@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Quantization in PyTorch</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem;
+      line-height: 1.6;
+    }
+    h1, h2, h3 {
+      color: #333;
+    }
+    pre {
+      background: #f4f4f4;
+      padding: 1rem;
+      overflow-x: auto;
+      border-left: 4px solid #ccc;
+    }
+    code {
+      font-family: monospace;
+      background: #f4f4f4;
+      padding: 0.2rem 0.4rem;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Quantization</h1>
+
+  <p>Smaller model means less memory bandwidth. Faster inference because fewer bits and fewer multiplies. Lower power because integer ops are cheaper than float on most hardware. You get the idea.</p>
+
+  <p>There are a couple types of quantization: <strong>Post-Training Quantization (PTQ)</strong> and <strong>Quantization-Aware Training (QAT)</strong>. PTQ comes in two flavors: <strong>Dynamic</strong> and <strong>Static</strong>. Let’s break them down.</p>
+
+  <section>
+    <h2>Dynamic Quantization</h2>
+    <p>This is the lazy version of quantization—and that’s not a bad thing. Super simple. You quantize the weights after training. Activations stay in float32 during inference but get quantized on the fly. No calibration. No fuss.</p>
+
+    <pre><code>import torch.quantization
+
+model = YourModel()
+model.eval()
+quantized_model = torch.quantization.quantize_dynamic(
+    model, {torch.nn.Linear}, dtype=torch.qint8
+)</code></pre>
+
+    <ul>
+      <li>Weights → int8</li>
+      <li>Activations → float32</li>
+      <li>Quantization of activations happens at runtime, per batch</li>
+      <li>Dequantization happens right after matmul</li>
+    </ul>
+
+    <p>So why use it? It’s stupid easy and gives you a fast win on CPUs—especially for LSTMs and Linear-heavy models.</p>
+
+    <p>But why doesn’t it work well for CNNs? Because Conv2d is not matmul. Conv layers have gnarly memory access patterns and need pre-quantized activations to be efficient. Dynamic quantization doesn’t do that. You’d be quantizing every sliding window patch per inference. Not fun. Not fast.</p>
+
+    <p>Also, dynamic quantization doesn’t touch things like BatchNorm or ReLU. It just swaps in dynamic versions of Linear and LSTM layers. No fusion here.</p>
+  </section>
+
+  <section>
+    <h2>Static Quantization</h2>
+    <p>Now we’re doing it properly. Both weights and activations go to int8. But to quantize activations, you first need to know their range. That’s where <strong>calibration</strong> comes in.</p>
+
+    <pre><code># Fuse layers
+def fuse_model(self):
+    torch.quantization.fuse_modules(self.conv, [['0', '1', '2']], inplace=True)
+
+model = QuantCNN()
+model.eval()
+model.fuse_model()
+
+# Set qconfig
+model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+
+# Insert observers
+torch.quantization.prepare(model, inplace=True)
+
+# Calibration
+with torch.no_grad():
+    for images in calibration_loader:
+        model(images)
+
+# Convert to int8
+torch.quantization.convert(model, inplace=True)</code></pre>
+
+    <h3>Fusion</h3>
+    <p>Fusing Conv + BatchNorm + ReLU reduces memory overhead, speeds things up, and minimizes numerical errors.</p>
+
+    <h3>QConfig</h3>
+    <p>QConfig tells PyTorch <em>how</em> to quantize:</p>
+
+    <pre><code>from torch.quantization import default_per_channel_weight_observer, MinMaxObserver
+
+my_qconfig = torch.quantization.QConfig(
+    activation=MinMaxObserver.with_args(dtype=torch.quint8),
+    weight=default_per_channel_weight_observer
+)
+model.qconfig = my_qconfig</code></pre>
+
+    <h3>Observers</h3>
+    <p>Observers record stats during calibration:</p>
+
+    <pre><code>class MinMaxObserver(ObserverBase):
+    def forward(self, x):
+        self.min_val = min(self.min_val, x.min())
+        self.max_val = max(self.max_val, x.max())</code></pre>
+  </section>
+
+  <section>
+    <h2>Histogram Observers</h2>
+    <p>MinMax gets clobbered by outliers. Histogram observers are smarter. They simulate many clipping thresholds and pick the one with lowest quant error.</p>
+
+    <pre><code>import torch.quantization as tq
+
+qconfig = tq.QConfig(
+    activation=tq.observer.HistogramObserver.with_args(
+        dtype=torch.quint8, qscheme=torch.per_tensor_affine
+    ),
+    weight=tq.default_per_channel_weight_observer
+)
+model.qconfig = qconfig</code></pre>
+
+    <p>This builds a histogram of activations and simulates quant-dequant at different thresholds. It finds the one with the smallest L2 loss between original and reconstructed signal.</p>
+  </section>
+
+  <section>
+    <h2>Scale and Zero-Point</h2>
+
+    <p>Quantize:</p>
+    <code>Q = round(X / scale) + zero_point</code><br>
+    <p>Dequantize:</p>
+    <code>X = scale * (Q - zero_point)</code>
+
+    <h3>Symmetric</h3>
+    <ul>
+      <li>zero_point = 0</li>
+      <li>scale = max(abs(min), abs(max)) / 127</li>
+    </ul>
+
+    <h3>Asymmetric</h3>
+    <ul>
+      <li>zero_point ≠ 0</li>
+      <li>scale = (max - min) / 255</li>
+      <li>zero_point = round(-min / scale)</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Calibration Tips</h2>
+    <ul>
+      <li>Bad calibration = bad quantization</li>
+      <li>Make sure your calibration data reflects actual inference data</li>
+      <li>Calibration is a one-time deal in PTQ—no backprop, no fine-tuning</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Quantization Boundaries</h2>
+    <p>Be careful when mixing float and quantized layers. Dequantizing and re-quantizing between layers kills performance and breaks fusion.</p>
+    <p>Once you quantize, try to stay quantized.</p>
+  </section>
+
+  <section>
+    <h2>Model Visualization with FX</h2>
+
+    <pre><code>from torch.fx import symbolic_trace
+graph = symbolic_trace(quantized_model)
+print(graph.graph)</code></pre>
+
+    <p>FX gives you a model graph. You can inspect, transform, and trace your quantization process. It’s the modern way. Use it.</p>
+
+    <pre><code>qconfig_dict = {"": torch.quantization.get_default_qconfig('fbgemm')}</code></pre>
+  </section>
+
+  <section>
+    <h2>Final Notes</h2>
+    <ul>
+      <li>Dynamic quantization: quick win for linear/LSTM-heavy models</li>
+      <li>Static quantization: proper path for CNNs and edge deployment</li>
+      <li>Fusion improves performance and reduces error</li>
+      <li>Choose the right observer for your data distribution</li>
+      <li>Watch out for quant-dequant boundaries</li>
+      <li>Use FX for quantization in modern PyTorch</li>
+      <li>MovingAverageObserver is for QAT, not PTQ</li>
+    </ul>
+  </section>
+
+</body>
+</html>

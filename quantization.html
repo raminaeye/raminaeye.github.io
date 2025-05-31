@@ -82,12 +82,12 @@
      <pre><code class="language-python">
 import torch.quantization
 
-# Assume YourModel is defined elsewhere
-# model = YourModel()
-# model.eval()
-# quantized_model = torch.quantization.quantize_dynamic(
-#     model, {torch.nn.Linear}, dtype=torch.qint8
-# )
+# Assume YourModel is defined elsewhere and 'model' is an instance of it
+model = YourModel()
+model.eval()
+quantized_model = torch.quantization.quantize_dynamic(
+    model, {torch.nn.Linear}, dtype=torch.qint8
+)
      </code></pre>
      <p>In this setup:</p>
      <ul>
@@ -107,15 +107,21 @@ import torch.quantization
      <p>This works great for CNNs and edge deployment. You get full int8 inference.</p>
      <p>The workflow looks like this:</p>
      <pre><code class="language-python">
-# Assume QuantCNN and calibration_loader are defined elsewhere
-# Also assume model has a fuse_model method
+# Assume QuantCNN class, model instance, and calibration_loader are defined elsewhere
+# Also assume model has a fuse_model method as part of its class definition
 
-# # Fuse layers
-# def fuse_model(self):
-#     # Example: torch.quantization.fuse_modules(self.conv, [['0', '1', '2']], inplace=True)
-#     pass
+# Example of how fuse_model might be defined in your QuantCNN class:
+# class QuantCNN(nn.Module):
+#     # ... other parts ...
+#     def fuse_model(self):
+#         # Example: torch.quantization.fuse_modules(self.conv_relu_group, ['0', '1', '2'], inplace=True) # if conv, bn, relu are grouped
+#         # Or fuse specific layers:
+#         # for module_name, module in self.named_children():
+#         #     if "conv_bn_relu" in module_name: # A common pattern
+#         #        torch.quantization.fuse_modules(module, ['conv', 'bn', 'relu'], inplace=True)
+#         pass # Actual fusion logic here
 
-# model = QuantCNN()
+# model = QuantCNN() # Instantiate your model
 # model.eval()
 # model.fuse_model() # Apply fusion if defined in your model
 
@@ -127,7 +133,7 @@ import torch.quantization
 
 # # Calibration step
 # with torch.no_grad():
-#     for images in calibration_loader:
+#     for images in calibration_loader: # calibration_loader should yield batches of input data
 #         model(images)
 
 # # Convert to int8
@@ -140,27 +146,30 @@ import torch.quantization
      <p>QConfig tells PyTorch how to quantize: symmetric vs asymmetric, per-tensor vs per-channel. Example:</p>
      <pre><code class="language-python">
 from torch.quantization import default_per_channel_weight_observer, MinMaxObserver
+import torch # Ensure torch is imported for dtypes
 
+# Assume 'model' is an instance of your model
 my_qconfig = torch.quantization.QConfig(
     activation=MinMaxObserver.with_args(dtype=torch.quint8),
     weight=default_per_channel_weight_observer.with_args(dtype=torch.qint8) # Specify dtype for weights
 )
-# model.qconfig = my_qconfig
+model.qconfig = my_qconfig # Then assign it to your model
      </code></pre>
      <h3>Observers</h3>
      <p>Observers are how PyTorch measures activation ranges. Here's a basic one (conceptual, PyTorch's <code>ObserverBase</code> is more complex):</p>
      <pre><code class="language-python">
-# from torch.ao.quantization.observer import ObserverBase
-# class MinMaxObserverExample(ObserverBase): # Conceptual
-#     def __init__(self, *args, **kwargs):
-#         super().__init__(*args, **kwargs)
-#         self.min_val = float('inf')
-#         self.max_val = float('-inf')
+from torch.ao.quantization.observer import ObserverBase # This import might vary based on PyTorch version
 
-#     def forward(self, x):
-#         self.min_val = min(self.min_val, x.min().item())
-#         self.max_val = max(self.max_val, x.max().item())
-#         return x
+class MinMaxObserverExample(ObserverBase): # Conceptual
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.min_val = float('inf')
+        self.max_val = float('-inf')
+
+    def forward(self, x):
+        self.min_val = min(self.min_val, x.min().item())
+        self.max_val = max(self.max_val, x.max().item())
+        return x
      </code></pre>
      <p>During calibration, these observers record activation stats. Then PyTorch figures out the scale and zero-point needed to map float values to int8.</p>
      <p>But MinMax isn’t always enough.</p>
@@ -171,14 +180,16 @@ my_qconfig = torch.quantization.QConfig(
      <p>MinMax gets clobbered by outliers. Histogram observers are smarter. They build a histogram of the activations, simulate multiple clipping thresholds, and pick the one that gives the smallest quantization error.</p>
      <pre><code class="language-python">
 import torch.quantization as tq # For HistogramObserver example
+import torch # Ensure torch is imported for dtypes
 
-# qconfig_hist = tq.QConfig(
-#     activation=tq.observer.HistogramObserver.with_args(
-#         dtype=torch.quint8, qscheme=torch.per_tensor_affine
-#     ),
-#     weight=tq.default_per_channel_weight_observer.with_args(dtype=torch.qint8)
-# )
-# model.qconfig = qconfig_hist
+# Assume 'model' is an instance of your model
+qconfig_hist = tq.QConfig(
+    activation=tq.observer.HistogramObserver.with_args(
+        dtype=torch.quint8, qscheme=torch.per_tensor_affine
+    ),
+    weight=tq.default_per_channel_weight_observer.with_args(dtype=torch.qint8)
+)
+model.qconfig = qconfig_hist
      </code></pre>
      <p>They look at the L2 error between the original and the quantized-dequantized tensor and find the best range for preserving accuracy.</p>
      <p>This is where quantization actually starts acting intelligent. Especially important when your activations have long tails, skew, or multimodal distributions.</p>
@@ -223,9 +234,10 @@ import torch.quantization as tq # For HistogramObserver example
      <p>Use FX to trace and manipulate the model graphically.</p>
      <pre><code class="language-python">
 from torch.fx import symbolic_trace
-# graph = symbolic_trace(quantized_model) # Assuming quantized_model is defined
-# print(graph.graph) # For a textual representation
-# graph.print_tabular() # For a more readable table
+# Assuming quantized_model is defined from a previous step
+graph = symbolic_trace(quantized_model)
+print(graph.graph) # For a textual representation
+graph.print_tabular() # For a more readable table
      </code></pre>
      <p>FX makes it easier to:</p>
      <ul>
@@ -236,7 +248,8 @@ from torch.fx import symbolic_trace
      </ul>
      <p>It’s the modern way to do quantization in PyTorch. Forget the old Eager mode unless you like pain.</p>
      <pre><code class="language-python">
-# qconfig_dict = {"": torch.quantization.get_default_qconfig('fbgemm')}
+import torch # Ensure torch is imported for torch.quantization
+qconfig_dict = {"": torch.quantization.get_default_qconfig('fbgemm')}
 # For FX, you typically apply this qconfig_dict when preparing the model with prepare_fx or prepare_qat_fx
      </code></pre>
      <p>FX takes care of applying qconfig recursively, inserting only the observers you need, and fusing layers correctly.</p>
@@ -291,21 +304,21 @@ class ObserverCNN(nn.Module):
         x = self.fc(x) # Apply fc
         return x
 
-# model_ptq_example = ObserverCNN().eval()
+model_ptq_example = ObserverCNN().eval()
 
-# # Fake calibration pass
-# with torch.no_grad():
-#     for _ in range(10):  # simulate 10 batches
-#         dummy_input = torch.randn(8, 3, 32, 32)
-#         _ = model_ptq_example(dummy_input)
+# Fake calibration pass
+with torch.no_grad():
+    for _ in range(10):  # simulate 10 batches
+        dummy_input = torch.randn(8, 3, 32, 32)
+        _ = model_ptq_example(dummy_input)
 
-# print("Conv1 activation range:", model_ptq_example.obs_act1.min_val.item(), model_ptq_example.obs_act1.max_val.item())
-# print("Conv2 activation range:", model_ptq_example.obs_act2.min_val.item(), model_ptq_example.obs_act2.max_val.item())
-# print("FC input range:", model_ptq_example.obs_fc_in.min_val.item(), model_ptq_example.obs_fc_in.max_val.item())
+print("Conv1 activation range:", model_ptq_example.obs_act1.min_val.item(), model_ptq_example.obs_act1.max_val.item())
+print("Conv2 activation range:", model_ptq_example.obs_act2.min_val.item(), model_ptq_example.obs_act2.max_val.item())
+print("FC input range:", model_ptq_example.obs_fc_in.min_val.item(), model_ptq_example.obs_fc_in.max_val.item())
 
-# print("Conv1 weight qparams:", model_ptq_example.obs_weight1.calculate_qparams())
-# print("Conv2 weight qparams:", model_ptq_example.obs_weight2.calculate_qparams())
-# print("FC weight qparams:", model_ptq_example.obs_weight_fc.calculate_qparams())
+print("Conv1 weight qparams:", model_ptq_example.obs_weight1.calculate_qparams())
+print("Conv2 weight qparams:", model_ptq_example.obs_weight2.calculate_qparams())
+print("FC weight qparams:", model_ptq_example.obs_weight_fc.calculate_qparams())
         </code></pre>
         <p><code>calculate_qparams()</code> is a method used by observers in PyTorch to compute scale and zero-point. That's the observer's job to begin with.</p>
         <p>General quantization formula: <code>quantized = round(clamp(x / scale + zero_point, qmin, qmax))</code></p>
@@ -328,13 +341,16 @@ class ObserverCNN(nn.Module):
         <pre><code class="language-python">
 from torch.ao.quantization import get_default_qat_qconfig
 from torch.ao.quantization.quantize_fx import prepare_qat_fx, convert_fx
+# Assuming ObserverCNN class is defined as in the PTQ example
+# import torch.nn as nn (if ObserverCNN uses it and is not defined in the same scope)
 
-# qat_qconfig = get_default_qat_qconfig('fbgemm')
-# qconfig_dict_qat = {"": qat_qconfig}
+qat_qconfig = get_default_qat_qconfig('fbgemm')
+qconfig_dict_qat = {"": qat_qconfig}
 
-# model_for_qat = ObserverCNN() # Assuming ObserverCNN or similar model
-# model_for_qat.train() # Set model to training mode for QAT
-# model_prepared_qat = prepare_qat_fx(model_for_qat, qconfig_dict_qat)
+model_for_qat = ObserverCNN() # Assuming ObserverCNN or similar model
+model_for_qat.train() # Set model to training mode for QAT
+# Note: prepare_qat_fx typically requires the model to be in training mode.
+model_prepared_qat = prepare_qat_fx(model_for_qat, qconfig_dict_qat)
         </code></pre>
         <p>Then you train the <code>model_prepared_qat</code> and convert it to int8 using <code>convert_fx(model_prepared_qat.eval())</code>. Inside the <code>FakeQuantize</code> module, it takes <code>x</code>, computes scale and zero-point, and simulates quantization like:</p>
         <pre><code>
@@ -344,6 +360,8 @@ x_hat = (q - zero_point) * scale
         <p>QAT can learn activation clipping, push small weights out of dead zones, and learn quantization-friendly distributions.</p>
         <p>QAT simulates quantization in the forward pass. Rounding and clamping are, however, both non-differentiable, so you can't directly backpropagate through them. QAT uses a <strong>Straight-Through Estimator (STE)</strong>, which basically means this operation has no gradient for the non-differentiable part. It pretends the output equals the input during backpropagation for that specific part.</p>
         <pre><code class="language-python">
+import torch # Ensure torch is imported for torch.autograd.Function
+
 class RoundSTE(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x):
@@ -371,20 +389,21 @@ max_val = (1 - α) * max_val + α * current_batch_max_val
         <h3>A note on observers and FakeQuantize modules</h3>
         <p>Inside the <code>FakeQuantize</code> modules, there is an observer instance (or logic) and a quantize-dequantize function. You can inspect them. The <code>activation_post_process</code> attribute on a layer (e.g., <code>model.layer_name.activation_post_process</code>) *is* the <code>FakeQuantize</code> module itself after <code>prepare_qat_fx</code>.</p>
         <pre><code class="language-python">
-# Assuming 'model_prepared_qat' is your QAT model and 'conv1' is a layer
-# if hasattr(model_prepared_qat, 'conv1') and hasattr(model_prepared_qat.conv1, 'activation_post_process'):
-#     fq_module = model_prepared_qat.conv1.activation_post_process # This IS the FakeQuantize module
+# Assuming 'model_prepared_qat' is your QAT model from prepare_qat_fx
+# and it has a layer named 'conv1'
+if hasattr(model_prepared_qat, 'conv1') and hasattr(model_prepared_qat.conv1, 'activation_post_process'):
+    fq_module = model_prepared_qat.conv1.activation_post_process # This IS the FakeQuantize module
     
-#     # The observer logic is part of the FakeQuantize module.
-#     # For example, it holds the min_val and max_val it has observed or is configured with.
-#     # To get its calculated scale and zero-point:
-#     current_scale, current_zero_point = fq_module.calculate_qparams()
-#     print(f"Scale: {current_scale}, Zero-point: {current_zero_point}")
+    # The observer logic is part of the FakeQuantize module.
+    # For example, it holds the min_val and max_val it has observed or is configured with.
+    # To get its calculated scale and zero-point:
+    current_scale, current_zero_point = fq_module.calculate_qparams()
+    print(f"Scale: {current_scale}, Zero-point: {current_zero_point}")
 
-#     if hasattr(fq_module, 'min_val') and hasattr(fq_module, 'max_val'):
-#          print(f"Observed min by FakeQuant: {fq_module.min_val.item()}, Observed max: {fq_module.max_val.item()}")
-# else:
-#     print("conv1 or activation_post_process not found in conceptual model_prepared_qat.")
+    if hasattr(fq_module, 'min_val') and hasattr(fq_module, 'max_val'):
+         print(f"Observed min by FakeQuant: {fq_module.min_val.item()}, Observed max: {fq_module.max_val.item()}")
+else:
+    print("conv1 or activation_post_process not found in conceptual model_prepared_qat.")
         </code></pre>
         <p>During the forward pass, observers (within <code>FakeQuantize</code>) are enabled to calculate the scale and zero-point. The fake quantizer then applies the quantize-dequantize simulation and uses STE during backpropagation. During QAT training (warm-up phase), observers are active, updating the range statistics, and the model learns under these evolving quantization conditions. Once the warm-up is done, the scale and zero-point are often "frozen." Training continues with this consistent quantization noise to improve stability.</p>
     </section>
@@ -430,15 +449,17 @@ max_val = (1 - α) * max_val + α * current_batch_max_val
         
         <h3>Print quantization parameters</h3>
         <pre><code class="language-python">
-# Assuming 'model_prepared_qat' is your QAT model
-# for name, module in model_prepared_qat.named_modules():
-#     if isinstance(module, torch.ao.quantization.FakeQuantize):
-#         # For FakeQuantize modules, scale and zero_point are attributes
-#         print(f"{name} -- scale: {module.scale.item() if torch.is_tensor(module.scale) else module.scale}, "
-#               f"zero_point: {module.zero_point.item() if torch.is_tensor(module.zero_point) else module.zero_point}")
-#     elif hasattr(module, 'weight_fake_quant'): # For layers with separate weight fake_quant
-#          print(f"{name}.weight_fake_quant -- scale: {module.weight_fake_quant.scale.item()}, "
-#                f"zero_point: {module.weight_fake_quant.zero_point.item()}")
+import torch # Ensure torch is imported
+# Assuming 'model_prepared_qat' is your QAT model from prepare_qat_fx
+for name, module in model_prepared_qat.named_modules():
+    if isinstance(module, torch.ao.quantization.FakeQuantize):
+        # For FakeQuantize modules, scale and zero_point are attributes
+        print(f"{name} -- scale: {module.scale.item() if torch.is_tensor(module.scale) else module.scale}, "
+              f"zero_point: {module.zero_point.item() if torch.is_tensor(module.zero_point) else module.zero_point}")
+    elif hasattr(module, 'weight_fake_quant'): # For layers with separate weight fake_quant
+         # Accessing .item() assumes these are single-element tensors. Adjust if they are per-channel.
+         print(f"{name}.weight_fake_quant -- scale: {module.weight_fake_quant.scale.item()}, "
+               f"zero_point: {module.weight_fake_quant.zero_point.item()}")
         </code></pre>
         <p>If you see scale is zero or NaN, then the observers aren’t seeing anything. If the scale is too large or too small, the range is skewed due to outliers.</p>
         
@@ -446,83 +467,96 @@ max_val = (1 - α) * max_val + α * current_batch_max_val
         <p>It’s important to see what range of values a layer is producing. Make sure the quantization observers capture the range properly and avoid outliers. If the range is off you’ll get clipping, dead activation, and poor resolution due to wide range. Hook into a layer to see float ranges and compare it with what you see from the observer reports.</p>
         <pre><code class="language-python">
 import matplotlib.pyplot as plt # Ensure matplotlib is installed
+import torch # Ensure torch is imported
 
-# activation_histograms = {}
+activation_histograms = {}
 
-# def capture_activations_hook(name):
-#     def hook(module, input_val, output_val):
-#         data_to_log = output_val
-#         if isinstance(output_val, tuple): data_to_log = output_val[0] # Handle tuple outputs
-#         if torch.is_tensor(data_to_log):
-#             activation_histograms[name] = data_to_log.detach().cpu().flatten().numpy()
-#     return hook
+def capture_activations_hook(name):
+    def hook(module, input_val, output_val):
+        data_to_log = output_val
+        if isinstance(output_val, tuple): data_to_log = output_val[0] # Handle tuple outputs
+        if torch.is_tensor(data_to_log):
+            activation_histograms[name] = data_to_log.detach().cpu().flatten().numpy()
+    return hook
 
-# # model_to_debug = ObserverCNN().eval() # Or your specific model
-# # hook_conv1 = model_to_debug.conv1.register_forward_hook(capture_activations_hook("conv1_output"))
-# # hook_relu1 = model_to_debug.relu1.register_forward_hook(capture_activations_hook("relu1_output"))
+ model_to_debug = ObserverCNN().eval() # Or your specific model, ensure ObserverCNN is defined
+ hook_conv1 = model_to_debug.conv1.register_forward_hook(capture_activations_hook("conv1_output"))
+ hook_relu1 = model_to_debug.relu1.register_forward_hook(capture_activations_hook("relu1_output"))
 
-# # with torch.no_grad():
-# #     _ = model_to_debug(torch.randn(1, 3, 32, 32)) # Adjust input shape
+ with torch.no_grad():
+     _ = model_to_debug(torch.randn(1, 3, 32, 32)) # Adjust input shape as needed
 
-# # for name, data in activation_histograms.items():
-# #     plt.figure()
-# #     plt.hist(data, bins=100)
-# #     plt.title(f"Activation Histogram: {name}")
-# #     plt.xlabel("Value"); plt.ylabel("Frequency"); plt.grid(True)
-# #     plt.show()
+ for name, data in activation_histograms.items():
+     plt.figure()
+     plt.hist(data, bins=100)
+     plt.title(f"Activation Histogram: {name}")
+     plt.xlabel("Value"); plt.ylabel("Frequency"); plt.grid(True)
+     plt.show()
 
-# # hook_conv1.remove() # Clean up hooks
-# # hook_relu1.remove()
+hook_conv1.remove() # Clean up hooks
+hook_relu1.remove()
         </code></pre>
         <p>Compare float vs quantized outputs. If a single layer is the issue, that narrows down the layer-wise outputs.</p>
         
         <h3>Disable quantization from layers one by one</h3>
         <pre><code class="language-python">
-# Assuming 'model_prepared_qat' is your QAT model
-# if hasattr(model_prepared_qat.conv1, 'activation_post_process') and \
-#    hasattr(model_prepared_qat.conv1.activation_post_process, 'disable_fake_quant'):
-#     model_prepared_qat.conv1.activation_post_process.disable_fake_quant()
-# # Re-evaluate and then re-enable with .enable_fake_quant() or re-prepare.
+# Assuming 'model_prepared_qat' is your QAT model and has a 'conv1' layer
+if hasattr(model_prepared_qat, 'conv1') and \
+   hasattr(model_prepared_qat.conv1, 'activation_post_process') and \
+   hasattr(model_prepared_qat.conv1.activation_post_process, 'disable_fake_quant'):
+    model_prepared_qat.conv1.activation_post_process.disable_fake_quant()
+# Re-evaluate and then re-enable with .enable_fake_quant() or re-prepare the model.
         </code></pre>
         
         <h3>Run FX <code>print_tabular()</code></h3>
         <p>This shows you which quantization observers are attached and where scale and zero points are applied. Look for missing <code>activation_post_process</code> or quant/dequant pairs due to bad layer fusion.</p>
         <pre><code class="language-python">
 # Assuming 'model_prepared_qat' is your FX-prepared QAT model
-# model_prepared_qat.graph.print_tabular()
+if hasattr(model_prepared_qat, 'graph'):
+    model_prepared_qat.graph.print_tabular()
+else:
+    print("Model does not seem to be an FX graph module or 'graph' attribute is missing.")
         </code></pre>
         
         <h3>Inspect <code>activation_post_process</code></h3>
         <p><code>activation_post_process</code> is the name of a hook module (<code>FakeQuantize</code> in QAT) that PyTorch uses to handle quantization of activation. It’s inserted when you call <code>prepare_qat_fx()</code>.</p>
         <pre><code class="language-python">
-# self.conv = nn.Conv2d(...)
-# # After prepare_qat_fx, self.conv will have:
-# # self.conv.activation_post_process = FakeQuantize(...)
+# Example:
+self.conv = nn.Conv2d(...)
+# After prepare_qat_fx, self.conv will have an attribute like:
+self.conv.activation_post_process = FakeQuantize(...)
 
-# # You can use it to compare with observer states:
-# # fq_module_inspect = model_prepared_qat.conv1.activation_post_process
-# # print(fq_module_inspect.scale, fq_module_inspect.zero_point)
-# # if hasattr(fq_module_inspect, 'min_val'): # Check if min_val/max_val are directly on FakeQuant
-# #     print("Observed min/max by FakeQuant:", fq_module_inspect.min_val.item(), fq_module_inspect.max_val.item())
+# You can use it to compare with observer states:
+# Assuming 'model_prepared_qat' is your QAT model with a 'conv1' layer
+ if hasattr(model_prepared_qat, 'conv1') and hasattr(model_prepared_qat.conv1, 'activation_post_process'):
+    fq_module_inspect = model_prepared_qat.conv1.activation_post_process
+    print(fq_module_inspect.scale, fq_module_inspect.zero_point)
+    if hasattr(fq_module_inspect, 'min_val'): # Check if min_val/max_val are directly on FakeQuant
+        print("Observed min/max by FakeQuant:", fq_module_inspect.min_val.item(), fq_module_inspect.max_val.item())
         </code></pre>
         <p>If the values are outside min/max, they’ll be clipped during quantization.</p>
         
         <h3>Use <code>torch.ao.quantization.quant_debug</code></h3>
         <p>This helps you record and compare float vs quantized activation, layer by layer differences, and histograms of differences. (API might vary across PyTorch versions).</p>
         <pre><code class="language-python">
-# from torch.ao.quantization.quant_debug import add_debug_observers_qat # For QAT
-# # debug_model = add_debug_observers_qat(model_prepared_qat, qconfig_dict_qat)
-# # # Run training/calibration epochs
-# # print(debug_model.activation_debug_stats) # Or similar attribute
+from torch.ao.quantization.quant_debug import add_debug_observers_qat # For QAT
+# Assuming model_prepared_qat and qconfig_dict_qat are defined
+debug_model = add_debug_observers_qat(model_prepared_qat, qconfig_dict_qat)
+# Run training/calibration epochs with debug_model
+# Then inspect debug statistics, e.g.:
+print(debug_model.activation_debug_stats) # Or similar attribute, API might change
         </code></pre>
         
         <h3>Look for outliers and dead activations</h3>
         <pre><code class="language-python">
-# import matplotlib.pyplot as plt
-# # Assuming 'tensor' is a weight or activation tensor
-# # plt.hist(tensor.detach().cpu().flatten().numpy(), bins=100)
-# # plt.title("Tensor Value Histogram")
-# # plt.show()
+import matplotlib.pyplot as plt
+import torch # Ensure torch and relevant data types/functions are available
+
+# Assuming 'tensor' is a weight or activation tensor (e.g., model.conv1.weight.data)
+tensor = torch.randn(1000) # Example tensor
+plt.hist(tensor.detach().cpu().flatten().numpy(), bins=100)
+plt.title("Tensor Value Histogram")
+plt.show()
         </code></pre>
     </section>
 

@@ -47,6 +47,13 @@
     ul {
         padding-left: 20px; /* Indent lists slightly */
     }
+    .subsection-title {
+        font-size: 1.25em; /* h4 like */
+        font-weight: bold;
+        margin-top: 1.5rem;
+        margin-bottom: 0.5rem;
+        color: #444;
+    }
   </style>
 </head>
 <body>
@@ -284,6 +291,7 @@ print("FC weight qparams:", model.obs_weight_fc.calculate_qparams())
         <li><code>zero_point = round(qmin - min_val / scale)</code></li>
     </ul>
    </section>
+   
    <section>
     <h2>Quantization-Aware Training (QAT)</h2>
     <p>If PTQ drops too much accuracy, QAT is how you can recover it. QAT requires retraining; it’s slower but more accurate. It learns to suppress outliers and it works well with tuning. You start with inserting observers just like PTQ. These observers are actually <code>FakeQuantize</code> modules that are differentiable. The model learns to adapt to quantization noise.</p>
@@ -315,6 +323,221 @@ x_hat = (q - zero_point) * scale</code></pre>
     <pre><code>min_val = (1 - α) * min_val + α * current_batch_min_val
 max_val = (1 - α) * max_val + α * current_batch_max_val</code></pre>
     <p>Where α (alpha) is a momentum term.</p>
+   </section>
+
+   <section>
+    <h2>QAT Training Details & FakeQuantize Modules</h2>
+    <p>Training a QAT model often requires lower learning rates and more epochs to converge. It also needs careful initialization, for example, starting from a pretrained FP32 model. Similar to static quantization, layers such as BatchNorm (BN) are fused with preceding convolution or linear layers during the conversion step (<code>convert_fx</code>).</p>
+    <p>After inserting observers (which are <code>FakeQuantize</code> modules in QAT) and monitoring ranges, it helps to fine-tune the model to the "frozen" quantization noise. This means that after an initial "warm-up" phase where quantization parameters (scale and zero-point) are being learned, these parameters are then fixed, and the model continues training to adapt to these specific, now constant, quantization effects.</p>
+    
+    <div class="subsection-title">A Note on Observers and FakeQuantize Modules</div>
+    <p>Inside the <code>FakeQuantize</code> modules, there is an observer instance and a quantize-dequantize function. You can inspect them:</p>
+    <pre><code># Assuming 'model_prepared' is your QAT model and 'layer_name' is a quantized layer
+fq_module = model_prepared.layer_name.activation_post_process 
+# For some model structures, it might be directly on the layer if it's a leaf module
+# or within a sub-module if it's a sequential block. The exact path depends on your model structure.
+
+# If fq_module is indeed the FakeQuantize module:
+# print(fq_module.activation_post_process) # This would be the observer *within* the FakeQuantize module
+# print(fq_module.calculate_qparams())     # This gets the current scale/zp from the FakeQuantize module
+</code></pre>
+    <p><strong>Correction/Clarification:</strong> The <code>activation_post_process</code> attribute on a layer (e.g., <code>model.conv1.activation_post_process</code>) *is* the <code>FakeQuantize</code> module itself after <code>prepare_qat_fx</code>. The observer is an attribute *of* this <code>FakeQuantize</code> module. For example:</p>
+    <pre><code># Assuming model_prepared is your QAT model from prepare_qat_fx
+# and 'conv1' is a layer in your model
+if hasattr(model_prepared.conv1, 'activation_post_process'):
+    fq_module = model_prepared.conv1.activation_post_process # This IS the FakeQuantize module
+    
+    # The observer is an attribute of the FakeQuantize module.
+    # The actual name of the observer attribute within FakeQuantize might vary based on PyTorch version
+    # or specific FakeQuantize class, but it's often 'observer' or similar, or it might be
+    # the FakeQuantize module itself acting as its own observer for some parameters.
+    # For example, MinMaxObserver, MovingAverageMinMaxObserver, etc. are set as fq_module.activation_post_process
+    
+    # To get the observer instance from the FakeQuantize module:
+    # (This depends on the specific type of FakeQuantize module,
+    #  often it's the module itself or an internal attribute like 'activation_post_process' again if nested)
+    # For a typical FakeQuantize module, it holds the observer type it was configured with.
+    # Let's assume fq_module is the FakeQuantize instance:
+    print(type(fq_module)) # This will tell you it's a FakeQuantize module
+    
+    # To get its calculated scale and zero-point:
+    current_scale, current_zero_point = fq_module.calculate_qparams()
+    print(f"Scale: {current_scale}, Zero-point: {current_zero_point}")
+
+    # If you want to see the min/max values the observer within FakeQuantize has recorded (if applicable):
+    if hasattr(fq_module, 'min_val') and hasattr(fq_module, 'max_val'):
+         print(f"Observed min: {fq_module.min_val.item()}, Observed max: {fq_module.max_val.item()}")
+else:
+    print("conv1 does not have activation_post_process, check layer name or model structure.")
+</code></pre>
+
+    <p>During the forward pass, observers are enabled to calculate the scale and zero-point, typically using <code>MovingAverageMinMaxObserver</code> for activations and <code>PerChannelMinMaxObserver</code> (or their moving average variants) for weights. The fake quantizer takes the output from these observers (or uses their statistics) and applies the quantize-dequantize simulation, using STE during backpropagation.</p>
+    <p>During QAT training, observers are active, updating the range statistics, simulating quantization, and the model learns under these evolving quantization conditions. This is often called the "warm-up" phase. Once that’s done (e.g., after a certain number of epochs), the scale and zero-point are often "frozen" (i.e., observers stop updating these parameters). Training then continues with this consistent quantization noise to improve stability and allow the model to fully adapt and lock into the quantized regime.</p>
+   </section>
+
+   <section>
+    <h2>Debugging Quantization Issues</h2>
+    <p>Quantization can sometimes lead to unexpected behavior or performance drops. Here are common issues and how to trace them.</p>
+
+    <div class="subsection-title">Common Quantization Bugs</div>
+    <ul>
+        <li><strong>Accuracy drops significantly:</strong>
+            <ul>
+                <li>Bad scale/zero-point due to poor calibration (PTQ) or observer setup (QAT).</li>
+                <li>Layers not fused properly, or unnecessary quantize-dequantize (qd_q) boundaries introduced.</li>
+                <li>ReLU ranges are too wide, skewing observers (consider ReLU6 or clipping).</li>
+                <li>Using per-tensor quantization when per-channel might be more appropriate (especially for weights).</li>
+            </ul>
+        </li>
+        <li><strong>Layers behave abnormally post-quantization:</strong>
+            <ul>
+                <li>Observer didn’t see representative data during calibration/training.</li>
+                <li>Quantize-dequantize boundary in the wrong place, disrupting data flow.</li>
+                <li>Rounding and clamping causing excessive clipping of values.</li>
+            </ul>
+        </li>
+        <li><strong>FakeQuant not simulating correctly, or model not converging during QAT:</strong>
+            <ul>
+                <li>Observers are not updating their statistics.</li>
+                <li>Observers are frozen too soon in the training process.</li>
+                <li>FakeQuant module is clipping values too aggressively.</li>
+            </ul>
+        </li>
+        <li><strong><code>convert_fx()</code> (or <code>torch.quantization.convert()</code>) fails:</strong>
+            <ul>
+                <li>Model wasn’t fused correctly before preparing for quantization.</li>
+                <li>A QConfig was missing for a submodule that needs to be quantized.</li>
+                <li>The FX graph tracer couldn’t correctly trace the model (more common with complex control flow).</li>
+            </ul>
+        </li>
+    </ul>
+
+    <div class="subsection-title">How to Trace the Bugs</div>
+    
+    <p><strong>1. Print Quantization Parameters:</strong></p>
+    <p>Check the scale and zero-point for each quantized layer. If scale is zero or NaN, the observers aren’t seeing any data or the range is problematic. If scale is too large or too small, the range might be skewed by outliers.</p>
+    <pre><code>for name, module in model_prepared.named_modules(): # Use your QAT-prepared model
+    if isinstance(module, torch.ao.quantization.FakeQuantize):
+        # For FakeQuantize modules, scale and zero_point are attributes
+        print(f"{name} -- scale: {module.scale.item() if torch.is_tensor(module.scale) else module.scale}, zero_point: {module.zero_point.item() if torch.is_tensor(module.zero_point) else module.zero_point}")
+    elif hasattr(module, 'weight_fake_quant'): # For layers with separate weight fake_quant
+         print(f"{name}.weight_fake_quant -- scale: {module.weight_fake_quant.scale.item()}, zero_point: {module.weight_fake_quant.zero_point.item()}")
+</code></pre>
+
+    <p><strong>2. Visualize Activation Ranges:</strong></p>
+    <p>It’s important to see what range of values a layer is producing. Ensure observers capture this range properly and avoid being skewed by outliers. If the range is off, you’ll get clipping, dead activations, or poor resolution. Hook into layers to see float ranges and compare them with observer reports.</p>
+    <pre><code>import matplotlib.pyplot as plt
+
+activation_histograms = {}
+
+def capture_activations_hook(name):
+    def hook(module, input, output):
+        # Ensure output is a tensor; input can be a tuple
+        data_to_log = output
+        if isinstance(output, tuple): # Some layers might return tuples
+            data_to_log = output[0] 
+        if torch.is_tensor(data_to_log):
+            activation_histograms[name] = data_to_log.detach().cpu().flatten().numpy()
+        else:
+            print(f"Warning: Output of {name} is not a tensor, it's {type(data_to_log)}")
+    return hook
+
+# Assuming 'model' is your float model or QAT model before conversion
+# Attach hooks to relevant layers
+# Ensure layer names like 'model.conv1' are correct for your model structure
+# For example:
+# hook_conv1 = model.conv1.register_forward_hook(capture_activations_hook("conv1_output"))
+# hook_relu1 = model.relu1.register_forward_hook(capture_activations_hook("relu1_output"))
+
+# Example: Attaching to a specific layer if your model is 'model_to_debug'
+# model_to_debug = ObserverCNN() # Or your specific model
+# hook_conv1 = model_to_debug.conv1.register_forward_hook(capture_activations_hook("conv1_output"))
+
+# Run a forward pass with sample data
+# with torch.no_grad():
+#     _ = model_to_debug(torch.randn(1, 3, 32, 32)) # Adjust input shape as needed
+
+# Plot histograms
+# for name, data in activation_histograms.items():
+#     plt.figure()
+#     plt.hist(data, bins=100)
+#     plt.title(f"Activation Histogram: {name}")
+#     plt.xlabel("Value")
+#     plt.ylabel("Frequency")
+#     plt.grid(True)
+#     plt.show()
+
+# hook_conv1.remove() # Don't forget to remove hooks when done
+# hook_relu1.remove()
+</code></pre>
+    <p><em>Note: The plotting code above is commented out to prevent immediate execution errors if matplotlib is not available or if run in a non-GUI environment. Uncomment and adapt as needed.</em></p>
+
+    <p><strong>3. Compare Float vs. Quantized Outputs:</strong></p>
+    <p>If a single layer is causing issues, compare its output before and after quantization to pinpoint discrepancies.</p>
+
+    <p><strong>4. Disable Quantization from Layers One by One (for QAT models):</strong></p>
+    <p>If you suspect a specific layer in a QAT-prepared model, you can temporarily disable its fake quantization to see if accuracy improves.</p>
+    <pre><code># Assuming 'model_prepared' is your QAT model
+# and 'conv1' is a layer with an activation_post_process (FakeQuantize module)
+if hasattr(model_prepared.conv1, 'activation_post_process') and \
+   hasattr(model_prepared.conv1.activation_post_process, 'disable_fake_quant'):
+    model_prepared.conv1.activation_post_process.disable_fake_quant()
+
+# Similarly for weight fake quant if it exists and is separate
+if hasattr(model_prepared.conv1, 'weight_fake_quant') and \
+   hasattr(model_prepared.conv1.weight_fake_quant, 'disable_fake_quant'):
+    model_prepared.conv1.weight_fake_quant.disable_fake_quant()
+</code></pre>
+    <p>Then, re-evaluate the model. Remember to re-enable it (<code>.enable_fake_quant()</code>) or re-prepare the model for further debugging.</p>
+
+    <p><strong>5. Run FX <code>print_tabular()</code>:</strong></p>
+    <p>For models prepared with FX (<code>prepare_qat_fx</code> or <code>prepare_fx</code>), this shows which quantization observers/FakeQuant modules are attached and where scale and zero-points are applied. Look for missing <code>activation_post_process</code> attributes or unexpected quant/dequant pairs, which might indicate bad layer fusion or incorrect QConfig application.</p>
+    <pre><code># Assuming 'model_prepared' is your FX-prepared QAT model
+model_prepared.graph.print_tabular()</code></pre>
+
+    <p><strong>6. Inspect <code>activation_post_process</code>:</strong></p>
+    <p><code>activation_post_process</code> is the name of the attribute (holding a <code>FakeQuantize</code> module in QAT, or an observer in PTQ) that PyTorch uses to handle quantization of activations. It’s inserted when you call <code>prepare_qat_fx()</code> or <code>prepare()</code>.</p>
+    <pre><code># Example:
+# self.conv = nn.Conv2d(...)
+# After prepare_qat_fx, self.conv will have an 'activation_post_process' attribute:
+# self.conv.activation_post_process = FakeQuantize(...) 
+
+# You can use it to compare with observer states:
+# Assuming 'model_prepared' is your QAT model
+if hasattr(model_prepared.conv1, 'activation_post_process'):
+    fq_module = model_prepared.conv1.activation_post_process  # This is the FakeQuantize module
+    
+    current_scale, current_zp = fq_module.calculate_qparams()
+    print(f"FakeQuant scale: {current_scale}, zero_point: {current_zp}")
+
+    # The observer is part of the FakeQuantize module's configuration.
+    # To see the min/max values the observer logic within FakeQuantize is using:
+    if hasattr(fq_module, 'min_val') and hasattr(fq_module, 'max_val'):
+        print(f"Observed min/max by FakeQuant's internal observer logic: {fq_module.min_val.item()}, {fq_module.max_val.item()}")
+</code></pre>
+    <p>If the actual input values to this layer are frequently outside the [min_val, max_val] range used by the <code>FakeQuantize</code> module, they’ll be clipped during the simulated quantization, potentially harming accuracy.</p>
+
+    <p><strong>7. Use <code>torch.ao.quantization.quant_debug</code>:</strong></p>
+    <p>This utility can help record and compare float vs. quantized activations, show layer-by-layer differences, and provide histograms of these differences. (Note: API and availability might vary across PyTorch versions).</p>
+    <pre><code>from torch.ao.quantization.quant_debug import add_debug_observers_qat # For QAT
+# Or from torch.ao.quantization.quant_debug import add_debug_observers # For PTQ
+
+# Assuming 'model_prepared' is your QAT model and qconfig_dict is defined
+# debug_model = add_debug_observers_qat(model_prepared, qconfig_dict) 
+# Then run calibration/training epochs with debug_model
+# Access stats via: debug_model.activation_debug_stats (or similar attribute)
+</code></pre>
+    <p><em>Consult the PyTorch documentation for the exact usage of <code>quant_debug</code> for your version.</em></p>
+
+    <p><strong>8. Look for Outliers and Dead Activations Manually:</strong></p>
+    <p>Plot histograms of weights and activations for various layers to spot outliers that might be skewing quantization ranges, or "dead" activations (always zero) that indicate issues.</p>
+    <pre><code># Example for a generic tensor (e.g., weights or activations)
+# import matplotlib.pyplot as plt
+# my_tensor = model.conv1.weight.detach().cpu() # Or an activation tensor
+# plt.hist(my_tensor.flatten().numpy(), bins=100)
+# plt.title("Histogram of Tensor Values")
+# plt.show()
+</code></pre>
    </section>
    <section>
      <h2>Final Notes</h2>

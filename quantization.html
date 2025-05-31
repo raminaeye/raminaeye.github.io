@@ -285,6 +285,38 @@ print("FC weight qparams:", model.obs_weight_fc.calculate_qparams())
     </ul>
    </section>
    <section>
+    <h2>Quantization-Aware Training (QAT)</h2>
+    <p>If PTQ drops too much accuracy, QAT is how you can recover it. QAT requires retraining; it’s slower but more accurate. It learns to suppress outliers and it works well with tuning. You start with inserting observers just like PTQ. These observers are actually <code>FakeQuantize</code> modules that are differentiable. The model learns to adapt to quantization noise.</p>
+    <pre><code>from torch.ao.quantization import get_default_qat_qconfig
+
+qconfig = get_default_qat_qconfig('fbgemm')
+qconfig_dict = {"": qconfig}
+
+from torch.ao.quantization.quantize_fx import prepare_qat_fx, convert_fx
+
+model.train() # Ensure model is in training mode for QAT
+model_prepared = prepare_qat_fx(model, qconfig_dict)</code></pre>
+    <p>Then you train the model (<code>model_prepared</code>) and convert it to int8 using <code>convert_fx(model_prepared.eval())</code>. Inside the <code>FakeQuantize</code> module, it takes input <code>x</code>, computes scale and zero-point, and simulates quantization like:</p>
+    <pre><code>q = round(clamp(x / scale + zero_point))
+x_hat = (q - zero_point) * scale</code></pre>
+    <p>QAT can learn activation clipping, push small weights out of dead zones, and learn quantization-friendly distributions.</p>
+    <p>QAT simulates quantization in the forward pass. Rounding and clamping are, however, both non-differentiable, so you can't directly backpropagate through them. QAT uses a <strong>Straight-Through Estimator (STE)</strong>, which basically means this operation has no gradient for the non-differentiable part. It pretends the output equals the input during backpropagation for that specific part.</p>
+    <pre><code>class RoundSTE(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x):
+        return torch.round(x)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output  # straight-through (acts like identity for the rounding part)</code></pre>
+    <p>STE allows the model to learn parameters and "survive" quantization during training.</p>
+    <p>Now let’s go back to <code>MovingAverageMinMaxObserver</code> during QAT. It uses an exponential moving average of min/max values observed during training. Similar to PTQ, observers (which are <code>FakeQuantize</code> modules in QAT) are inserted during <code>prepare_qat_fx()</code> and are active during the training phase. After training, during <code>convert_fx()</code>, they’re replaced with real quantization operations.</p>
+    <p>The moving average update rules are typically:</p>
+    <pre><code>min_val = (1 - α) * min_val + α * current_batch_min_val
+max_val = (1 - α) * max_val + α * current_batch_max_val</code></pre>
+    <p>Where α (alpha) is a momentum term.</p>
+   </section>
+   <section>
      <h2>Final Notes</h2>
      <ul>
        <li>Dynamic quantization: quick win for linear/LSTM-heavy models</li>
@@ -293,7 +325,7 @@ print("FC weight qparams:", model.obs_weight_fc.calculate_qparams())
        <li>Choose the right observer for your data distribution</li>
        <li>Watch out for quant-dequant boundaries</li>
        <li>Use FX for quantization in modern PyTorch</li>
-       <li><code>MovingAverageObserver</code> is for QAT, not PTQ</li>
+       <li><code>MovingAverageObserver</code> (or <code>MovingAverageMinMaxObserver</code>) is typically used for QAT, not PTQ. PTQ observers like <code>MinMaxObserver</code> or <code>HistogramObserver</code> collect stats on a calibration dataset.</li>
      </ul>
    </section>
 

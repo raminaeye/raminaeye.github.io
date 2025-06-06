@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Knowledge-Distillation Explained with PyTorch</title>
+  <title>Knowledge Distillation Explained with PyTorch</title>
   <style>
     body {
       font-family: sans-serif;
@@ -62,6 +62,20 @@
         color: #2980b9;
     }
   </style>
+  
+  <script type="text/javascript" async
+    src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML">
+  </script>
+  <script type="text/x-mathjax-config">
+    MathJax.Hub.Config({
+      tex2jax: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        displayMath: [['$$','$$'], ['\\[','\\]']],
+        processEscapes: true
+      }
+    });
+  </script>
+
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/monokai.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
   <script>hljs.highlightAll();</script>
@@ -69,11 +83,75 @@
 <body>
    <nav>
      <ul>
-      <li><a href="index.html">Home</a></li> 
-      <li><a href="https://github.com/raminaeye/model-optimization/blob/main/knowledge_distillation/knowledge_distillation.ipynb">Knowledge Distillation-Notebook</a></li>
+       <li><a href="index.html">Home</a></li> 
+       <li><a href="https://github.com/raminaeye/model-optimization/blob/main/knowledge_distillation/knowledge_distillation.ipynb">Knowledge Distillation-Notebook</a></li>
      </ul>
    </nav>
-   <h1>Pruning</h1>
+
+   <h1>Knowledge Distillation</h1>
+   <p>
+     How do you shrink a giant model into a small one without a significant loss in performance? <strong>Knowledge Distillation (KD)</strong> provides a powerful solution. The core idea is to use a large, accurate pre-trained model (the "teacher") to train a smaller, faster model (the "student") that mimics the teacher’s behavior.
+   </p>
+   <p>
+     This technique has proven highly effective in practice. For example, <code>DistilBERT</code> was distilled from the <code>BERT-base</code> model, resulting in a 40% parameter reduction while retaining 95% of BERT's performance. Similarly, the original <code>MobileNet</code> was distilled from <code>ResNet-50</code>.
+   </p>
+   <p>
+     Today, Knowledge Distillation is widely deployed for a variety of tasks, including:
+   </p>
+   <ul>
+     <li>Getting Automatic Speech Recognition (ASR) models to run efficiently on-device.</li>
+     <li>Performing real-time segmentation with smaller, faster models.</li>
+     <li>Creating tiny yet powerful transformer models for resource-constrained environments.</li>
+     <li>Developing lightweight reinforcement learning policies distilled from large, complex RL agents.</li>
+   </ul>
+
+   <h2>The Core Idea: Learning from "Soft" Predictions</h2>
+   <p>
+     Instead of training the student model solely on the hard ground-truth labels (e.g., "this image is a cat"), the student also learns from the "soft" predictions produced by the teacher. These soft predictions are the probability distribution over all classes that the teacher model outputs. This distribution contains richer information, revealing how the teacher "thinks" (e.g., "this image is 90% likely a cat, 8% a dog, and 2% a car").
+   </p>
+   <p>
+     To make this information more useful, the teacher's output logits are typically softened using a <strong>temperature scaling</strong> parameter, $T$.
+   </p>
+   $$ \text{soft\_targets} = \text{softmax}\left(\frac{\text{logits}}{T}\right) $$
+   <p>
+     The temperature $T$ controls the smoothness of the output distribution.
+   </p>
+   <ul>
+     <li>When $T = 1$, you get the standard <code>softmax</code> output.</li>
+     <li>When $T > 1$, the distribution becomes softer, shrinking the differences between class probabilities. This better reveals the teacher's knowledge about class similarities (e.g., that a truck is more similar to a car than to a cat).</li>
+     <li>When $T < 1$, the distribution becomes sharper, approaching a one-hot encoding.</li>
+   </ul>
+   <p>
+     Using a higher temperature helps the student learn the teacher’s inductive biases and provides a much better training signal, especially when true labels are sparse or noisy.
+   </p>
+
+   <h2>The Distillation Loss Function</h2>
+   <p>
+     The student is trained by optimizing a composite loss function that combines two objectives. This encourages the student to match both the ground truth and the teacher's soft predictions.
+   </p>
+   <ol>
+     <li><strong>Classification Loss:</strong> A standard cross-entropy loss between the student's predictions and the hard ground-truth labels.</li>
+     <li><strong>Distillation Loss:</strong> A loss that measures the difference between the student's and teacher's soft predictions. The Kullback-Leibler (KL) divergence is typically used for this.</li>
+   </ol>
+   <p>The final loss is a weighted average of these two components, controlled by a hyperparameter $\alpha$:</p>
+   $$ \mathcal{L} = \alpha \cdot \mathcal{L}_{CE}(\text{student\_logits, true\_labels}) + (1 - \alpha) \cdot \mathcal{L}_{KL}(\text{student\_logits}_T, \text{teacher\_logits}_T) $$
+   
+   <h2>Types of Knowledge Distillation</h2>
+   
+   <h3>Response-Based Distillation (Logit Distillation)</h3>
+   <p>
+     This is the most common and straightforward form of KD, where only the final output logits from the teacher are used to train the student. While this method doesn't capture the teacher's internal reasoning process, its simplicity and effectiveness have made it very popular. Both <code>DistilBERT</code> and <code>MobileNet</code> used this approach. The distillation loss is the KL divergence between the temperature-scaled outputs of the student ($z_s$) and teacher ($z_t$).
+   </p>
+   $$ \mathcal{L}_{KD} = KL\left(\text{softmax}\left(\frac{z_s}{T}\right) \bigg|\bigg| \text{softmax}\left(\frac{z_t}{T}\right)\right) $$
+
+   <h3>Feature-Based Distillation</h3>
+   <p>This approach goes deeper by forcing the student to mimic the teacher's intermediate feature representations from one or more layers, not just the final output.</p>
+
+   <h3>Relation-Based Distillation</h3>
+   <p>Here, the student learns from the relationships between different data points or layers as seen by the teacher, rather than the absolute values of the outputs.</p>
+   
+   <h3>Self-Distillation</h3>
+   <p>An interesting variant where a model teaches itself. Typically, a larger teacher model is used to train a student of the exact same architecture, often leading to improved performance and robustness.</p>
 
 </body>
 </html>

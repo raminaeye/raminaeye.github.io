@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Knowledge Distillation Explained with PyTorch</title>
+    <title>Transformers</title>
     <style>
         body {
             font-family: sans-serif;
@@ -543,11 +543,16 @@ def generate(model, idx, max_new_tokens):
     return idx
 </code></pre>
 
+    ---
+
     <h2>Weight Tying and Initialization</h2>
     <p>Decoder-only models do not require padding or masking if all sequences have the same length. For variable-length inference, no padding is used; tokens are simply grown one by one. In GPT and similar decoder-only transformers, input embeddings convert token IDs into vectors. The output projection layer maps the model's final hidden vector back to vocabulary logits. These two matrices, with shape <code>[vocab_size, D]</code>, are often the same due to <b>weight tying</b>, which reduces the model's parameters. This encourages consistency between the input and output spaces, leading to faster convergence as the model doesn't need to learn that similar embeddings should be similarly decoded.</p>
     <pre><code>output_projection.weight = token_embedding.weight
 </code></pre>
     <p>GPT-2 uses <b>scaled initialization</b> in attention and output layers. This compensates for model depth and width to prevent exploding or vanishing activations and gradients.</p>
+
+    ---
+
     <h2>Inference Optimization: Key-Value Caching</h2>
     <p>Inference speed can be slow and expensive in decoder-only models. Generating one token at a time requires a full forward pass through the entire model for each token. This means recomputing attention over all previous tokens at every step. You take the entire input sequence, including all previously generated tokens, embed it, pass it through every transformer layer, and compute attention ($\text{Q}$, $\text{K}$, $\text{V}$). In standard attention, the complexity is $\mathcal{O}(T^2 \cdot D)$, where $T$ is the number of tokens seen so far and $D$ is the embedding size. Inference slows down with each new token generated. For example, generating 100 tokens from a prompt leads to quadratic growth in computation over time. Recomputing keys and values for all previous tokens in every forward pass results in slow generation, high memory usage, and latency spikes as the sequence grows.</p>
     <p>Instead of recomputing everything from scratch, we can <b>cache the keys and values</b> from previous tokens and reuse them. For each layer and each head, <code>k_prev</code> and <code>v_prev</code> (shape <code>[B, heads, T_prev, D_head]</code>) are cached. Then, during inference, we only compute <code>q_t</code> for the current token and attend over:</p>
@@ -555,6 +560,136 @@ def generate(model, idx, max_new_tokens):
     <p>This optimization reduces computation from quadratic to linear, resulting in nearly constant latency. You compute $\text{K}/\text{V}$ for the current token and store it.</p>
     <p>At step 2: $q_2 \cdot [k_1, k_2]$<br>And at step 100: $q_{100} \cdot [k_1, \dots, k_{100}]$</p>
     <p>You only compute $\text{Q}$ for the current token and reuse all past $\text{K}/\text{V}$ from previous steps. This ensures that latency per token is constant, not linear.</p>
+
+    <hr>
+
+    <h1>Decoding Strategies</h1>
+    <p>After a language model generates logits (raw scores) for the next token, various <b>decoding strategies</b> can be employed to select the actual token. The choice of strategy significantly impacts the quality, diversity, and coherence of the generated text.</p>
+
+    <h2>Greedy Decoding</h2>
+    <p><b>Greedy decoding</b> is the simplest approach, where the model always picks the token with the highest probability. This is a deterministic method: the same prompt will always produce the same output. While fast, it can lead to repetitive text and lacks diversity due to no exploration of alternative token paths.</p>
+    <pre><code class="language-python">
+next_token = torch.argmax(logits, dim=-1)
+</code></pre>
+
+    <h2>Multinomial Sampling</h2>
+    <p><b>Multinomial sampling</b> (also known as <b>Temperature Sampling</b>) involves randomly sampling a token proportional to its probability. This introduces randomness, allowing for more diverse outputs. The process involves applying a softmax function to the logits to get probabilities.</p>
+    <p>$$P_i = \frac{e^{(z_i/T)}}{\sum_j e^{(z_j/T)}}$$</p>
+    <p>Here, $z_i$ is the logit for token $i$, and $T$ is the temperature parameter.</p>
+    <ul>
+        <li><b>Temperature ($T$)</b>: This parameter controls the randomness of the sampling.
+            <ul>
+                <li>$T > 1$: Gives more random samples, making the distribution flatter and increasing diversity.</li>
+                <li>$T < 1$: Gives more "confident" samples, making the distribution sharper and closer to greedy decoding.</li>
+                <li>$T = 1$: Standard softmax.</li>
+            </ul>
+        </li>
+    </ul>
+    <p>For creative writing, a higher temperature might be considered, while for deterministic Q&A, a lower temperature is generally preferred.</p>
+    <pre><code class="language-python">
+probs = F.softmax(logits / temperature, dim=-1)
+next_token = torch.multinomial(probs, num_samples=1)
+</code></pre>
+
+    <h2>Top-K Sampling</h2>
+    <p><b>Top-K sampling</b> aims to balance quality and diversity by sampling only from the $k$ most likely tokens. It discards the vast majority of low-probability "garbage" tokens. The process involves:
+        <ol>
+            <li>Keeping only the top $k$ highest probabilities.</li>
+            <li>Setting all other probabilities to zero.</li>
+            <li>Renormalizing the probabilities of the remaining top-$k$ tokens to sum to 1.</li>
+            <li>Sampling from this reduced set using a categorical distribution.</li>
+        </ol>
+    </p>
+    <pre><code class="language-python">
+def top_k_sample(logits, k=50, temperature=1.0):
+    logits = logits / temperature
+    top_k_vals, top_k_idx = torch.topk(logits, k)
+
+    probs = F.softmax(top_k_vals, dim=-1)
+    sample = torch.multinomial(probs, num_samples=1)
+
+    return top_k_idx.gather(1, sample) # map back to vocab indices
+</code></pre>
+
+    <h2>Top-P (Nucleus) Sampling</h2>
+    <p><b>Top-P sampling</b> (also known as <b>Nucleus Sampling</b>) dynamically selects the smallest set of tokens whose cumulative probability exceeds a predefined threshold $p$. This set is called the "nucleus." This method adapts to the model's uncertainty: if the model is confident, the nucleus will contain fewer tokens, while if it's uncertain, more tokens will be included.</p>
+    <pre><code class="language-python">
+def top_p_sample(logits, p=0.9, temperature=1.0):
+    logits = logits / temperature
+    probs = F.softmax(logits, dim=-1)
+
+    sorted_probs, sorted_indices = torch.sort(probs, descending=True)
+    cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+
+    # Create mask for cumulative probability > p
+    mask = cumulative_probs > p
+    mask[..., 1:] = mask[..., :-1].clone()
+    mask[..., 0] = False # Always include top token
+
+    # Zero out the masked probs and re-normalize
+    sorted_probs[mask] = 0
+    sorted_probs /= sorted_probs.sum(dim=-1, keepdim=True)
+
+    sample = torch.multinomial(sorted_probs, num_samples=1)
+    next_token = sorted_indices.gather(-1, sample)
+    return next_token
+</code></pre>
+
+    <h2>Beam Search</h2>
+    <p><b>Beam search</b> is a more sophisticated search algorithm that explores multiple sequences in parallel at each decoding step. Instead of selecting just one best token, it keeps track of the $N$ most likely sequences (where $N$ is the <b>beam size</b>).</p>
+    <p><b>Algorithm Overview (assuming Beam Size $B$, Vocabulary Size $V$, Output Length $T$):</b></p>
+    <ol>
+        <li><b>Initialization</b>: Start with $B$ empty beams. Each beam stores:
+            <ul>
+                <li>The sequence generated so far.</li>
+                <li>Its score (usually log-probability).</li>
+            </ul>
+        </li>
+        <li><b>At each step $t$</b>:
+            <ul>
+                <li>For each active beam, compute logits for the next token (shape `B x V`).</li>
+                <li>Convert logits to log-probabilities.</li>
+                <li>Add these log-probabilities to the beam's current score.</li>
+                <li>Flatten the `B x V` total candidates into a single list of (sequence, score) pairs.</li>
+                <li>Select the top $B$ sequences from this combined list to form the new beams.</li>
+            </ul>
+        </li>
+        <li><b>Repeat</b>: Continue step 2 until:
+            <ul>
+                <li>A beam ends in an End-Of-Sequence (<code>&lt;EOS&gt;</code>) token.</li>
+                <li>The maximum output length is reached.</li>
+            </ul>
+        </li>
+        <li><b>Final Result</b>: Return the beam with the highest total score.</li>
+    </ol>
+    <p>While beam search can produce higher quality outputs by exploring more possibilities, it can sometimes favor shorter or less diverse (boring) outputs.</p>
+    <pre><code class="language-python">
+def beam_search(model, input_ids, beam_size=5, max_len=20):
+    beams = [(input_ids, 0.0)] # (sequence, score)
+
+    for _ in range(max_len):
+        all_candidates = []
+        for seq, score in beams:
+            # Get logits for the next token based on the current sequence
+            # Unsqueeze to add a batch dimension for model input, then get last token's logits
+            logits = model(seq.unsqueeze(0))[:, -1, :] # [1, vocab_size]
+            log_probs = F.log_softmax(logits, dim=-1).squeeze(0) # [vocab_size]
+            
+            topk_logprobs, topk_ids = torch.topk(log_probs, beam_size)
+
+            for i in range(beam_size):
+                new_seq = torch.cat([seq, topk_ids[i].unsqueeze(0)], dim=0)
+                new_score = score + topk_logprobs[i].item()
+                all_candidates.append((new_seq, new_score))
+
+        # Keep top B overall candidates
+        beams = sorted(all_candidates, key=lambda x: x[1], reverse=True)[:beam_size]
+
+        # Note: For production use, you'd add logic here to check for EOS tokens
+        # and manage completed beams separately. For this example, we proceed for max_len.
+
+    return beams[0][0] # Best sequence
+</code></pre>
 
     <script>
         document.addEventListener("DOMContentLoaded", function() {

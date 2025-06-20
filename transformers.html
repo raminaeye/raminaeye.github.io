@@ -402,9 +402,6 @@ for _ in range(N):
 
     <h1>Decoder-Only Transformer</h1>
     <p>The training objective for building <b>decoder-only language models</b> is to maximize the probability of the next token given all previous tokens. During inference, the model autoregressively generates one token at a time by repeating the forward pass.</p>
-
-    ---
-
     <h2>Input and Embedding</h2>
     <p>First, you need an input data vocabulary of tokens, for example, 10,000 words. Input is tokenized into token IDs using a tokenizer.</p>
     <p>For instance, if the input is $[t_1, t_2, t_3]$ and the target is $[t_2, t_3, y_4]$, the model learns to predict each token from its context.</p>
@@ -422,8 +419,6 @@ class TokenPosEmbedding(nn.Module):
         x = self.token_embed(x) + self.pos_embed(positions) # [B, T, D]
         return x
 </code></pre>
-
-    ---
 
     <h2>Causal Self-Attention</h2>
     <p>The decoder is <b>causal</b>, meaning it only attends to previous tokens, not future ones. This is achieved by applying a lower-triangular mask to the attention scores, setting future token attention to $-\infty$, which then becomes zero after softmax.</p>
@@ -467,8 +462,6 @@ class CausalSelfAttention(nn.Module):
         return self.out_proj(out)
 </code></pre>
 
-    ---
-
     <h2>Transformer Block</h2>
     <p>At each layer, the hidden state for token $t$ is a function of all preceding tokens. The <b>transformer block</b> includes a layer normalization, followed by a causal attention layer and a residual connection, another layer normalization, a Multi-Layer Perceptron (MLP), and a final residual connection. Layer normalization, which typically comes before attention in GPT models (some older transformer models used post-norm), helps with training stability. Residual connections ensure gradients flow, allowing the model to learn identity mappings or refine existing representations. The MLP is a two-layer per-token network that increases capacity, enabling richer token-wise transformations. Each token attends to prior tokens via causal attention.</p>
     <pre><code class="language-python">
@@ -490,8 +483,6 @@ class TransformerBlock(nn.Module):
         return x
 </code></pre>
 
-    ---
-
     <h2>MiniGPT Model</h2>
     <p>You stack $N$ transformer decoder blocks to learn complex patterns over long-range token dependencies. The <code>MiniGPT</code> model is defined as:</p>
     <pre><code class="language-python">
@@ -512,8 +503,6 @@ class MiniGPT(nn.Module):
         return self.head(x) # [B, T, vocab_size]
 </code></pre>
 
-    ---
-
     <h2>Training</h2>
     <p>We predict every next token using the <b>cross-entropy loss</b>. Tokens are generated one by one. For example, if the input is "the cat sat on," the target would be "cat sat on my." Our <code>MiniGPT</code> model learns word identity from token embeddings, word order from positional embeddings, long-range patterns via attention, and token-level transformations via MLPs.</p>
     <pre><code class="language-python">
@@ -531,8 +520,6 @@ for epoch in range(10): # or however long you want to train
         loss.backward()
         optimizer.step()
 </code></pre>
-
-    ---
 
     <h2>Inference</h2>
     <p>During training, the model observes patterns in text, such as question/answer pairs, instructions, and dialogues. No weight changes occur during inference; the model utilizes what it has learned. During generation, we start with a prompt, such as "the cat." Logits for the next token are generated, focusing only on the prediction for the last token. We employ <b>greedy sampling</b> by selecting the most probable token from the distribution, appending it, and repeating the process. The <code>idx</code> tensor represents the current input tokens, with shape <code>[batch_size, current_seq_len]</code>. This sequence grows as new tokens are appended during generation. We crop <code>idx</code> because transformers have a maximum context length. This process repeats until the maximum number of new tokens is reached or an End-Of-Sequence (<code>&lt;EOS&gt;</code>) token is generated.</p>
@@ -556,16 +543,11 @@ def generate(model, idx, max_new_tokens):
     return idx
 </code></pre>
 
-    ---
-
     <h2>Weight Tying and Initialization</h2>
     <p>Decoder-only models do not require padding or masking if all sequences have the same length. For variable-length inference, no padding is used; tokens are simply grown one by one. In GPT and similar decoder-only transformers, input embeddings convert token IDs into vectors. The output projection layer maps the model's final hidden vector back to vocabulary logits. These two matrices, with shape <code>[vocab_size, D]</code>, are often the same due to <b>weight tying</b>, which reduces the model's parameters. This encourages consistency between the input and output spaces, leading to faster convergence as the model doesn't need to learn that similar embeddings should be similarly decoded.</p>
     <pre><code>output_projection.weight = token_embedding.weight
 </code></pre>
     <p>GPT-2 uses <b>scaled initialization</b> in attention and output layers. This compensates for model depth and width to prevent exploding or vanishing activations and gradients.</p>
-
-    ---
-
     <h2>Inference Optimization: Key-Value Caching</h2>
     <p>Inference speed can be slow and expensive in decoder-only models. Generating one token at a time requires a full forward pass through the entire model for each token. This means recomputing attention over all previous tokens at every step. You take the entire input sequence, including all previously generated tokens, embed it, pass it through every transformer layer, and compute attention ($\text{Q}$, $\text{K}$, $\text{V}$). In standard attention, the complexity is $\mathcal{O}(T^2 \cdot D)$, where $T$ is the number of tokens seen so far and $D$ is the embedding size. Inference slows down with each new token generated. For example, generating 100 tokens from a prompt leads to quadratic growth in computation over time. Recomputing keys and values for all previous tokens in every forward pass results in slow generation, high memory usage, and latency spikes as the sequence grows.</p>
     <p>Instead of recomputing everything from scratch, we can <b>cache the keys and values</b> from previous tokens and reuse them. For each layer and each head, <code>k_prev</code> and <code>v_prev</code> (shape <code>[B, heads, T_prev, D_head]</code>) are cached. Then, during inference, we only compute <code>q_t</code> for the current token and attend over:</p>

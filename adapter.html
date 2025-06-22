@@ -1,1 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Adapters - Parameter Efficient Fine-tuning (PEFT)</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+            line-height: 1.6;
+            color: #333;
+        }
+        h1, h2, h3, h4 {
+            color: #2c3e50; /* Darker shade for better contrast */
+            margin-top: 1.5em;
+            margin-bottom: 0.5em;
+        }
+        h1 { font-size: 2.5em; border-bottom: 2px solid #3498db; padding-bottom: 0.3em;}
+        h2 { font-size: 2em; border-bottom: 1px solid #bdc3c7; padding-bottom: 0.2em;}
+        h3 { font-size: 1.5em; }
+        h4 { font-size: 1.2em; color: #555;}
 
+        nav { margin-bottom: 30px; padding: 10px; background: #ecf0f1; border: 1px solid #bdc3c7; border-radius: 4px;}
+        nav ul { list-style: none; padding: 0; }
+        nav li { display: inline-block; margin-right: 15px; }
+        nav a { text-decoration: none; color: #3498db; font-weight: bold;}
+        nav a:hover { text-decoration: underline; color: #2980b9;}
+
+        pre {
+            background: #f8f9f9; /* Lighter background for code blocks */
+            padding: 1rem;
+            overflow-x: auto;
+            border: 1px solid #e1e4e8; /* Softer border */
+            border-left: 4px solid #3498db; /* Accent border */
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+        code {
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+        }
+        /* For inline code */
+        p > code, li > code, table td > code {
+            background: #e8eaed;
+            padding: 0.2em 0.4em;
+            border-radius: 3px;
+            font-size: 0.85em;
+        }
+        pre code { /* Reset for code inside pre, already handled by pre styling */
+            background: none;
+            padding: 0;
+            font-size: 1em; /* Ensure pre's font size is inherited */
+        }
+        ul {
+            padding-left: 20px;
+        }
+        li {
+            margin-bottom: 0.5em;
+        }
+        strong {
+            color: #2980b9;
+        }
+    </style>
+    
+    <script type="text/javascript" async
+      src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML">
+    </script>
+    <script type="text/x-mathjax-config">
+      MathJax.Hub.Config({
+        tex2jax: {
+          inlineMath: [['$','$'], ['\\(','\\)']],
+          displayMath: [['$$','$$'], ['\\[','\\]']],
+          processEscapes: true
+        }
+      });
+    </script>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/monokai.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script>hljs.highlightAll();</script>
+    <!-- Adding PyTorch for code examples -->
+    <script src="https://cdn.jsdelivr.net/npm/torch@2.3.0/dist/torch.min.js"></script>
+</head>
+<body>
+    <nav>
+      <ul>
+        <li><a href="index.html">Home</a></li> 
+      </ul>
+    </nav>
+    <h1>Adapters - Parameter Efficient Fine-tuning (PEFT)</h1>
+    <p>Instead of updating all model parameters during fine-tuning, <b>Adapters</b> insert small bottleneck modules within each transformer layer and train only these modules. This approach offers several advantages:</p>
+    <ul>
+        <li><b>Memory Efficiency</b>: Only adapter parameters need to be stored, not the full model.</li>
+        <li><b>Faster Training</b>: Significantly reduces training time.</li>
+        <li><b>Data Efficiency</b>: Works well even on smaller datasets.</li>
+        <li><b>Modularity</b>: Task-specific adapters can be plugged into a shared, frozen backbone model.</li>
+    </ul>
+    <p>Adapters are typically simple 2-layer MLPs with a bottleneck structure. They project the input down to a smaller dimension and then project it back up. Within transformers, adapters are commonly inserted after self-attention and feed-forward blocks. Often, the layer normalization parameters are also trained along with the adapters. The bottleneck structure is crucial for reducing the number of trainable parameters.</p>
+
+    <h2>Simple Adapter Implementation</h2>
+    <p>Here's a basic implementation of a simple adapter module:</p>
+    <pre><code class="language-python">
+import torch
+import torch.nn as nn
+
+class SimpleAdapter(nn.Module):
+    def __init__(self, hidden_dim, bottleneck_dim):
+        super().__init__()
+        self.down_proj = nn.Linear(hidden_dim, bottleneck_dim)
+        self.relu = nn.ReLU()
+        self.up_proj = nn.Linear(bottleneck_dim, hidden_dim)
+
+    def forward(self, x):
+        return x + self.up_proj(self.relu(self.down_proj(x)))
+    </code></pre>
+    <p>For example, a BERT base model with 110 million trainable parameters can be fine-tuned using an adapter with only about 1.2 million parameters. Consider a GPT block with attention and a Feed-Forward Network (FFN). We can integrate the adapter after a layer normalization within the GPT block:</p>
+    <pre><code class="language-python">
+class GPTBlock(nn.Module):
+    def __init__(self, hidden_dim, num_heads, bottleneck_dim):
+        super().__init__()
+        self.attn = nn.MultiheadAttention(hidden_dim, num_heads, batch_first=True)
+        self.ln1 = nn.LayerNorm(hidden_dim)
+        self.ffn = nn.Sequential(
+            nn.Linear(hidden_dim, 4 * hidden_dim),
+            nn.ReLU(),
+            nn.Linear(4 * hidden_dim, hidden_dim)
+        )
+        self.ln2 = nn.LayerNorm(hidden_dim)
+        self.adapter = SimpleAdapter(hidden_dim, bottleneck_dim)
+
+    def forward(self, x):
+        attn_out, _ = self.attn(x, x, x, need_weights=False)
+        x = x + attn_out
+        x = self.ln1(x)
+
+        ffn_out = self.ffn(x)
+        x = x + ffn_out
+        x = self.ln2(x)
+
+        x = self.adapter(x)
+        return x
+    </code></pre>
+
+    <h3>MiniGPT Model with Simple Adapters</h3>
+    <p>Here's how a MiniGPT model would be structured to incorporate these adapters:</p>
+    <pre><code class="language-python">
+class MiniGPT(nn.Module):
+    def __init__(self, vocab_size, hidden_dim, seq_len, n_layers, n_heads, bottleneck_dim):
+        super().__init__()
+        self.embed = nn.Embedding(vocab_size, hidden_dim)
+        self.pos_embed = nn.Parameter(torch.randn(1, seq_len, hidden_dim))
+
+        self.blocks = nn.Sequential(*[
+            GPTBlock(hidden_dim, n_heads, bottleneck_dim)
+            for _ in range(n_layers)
+        ])
+        self.ln_f = nn.LayerNorm(hidden_dim)
+        self.head = nn.Linear(hidden_dim, vocab_size)
+
+    def forward(self, x):
+        x = self.embed(x) + self.pos_embed[:, :x.size(1)]
+        x = self.blocks(x)
+        x = self.ln_f(x)
+        return self.head(x)
+    </code></pre>
+    <p>During fine-tuning with adapters, everything is frozen except the adapter modules themselves:</p>
+    <pre><code class="language-python">
+model = MiniGPT(vocab_size=100, hidden_dim=128, seq_len=32, n_layers=2, n_heads=4, bottleneck_dim=32)
+
+# Freeze everything except adapters
+for name, param in model.named_parameters():
+    if 'adapter' not in name:
+        param.requires_grad = False
+    </code></pre>
+
+    <h2>Houlsby Adapter</h2>
+    <p>The **Houlsby Adapter** is the original adapter proposed in <a href="https://arxiv.org/abs/1902.00751" target="_blank">https://arxiv.org/abs/1902.00751</a>. This adapter is typically inserted twice per transformer layer: once after self-attention and once after the FFN. It includes a LayerNorm before an optional residual connection after the adapter's MLP. This specific design tends to perform well in multi-task and cross-domain setups.</p>
+    <p>Here's how the Houlsby adapter itself is implemented:</p>
+    <pre><code class="language-python">
+class HoulsbyAdapter(nn.Module):
+    def __init__(self, hidden_dim, bottleneck_dim):
+        super().__init__()
+        self.norm = nn.LayerNorm(hidden_dim)
+        self.down = nn.Linear(hidden_dim, bottleneck_dim)
+        self.up = nn.Linear(bottleneck_dim, hidden_dim)
+        self.activation = nn.ReLU() # Often ReLU, but can be others
+
+    def forward(self, x):
+        h = self.norm(x)
+        h = self.activation(self.down(h))
+        return x + self.up(h)
+    </code></pre>
+    <p>And here's where the Houlsby adapters would be inserted in a GPT block:</p>
+    <pre><code class="language-python">
+class GPTBlock(nn.Module):
+    def __init__(self, hidden_dim, num_heads, bottleneck_dim):
+        super().__init__()
+        self.attn = nn.MultiheadAttention(hidden_dim, num_heads, batch_first=True)
+        self.ln1 = nn.LayerNorm(hidden_dim)
+        self.adapter1 = HoulsbyAdapter(hidden_dim, bottleneck_dim) # after attn
+
+        self.ffn = nn.Sequential(
+            nn.Linear(hidden_dim, 4 * hidden_dim),
+            nn.ReLU(),
+            nn.Linear(4 * hidden_dim, hidden_dim)
+        )
+        self.ln2 = nn.LayerNorm(hidden_dim)
+        self.adapter2 = HoulsbyAdapter(hidden_dim, bottleneck_dim) # after FFN
+
+    def forward(self, x):
+        # Self-attention block
+        attn_out, _ = self.attn(x, x, x, need_weights=False)
+        x = x + attn_out
+        x = self.ln1(x)
+        x = self.adapter1(x) # Adapter after attention
+
+        # Feed-forward block
+        ffn_out = self.ffn(x)
+        x = x + ffn_out
+        x = self.ln2(x)
+        x = self.adapter2(x) # Adapter after FFN
+
+        return x
+    </code></pre>
+
+    <h2>LoRA (Low-Rank Adaptation)</h2>
+    <p><b>LoRA (Low-Rank Adaptation)</b> is a widely used and highly efficient fine-tuning technique for large language models. Instead of directly updating the weights of pre-trained linear layers, LoRA freezes the original weights ($W$) and introduces small, trainable low-rank decomposition matrices ($B$ and $A$) that are added to the original weights. The modified weight matrix becomes:</p>
+    <p>$$ W_{\text{LoRA}} = W + \Delta W = W + B \cdot A $$</p>
+    <p>Where $A$ has shape $[r \times k]$, $B$ has shape $[d \times r]$, and $r \ll \min(d, k)$ (meaning $r$ is much smaller than the input or output dimensions). Only matrices $A$ and $B$ are trained, significantly reducing the number of trainable parameters.</p>
+    <p>LoRA is typically applied to the linear projection layers within the attention mechanism (e.g., Query and Value projections). A LoRA module takes the original frozen linear layer and initializes two low-rank weight matrices, $A$ and $B$. When multiplied, $B \cdot A$ creates a tensor of the same dimension as the original linear layer, but with far fewer parameters. Optional scaling parameters can be used to stabilize training. LoRA doesn't alter the base model's weights; it simply adds a learnable $\Delta W$ to them.</p>
+    <pre><code class="language-python">
+class LoRALinear(nn.Module):
+    def __init__(self, linear_layer, rank=4, alpha=1.0):
+        super().__init__()
+        self.linear = linear_layer # frozen original linear layer
+        self.rank = rank
+        self.alpha = alpha
+
+        in_dim, out_dim = linear_layer.in_features, linear_layer.out_features
+        # Initialize LoRA A and B matrices with small random values
+        self.lora_A = nn.Parameter(torch.randn(rank, in_dim) * 0.01)
+        self.lora_B = nn.Parameter(torch.randn(out_dim, rank) * 0.01)
+
+        self.scale = self.alpha / self.rank
+        self.linear.weight.requires_grad = False # Freeze the original weights
+
+    def forward(self, x):
+        base = self.linear(x) # Output from the frozen original layer
+        # Compute the low-rank update: x @ A.T @ B.T
+        lora = (x @ self.lora_A.T) @ self.lora_B.T
+        return base + self.scale * lora # Add the scaled low-rank update
+    </code></pre>
+    <p>Here's how an attention block might look with LoRA applied to the Query and Value projections:</p>
+    <pre><code class="language-python">
+class LoRA_MHA(nn.Module):
+    def __init__(self, embed_dim, num_heads, lora_rank=4):
+        super().__init__()
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+
+        # LoRA applied to Q and V projections
+        self.q_proj = LoRALinear(nn.Linear(embed_dim, embed_dim), rank=lora_rank)
+        self.k_proj = nn.Linear(embed_dim, embed_dim) # K-projection typically not LoRA-fied
+        self.v_proj = LoRALinear(nn.Linear(embed_dim, embed_dim), rank=lora_rank)
+        self.out_proj = nn.Linear(embed_dim, embed_dim)
+
+    def forward(self, x):
+        B, T, C = x.size()
+        q = self.q_proj(x)
+        k = self.k_proj(x)
+        v = self.v_proj(x)
+
+        q = q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+        k = k.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+        v = v.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+
+        attn_scores = (q @ k.transpose(-2, -1)) / (self.head_dim ** 0.5)
+        attn_probs = attn_scores.softmax(dim=-1)
+        context = attn_probs @ v
+
+        context = context.transpose(1, 2).reshape(B, T, C)
+        return self.out_proj(context)
+    </code></pre>
+    <p>A GPT block incorporating LoRA for its attention mechanism would look like this:</p>
+    <pre><code class="language-python">
+class GPTBlock(nn.Module):
+    def __init__(self, hidden_dim, num_heads, lora_rank):
+        super().__init__()
+        self.attn = LoRA_MHA(hidden_dim, num_heads, lora_rank)
+        self.ln1 = nn.LayerNorm(hidden_dim)
+
+        self.ffn = nn.Sequential(
+            nn.Linear(hidden_dim, 4 * hidden_dim),
+            nn.ReLU(),
+            nn.Linear(4 * hidden_dim, hidden_dim)
+        )
+        self.ln2 = nn.LayerNorm(hidden_dim)
+
+    def forward(self, x):
+        # Pre-norm architecture
+        x = self.ln1(x + self.attn(x))
+        x = self.ln2(x + self.ffn(x))
+        return x
+    </code></pre>
+    <p>The training loop for LoRA would involve freezing all model parameters except those belonging to the `LoRALinear` modules (i.e., `lora_A` and `lora_B` parameters):</p>
+    <pre><code class="language-python">
+import torch
+import torch.nn.functional as F
+
+# Dummy data: vocab size 100, seq_len 16
+vocab_size = 100
+seq_len = 16
+batch_size = 32
+
+model = MiniGPT(vocab_size=vocab_size, hidden_dim=128, seq_len=seq_len,
+                n_layers=2, n_heads=4, lora_rank=4)
+
+# Freeze everything except LoRA parameters
+for name, param in model.named_parameters():
+    param.requires_grad = 'lora' in name.lower() or 'A' in name or 'B' in name
+    </code></pre>
+
+    <h2>Prefix Tuning</h2>
+    <p><b>Prefix Tuning</b> is another parameter-efficient fine-tuning method that is simpler than modifying model weights or adding layers. It involves prepending a small, trainable sequence of virtual tokens (called a "prefix") to the input. These prefix tokens are learned embeddings that "steer" the frozen transformer towards the specific task. Only the prefix embeddings are trained; the main pre-trained model remains frozen.</p>
+    <p>Conceptually, if your input is $[x_1, x_2, x_3]$, the model processes it as: $[p_1, p_2, \dots, p_T, x_1, x_2, x_3]$, where $p_i$ are the learned prefix tokens.</p>
+    <p>These learnable prefix vectors are prepended to the Key and Value sequences within the multi-head attention mechanism at each layer. They are task-specific and are learned during fine-tuning. The attention scores become larger, from $T \times T$ to $T \times (P + T)$, where $P$ is the prefix length. This means each input token now attends to both the learned virtual prefix tokens and the real sequence tokens. The transformer model treats these prefix tokens as regular input, learning to be guided by their influence during training. Essentially, the Query receives more Keys and Values to attend to, effectively shaping the attention distribution.</p>
+    <pre><code class="language-python">
+class PrefixTuning(nn.Module):
+    def __init__(self, prefix_len, num_heads, head_dim):
+        super().__init__()
+        self.prefix_len = prefix_len
+        self.num_heads = num_heads
+        self.head_dim = head_dim
+
+        # Trainable prefix for key and value per head
+        # Initialized randomly, these will be learned
+        self.prefix_key = nn.Parameter(torch.randn(1, prefix_len, num_heads, head_dim))
+        self.prefix_value = nn.Parameter(torch.randn(1, prefix_len, num_heads, head_dim))
+
+    def get_prefix(self, batch_size):
+        # Repeat the learned prefix across the batch dimension
+        k = self.prefix_key.expand(batch_size, -1, -1, -1) # (B, prefix_len, H, D_head)
+        v = self.prefix_value.expand(batch_size, -1, -1, -1)
+        return k, v
+    </code></pre>
+    <p>Then, the multi-headed attention (MHA) module is modified to accept and integrate these prefixes:</p>
+    <pre><code class="language-python">
+class MHAWithPrefix(nn.Module):
+    def __init__(self, embed_dim, num_heads, prefix_len):
+        super().__init__()
+        assert embed_dim % num_heads == 0
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+
+        self.q_proj = nn.Linear(embed_dim, embed_dim)
+        self.k_proj = nn.Linear(embed_dim, embed_dim)
+        self.v_proj = nn.Linear(embed_dim, embed_dim)
+        self.out_proj = nn.Linear(embed_dim, embed_dim)
+
+        self.prefix = PrefixTuning(prefix_len, num_heads, self.head_dim)
+
+    def forward(self, x):
+        B, T, C = x.shape
+
+        q = self.q_proj(x).view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+        k = self.k_proj(x).view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+        v = self.v_proj(x).view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+
+        # Get prefix keys and values and transpose for concatenation
+        prefix_k, prefix_v = self.prefix.get_prefix(B) # (B, prefix_len, H, D_head)
+        prefix_k = prefix_k.transpose(1, 2) # (B, H, prefix_len, D_head)
+        prefix_v = prefix_v.transpose(1, 2)
+
+        # Concatenate prefix with actual keys and values
+        k = torch.cat([prefix_k, k], dim=2) # (B, H, prefix_len + T, D_head)
+        v = torch.cat([prefix_v, v], dim=2)
+
+        # Attention calculation now includes prefix
+        attn_weights = (q @ k.transpose(-2, -1)) / (self.head_dim ** 0.5)
+        attn_probs = attn_weights.softmax(dim=-1)
+        out = attn_probs @ v # (B, H, T, D_head) - output is still for original sequence length
+
+        out = out.transpose(1, 2).contiguous().view(B, T, C)
+        return self.out_proj(out)
+    </code></pre>
+    <p>The training strategy for Prefix Tuning involves only training the parameters within the `PrefixTuning` module, while the rest of the transformer remains frozen:</p>
+    <pre><code class="language-python">
+for name, param in model.named_parameters():
+    param.requires_grad = 'prefix' in name # Only parameters containing 'prefix' are trainable
+    </code></pre>
+    <p>Prefix tokens provide the transformer with sufficient guidance to adapt to new tasks. They influence representation learning across all layers, as they are injected into the attention computation at every layer. Prefix fine-tuning tends to work better for larger models, while for smaller models, full fine-tuning or LoRA might perform better. A typical prefix might add approximately 200,000 trainable parameters. These prefix tokens learn to inject task-relevant information, acting like "soft prompts" that convey task intent, class bias, and inductive priors. Different prefixes can be stored for different tasks and dynamically switched at inference time. Since prefix tuning does not modify the pre-trained weights, it reduces the risk of overfitting and catastrophic forgetting, allowing them to be deployed as plug-in modules.</p>
+    <pre><code>
+prefix_dict = {
+    "summarization": prefix_A,
+    "question_answering": prefix_B,
+    "sentiment": prefix_C,
+}
+    </code></pre>
+    <p>There are also "hard prefixes" like `[SUMMARIZE]`, which are good for direct prompting but are static. Soft prefixes, on the other hand, are more expressive and tunable.</p>
+
+    <h2>AdapterFusion</h2>
+    <p><b>AdapterFusion</b>, introduced in <a href="https://arxiv.org/abs/2005.00247" target="_blank">https://arxiv.org/abs/2005.00247</a>, combines multiple pre-trained adapters at inference time. For instance, if you have Adapter A trained for a translation task and Adapter B for a summarization task, AdapterFusion learns how to mix their outputs based on the input without requiring retraining of the individual adapters. This is achieved by passing the input through all relevant adapters, then learning a small attention mechanism to weigh their outputs, and finally summing them into a single fused output.</p>
+    <p>Each individual adapter typically remains a small bottleneck MLP:</p>
+    <pre><code class="language-python">
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class Adapter(nn.Module):
+    def __init__(self, hidden_dim, bottleneck_dim):
+        super().__init__()
+        self.down = nn.Linear(hidden_dim, bottleneck_dim)
+        self.up = nn.Linear(bottleneck_dim, hidden_dim)
+        self.activation = nn.ReLU()
+
+    def forward(self, x):
+        return self.up(self.activation(self.down(x)))
+    </code></pre>
+    <p>Here's the `AdapterFusion` module. It takes outputs from multiple adapters and learns attention weights to fuse them. The core idea is that a learnable "query" vector queries which adapters are most relevant for the current input, and `key_proj` transforms adapter outputs into "keys" for this attention mechanism. The final output is a weighted sum of the adapter outputs.</p>
+    <pre><code class="language-python">
+class AdapterFusion(nn.Module):
+    def __init__(self, hidden_dim, num_adapters):
+        super().__init__()
+        self.query = nn.Parameter(torch.randn(hidden_dim)) # Learnable query vector
+        self.key_proj = nn.Linear(hidden_dim, hidden_dim)   # Projects adapter outputs to keys
+        self.num_adapters = num_adapters
+
+    def forward(self, adapter_outputs): # adapter_outputs: list of tensors, each (B, D)
+        # Stack all adapter outputs along a new dimension to get (B, N_adapters, D)
+        stacked_outputs = torch.stack(adapter_outputs, dim=1)
+        keys = self.key_proj(stacked_outputs) # (B, N_adapters, D)
+
+        # Compute attention scores: Query @ Keys.T
+        # Reshape query to (1, 1, D) for broadcasting across batch and adapters
+        q = self.query.view(1, 1, -1) 
+        attn_scores = torch.matmul(q, keys.transpose(-2, -1)) / (keys.size(-1) ** 0.5) # (B, 1, N_adapters)
+        attn_weights = F.softmax(attn_scores, dim=-1) # (B, 1, N_adapters)
+
+        # Weighted sum of adapter outputs: Attention_weights @ Stacked_outputs
+        fused_output = torch.sum(attn_weights @ stacked_outputs, dim=1) # (B, D)
+        return fused_output
+    </code></pre>
+    <p>In an example scenario, we can create several "frozen" adapters (representing pre-trained adapters for different tasks) and then train only the `AdapterFusion` module. The fusion module learns to combine the outputs of these task-specific adapters to match a desired `true_target` (e.g., a specific task label). This allows the model to leverage knowledge from multiple specialized adapters without modifying their original weights, effectively determining how to blend the expertise of each "task expert" adapter.</p>
+    <pre><code class="language-python">
+# Hyperparameters
+hidden_dim = 64
+bottleneck_dim = 16
+batch_size = 32
+
+# Create and freeze 3 dummy adapters (pretend they're pretrained on different tasks)
+adapters = [Adapter(hidden_dim, bottleneck_dim) for _ in range(3)]
+for adapter in adapters:
+    for param in adapter.parameters():
+        param.requires_grad = False
+
+# Instantiate the AdapterFusion layer
+fusion = AdapterFusion(hidden_dim, num_adapters=3)
+
+# Dummy input data and a target for the fusion module to learn from
+x = torch.randn(batch_size, hidden_dim)        # Input passed to all adapters
+true_target = torch.randn(batch_size, hidden_dim) # Pretend ground truth for fusion
+
+# Optimizer for the fusion module (only fusion's parameters are trainable)
+optimizer = torch.optim.Adam(fusion.parameters(), lr=1e-3)
+
+# Simple training loop for the fusion module
+for step in range(100):
+    # Get outputs from the frozen adapters (no gradient tracking here)
+    with torch.no_grad():
+        adapter_outputs = [adapter(x) for adapter in adapters]
+
+    # Pass adapter outputs through the fusion module
+    fused_output = fusion(adapter_outputs) # (B, D)
+
+    # Compute a loss to guide the fusion mechanism (e.g., regression loss)
+    loss = F.mse_loss(fused_output, true_target)
+
+    # Optimization step
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+    </code></pre>
+    <p>To summarize, each individual adapter is trained to assist in a specific task (e.g., Adapter A for sentiment classification, Adapter B for question answering). If a new input belongs to a novel task like toxic comment detection, AdapterFusion asks whether existing knowledge can be reused by combining these adapters. It learns soft attention weights, for instance, indicating that the input resembles a sentiment task by 70% and a QA task by 20%. The output of AdapterFusion is a weighted sum of the individual adapter outputs. The loss used would typically be a classification loss, with target labels corresponding to the real task (e.g., toxic or not), and predictions derived from the fused representation.</p>
+
+    <h2>Prompt Tuning</h2>
+    <p><b>Prompt Tuning</b> is conceptually similar to Prefix Tuning but often simpler. Instead of modifying the model's architecture, it merely prepends a set of learnable embedding vectors (often referred to as "soft prompts" or "virtual tokens") to the input sequence. These prompt tokens are trained per task, allowing them to learn task-specific hints and guide the frozen pre-trained model's behavior.</p>
+    <p>If your original input sequence is $[x_1, x_2, x_3]$, the prompt-tuned input becomes: $[p_1, p_2, \dots, p_T, x_1, x_2, x_3]$. The base model processes this as a single sequence, but critically, only the parameters of the soft prompt embeddings ($p_i$) are trainable; the rest of the model's weights remain frozen.</p>
+    <p>For example, if you have a frozen embedding model and want to fine-tune it for classification without altering the base model, here's how a `PromptTuningClassifier` might look:</p>
+    <pre><code class="language-python">
+class PromptTuningClassifier(nn.Module):
+    def __init__(self, vocab_size, embed_dim, prompt_len, num_classes):
+        super().__init__()
+        # Assume FrozenEmbedder is a pre-trained, frozen embedding component
+        self.embedding_model = FrozenEmbedder(vocab_size, embed_dim) 
+        # The learnable prompt embeddings (P: prompt_len, D: embed_dim)
+        self.prompt = nn.Parameter(torch.randn(prompt_len, embed_dim)) 
+        self.classifier = nn.Linear(embed_dim, num_classes)
+
+    def forward(self, x): # x: (B, T) for batch_size B, sequence_length T
+        B = x.size(0)
+        x_embed = self.embedding_model(x) # (B, T, D) - output from frozen embedder
+        
+        # Expand prompt to match batch size: (B, P, D)
+        prompt = self.prompt.unsqueeze(0).expand(B, -1, -1) 
+        
+        # Concatenate prompt with input embeddings: (B, P+T, D)
+        full_input = torch.cat([prompt, x_embed], dim=1) 
+        
+        # Simple pooling for classification (e.g., mean pooling over sequence)
+        pooled = full_input.mean(dim=1) # (B, D) 
+        
+        # Final classification layer
+        return self.classifier(pooled) # (B, num_classes)
+    </code></pre>
+    <p>Once the soft prompt is trained, you simply prepend it to the input during inference. The prompt effectively injects task-specific knowledge into the input stream, guiding the frozen model.</p>
+
+    <h2>Compacter</h2>
+    <p><b>Compacter</b> is a parameter-efficient fine-tuning method that further reduces the number of parameters compared to Houlsby-style adapters by using **Kronecker product decomposition** for its internal weight matrices. It can also share parameters across tasks. Recall that Houlsby adapters reduced parameters by inserting bottleneck layers ($D \times B$ down, $B \times D$ up) into the transformer block after attention and FFN. For an embedding dimension of 768 and a bottleneck dimension of 64, the number of parameters for a single Houlsby adapter would be:</p>
+    <ul>
+        <li>Down projection: $768 \times 64 = 49,152$ parameters</li>
+        <li>Up projection: $64 \times 768 = 49,152$ parameters</li>
+        <li>Total: $98,304$ parameters</li>
+    </ul>
+    <p>The Kronecker product allows expanding smaller matrices into a structured larger one. If you have two matrices, $A$ (size $m \times n$) and $B$ (size $p \times q$), their Kronecker product $A \otimes B$ results in a large matrix of size $(m \cdot p) \times (n \cdot q)$. Each element in $A$ scales a copy of $B$. Compacter leverages this by not learning a full dense weight matrix $W$, but rather smaller factors $A$ and $B$. The full matrix $W = A \otimes B$ is implicitly constructed from their structure.</p>
+    <p>For example, if $A = \begin{bmatrix} a & b \\ c & d \end{bmatrix}$ (size $2 \times 2$) and $B = \begin{bmatrix} e & f \\ g & h \end{bmatrix}$ (size $2 \times 2$), then $A \otimes B$ is:</p>
+    <p>$$ A \otimes B = \begin{bmatrix} aB & bB \\ cB & dB \end{bmatrix} = \begin{bmatrix} ae & af & be & bf \\ ag & ah & bg & bh \\ ce & cf & de & df \\ cg & ch & dg & dh \end{bmatrix} $$</p>
+    <p>(Resulting size: $(2 \times 2) \times (2 \times 2) = 4 \times 4$)</p>
+    <p>In practice, the full $W = A \otimes B$ matrix is not materialized. Instead, the computation $X \cdot (A \otimes B)$ can be efficiently performed without explicitly building the huge matrix, often by rearranging and multiplying the factors (e.g., involving $B \cdot X \cdot A^T$). Here's what an efficient Compacter adapter layer might look like:</p>
+    <pre><code class="language-python">
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class EfficientCompacterAdapter(nn.Module):
+    def __init__(self, d_model, bottleneck_dim, rank):
+        super().__init__()
+        self.d_model = d_model
+        self.bottleneck_dim = bottleneck_dim
+        self.rank = rank # Rank for Kronecker factors
+
+        # Down projection Kronecker factors (e.g., for W_down: (d_model x bottleneck_dim))
+        # A_down: (rank, bottleneck_dim / (d_model / rank)) - adjusted to fit the kron_multiply logic
+        # For simplicity in this example, let's assume specific dimensions where kron_multiply works
+        # A and B are learnable parameters
+        self.A_down = nn.Parameter(torch.randn(rank, bottleneck_dim)) # Example factor
+        self.B_down = nn.Parameter(torch.randn(d_model // rank, 1)) # Example factor. This needs careful dimensioning for actual Kronecker.
+
+        # Up projection Kronecker factors
+        self.A_up = nn.Parameter(torch.randn(1, rank)) # Example factor
+        self.B_up = nn.Parameter(torch.randn(1, d_model // rank)) # Example factor
+
+        self.activation = nn.ReLU()
+
+    # Note: The provided kron_multiply function might need adjustments based on how A and B factors
+    # are truly defined for a generalized Kronecker product multiplication.
+    # The current implementation assumes a specific decomposition form.
+    def kron_multiply(self, x, A, B, out_dim):
+        """
+        Efficiently computes x @ (A ⊗ B) without materializing A ⊗ B.
+        This is a simplified representation and might require precise dimensioning
+        based on the actual Kronecker product factorization used in Compacter.
+        - x: (batch, in_dim)
+        - A: (m, n)
+        - B: (p, q)
+        Returns: (batch, m * p)
+        """
+        batch = x.shape[0]
+        
+        # User's provided kron_multiply:
+        batch_size = x.shape[0]
+        in_dim = x.shape[1]
+        
+        x_reshaped = x.view(batch_size, q_factor_cols, n_factor_cols)
+
+        # Compute: B @ X @ A.T -> shape: (batch, p, m) where p=B.rows, m=A.rows
+        # B: (p, q), x_reshaped: (batch, q, n) -> (batch, p, n)
+        BX = torch.matmul(B, x_reshaped) 
+        
+        # BXA: (batch, p, n) @ (n, m) -> (batch, p, m)
+        BXA = torch.matmul(BX, A.T)
+
+        return BXA.reshape(batch_size, out_dim)
+
+    def forward(self, x):
+        # x: (batch, d_model)
+        batch_size, d_model = x.shape
+        bottleneck_dim = self.bottleneck_dim
+
+        # Down projection: project to bottleneck dimension
+        # A_down: (rank, B), B_down: (D/rank, 1). For kron_multiply to work
+        # x (batch, D) needs to be viewed as (batch, 1, D) for the A,B factor.
+        # This is very specific to the kron_multiply given by the user.
+        h = self.kron_multiply(x, self.A_down, self.B_down, bottleneck_dim)
+        h = self.activation(h)
+
+        # Up projection: project back to d_model
+        h = self.kron_multiply(h, self.A_up, self.B_up, d_model)
+
+        return x + h # Residual connection
+    </code></pre>
+    <p>Using Compacter, the parameter count for the down and up projections would be significantly lower. For the example where `d_model=768`, `bottleneck_dim=64`, and assuming `rank=8` for `A_down` (so `d_model // rank = 96`), the parameters might be:</p>
+    <ul>
+        <li><code>A_down</code>: $rank \times bottleneck\_dim = 8 \times 64 = 512$</li>
+        <li><code>B_down</code>: $(d\_model / rank) \times 1 = 96 \times 1 = 96$</li>
+        <li><code>A_up</code>: $1 \times rank = 1 \times 8 = 8$</li>
+        <li><code>B_up</code>: $1 \times (d\_model / rank) = 1 \times 96 = 96$</li>
+        <li>Total: $\approx 512 + 96 + 8 + 96 = 712$ parameters</li>
+    </ul>
+    <p>This shows a dramatic reduction in parameters compared to the Houlsby adapter (~98k parameters). The efficiency comes from the fact that we don't store the full dense matrices for the projections; instead, we store their low-rank Kronecker factors and compute the matrix-vector products efficiently.</p>
+
+    <h2>Other PEFT Methods</h2>
+    <p>Beyond these, there are other parameter-efficient fine-tuning methods:</p>
+    <ul>
+        <li><b>BitFit</b>: Fine-tunes only the bias terms of the transformer layers, which can work well on low-resource tasks.</li>
+        <li><b>Compacter++</b>: An improvement over Compacter that uses multiple Kronecker factors.</li>
+        <li><b>AdapterDrop</b>: Allows dynamically dropping adapters during inference to speed up computation with minimal performance loss.</li>
+        <li><b>P-tuning</b>: An advanced prompt tuning method that uses gating mechanisms and additional layers to improve prompt effectiveness.</li>
+        <li><b>Side-tuning</b>: Involves training a small side network alongside the original pre-trained model.</li>
+    </ul>
+    <p>Among these, <b>LoRA</b> and **Houlsby Adapters** are generally considered the most practical and popular choices for parameter-efficient fine-tuning.</p>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            // Replace KaTeX-specific renderMathInElement with MathJax's Typeset method
+            if (typeof MathJax !== 'undefined' && MathJax.Hub) {
+                MathJax.Hub.Queue(["Typeset",MathJax.Hub]);
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>A Deep Dive into Recurrent Neural Networks</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+            line-height: 1.6;
+            color: #333;
+        }
+        h1, h2, h3, h4 {
+            color: #2c3e50; /* Darker shade for better contrast */
+            margin-top: 1.5em;
+            margin-bottom: 0.5em;
+        }
+        h1 { font-size: 2.5em; border-bottom: 2px solid #3498db; padding-bottom: 0.3em;}
+        h2 { font-size: 2em; border-bottom: 1px solid #bdc3c7; padding-bottom: 0.2em;}
+        h3 { font-size: 1.5em; }
+        h4 { font-size: 1.2em; color: #555;}
+
+        nav { margin-bottom: 30px; padding: 10px; background: #ecf0f1; border: 1px solid #bdc3c7; border-radius: 4px;}
+        nav ul { list-style: none; padding: 0; }
+        nav li { display: inline-block; margin-right: 15px; }
+        nav a { text-decoration: none; color: #3498db; font-weight: bold;}
+        nav a:hover { text-decoration: underline; color: #2980b9;}
+
+        pre {
+            background: #f8f9f9; /* Lighter background for code blocks */
+            padding: 1rem;
+            overflow-x: auto;
+            border: 1px solid #e1e4e8; /* Softer border */
+            border-left: 4px solid #3498db; /* Accent border */
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+        code {
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+        }
+        /* For inline code */
+        p > code, li > code, table td > code {
+            background: #e8eaed;
+            padding: 0.2em 0.4em;
+            border-radius: 3px;
+            font-size: 0.85em;
+        }
+        pre code { /* Reset for code inside pre, already handled by pre styling */
+            background: none;
+            padding: 0;
+            font-size: 1em; /* Ensure pre's font size is inherited */
+        }
+        ul {
+            padding-left: 20px;
+        }
+        li {
+            margin-bottom: 0.5em;
+        }
+        strong {
+            color: #2980b9;
+        }
+        hr {
+            border: 0;
+            height: 1px;
+            background: #bdc3c7;
+            margin-top: 2em;
+            margin-bottom: 2em;
+        }
+    </style>
+    
+    <script type="text/javascript" async
+        src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML">
+    </script>
+    <script type="text/x-mathjax-config">
+        MathJax.Hub.Config({
+            tex2jax: {
+                inlineMath: [['$','$'], ['\\(','\\)']],
+                displayMath: [['$$','$$'], ['\\[','\\]']],
+                processEscapes: true
+            }
+        });
+    </script>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script>hljs.highlightAll();</script>
+</head>
+<body>
+    <nav>
+        <ul>
+            <li><a href="#intro">Introduction</a></li>
+            <li><a href="#bptt">BPTT</a></li>
+            <li><a href="#gru">GRU</a></li>
+            <li><a href="#lstm">LSTM</a></li>
+            <li><a href="#practical-concepts">Practical Concepts</a></li>
+            <li><a href="#enhancements">Modern Enhancements</a></li>
+        </ul>
+    </nav>
+
+    <h1 id="intro">The Limits of Feedforward Networks & The Rise of RNNs</h1>
+    <p>
+        We all know what feedforward networks are. They assume a fixed-size input. It takes an input, multiplies it with some weights, and applies non-linearities. The order of the input doesn’t matter. This is a problem for input sequences, like words in a sentence, stock prices over days, or audio samples, where order actually matters. Different sentences can have different lengths, which would require padding or truncating. A feedforward network collapses the learned weights, losing the temporal structure.
+    </p>
+    <p>
+        With <strong>recurrence</strong>, instead of processing all input at once, you process one input at a time and carry forward some memory.
+    </p>
+    
+    <h3>The Core RNN Equations</h3>
+    <p><strong>Hidden State:</strong></p>
+    $$h_t = \tanh(W_{xh} x_t + W_{hh} h_{t-1} + b_h)$$
+    <p><strong>Output:</strong></p>
+    $$y_t = W_{hy} h_t + b_y$$
+    <ul>
+        <li><code>$x_t$</code>: input at time $t$</li>
+        <li><code>$h_t$</code>: hidden state at time $t$</li>
+        <li><code>$h_{t-1}$</code>: hidden state from the previous step</li>
+        <li><code>$y_t$</code>: output at time $t$</li>
+        <li><code>$W_{xh}$</code>: input-to-hidden weight matrix (projects inputs into the latent space)</li>
+        <li><code>$W_{hh}$</code>: hidden-to-hidden weight matrix (carries memory forward in time)</li>
+        <li><code>$W_{hy}$</code>: hidden-to-output weight matrix (transforms the hidden state to an output)</li>
+    </ul>
+    <p>
+        The current hidden state depends on the previous hidden state. That’s what gives it memory.
+    </p>
+    <p>
+        Let’s take it one step at a time. At each timestep <code>$t$</code>:
+    </p>
+    <ol>
+        <li>We take the input vector <code>$x_t$</code> and apply the transformation <code>$W_{xh} x_t$</code>. This is what today’s input contributes to the memory.</li>
+        <li>We take the previous hidden state <code>$h_{t-1}$</code> and transform it using <code>$W_{hh} h_{t-1}$</code>. This is what we remember from yesterday.</li>
+        <li>We combine these, add a bias, and apply a <code>tanh</code> non-linearity. That’s <code>$h_t$</code>, the memory at time <code>$t$</code>. It has today’s input and past memory.</li>
+        <li>We then use another matrix <code>$W_{hy}$</code> to turn the hidden state into the output: <code>$y_t = W_{hy} h_t + b_y$</code>. Based on my memory now, what should my prediction be?</li>
+    </ol>
+
+    <hr>
+    
+    <h2 id="bptt">Backpropagation Through Time (BPTT)</h2>
+    <p>
+        Unlike backpropagation that flows layer by layer, in an RNN we have time as well as depth. This is called <strong>backpropagation through time (BPTT)</strong>.
+    </p>
+    <p>
+        Say the loss is cross-entropy: $L = \sum_{t=1}^{T} L_t(y_t, \hat{y}_t)$
+    </p>
+    <p>
+        When we unroll the RNN for $T$ timesteps, it looks like a deep forward network of depth $T$, where each layer reuses the same weights ($W_{xh}, W_{hh}, W_{hy}$). During backprop, gradients flow through the sequence of hidden states. Since parameters are shared, their gradients accumulate across timesteps.
+    </p>
+    <p>
+        The trouble comes from the recurrent connection. Since $h_t$ depends on $h_{t-1}$, this expands into a long chain rule across time.
+    </p>
+    <ul>
+        <li><strong>Vanishing Gradients</strong>: If you keep multiplying derivatives of <code>tanh</code>, which are $\le 1$, they shrink exponentially. The model forgets long-term dependencies.</li>
+        <li><strong>Exploding Gradients</strong>: If the recurrent weights in $W_{hh}$ are large, the gradients can grow exponentially, causing instability.</li>
+    </ul>
+    
+    <h3>Gradient Clipping</h3>
+    <p>
+        You can deal with exploding gradients using <strong>gradient clipping</strong>. This shrinks the gradient vector before updating the parameters. Typically, you take the L2 norm of all parameters flattened into one big vector.
+    </p>
+    <p>
+        Let $g = [\text{grad}(W_{xh}), \text{grad}(W_{hh}), \text{grad}(W_{hy}), \dots]$.
+        The L2 norm is $\|g\|_2 = \sqrt{\sum_i g_i^2}$.
+    </p>
+    <p>
+        If this value is bigger than a threshold $\tau$, you rescale the entire gradient vector:
+    </p>
+    $$ \text{If } \|g\|_2 > \tau: \quad g \leftarrow g \cdot \frac{\tau}{\|g\|_2} $$
+    <p>
+        This keeps the direction of the gradient but reduces its magnitude.
+    </p>
+    <p>
+        Now, the main issue with RNNs was really vanishing gradients, which affects long-term memory. The old memory gets mixed in and there’s no control over how information passes to the future; the information washes out. The RNN forgets context.
+    </p>
+
+    <hr>
+
+    <h2 id="gru">Gated Recurrent Unit (GRU)</h2>
+    <p>
+        The GRU introduces <strong>gates</strong> to control what information to keep and what to forget.
+    </p>
+    <ul>
+        <li>An <strong>update gate</strong> decides: <em>Do I keep the old memory or replace it with new information?</em></li>
+        <li>A <strong>reset gate</strong> decides: <em>Do I ignore the old memory when making new memory, or should I use it?</em></li>
+    </ul>
+    <p>
+        For example, consider “Ramin wrote the best tutorial, <strong>he</strong> did it again!”. A vanilla RNN might overwrite “Ramin” and forget who “he” was. A GRU's update gate would say "don’t overwrite Ramin, hold on to that memory." If the update gate decides to just keep the old memory, the hidden state can flow unchanged for many steps. That means gradients can also flow back easily, solving the vanishing gradients problem.
+    </p>
+    <p>
+        Conceptually, the hidden state update is:
+    </p>
+    $$h_t = (1-z_t) \odot h_{t-1} + z_t \odot \tilde{h}_t$$
+    <p>
+        Where $z_t$ is the update gate. If $z_t=0$, then $h_t = h_{t-1}$. The memory is copied directly from one step to the next. No multiplication, no <code>tanh</code>—just an identity connection. During backprop, the gradients flow through this same path, unchanged. This is a shortcut path or linear highway for memory.
+    </p>
+    
+    <h3>GRU Equations</h3>
+    <p>
+        There are 2 gates, both are little feedforward networks with a sigmoid activation, so their outputs are between 0 and 1.
+    </p>
+    <ol>
+        <li>
+            <strong>Update Gate ($z_t$)</strong>: <em>Keep the old hidden state or update it?</em>
+            $$z_t = \sigma(W_z x_t + U_z h_{t-1} + b_z)$$
+            The sigmoid squashes the result to a number between 0 and 1, interpreted as a switch. 0 means keep old memory, 1 means overwrite with new memory.
+        </li>
+        <li>
+            <strong>Reset Gate ($r_t$)</strong>: <em>When computing new candidate memory, how much of the old memory should I ignore?</em>
+            $$r_t = \sigma(W_r x_t + U_r h_{t-1} + b_r)$$
+        </li>
+        <li>
+            <strong>Candidate Hidden State ($\tilde{h}_t$)</strong>: <em>A proposal for new memory.</em> The reset gate $r_t$ decides how much of the previous state $h_{t-1}$ is allowed in. If $r_t$ is zero, the candidate ignores past memory and depends only on the input.
+            $$\tilde{h}_t = \tanh(W_h x_t + U_h (r_t \odot h_{t-1}) + b_h)$$
+        </li>
+        <li>
+            <strong>Final Hidden State ($h_t$)</strong>: <em>The actual memory we carry forward.</em> It’s a blend between the old hidden state and the candidate, controlled by the update gate. If $z_t$ is 0, it keeps the old memory ($h_t = h_{t-1}$), and if $z_t$ is 1, it replaces it ($h_t = \tilde{h}_t$).
+            $$h_t = (1-z_t) \odot h_{t-1} + z_t \odot \tilde{h}_t$$
+        </li>
+    </ol>
+    <p>
+        Finally, the output is computed from the hidden state:
+    </p>
+    $$y_t = W_{hy} h_t + b_y$$
+
+    <h3>GRU Implementation</h3>
+<pre><code class="language-python">
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class GRUCell(nn.Module):
+    def __init__(self, input_dim, hidden_dim):
+        super(GRUCell, self).__init__()
+        self.hidden_dim = hidden_dim
+
+        # Update gate parameters
+        self.W_z = nn.Linear(input_dim, hidden_dim)
+        self.U_z = nn.Linear(hidden_dim, hidden_dim, bias=False)
+
+        # Reset gate parameters
+        self.W_r = nn.Linear(input_dim, hidden_dim)
+        self.U_r = nn.Linear(hidden_dim, hidden_dim, bias=False)
+
+        # Candidate hidden state parameters
+        self.W_h = nn.Linear(input_dim, hidden_dim)
+        self.U_h = nn.Linear(hidden_dim, hidden_dim, bias=False)
+
+    def forward(self, x_t, h_prev):
+        # 1. Update gate
+        z_t = torch.sigmoid(self.W_z(x_t) + self.U_z(h_prev))
+
+        # 2. Reset gate
+        r_t = torch.sigmoid(self.W_r(x_t) + self.U_r(h_prev))
+
+        # 3. Candidate hidden state
+        h_tilde = torch.tanh(self.W_h(x_t) + self.U_h(r_t * h_prev))
+
+        # 4. Final hidden state
+        h_t = (1 - z_t) * h_prev + z_t * h_tilde
+        return h_t
+</code></pre>
+    <p>
+        Even though the GRU doesn’t have a dedicated cell state, it can still preserve long-term memory because the update gate can create identity connections across time steps.
+    </p>
+
+    <hr>
+    
+    <h2 id="lstm">Long Short-Term Memory (LSTM)</h2>
+    <p>
+        LSTM (Long Short-Term Memory) separates memory into two parts and uses three gates to carefully control what flows into, out of, and stays within these memories.
+    </p>
+    <ul>
+        <li><strong>Cell State ($c_t$)</strong>: The <strong>long-term memory</strong>. It carries information across many time steps and can pass info almost unchanged to help gradients flow, fixing the vanishing gradient problem.</li>
+        <li><strong>Hidden State ($h_t$)</strong>: The <strong>short-term memory</strong>. This is what the network is "thinking" right now and is used for immediate predictions.</li>
+    </ul>
+    <p>
+        The three gates are:
+    </p>
+    <ol>
+        <li><strong>Forget Gate</strong>: Decides what old info to erase from long-term memory.</li>
+        <li><strong>Input Gate</strong>: Decides what new info to store in long-term memory.</li>
+        <li><strong>Output Gate</strong>: Decides what part of the memory to use right now.</li>
+    </ol>
+    
+    <h3>LSTM Equations</h3>
+    <p><strong>Cell State Update (Long-Term Memory):</strong></p>
+    <p>The new long-term memory is formed by keeping some of the old memory and adding some new information.</p>
+    $$c_t = f_t \odot c_{t-1} + i_t \odot \tilde{c}_t$$
+    <p>Where $f_t$ is the forget gate, $i_t$ is the input gate, and $\tilde{c}_t$ is the candidate memory.</p>
+    
+    <p><strong>Candidate Cell State:</strong></p>
+    <p>This is a proposal for what new information could be written into long-term memory.</p>
+    $$\tilde{c}_t = \tanh(W_c x_t + U_c h_{t-1} + b_c)$$
+    
+    <p><strong>Hidden State Update (Short-Term Memory):</strong></p>
+    <p>The short-term working memory is a filtered view of the long-term memory.</p>
+    $$h_t = o_t \odot \tanh(c_t)$$
+    <p>Where $o_t$ is the output gate.</p>
+    
+    <p><strong>The Gates:</strong></p>
+    <p>All gates are a mix of the input ($x_t$) and the previous hidden state ($h_{t-1}$), passed through a sigmoid function.</p>
+    <ul>
+        <li><strong>Forget Gate ($f_t$)</strong>: <em>Should I forget this old info?</em>
+            $$f_t = \sigma(W_f x_t + U_f h_{t-1} + b_f)$$</li>
+        <li><strong>Input Gate ($i_t$)</strong>: <em>Should I add this new info?</em>
+            $$i_t = \sigma(W_i x_t + U_i h_{t-1} + b_i)$$</li>
+        <li><strong>Output Gate ($o_t$)</strong>: <em>What part of memory should I expose right now?</em>
+            $$o_t = \sigma(W_o x_t + U_o h_{t-1} + b_o)$$</li>
+    </ul>
+
+    <h3>LSTM Implementation</h3>
+<pre><code class="language-python">
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class LSTMCell(nn.Module):
+    def __init__(self, input_dim, hidden_dim):
+        super(LSTMCell, self).__init__()
+        self.hidden_dim = hidden_dim
+
+        # Forget gate
+        self.W_f = nn.Linear(input_dim, hidden_dim)
+        self.U_f = nn.Linear(hidden_dim, hidden_dim, bias=False)
+
+        # Input gate
+        self.W_i = nn.Linear(input_dim, hidden_dim)
+        self.U_i = nn.Linear(hidden_dim, hidden_dim, bias=False)
+
+        # Candidate cell state
+        self.W_c = nn.Linear(input_dim, hidden_dim)
+        self.U_c = nn.Linear(hidden_dim, hidden_dim, bias=False)
+
+        # Output gate
+        self.W_o = nn.Linear(input_dim, hidden_dim)
+        self.U_o = nn.Linear(hidden_dim, hidden_dim, bias=False)
+
+    def forward(self, x_t, h_prev, c_prev):
+        # 1. Forget gate
+        f_t = torch.sigmoid(self.W_f(x_t) + self.U_f(h_prev))
+
+        # 2. Input gate
+        i_t = torch.sigmoid(self.W_i(x_t) + self.U_i(h_prev))
+
+        # 3. Candidate memory
+        c_hat_t = torch.tanh(self.W_c(x_t) + self.U_c(h_prev))
+
+        # 4. Update cell state
+        c_t = f_t * c_prev + i_t * c_hat_t
+
+        # 5. Output gate
+        o_t = torch.sigmoid(self.W_o(x_t) + self.U_o(h_prev))
+
+        # 6. Hidden state (short-term memory)
+        h_t = o_t * torch.tanh(c_t)
+        
+        return h_t, c_t
+</code></pre>
+    
+    <hr>
+    
+    <h2>GRU vs. LSTM at a Glance</h2>
+    <p>
+        GRUs typically achieve similar effects to LSTMs but with fewer parameters.
+    </p>
+<pre><code>
+================ GRU =================
+
+Input (x_t)
+   |
+   v
+ [ Reset Gate ] ---&gt; controls old hidden state
+   |
+   v
+Candidate Hidden (h̃_t)
+   |
+[ Update Gate ] ---&gt; blends old hidden h_{t-1} with h̃_t
+   |
+   v
+Hidden State (h_t) ----&gt; used as output + passed forward
+</code></pre>
+<pre><code>
+================ LSTM =================
+
+Input (x_t)
+   |
+   v
+[ Forget Gate ] --------&gt; controls old Cell State (c_{t-1})
+[ Input Gate  ] --------&gt; controls Candidate Cell State (c̃_t)
+   |
+   v
+Cell State (c_t) -------&gt; long-term memory (carried forward)
+   |
+[ Output Gate ] --------&gt; controls what part of c_t is shown
+   |
+   v
+Hidden State (h_t) ----&gt; short-term memory, used as output
+</code></pre>
+    
+    <hr>
+    
+    <h2 id="practical-concepts">Practical Implementations & Concepts in PyTorch</h2>
+    <p>
+        We typically stack multiple recurrent layers on top of each other. The first layer processes the input sequence and produces hidden states, and the second processes those hidden states to learn higher-level temporal features.
+    </p>
+    
+    <h3>PyTorch <code>nn.LSTM</code> and <code>nn.GRU</code></h3>
+<pre><code class="language-python">
+# A 2-layer LSTM
+lstm = nn.LSTM(
+    input_size=10,   # size of input vector at each timestep
+    hidden_size=20,  # hidden state dimension
+    num_layers=2,    # stacked layers
+    batch_first=True # batch, seq_len, input_size format
+)
+</code></pre>
+    <p>
+        The <code>batch_first=True</code> argument is convenient when working with other PyTorch layers like CNNs, which expect the batch dimension first.
+    </p>
+    <p>
+        The call signature is <code>output, (hn, cn) = lstm(input, (h0, c0))</code>.
+    </p>
+    <ul>
+        <li><code>output</code>: The hidden state for all time steps from the <em>final</em> layer.</li>
+        <li><code>hn</code>, <code>cn</code>: The final hidden and cell states for <em>each layer</em>.</li>
+    </ul>
+    <p>
+        For a GRU, there is no cell state: <code>output, hn = gru(input, h0)</code>.
+    </p>
+
+    <h3>Common RNN Architectures</h3>
+    <p>
+        There are many variants of RNNs for different tasks:
+    </p>
+    <ul>
+        <li><strong>One-to-many</strong>: A single input (e.g., an image) produces a sequence output (e.g., a caption).</li>
+        <li><strong>Many-to-one</strong>: A sequence input (e.g., EEG data) produces a single output (e.g., a seizure classification).</li>
+        <li><strong>Many-to-many (Aligned)</strong>: An output is generated for every input time step (e.g., video frame classification).</li>
+    </ul>
+<pre><code class="language-python">
+class ManyToManyAligned(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim):
+        super().__init__()
+        self.rnn = nn.LSTM(input_dim, hidden_dim, batch_first=True)
+        self.fc = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, x):
+        out, _ = self.rnn(x)      # out: (batch, seq_len, hidden_dim)
+        return self.fc(out)       # (batch, seq_len, output_dim)
+</code></pre>
+    <ul>
+        <li><strong>Many-to-many (Unaligned / Seq2Seq)</strong>: An input sequence is processed first, then an output sequence is generated (e.g., machine translation).</li>
+    </ul>
+<pre><code class="language-python">
+class Seq2Seq(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim):
+        super().__init__()
+        self.encoder = nn.LSTM(input_dim, hidden_dim, batch_first=True)
+        self.decoder = nn.LSTM(output_dim, hidden_dim, batch_first=True)
+        self.fc = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, src, tgt, teacher_forcing=True):
+        # Encode source
+        _, (h, c) = self.encoder(src)
+
+        # Decode target
+        out, _ = self.decoder(tgt, (h, c))
+        return self.fc(out)  # (batch, tgt_seq_len, output_dim)
+</code></pre>
+    <p>
+        In Seq2Seq, <strong>teacher forcing</strong> is a training technique where the ground truth from the previous time step is fed as input to the decoder, rather than its own (potentially wrong) prediction. This makes training more stable and faster.
+    </p>
+    
+    <h3>Bidirectional RNNs</h3>
+    <p>
+        A standard RNN processes a sequence from left to right. A <strong>bidirectional RNN</strong> processes the sequence in both directions (forward and backward) using two separate RNNs and concatenates their hidden states. This gives the hidden state at time $t$ information from both the past and the future.
+    </p>
+    $$ \text{BiRNN}(x) = \text{ForwardRNN}(x) \oplus \text{BackwardRNN}(x) $$
+<pre><code class="language-python">
+class BiGRU(nn.Module):
+    def __init__(self, input_dim, hidden_dim):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+
+        # Forward and backward GRU cells
+        self.gru_fwd = GRUCell(input_dim, hidden_dim)
+        self.gru_bwd = GRUCell(input_dim, hidden_dim)
+
+    def forward(self, x):
+        """
+        x: [B, T, D]  (batch, sequence length, input_dim)
+        """
+        B, T, D = x.shape
+        h_fwd = torch.zeros(B, self.hidden_dim, device=x.device)
+        h_bwd = torch.zeros(B, self.hidden_dim, device=x.device)
+
+        outputs_fwd, outputs_bwd = [], []
+
+        # Forward direction
+        for t in range(T):
+            h_fwd = self.gru_fwd(x[:, t, :], h_fwd)
+            outputs_fwd.append(h_fwd)
+
+        # Backward direction
+        for t in reversed(range(T)):
+            h_bwd = self.gru_bwd(x[:, t, :], h_bwd)
+            outputs_bwd.append(h_bwd)
+
+        # Reverse backward outputs so they align with forward timesteps
+        outputs_bwd = outputs_bwd[::-1]
+
+        # Concatenate forward and backward hidden states
+        H_fwd = torch.stack(outputs_fwd, dim=1)  # [B, T, H]
+        H_bwd = torch.stack(outputs_bwd, dim=1)  # [B, T, H]
+        H = torch.cat([H_fwd, H_bwd], dim=-1)     # [B, T, 2*H]
+
+        return H
+</code></pre>
+    
+    <h3>Truncated Backpropagation Through Time (TBPTT)</h3>
+    <p>
+        In practice, you rarely backprop through entire long sequences due to memory constraints. With <strong>TBPTT</strong>, you cut the sequence into shorter chunks. You still carry the hidden state forward between chunks, but you only backpropagate within each chunk.
+    </p>
+
+    <hr>
+    
+    <h2 id="enhancements">Modern RNN Enhancements</h2>
+    
+    <h3>Residuals + LayerNorm</h3>
+    <p>
+        Many modern GRU/LSTM cells follow a residual + layernorm design. The <strong>residual connection</strong> helps with gradient flow, and <strong>LayerNorm</strong> normalizes activations across the hidden dimension of each time step, making training more stable for longer sequences.
+    </p>
+<pre><code class="language-python">
+import torch
+import torch.nn as nn
+
+class ResidualLayerNormGRU(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers=1, bidirectional=False):
+        super().__init__()
+        self.gru = nn.GRU(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            bidirectional=bidirectional,
+            batch_first=True
+        )
+        self.layernorm = nn.LayerNorm(hidden_size * (2 if bidirectional else 1))
+
+    def forward(self, x, h0=None):
+        """
+        x: [B, T, input_size]
+        h0: optional initial hidden state
+        """
+        # GRU forward
+        out, h = self.gru(x, h0)  # out: [B, T, H]
+
+        # Residual connection (if input and hidden dims match)
+        if out.shape[-1] == x.shape[-1]:
+            out = out + x
+
+        # Layer normalization
+        out = self.layernorm(out)
+
+        return out, h
+</code></pre>
+
+    <h3>Dropout in RNNs</h3>
+    <p>
+        Dropout in RNNs is subtle. It is applied on the outputs of each RNN layer, except the last layer. Crucially, it is <strong>not applied inside the recurrent cell across time steps</strong>. PyTorch samples one dropout mask per layer per forward pass and applies that <em>same mask</em> to the input of the next layer at every time step.
+    </p>
+<pre><code>
+          ┌───────────────────────────────┐
+          │         GRU Layer 1           │
+x_t ───►  │     produces h1_t at each t   │
+          └───────────────────────────────┘
+                        │
+                        ▼
+          Dropout mask M1 (fixed across time)
+                        │
+                        ▼
+          ┌───────────────────────────────┐
+          │         GRU Layer 2           │
+          │     produces h2_t at each t   │
+          └───────────────────────────────┘
+                        │
+                        ▼
+          Dropout mask M2 (fixed across time)
+                        │
+                        ▼
+          ┌───────────────────────────────┐
+          │         GRU Layer 3           │
+          │     produces h3_t at each t   │
+          └───────────────────────────────┘
+                        │
+                        ▼
+                 Output (no dropout here)
+</code></pre>
+</body>
+</html>

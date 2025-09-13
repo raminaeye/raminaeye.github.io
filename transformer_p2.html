@@ -96,7 +96,6 @@
             <li><a href="#masking">Masking</a></li>
             <li><a href="#encoder-decoder">Encoder-Decoder</a></li>
             <li><a href="#pos-encoding">Positional Encoding</a></li>
-            <li><a href="#streaming">Streaming & Conformer</a></li>
         </ul>
     </nav>
 
@@ -105,7 +104,7 @@
         Older sequence models like RNNs process one token at a time, so they struggle with long dependencies and cannot parallelize well. CNNs can look at a local neighborhood, but stacking many layers is needed to capture long-range relations.
     </p>
     <p>
-        <strong>Transformers</strong> replace recurrence and convolutions with <strong>self-attention</strong>, a mechanism where every token can directly interact with every other token in a single step. Transformers are typically composed of two main parts: an <strong>encoder</strong> and a <strong>decoder</strong>. Both the encoder and decoder contain two primary sub-layers:
+        <strong>Transformers</strong> replace recurrence and convolutions with <strong>self-attention</strong>, a mechanism where every token can directly interact with every other token in a single step. There are two main parts inside a Transformer: an <strong>encoder</strong> and a <strong>decoder</strong>. Both the encoder and decoder contain two primary sub-layers:
     </p>
     <ul>
         <li>A <strong>self-attention</strong> layer that allows each token to attend to all others.</li>
@@ -119,7 +118,7 @@
 
     <h2 id="self-attention">The Self-Attention Mechanism</h2>
     <p>
-        Self-attention is the heart of the Transformer. Suppose you have an input sequence of length $n$ with an embedding of dimension $d$. We typically map each discrete token to a continuous vector using a learned <strong>embedding matrix</strong>, which is essentially a large lookup table.
+        Self-attention is the heart of the Transformer. Suppose you have an input sequence of length $n$ with an embedding of dimension $d$. We typically map each discrete token to a continuous vector using a learned <strong>embedding matrix</strong>, which is essentially a big lookup table.
     </p>
     <p>
         For example, if you have a vocabulary of 30,000 tokens and you choose an embedding size of 512, then the embedding matrix will have a shape of $30,000 \times 512$. When you feed a word to the model, it looks up the corresponding row in this matrix, and that becomes the embedding vector of size 512 for that word.
@@ -153,7 +152,8 @@
     <p>
         The dot product is used as a measure of similarity. Since $Q$ and $K$ are in the same vector space, their dot product measures both magnitude and directional alignment. If a query and a key point in the same direction, the model considers them relevant.
     </p>
-    <p>We then scale these scores by dividing by $\sqrt{d_k}$. Let’s understand why. If you assume the components of $Q$ and $K$ are normally distributed with a mean of 0 and a variance of 1, then their dot product will have a mean of 0 and a variance of $d_k$. The magnitude of this dot product would then be on the order of $\sqrt{d_k}$. By dividing by $\sqrt{d_k}$, we are normalizing the scores to have a variance of 1, which helps stabilize training. Without this scaling, the scores would grow with the dimension $d_k$.
+    <p>
+        We then scale these scores by dividing by $\sqrt{d_k}$. Let’s understand why. If you assume the components of $Q$ and $K$ are normally distributed with a mean of 0 and a variance of 1, then their dot product will have a mean of 0 and a variance of $d_k$. The magnitude of this dot product would then be on the order of $\sqrt{d_k}$. By dividing by $\sqrt{d_k}$, we are normalizing the scores to have a variance of 1, which helps stabilize training. Without this scaling, the scores would grow with the dimension $d_k$.
     </p>
     <p>
         We want these scores to behave like attention weights—they should be non-negative and sum to 1 to form a probability distribution. That’s what the <strong>softmax</strong> function does. For very large scores (i.e., if we did not normalize them), the softmax output would collapse to a one-hot distribution where one weight is 1 and all others are 0. This would cause the query to "latch on" to a single token, ignoring all other context. This not only kills the attention mechanism's ability to softly mix information but also introduces <strong>vanishing gradients</strong>, as small changes in extreme values barely change the output, preventing the network from adjusting the attention weights. The normalization by $\sqrt{d_k}$ is therefore crucial for keeping the softmax in a smooth, trainable zone.
@@ -259,10 +259,10 @@
     <p>
         All decoder blocks use the same <code>H_enc</code> as their keys and values. The encoder output acts as a fixed memory of the source sequence, which the decoder needs consistent access to. What changes are the decoder's queries, which are progressively refined through the decoder stack.
     </p>
-
+    
     <hr>
     
-    <h2 id="pos-encoding">Positional Encoding, Output Layer, and Complexity</h2>
+    <h2 id="pos-encoding">Positional Encoding and Input/Output</h2>
     
     <h3>Positional Encoding</h3>
     <p>
@@ -273,51 +273,138 @@
     <p>
         Each dimension of the embedding gets a sinusoid of a different frequency. This gives each position a unique multi-frequency signature and allows the model to easily learn relative positions.
     </p>
-
-    <h3>Output Layer and Weight Tying</h3>
+    
+    <h3>Input Embeddings and the Final Output Layer</h3>
     <p>
-        At the decoder’s output, we have hidden states of shape $n_{target} \times d_{model}$. To predict the next token, we need logits over the vocabulary. This is done with a final linear layer:
-    </p>
-    $$ Z = H_{dec} W_{out} + b $$
-    <p>
-        where $W_{out}$ is an output projection matrix of shape $d_{model} \times |V|$. The input embedding matrix and this output projection matrix can be the transpose of each other. <strong>Weight tying</strong> ($W_{out} = E^T$) has been shown to consistently improve the performance of language models.
+        At the input, we took discrete tokens and mapped them to a continuous space of dimension $d_{model}$ using an embedding matrix of shape $|V| \times d_{model}$, where $|V|$ is the vocabulary size.
     </p>
 
-    <h3>Computational Complexity</h3>
-    <ul>
-        <li><strong>RNNs:</strong> The complexity is $O(n \cdot d^2)$, which is linear over the sequence length but does not parallelize.</li>
-        <li><strong>CNNs:</strong> The complexity is roughly $O(n \cdot k \cdot d^2)$, which is parallelizable but has a limited receptive field.</li>
-        <li><strong>Transformers:</strong> The most expensive step is computing the score matrix $Q K^T$, which has a complexity of $O(n^2 \cdot d)$. This quadratic scaling with sequence length is the fundamental bottleneck of the attention mechanism.</li>
-    </ul>
+  <h3>Output Layer and Weight Tying</h3>
+<p>
+    Now at the decoder’s output, after the last block, we have hidden states of shape <code>n_target x d_model</code>. To predict the next token we need logits over the vocabulary.
+</p>
+$$ Z = H_{dec} W_{out} + b $$
+<p>
+    Where $W_{out}$ is the output projection matrix of <code>d_model x |V|</code>.
+</p>
+<p>
+    The input embedding matrix and our output projection can be the transpose of each other. So, instead of learning two of them we can set $W_{out} = E^T$. <strong>Weight tying</strong> has consistently improved the perplexity of language models.
+</p>
+<p>
+    In a translation task, you don’t want to tie the weight to the encoder's embedding matrix, but you could tie it to the decoder’s input embedding, as both are in the same language.
+</p>
 
-    <hr>
-    
-    <h2 id="streaming">Architectural Variants and Streaming Models</h2>
-    
-    <h3>Decoder-Only Transformers</h3>
-    <p>
-        The new family of modern large language models like GPTs and LLaMA are <strong>decoder-only</strong>, throwing away the encoder and cross-attention. This is perfect for autoregressive next-token prediction. For text generation, decoder-only models typically outperform encoder-decoder models because they can be scaled to larger sizes.
-    </p>
-    
-    <h3>Streaming Transformers</h3>
-    <p>
-        Streamable models, like those for online ASR or real-time translation, cannot see the entire sequence at once. Instead of full self-attention, they use a restricted <strong>windowed attention</strong>. Each query token only attends to nearby tokens in a fixed range, and the attention is causal. Stacking enough layers allows the effective "attention span" to grow, as the context propagates forward through the overlap between windows.
-    </p>
-    
-    <h2>The Conformer Model: Blending CNNs and Transformers</h2>
-    <p>
-        Vanilla Transformers are great for global context but weak at capturing local details. CNNs are excellent for local structure. The <strong>Conformer</strong>, a "convolution-augmented Transformer," has both. It is particularly effective for Automatic Speech Recognition (ASR).
-    </p>
-    <p>
-        For ASR, continuous audio is first converted into acoustic features like log-mel spectrograms. These features are then projected into the model dimension, $d_{model}$. The Conformer block modifies the standard Transformer encoder block with a "macaron-style" feed-forward network and a convolution module:
-    </p>
-    $$ x \rightarrow [\text{FFN}(0.5)] \rightarrow [\text{MHSA}] \rightarrow [\text{Conv}] \rightarrow [\text{FFN}(0.5)] \rightarrow \text{out} $$
-    <ul>
-        <li>The <strong>MHSA</strong> module uses <strong>relative positional encoding</strong>, which generalizes better to long sequences. It introduces an extra bias term into the attention score based on the relative distance between tokens.</li>
-        <li>The <strong>Convolution Module</strong> explicitly models local sequential structure using a depthwise separable convolution. It typically uses <strong>BatchNorm</strong>, which is well-suited for stabilizing convolution filters, followed by a Swish activation.</li>
-    </ul>
-    
-    <pre><code class="language-python">
+<hr>
+
+<h2 id="complexity">Computational Complexity</h2>
+<p>Let’s talk complexity.</p>
+
+<h3>For RNNs</h3>
+<p>
+    The core computation is $h_t = f(W_h h_{t-1} + W_x x_t)$. Where:
+</p>
+<ul>
+    <li>$x_t$ is the input embedding at time $t$ (dimension $d_{in}$)</li>
+    <li>$H_t$ is the hidden state at time $t$ (dimension $d$)</li>
+    <li>$W_h$ is hidden-to-hidden weights ($d \times d$)</li>
+    <li>$W_x$ is input-to-hidden weights ($d \times d_{in}$)</li>
+</ul>
+<p>
+    The cost for each hidden state is dominated by the matrix multiplications, roughly $O(d^2)$. For each time step, the total cost is $O(n d^2)$ and memory for storing hidden states is $O(n d)$. This is linear over sequence length, but it doesn’t parallelize.
+</p>
+
+<h3>For CNNs</h3>
+<p>
+    In a 1D convolution over sequences with kernel size $k$ and hidden dimension $d$, for each of the $n$ positions, you have to compute the weighted sum over $k$ neighboring positions. This results in a cost per layer of $O(n \cdot k \cdot d^2)$. The receptive field is limited, so depth is needed for global context.
+</p>
+
+<h3>Now complexity of Transformers</h3>
+<p>
+    In attention, the expensive step is computing the score matrix. Let’s look at matrix multiplication complexity quickly. If A is $m \times d$ and B is $d \times n$, then C = AB is $m \times n$. The total cost is $O(m \cdot n \cdot d)$.
+</p>
+<p>
+    In attention, computing $S = Q K^T$ (where Q and K are $n \times d_k$) results in an $n \times n$ matrix. The cost is $O(n^2 \cdot d_k)$ for each head, or $O(h \cdot n^2 \cdot d_k)$ total, with $O(n^2)$ memory for storing the score matrix for each head. Applying the $n \times n$ score to V (shape $n \times d_v$) is $O(n^2 \cdot d_v)$.
+</p>
+<p>
+    So for short sequences and large hidden sizes, the complexity is dominated by the feed-forward layers ($O(n \cdot d^2)$), but for long sequences, it’s quadratic in sequence length ($O(n^2 \cdot d)$). That’s why attention is generally considered expensive; $n^2$ grows quickly. This global receptive field comes with a cost and it’s a fundamental bottleneck.
+</p>
+
+<hr>
+
+<h2 id="variants">Architectural Variants and Streaming</h2>
+<h3>Decoder-Only Transformers</h3>
+<p>
+    The <strong>decoder-only Transformer</strong> that’s now the new family of modern large language models like GPTs and LLaMA throws away the encoder and cross-attention. This is perfect for autoregressive next-token prediction. For conditional generation across modalities you need the encoder-decoder, but for text generation, decoder-only models typically outperform encoder-decoder models because they can be scaled bigger.
+</p>
+<p>
+    Some actually use a decoder-only model for language translation and simply use a <code>&lt;SEP&gt;</code> token before the prompt/context and the target after this token. In a decoder-only model, everything is just context; source or target don’t matter. As long as you mark the boundary, the model learns what’s source and what’s target.
+</p>
+
+<h3>Streaming Transformers</h3>
+<p>
+    Let’s now switch gears a bit. Consider streamable models like online ASR or real-time translation. They can’t see the entire sequence at once, so instead of a full self-attention, you pick a restricted window. In a normal attention, it’s global (each query token attends to all past and future tokens). With <strong>windowed attention</strong>, it only attends to nearby tokens in a fixed range and is also causal because we can’t look into the future.
+</p>
+<p>
+    Say you have 10 ms frames and you want the model to make predictions in streaming chunks every 500 ms. We might want each query frame to look back at the last 50 frames. The attention window is how many past frames each frame is allowed to see. This is done by masking the attention matrix, setting the scores outside the window to $-\infty$ and forcing the model to ignore keys/values beyond that window.
+</p>
+<pre><code class="language-python">
+# Create window mask (causal + limited)
+mask = torch.full((n, n), float("-inf"))
+for i in range(n):
+    start = max(0, i - self.window_size + 1)
+    mask[i, start:i+1] = 0 # allow only last `window_size` frames
+</code></pre>
+<p>
+    You might ask, why not feed the model overlapping windows? With overlapping windows, tokens are recomputed multiple times and the model has no way of knowing the previous context. The context is the information a token carries from other tokens it attends to. Imagine at layer 1 you look at 10 frames back. At layer 2, an enriched token isn't just itself; it's a blend of the 10 tokens from the layer below. The context from one of those tokens (say, token 10) is itself a blend of tokens 0 to 9. It’s kind of like the receptive field growing in each layer; by stacking enough layers you grow the attention span.
+</p>
+<p>
+    If you were to just send 10 frames at a time in an overlapping fashion, the new chunk doesn’t have any memory of the past because the context gets reset at each chunk boundary. A sliding window allows for the context to propagate forward through the overlap, even if the window size is small.
+</p>
+<p>
+    The choice of window balances accuracy, latency, and compute. You want a large enough window to disambiguate context, but a longer window means more memory, FLOPs, and latency, as you have to wait longer to fill it. How long is the smallest unit you need to capture? A phoneme, a gesture, a word? Convert that to milliseconds and figure out how many frames/tokens it needs to be. You can increase the window if validation accuracy keeps improving and stop if latency and compute are unacceptable.
+</p>
+
+<hr>
+
+<h2 id="conformer">The Conformer Model: CNNs meet Transformers</h2>
+<p>
+    Before wrapping up, let’s take a look at an ASR model that blends CNNs with Transformers for speech. Vanilla Transformers are great for global context but weak at capturing local details like phoneme edges. CNNs are excellent for local structure but they miss global dependencies. The <strong>Conformer</strong>, a "convolution-augmented transformer," has both.
+</p>
+<p>
+    Unlike text, ASR takes continuous audio as input. Because audio data has a high sampling rate (e.g., 16kHz), we first need to extract acoustic features like log-mel spectrograms. For 1 second of speech, you might get 100 frames of 80 dimensions each. A linear or convolutional layer then projects these acoustic features into the model dimension, $d_{model}$.
+</p>
+<p>A standard Transformer encoder block looks like this:</p>
+<p><code>x → [MHSA] → +residual → [FFN] → +residual → out</code></p>
+<p>Conformer changes this to:</p>
+<p><code>x → [FFN(0.5)] → [MHSA] → [Conv] → [FFN(0.5)] → out</code></p>
+<p>
+    The Conformer block calls these two feed-forward networks a <strong>macaron-style feed-forward network</strong>. They add capacity and non-linearity but don’t mix across time steps. They scale the FFN output by half to match the contribution of one FFN in a vanilla Transformer.
+</p>
+<p>
+    The model uses <strong>relative positional encoding</strong> instead of absolute sinusoidal encodings, which generalizes better to long sequences. Instead of altering the input embeddings directly, it introduces an extra bias term in the attention score based on the relative distance between tokens. Speech is shift-invariant; what matters is how far tokens are apart, not their absolute index.
+</p>
+$$ \text{score}(i,j) = Q_i \cdot K_j + Q_i \cdot r_{i-j} $$
+<p>Where $r_{i-j}$ is a learned embedding for the relative offset between positions $i$ and $j$.</p>
+
+<h3>The Convolution Module</h3>
+<p>
+    Next is the convolution module, which is the big difference from vanilla Transformers. This is a depthwise separable convolution to explicitly model local sequential structure. The convolution module looks similar to those in EfficientNet and MobileNet.
+</p>
+<ol>
+    <li>The features are first passed to a LayerNorm.</li>
+    <li>A pointwise convolution with a Gated Linear Unit (GLU) activation is applied. The pointwise convolution expands the channels to $2 \times d_{model}$, and the GLU ($A \cdot \sigma(B)$) halves them back down while acting as a learned gate.</li>
+    <li>A depthwise convolution is applied along the time axis. Each channel has its own convolution filter. In streaming ASR, you’d switch from `same` to causal padding.</li>
+    <li>A BatchNorm is applied. For this task, BatchNorm makes more sense than LayerNorm because it normalizes per channel across time and batch, stabilizing the convolution filters without washing away temporal patterns. It is followed by a Swish activation.</li>
+    <li>Finally, another pointwise convolution projects back to $d_{model}$, and a residual connection is added.</li>
+</ol>
+<p>
+    During inference with streaming ASR, standard BatchNorm can be problematic because the running stats computed on long training sequences may not match the local chunk being processed. A causal/online BN, which computes stats only on past frames, is often needed.
+</p>
+<p>
+    The output from the convolution block remains $B \times T \times d_{model}$. After this, another feed-forward network is applied to complete the macaron-style design.
+</p>
+
+<pre><code class="language-python">
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -342,7 +429,7 @@ class ConformerFFN(nn.Module):
         return x + 0.5 * out  # Macaron: scale by 0.5
 
 # -------------------------------
-# 2. Multi-Head Self-Attention
+# 2. Multi-Head Self-Attention (vanilla version, can extend with relative PE)
 # -------------------------------
 class MHSA(nn.Module):
     def __init__(self, d_model, num_heads, dropout=0.1):
@@ -426,32 +513,32 @@ class ConformerBlock(nn.Module):
         x = self.conv(x)
         x = self.ffn2(x)
         return self.final_ln(x)
-    </code></pre>
+</code></pre>
+<h3>Making the Conformer Work in Real-Time</h3>
+<p>
+    Now, how do you make the Conformer work in real-time? The attention mechanism, as we mentioned earlier, needs to change to a <strong>streaming attention</strong> where we restrict how far queries can look back using a fixed attention window with causal masking. Sometimes speech can be ambiguous if you don’t peek a little into the future, so we can allow each frame to have a <strong>look ahead</strong> of a fixed number of frames. This adds some latency but improves the model, and it can be easily configured in the attention mask.
+</p>
+<p>
+    Additionally, you can make your multi-head attention into a <strong>multiscale multihead attention</strong>. Because information varies in length—phonemes can be shorter, while syllables and words are longer—one head might span more frames than another to capture these different relationships.
+</p>
+<p>
+    The convolution module, which uses <code>same</code> padding, will also need to be changed to use <strong>causal padding</strong>. The normalization, as we discussed in depth, needs to change as well to a streaming-friendly version.
+</p>
 
-    <h3>Making the Conformer Work in Real-Time</h3>
-    <p>
-        Now, how do you make the Conformer work in real-time? The attention mechanism, as we mentioned earlier, needs to change to a <strong>streaming attention</strong> where we restrict how far queries can look back using a fixed attention window with causal masking. Sometimes speech can be ambiguous if you don’t peek a little into the future, so we can allow each frame to have a <strong>look ahead</strong> of a fixed number of frames. This adds some latency but improves the model, and it can be easily configured in the attention mask.
-    </p>
-    <p>
-        Additionally, you can make your multi-head attention into a <strong>multiscale multihead attention</strong>. Because information varies in length—phonemes can be shorter, while syllables and words are longer—one head might span more frames than another to capture these different relationships.
-    </p>
-    <p>
-        The convolution module, which uses <code>same</code> padding, will also need to be changed to use <strong>causal padding</strong>. The normalization, as we discussed in depth, needs to change as well to a streaming-friendly version.
-    </p>
-    
-    <h3>Mapping to Text and Using CTC Loss</h3>
-    <p>
-        Okay, now we have our Conformer block, and we can stack several Conformer blocks to enrich the acoustic embeddings. Now we need to map this to text. What we have are frame-level embeddings that need to be converted back to words or tokens.
-    </p>
-    <p>
-        You can add a linear layer after the stack of Conformer blocks that takes the final feature dimension, $d_{model}$, and projects it to $|V|$, the number of words, tokens, or phonemes in the vocabulary. The output is a logit matrix $Z$ of shape $B \times T \times |V|$ (Batch, Time, Vocabulary).
-    </p>
-    <p>
-        Then, you take the model outputs (the logits, which are unnormalized scores) and pass them through a softmax function for each frame to get token probabilities:
-    </p>
-    $$ P(t,v) = \frac{\exp(Z_{t,v})}{\sum_{v'} \exp(Z_{t,v'})} $$
-    <p>
-        Once you have these frame-level probabilities, you need to use a loss function like the <strong>Connectionist Temporal Classification (CTC) loss</strong> to align the output probabilities with the ground-truth text sequence.
-    </p>
+<h3>Mapping to Text and Using CTC Loss</h3>
+<p>
+    Okay, now we have our Conformer block, and we can stack several Conformer blocks to enrich the acoustic embeddings. Now we need to map this to text. What we have are frame-level embeddings that need to be converted back to words or tokens.
+</p>
+<p>
+    You can add a linear layer after the stack of Conformer blocks that takes the final feature dimension, $d_{model}$, and projects it to $|V|$, the number of words, tokens, or phonemes in the vocabulary. The output is a logit matrix $Z$ of shape $B \times T \times |V|$ (Batch, Time, Vocabulary).
+</p>
+<p>
+    Then, you take the model outputs (the logits, which are unnormalized scores) and pass them through a softmax function for each frame to get token probabilities:
+</p>
+$$ P(t,v) = \frac{\exp(Z_{t,v})}{\sum_{v'} \exp(Z_{t,v'})} $$
+<p>
+    Once you have these frame-level probabilities, you need to use a loss function like the <strong>Connectionist Temporal Classification (CTC) loss</strong> to align the output probabilities with the ground-truth text sequence.
+</p>
+
 </body>
 </html>

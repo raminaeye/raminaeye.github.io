@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Understanding Errors, Optimizers, and Scaling Laws in ML</title>
+  <title>Advanced ML Concepts: Errors, Optimizers, and Scaling Laws</title>
   <style>
     body {
       font-family: sans-serif;
@@ -263,47 +263,118 @@
 
     <h2 id="optimizers">Optimizers</h2>
     
-    <h3>SGD and Momentum</h3>
+    <h3>Gradient Descent and SGD</h3>
     <p>
-        <strong>Stochastic Gradient Descent (SGD)</strong> updates model parameters using a random subset (mini-batch) of data.
+        <strong>Gradient Descent</strong> updates the model parameters in the direction that reduces the loss function. <strong>Stochastic Gradient Descent (SGD)</strong> takes a random subset of data (a mini-batch) instead of the entire dataset and performs the update rule based on that gradient.
     </p>
-    $$ \theta_{t+1} = \theta_t - \eta \cdot \nabla_{\theta_t} L $$
+    $$ \theta_{t+1} = \theta_t - \text{learning\_rate} \cdot \nabla_{\theta_t} L(\theta_t) $$
     <p>
-        It is noisy but fast and can escape poor local minima. <strong>SGD with Momentum</strong> smooths the update path by accumulating a running average of past gradients.
+        This makes the process noisy but much faster and allows it to escape poor local minima.
     </p>
-    $$ v_{t+1} = \mu v_t + \eta \cdot \nabla_{\theta_t} L $$
+    <p>
+        SGD can be sensitive to the learning rate; if it's too large, the optimization path can zig-zag or diverge, and if it's too small, it can be very slow. Its learning rate is the same across all parameters, so there’s no adaptation. With a constant learning rate, SGD will bounce around near a local minimum. The stochasticity helps it escape <strong>saddle points</strong>, which are points where the gradient is zero but are not a true minimum. High-dimensional loss surfaces are full of saddle points. SGD's noise can shake it loose from these saddles, while full-batch Gradient Descent might get stuck.
+    </p>
+
+    <h3>SGD with Momentum</h3>
+    <p>
+        <strong>Momentum</strong> can smooth out the zig-zag path of SGD by accumulating a running average of past gradients, so updates have a more consistent direction. The update rule with momentum introduces a velocity term, $v_t$:
+    </p>
+    $$ v_{t+1} = \mu \cdot v_t + \text{learning\_rate} \cdot \nabla_{\theta_t} L $$
     $$ \theta_{t+1} = \theta_t - v_{t+1} $$
     <p>
-        Here, $v_t$ is the velocity and $\mu$ is the momentum coefficient (typically ~0.9). It builds up speed in consistent directions. <strong>Nesterov Accelerated Gradient (NAG)</strong> improves on this by "looking ahead." It calculates the gradient not at the current position, but at a future-leaning position where momentum would have taken it, preventing overshooting.
+        Here, $v_t$ is the running average of the gradients and $\mu$ is the momentum coefficient (between 0 and 1, typically 0.9). A higher $\mu$ gives more weight to past gradients. This means you carry more velocity from the past, like rolling downhill with less friction. The velocity builds up, and the magnitude of the step can actually be bigger than with plain SGD. It’s slower to react but converges faster in a consistent direction.
     </p>
-    
-    <h3>Adaptive Learning Rate Optimizers</h3>
-    <p>These optimizers adapt the learning rate for each parameter individually.</p>
+
+    <h3>Nesterov Accelerated Gradient (NAG)</h3>
+    <p>
+        With <strong>NAG</strong>, you "look ahead" in the direction of the current velocity <em>before</em> you compute the gradient. This helps prevent overshooting the minimum. You pretend to take a step based on your current velocity and then compute the gradient from that future-leaning position.
+    </p>
+    $$ \theta_{hat} = \theta_t - \mu \cdot v_t $$
+    $$ g_t = \nabla L(\theta_{hat}) $$
+    <p>The update rule then becomes:</p>
+    $$ v_{t+1} = \mu \cdot v_t + \text{learning\_rate} \cdot g_t $$
+    $$ \theta_{t+1} = \theta_t - v_{t+1} $$
+    <p>
+        It basically glances in the direction you’re already moving and then adjusts based on the slope there. It’s like an early warning if the slope is flattening or turning, so you can correct sooner. With vanilla momentum, you say, “I’m here, what’s the slope?” With Nesterov, you say, “I’m about to be over there, what’s the slope? Let me adjust my push so I don’t overshoot.”
+    </p>
+
+    <h3>AdaGrad</h3>
+    <p>
+        The following optimizers introduce <strong>adaptive learning rates</strong>, where each parameter can have its own step size. AdaGrad adapts the learning rate of each parameter based on the history of its gradients. For each parameter $\theta_i$, it maintains an accumulator, $G_t$, which is the cumulative sum of its squared gradients.
+    </p>
+    $$ G_{t,i} = G_{t-1,i} + (\nabla L_t(\theta_i))^2 $$
+    <p>The update then scales the learning rate by this accumulated value.</p>
+    $$ \theta_{t+1, i} = \theta_{t, i} - \frac{\text{learning\_rate}}{\sqrt{G_{t,i}} + \epsilon} \cdot \nabla L_t(\theta_i) $$
+    <p>
+        Parameters that consistently see large gradients will have their effective learning rate shrink, preventing runaway updates. Parameters that see small gradients will have a larger effective learning rate so they can still learn. However, the denominator grows monotonically, so the learning rate shrinks forever and can eventually become infinitesimally small.
+    </p>
+
+    <h3>RMSProp</h3>
+    <p>
+        Instead of a running sum, <strong>RMSProp</strong> uses an exponentially decaying average of squared gradients.
+    </p>
+    $$ E[g^2]_{t,i} = \rho \cdot E[g^2]_{t-1,i} + (1-\rho) \cdot (\nabla L_t(\theta_i))^2 $$
+    $$ \theta_{t+1, i} = \theta_{t,i} - \frac{\text{learning\_rate}}{\sqrt{E[g^2]_{t,i}} + \epsilon} \cdot \nabla L_t(\theta_i) $$
+    <p>
+        Where $\rho$ is the decay rate (commonly 0.9). Older gradients decay away exponentially, so they don’t dominate forever. Now the denominator tracks the more recent scale of the gradients, not the entire history, allowing the optimizer to adapt more quickly.
+    </p>
+
+    <h3>Adam (Adaptive Moment Estimation)</h3>
+    <p>
+        <strong>Adam</strong> combines the momentum from SGD with the adaptive learning rates from RMSProp and also adds a bias-correction step.
+    </p>
+    <p>For each parameter $\theta$ at step $t$, we first get the gradient $g_t = \nabla L_t$.</p>
+    <p>Then we compute the first moment (the mean of gradients, like momentum):</p>
+    $$ m_t = \beta_1 m_{t-1} + (1-\beta_1)g_t $$
+    <p>And the second moment (the mean of squared gradients, like RMSProp):</p>
+    $$ v_t = \beta_2 v_{t-1} + (1-\beta_2)g_t^2 $$
+    <p>Because these moving averages are initialized at zero, they are biased towards zero at the beginning of training. Adam corrects for this bias:</p>
+    $$ \hat{m}_t = \frac{m_t}{1 - \beta_1^t} $$
+    $$ \hat{v}_t = \frac{v_t}{1 - \beta_2^t} $$
+    <p>The update rule then uses these corrected moments:</p>
+    $$ \theta_{t+1} = \theta_t - \text{learning\_rate} \cdot \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon} $$
+
+    <h3>A Detour on L1 and L2 Regularization</h3>
+    <p>To prevent overfitting, we can add a penalty to the loss function to discourage very large weights.</p>
     <ul>
-        <li><strong>AdaGrad</strong>: Scales each parameter's learning rate based on the cumulative sum of its squared gradients. It gives larger updates for infrequent parameters and smaller updates for frequent ones. However, the learning rate shrinks monotonically and can eventually become too small.</li>
-        <li><strong>RMSProp</strong>: Uses an <em>exponentially decaying average</em> of squared gradients instead of a cumulative sum. This allows the optimizer to adapt more quickly to recent gradient information and prevents the learning rate from vanishing.</li>
-        <li><strong>Adam (Adaptive Moment Estimation)</strong>: Combines the momentum (first moment) of SGD with the adaptive learning rates (second moment) of RMSProp. It also includes a bias-correction step to ensure stable updates, especially at the beginning of training.
-        $$ m_t = \beta_1 m_{t-1} + (1-\beta_1)g_t \quad (\text{First moment}) $$
-        $$ v_t = \beta_2 v_{t-1} + (1-\beta_2)g_t^2 \quad (\text{Second moment}) $$
-        $$ \theta_{t+1} = \theta_t - \eta \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon} $$
-        where $\hat{m}_t$ and $\hat{v}_t$ are the bias-corrected moments.
+        <li><strong>L2 Regularization</strong>: Adds a penalty proportional to the squared magnitude of the weights.
+            $$ L_{reg}(\theta) = L(\theta) + \frac{\lambda}{2} ||\theta||^2 $$
+            <p>The optimizer is pushed to keep weights small and spread out. The constraint $||\theta||^2 < C$ is a ball or circle. L2 produces <strong>shrinkage</strong>, where weights are spread out but generally non-zero.</p>
+        </li>
+        <li><strong>L1 Regularization</strong>: Uses the sum of the absolute values of the weights.
+            $$ L_{reg}(\theta) = L(\theta) + \lambda ||\theta||_1 $$
+            <p>Its constraint $|\theta_1| + |\theta_2| < C$ looks like a diamond shape. This encourages the optimizer to find solutions at the "corners" where some weights are exactly zero. That’s why L1 produces <strong>sparsity</strong>.</p>
         </li>
     </ul>
 
-    <h3>Regularization: L1 vs. L2</h3>
-    <p>Regularization is used to prevent overfitting by penalizing large weights.</p>
-    <ul>
-        <li><strong>L2 Regularization (Weight Decay)</strong>: Adds a penalty proportional to the squared magnitude of the weights ($\lambda/2 \cdot ||\theta||^2$). This encourages the model to keep weights small and spread out, leading to <strong>shrinkage</strong>.</li>
-        <li><strong>L1 Regularization</strong>: Adds a penalty proportional to the absolute magnitude of the weights ($\lambda \cdot ||\theta||_1$). This encourages some weights to become exactly zero, leading to <strong>sparsity</strong>.</li>
-    </ul>
-
-    <h3>Other Optimizers and Techniques</h3>
-    <ul>
-        <li><strong>AdamW</strong> is a variant of Adam that decouples the L2 regularization from the gradient update. Instead of mixing the weight decay term into the adaptive moments, it applies it directly to the weights after the main Adam step. This often leads to better generalization.</li>
-        <li><strong>Nadam</strong>: Incorporates Nesterov momentum into the Adam algorithm for potentially faster convergence.</li>
-        <li><strong>SAM (Sharpness-Aware Minimization)</strong>: A wrapper that can be used with another optimizer (like AdamW). Instead of finding the point of lowest loss, it finds parameters that lie in a "flat" minima, where the loss remains low even if the weights are slightly perturbed. This has been shown to improve model generalization.</li>
-    </ul>
+    <h3>AdamW (Adam with Weight Decay)</h3>
+    <p>
+        In standard implementations, L2 regularization is added <em>inside</em> the gradient calculation.
+    </p>
+    $$ g_t = \nabla L_t + \lambda \theta_t $$
+    <p>
+        With adaptive optimizers like Adam, this means the L2 penalty term gets included in the second moment estimate ($v_t$), distorting the adaptive scaling.
+    </p>
+    <p>
+        <strong>AdamW</strong> decouples the weight decay from the gradient update. It keeps a moving average of only the true gradients (without the L2 term) and applies the regularization penalty to the update separately at the end.
+    </p>
+    $$ \theta_{t+1} = \theta_t - \text{learning\_rate} \cdot \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon} - \text{learning\_rate} \cdot \lambda \cdot \theta_t $$
     
+    <h3>Nadam (Nesterov-accelerated Adam)</h3>
+    <p>
+        <strong>Nadam</strong> blends Nesterov's look-ahead momentum with the Adam optimizer. The update becomes:
+    </p>
+    $$ \theta_{t+1} = \theta_t - \frac{\text{learning\_rate}}{\sqrt{\hat{v}_t} + \epsilon} \cdot \left(\beta_1 \hat{m}_t + \frac{(1-\beta_1)g_t}{1-\beta_1^t}\right) $$
+    
+    <h3>SAM (Sharpness-Aware Minimization)</h3>
+    <p>
+        <strong>SAM</strong> is a wrapper that can be used with another optimizer (like AdamW). Instead of finding the point of lowest loss, it finds parameters that lie in a "flat" minima, where the loss remains low even if the weights are slightly perturbed. It seeks to solve the following min-max problem:
+    </p>
+    $$ \min_{\theta} \max_{||\epsilon|| \le \rho} L(\theta + \epsilon) $$
+    <p>
+        It first finds the worst-case perturbation $\epsilon$ in a small neighborhood and then updates the weights $\theta$ to reduce that worst-case loss.
+    </p>
+
     <hr>
     
     <h2 id="schedulers">Learning Rate Schedulers</h2>

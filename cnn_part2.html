@@ -1,0 +1,389 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>1D Convolutions for Time-Series Data Explained</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem;
+      line-height: 1.6;
+      color: #333;
+    }
+    h1, h2, h3, h4 {
+      color: #2c3e50; /* Darker shade for better contrast */
+      margin-top: 1.5em;
+      margin-bottom: 0.5em;
+    }
+    h1 { font-size: 2.5em; border-bottom: 2px solid #3498db; padding-bottom: 0.3em;}
+    h2 { font-size: 2em; border-bottom: 1px solid #bdc3c7; padding-bottom: 0.2em;}
+    h3 { font-size: 1.5em; }
+    h4 { font-size: 1.2em; color: #555;}
+
+    nav { margin-bottom: 30px; padding: 10px; background: #ecf0f1; border: 1px solid #bdc3c7; border-radius: 4px;}
+    nav ul { list-style: none; padding: 0; }
+    nav li { display: inline-block; margin-right: 15px; }
+    nav a { text-decoration: none; color: #3498db; font-weight: bold;}
+    nav a:hover { text-decoration: underline; color: #2980b9;}
+
+    pre {
+      background: #f8f9f9; /* Lighter background for code blocks */
+      padding: 1rem;
+      overflow-x: auto;
+      border: 1px solid #e1e4e8; /* Softer border */
+      border-left: 4px solid #3498db; /* Accent border */
+      border-radius: 4px;
+      font-size: 0.9em;
+    }
+    code {
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+    }
+    /* For inline code */
+    p > code, li > code, table td > code {
+      background: #e8eaed;
+      padding: 0.2em 0.4em;
+      border-radius: 3px;
+      font-size: 0.85em;
+    }
+    pre code { /* Reset for code inside pre, already handled by pre styling */
+        background: none;
+        padding: 0;
+        font-size: 1em; /* Ensure pre's font size is inherited */
+    }
+    ul, ol {
+        padding-left: 20px;
+    }
+    li {
+        margin-bottom: 0.5em;
+    }
+    strong {
+        color: #2980b9;
+    }
+    hr {
+      border: 0;
+      height: 1px;
+      background: #bdc3c7;
+      margin-top: 2em;
+      margin-bottom: 2em;
+    }
+  </style>
+ 
+  <script type="text/javascript" async
+    src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML">
+  </script>
+  <script type="text/x-mathjax-config">
+    MathJax.Hub.Config({
+      tex2jax: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        displayMath: [['$$','$$'], ['\\[','\\]']],
+        processEscapes: true
+      }
+    });
+  </script>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+</head>
+<body>
+    <nav>
+        <ul>
+            <li><a href="#fundamentals">Fundamentals</a></li>
+            <li><a href="#padding">Padding & Causality</a></li>
+            <li><a href="#dilation">Dilation</a></li>
+            <li><a href="#design">Design</a></li>
+            <li><a href="#normalization">Normalization</a></li>
+            <li><a href="#separable-convs">Separable Convolutions</a></li>
+            <li><a href="#advanced-arch">Advanced Architectures</a></li>
+        </ul>
+    </nav>
+
+    <h1 id="fundamentals">1D Convolutions for Time-Series Data</h1>
+
+    <h2>Stride, Receptive Field, and Aliasing</h2>
+    <p>
+        In a 1D convolution layer, <strong>stride</strong> is how many steps you move the filter at each slide along the sequence. A <strong>stride of 1</strong> provides maximum resolution, where every neighboring point contributes to an output. A stride greater than 1 produces fewer output points and thus performs downsampling.
+    </p>
+    <p>
+        The <strong>receptive field</strong> is how much of the input sequence each output point "sees." A larger stride doesn’t change the receptive field of a single filter (that’s set by the kernel size), but it does change the spacing of the outputs. As you stack layers, striding effectively makes the overall receptive field grow faster because each deeper unit corresponds to bigger chunks of the original signal.
+    </p>
+    <p>
+        Using a stride greater than 1 reduces the number of output points, which means fewer multiplications, lower latency, and lower memory cost. That’s why striding is often used instead of pooling for downsampling. However, any downsampling risks <strong>aliasing</strong>.
+    </p>
+    <p>
+        At a sampling rate of $f_s$, any frequency content above the Nyquist frequency ($f_s/2$) folds back into the lower frequency band, causing aliasing. We typically use a low-pass filter to attenuate those high frequencies before downsampling.
+    </p>
+    <p>
+        If you stride by $s$, you downsample by a factor of $s$. If your original sampling rate is 1kHz and you use a stride of 2, the effective sampling rate becomes 500 Hz ($f_s/2$), with the new Nyquist frequency being 250 Hz ($f_s/4$). Now, if the input has frequency content above 250 Hz, it will alias unless the convolution filter itself acts as a low-pass filter before the downsampling. In a CNN, the convolutional filter can act as a crude low-pass filter if its weights are averaging-like, but this is not guaranteed.
+    </p>
+    <p>
+        In the early layers of a CNN for time-series, we often use a <strong>stride of 1</strong> to preserve fine timing details. As we go deeper into the network, we can use a larger stride to capture a larger context without causing the computational cost to explode.
+    </p>
+
+    <hr>
+
+    <h2 id="padding">Padding and Causality</h2>
+    <p>
+        When we apply a convolution, the filter slides across the input. The filter would "hang off" at the ends unless you pad the sequence. If you pass a filter of size $k$ over a sequence of length $L_{in}$ with no padding, the output length will be:
+    </p>
+    $$L_{out} = L_{in} - k + 1$$
+    <p>
+        <strong>Zero-padding</strong> is commonly used to address this. With <code>'same'</code> padding, zeros are typically added to both sides of the sequence so that the output length matches the input length (at a stride of 1). Without it, the output shrinks at each layer, and you might lose important information at the edges of the sequence.
+    </p>
+    <p>The full equation for output length is:</p>
+    $$L_{out} = \frac{(L_{in} + 2P - k)}{s} + 1$$
+    <p>where $P$ is the padding, $k$ is the kernel size, and $s$ is the stride.</p>
+    
+    <h3>Causal Padding</h3>
+    <p>
+        Typical <code>'same'</code> padding looks at both backward and forward in time. With <strong>causal padding</strong>, the filter looks only at the current and past inputs. Causal padding is achieved by padding only the <strong>left</strong> side of the sequence. For real-time inference, you can’t peek into the future; causal convolution ensures that predictions at time $t$ depend only on data up to time $t$. If you use future samples during training, you might get better performance on an offline batch dataset than you will in a real-time deployment.
+    </p>
+    <p>
+        In PyTorch/TensorFlow, when you use <code>padding='same'</code>, the implementation pads the input so the kernel is centered at each output position, meaning it's already looking ahead. To make a convolution causal, you must manually add $k-1$ zeros to the left of the input.
+    </p>
+    
+    <hr>
+    
+    <h2 id="dilation">Dilated Causal Convolutions</h2>
+    <p>
+        To make causal convolutions more powerful, we can use <strong>dilation</strong>, which involves skipping input points at a certain rate $d$. When dilation is 1, the receptive field is just the kernel size. If we introduce a dilation greater than 1, we can look farther back in time without increasing the number of parameters. The total span of a dilated kernel is:
+    </p>
+    $$ \text{Total Span} = (k-1)d + 1 $$
+    <p>
+        When you stack two causal dilated convolution layers, the new layer sees the entire receptive field of the layer below. In the first layer, you usually don’t want to dilate, as you don't want to miss samples in the raw input by introducing blind spots.
+    </p>
+    <p>The receptive field for a stack of $L$ layers is:</p>
+    $$ RF = 1 + \sum_{l=1}^{L} (k-1) \prod_{j=1}^{l} d_j $$
+    <p>
+        Alternatively, we can define <strong>jump</strong> as the effective stride in raw input units. Jump is how far apart two adjacent outputs at layer $l$ are in terms of raw input indices. At each layer, the jump and receptive field are updated:
+    </p>
+    $$ jump_l = jump_{l-1} \times s_l \times d_l $$
+    $$ RF_l = RF_{l-1} + (k_l - 1) \times jump_{l-1} $$
+
+    <hr>
+
+    <h2 id="design">Designing CNNs for Sensory Data</h2>
+    <p>
+        Let’s consider sensory data coming in at a 1kHz sampling rate. Let’s say we know that in our trial window, the activity corresponding to our label is about 300 ms long. We would want our model’s receptive field to be large enough to see this entire structure (e.g., a receptive field of at least 300 samples).
+    </p>
+    <p>When designing a model, we have to make some decisions:</p>
+    <ul>
+        <li><strong>Do we pool early or late?</strong> If we pool early, the sequence length reduces quickly, leading to faster computation and smaller memory usage, but we could be throwing away fine details. If we pool late, there’s a good chance we capture those fine details, but it would be more expensive. For noisy, high-frequency signals, you might want to pool early. For low-rate signals, you can postpone it.</li>
+        <li><strong>Dilation</strong> can help expand the receptive field at no extra computational cost, but too much dilation in the early layers can risk creating holes in the signal and missing local details. You may want to apply it once features have stabilized in deeper layers.</li>
+        <li><strong>Small kernels</strong> (e.g., size 3 or 5) are typically standard, as they stack well to approximate large filters. Sometimes, <strong>large kernels</strong> can be used in the first layer to capture broad spectral features.</li>
+    </ul>
+
+    <h3>The Role of Pooling in Final Layers</h3>
+    <p>
+        Both <strong>pooling</strong> and <strong>striding</strong> downsample the time resolution. However, a strided convolution uses a learnable filter, while pooling is a fixed function.
+    </p>
+    <p>
+        The final layers of a CNN often use <strong>Global Average Pooling (GAP)</strong> across time before a classification task. This squeezes the entire sequence dimension and gives you one feature value per channel. GAP is useful because:
+    </p>
+    <ol>
+        <li>It produces a fixed-size representation regardless of the input length.</li>
+        <li>It provides translation invariance in time, where the exact location of a pattern matters less than its existence somewhere in the window.</li>
+        <li>Instead of flattening a $C \times T$ feature map into a huge vector, GAP collapses it to just $C$ features, which prevents the classification head from exploding in size.</li>
+    </ol>
+    <p>
+        Pooling is not the only option. You can also use an <strong>attention mechanism</strong> to learn a weight for each time step and let the model focus on the most informative parts of the signal.
+    </p>
+    $$ z = \sum_t \alpha_t h_t \quad \text{where} \quad \alpha_t = \text{softmax}(W h_t) $$
+    <p>
+        Alternatively, you can feed the CNN features into an LSTM or a Transformer to model long-range temporal dependencies.
+    </p>
+
+    <hr>
+
+    <h2 id="normalization">Normalization for Time-Series Data</h2>
+    <p>
+        <strong>Batch Normalization (BN)</strong> is typically used for images in CNNs to reduce internal covariate shift and stabilize training. For time-series signals with long windows, GPU memory is often tight, so the batch size might be small, making batch statistics unreliable. Furthermore, if the signals are non-stationary and drift over time, batch normalization can wash out useful information.
+    </p>
+    <p>
+        Let’s talk about this a bit. In images (<code>N, C, H, W</code>), BN computes the mean/variance per channel across the batch <code>N</code> and spatial dimensions <code>H, W</code>. For a 1D time-series signal (<code>N, C, T</code>), BN computes statistics per channel across the batch <code>N</code> and time <code>T</code>.
+    </p>
+    <p>
+        If you normalize a signal that has both weak and strong amplitudes using BN, the absolute difference in amplitude is lost. It erases scale cues that might indicate one burst was stronger than another. For images, we often don't care if an image is brighter or darker. For time-series signals, however, amplitude often carries important information.
+    </p>
+    <p>Other forms of normalization are often more suitable:</p>
+    <ul>
+        <li><strong>InstanceNorm (IN)</strong>: Normalizes per sample, per channel, across the time dimension only. Each trial and channel gets its own mean and standard deviation. This can remove per-trial baseline shifts but also loses absolute amplitude information within that trial. If amplitude is important for the label, IN can hurt the model. It can be useful in early layers to remove baseline drift in raw signals.</li>
+        <li><strong>LayerNorm (LN)</strong>: Normalizes per sample, across all channels, at each individual time step. This works well for RNNs and Transformers with small batches and preserves differences between trials. However, if one channel is consistently dominant, normalization could suppress that important cue. It's often more helpful for later layers after features have been fused across channels.</li>
+        <li><strong>GroupNorm (GN)</strong>: Splits channels into groups and normalizes within each group. It’s a middle ground between IN and LN and lets you normalize different modalities separately before fusing them.</li>
+    </ul>
+
+    <hr>
+    
+    <h2 id="separable-convs">Depthwise Separable Convolutions in 1D</h2>
+    <p>
+        The number of parameters in a standard 1D convolution is $k \times C_{in} \times C_{out}$. Each filter mixes time and channels jointly. <strong>Depthwise separable convolution</strong> breaks this into two cheaper steps:
+    </p>
+    <ol>
+        <li>A <strong>depthwise convolution</strong> applies one filter per input channel independently (by setting <code>groups=in_channels</code>). Each filter has a size of $k \times 1$. This step captures temporal patterns <em>within</em> each channel but does not perform cross-channel mixing. The number of parameters is $k \times C_{in}$.</li>
+        <li>It is followed by a <strong>pointwise convolution</strong>, which is a <code>1x1</code> convolution that mixes information <em>across</em> channels. This step captures cross-channel correlations. The number of parameters is $C_{in} \times C_{out}$.</li>
+    </ol>
+    <p>
+        The total number of parameters is $k \times C_{in} + C_{in} \times C_{out}$, which is significantly less than a standard convolution.
+    </p>
+    <pre><code class="language-python">
+import torch
+import torch.nn as nn
+
+class SeparableConv1d(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0):
+        super().__init__()
+        
+        # Depthwise: one conv per channel (groups=in_channels)
+        self.depthwise = nn.Conv1d(
+            in_channels, 
+            in_channels, 
+            kernel_size=kernel_size, 
+            stride=stride, 
+            padding=padding, 
+            groups=in_channels,  # <- key!
+            bias=False
+        )
+        
+        # Pointwise: 1x1 conv to mix channels
+        self.pointwise = nn.Conv1d(
+            in_channels, 
+            out_channels, 
+            kernel_size=1, 
+            bias=False
+        )
+
+    def forward(self, x):
+        x = self.depthwise(x)  # per-channel temporal filtering
+        x = self.pointwise(x)  # cross-channel mixing
+        return x
+
+# Example usage
+# x = torch.randn(8, 32, 1000)  # batch=8, channels=32 (EMG), time=1000
+# model = SeparableConv1d(32, 64, kernel_size=5, padding=2)
+# y = model(x)
+# print(x.shape)  # torch.Size([8, 32, 1000])
+# print(y.shape)  # torch.Size([8, 64, 1000])
+    </code></pre>
+    
+    <hr>
+    
+    <h2 id="advanced-arch">Advanced Architectures: TDS and Multi-Scale TDS</h2>
+    
+    <h3>Time-Depth Separable (TDS) Block</h3>
+    <p>
+        A <strong>Time-Depth Separable (TDS) block</strong> is inspired by depthwise separable convolution and is tailored for temporal signals. It has three main steps:
+    </p>
+    <ol>
+        <li>A <strong>time-channel separable convolution</strong> (a large convolution along time applied independently to each channel).</li>
+        <li>A <strong>pointwise convolution</strong> that mixes across channels.</li>
+        <li>A <strong>residual connection</strong> combined with normalization and dropout.</li>
+    </ol>
+    <p>
+        It’s basically a temporal pattern extractor + channel mixer + residual block. <strong>LayerNorm</strong> is often used because it normalizes per sample across channels (not across the batch), which respects the structure of time-series data and doesn't erase trial-level amplitude differences like BatchNorm would.
+    </p>
+    <pre><code class="language-python">
+import torch.nn.functional as F
+
+class TDSBlock(nn.Module):
+    """
+    Time-Depth Separable (TDS) block for temporal signals.
+    Steps:
+      1) Depthwise temporal conv (per-channel).
+      2) Pointwise conv (1x1) to mix across channels.
+      3) Residual + normalization + dropout.
+    """
+    def __init__(self, channels, kernel_size=5, dropout=0.1):
+        super().__init__()
+        
+        # Depthwise conv along time
+        self.depthwise = nn.Conv1d(
+            in_channels=channels,
+            out_channels=channels,
+            kernel_size=kernel_size,
+            groups=channels,  # <- depthwise!
+            padding=kernel_size // 2,
+            bias=False
+        )
+        
+        # Pointwise convs
+        self.pointwise1 = nn.Conv1d(channels, channels, kernel_size=1, bias=False)
+        self.pointwise2 = nn.Conv1d(channels, channels, kernel_size=1, bias=False)
+        
+        self.norm = nn.LayerNorm(channels)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        # x: (batch, channels, time)
+        residual = x
+        
+        out = self.depthwise(x)
+        out = F.relu(out)
+        
+        out = self.pointwise1(out)
+        out = F.relu(out)
+        out = self.pointwise2(out)
+        
+        out = self.dropout(out)
+        out = out + residual  # residual connection
+        
+        # LayerNorm expects (batch, time, channels)
+        out = out.transpose(1, 2)
+        out = self.norm(out)
+        out = out.transpose(1, 2)
+        
+        return out
+    </code></pre>
+
+    <h3>Multi-Scale TDS</h3>
+    <p>
+        You can create <strong>Multi-Scale TDS blocks</strong> by running TDS blocks in parallel, with each branch operating on a different temporal scale achieved through downsampling. This allows the network to capture both fine-grained bursts and long-range temporal structures simultaneously, giving it multiple receptive field sizes.
+    </p>
+    <p>
+        <strong>Average pooling</strong> is used for downsampling as it acts as a low-pass filter to prevent aliasing. The output from each branch is then upsampled back to the original time resolution so it can be fused with the outputs from other branches.
+    </p>
+    <pre><code class="language-python">
+class MultiScaleTDS(nn.Module):
+    """
+    Multiscale TDS design (s = 0..5).
+    At each scale:
+      - Downsample with average pooling (2^s).
+      - Apply a TDS block.
+      - Upsample back and fuse outputs.
+    """
+    def __init__(self, channels, kernel_size=5, num_scales=6, dropout=0.1):
+        super().__init__()
+        
+        self.scales = nn.ModuleList()
+        for s in range(num_scales):
+            block = TDSBlock(channels, kernel_size=kernel_size, dropout=dropout)
+            self.scales.append(block)
+        
+        self.num_scales = num_scales
+
+    def forward(self, x):
+        # x: (batch, channels, time)
+        outputs = []
+        T = x.size(-1)
+        
+        for s, block in enumerate(self.scales):
+            # Downsample by 2^s
+            pool_factor = 2**s
+            pooled = F.avg_pool1d(x, kernel_size=pool_factor, stride=pool_factor, ceil_mode=True)
+            
+            # Apply TDS block
+            out = block(pooled)
+            
+            # Upsample back to original time length
+            out = F.interpolate(out, size=T, mode="linear", align_corners=False)
+            
+            outputs.append(out)
+        
+        # Fuse multiscale outputs
+        return sum(outputs) / self.num_scales
+    </code></pre>
+    
+</body>
+</html>

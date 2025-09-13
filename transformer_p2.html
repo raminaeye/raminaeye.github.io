@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Transformers Explained in Detail</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem;
+      line-height: 1.6;
+      color: #333;
+    }
+    h1, h2, h3, h4 {
+      color: #2c3e50; /* Darker shade for better contrast */
+      margin-top: 1.5em;
+      margin-bottom: 0.5em;
+    }
+    h1 { font-size: 2.5em; border-bottom: 2px solid #3498db; padding-bottom: 0.3em;}
+    h2 { font-size: 2em; border-bottom: 1px solid #bdc3c7; padding-bottom: 0.2em;}
+    h3 { font-size: 1.5em; }
+    h4 { font-size: 1.2em; color: #555;}
+
+    nav { margin-bottom: 30px; padding: 10px; background: #ecf0f1; border: 1px solid #bdc3c7; border-radius: 4px;}
+    nav ul { list-style: none; padding: 0; }
+    nav li { display: inline-block; margin-right: 15px; }
+    nav a { text-decoration: none; color: #3498db; font-weight: bold;}
+    nav a:hover { text-decoration: underline; color: #2980b9;}
+
+    pre {
+      background: #f8f9f9; /* Lighter background for code blocks */
+      padding: 1rem;
+      overflow-x: auto;
+      border: 1px solid #e1e4e8; /* Softer border */
+      border-left: 4px solid #3498db; /* Accent border */
+      border-radius: 4px;
+      font-size: 0.9em;
+    }
+    code {
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+    }
+    /* For inline code */
+    p > code, li > code, table td > code {
+      background: #e8eaed;
+      padding: 0.2em 0.4em;
+      border-radius: 3px;
+      font-size: 0.85em;
+    }
+    pre code { /* Reset for code inside pre, already handled by pre styling */
+        background: none;
+        padding: 0;
+        font-size: 1em; /* Ensure pre's font size is inherited */
+    }
+    ul, ol {
+        padding-left: 20px;
+    }
+    li {
+        margin-bottom: 0.5em;
+    }
+    strong {
+        color: #2980b9;
+    }
+    hr {
+      border: 0;
+      height: 1px;
+      background: #bdc3c7;
+      margin-top: 2em;
+      margin-bottom: 2em;
+    }
+  </style>
+ 
+  <script type="text/javascript" async
+    src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML">
+  </script>
+  <script type="text/x-mathjax-config">
+    MathJax.Hub.Config({
+      tex2jax: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        displayMath: [['$$','$$'], ['\\[','\\]']],
+        processEscapes: true
+      }
+    });
+  </script>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+</head>
+<body>
+    <nav>
+        <ul>
+            <li><a href="#intro">Introduction</a></li>
+            <li><a href="#self-attention">Self-Attention</a></li>
+            <li><a href="#mha">Multi-Head Attention</a></li>
+            <li><a href="#masking">Masking</a></li>
+            <li><a href="#encoder-decoder">Encoder-Decoder</a></li>
+            <li><a href="#pos-encoding">Positional Encoding</a></li>
+            <li><a href="#streaming">Streaming & Conformer</a></li>
+        </ul>
+    </nav>
+
+    <h1 id="intro">Introduction to Transformers</h1>
+    <p>
+        Older sequence models like RNNs process one token at a time, so they struggle with long dependencies and cannot parallelize well. CNNs can look at a local neighborhood, but stacking many layers is needed to capture long-range relations.
+    </p>
+    <p>
+        <strong>Transformers</strong> replace recurrence and convolutions with <strong>self-attention</strong>, a mechanism where every token can directly interact with every other token in a single step. Transformers are typically composed of two main parts: an <strong>encoder</strong> and a <strong>decoder</strong>. Both the encoder and decoder contain two primary sub-layers:
+    </p>
+    <ul>
+        <li>A <strong>self-attention</strong> layer that allows each token to attend to all others.</li>
+        <li>A <strong>feed-forward</strong> block that applies a position-wise MLP to enrich each token's representation.</li>
+    </ul>
+    <p>
+        These parts also employ residual connections, layer normalization, and positional encodings to function effectively.
+    </p>
+
+    <hr>
+
+    <h2 id="self-attention">The Self-Attention Mechanism</h2>
+    <p>
+        Self-attention is the heart of the Transformer. Suppose you have an input sequence of length $n$ with an embedding of dimension $d$. We typically map each discrete token to a continuous vector using a learned <strong>embedding matrix</strong>, which is essentially a large lookup table.
+    </p>
+    <p>
+        For example, if you have a vocabulary of 30,000 tokens and you choose an embedding size of 512, then the embedding matrix will have a shape of $30,000 \times 512$. When you feed a word to the model, it looks up the corresponding row in this matrix, and that becomes the embedding vector of size 512 for that word.
+    </p>
+    <p>
+        The input sequence has a length of $n$ (the number of tokens), and each token has an embedding dimension of $d_{model}$. After the embedding lookup, the input tensor $X$ has a shape of $n \times d_{model}$.
+    </p>
+
+    <h3>Query, Key, and Value</h3>
+    <p>First, you project each input embedding into three distinct vectors:</p>
+    <ul>
+        <li><strong>Query (Q)</strong>: Represents what a token is looking for. Each word effectively asks a "question."</li>
+        <li><strong>Key (K)</strong>: Represents what a token contains or offers. It "answers" the questions posed by other words.</li>
+        <li><strong>Value (V)</strong>: Represents the actual information or content of a token. This is the information that gets pulled in by other tokens that find it relevant.</li>
+    </ul>
+    <p>We obtain these vectors by multiplying the input embedding matrix $X$ by learned weight matrices:</p>
+    $$ Q = X W_Q $$
+    $$ K = X W_K $$
+    $$ V = X W_V $$
+    <p>
+        These weight matrices project the input embeddings from dimension $d_{model}$ into a dimension $d_k$. The <strong>Query</strong> and <strong>Key</strong> vectors must always have the same dimension, $d_k$, because their dot product is computed later. The <strong>Value</strong> vector typically has the same dimension, but some implementations allow it to be different. At this point, our $Q$, $K$, and $V$ matrices each have a shape of $n \times d_k$.
+    </p>
+
+    <h3>Attention Score Calculation</h3>
+    <p>
+        Next, we compute the attention scores. This is done by taking the dot product of every query with every key. The resulting score between token $i$ and token $j$ determines how much token $i$ should attend to token $j$.
+    </p>
+    $$ \text{score}(i,j) = Q_i \cdot K_j $$
+    <p>This is vectorized to compute the entire $n \times n$ score matrix at once:</p>
+    $$ \text{Scores} = Q K^T $$
+    <p>
+        The dot product is used as a measure of similarity. Since $Q$ and $K$ are in the same vector space, their dot product measures both magnitude and directional alignment. If a query and a key point in the same direction, the model considers them relevant.
+    </p>
+    <p>We then scale these scores by dividing by $\sqrt{d_k}$. Let’s understand why. If you assume the components of $Q$ and $K$ are normally distributed with a mean of 0 and a variance of 1, then their dot product will have a mean of 0 and a variance of $d_k$. The magnitude of this dot product would then be on the order of $\sqrt{d_k}$. By dividing by $\sqrt{d_k}$, we are normalizing the scores to have a variance of 1, which helps stabilize training. Without this scaling, the scores would grow with the dimension $d_k$.
+    </p>
+    <p>
+        We want these scores to behave like attention weights—they should be non-negative and sum to 1 to form a probability distribution. That’s what the <strong>softmax</strong> function does. For very large scores (i.e., if we did not normalize them), the softmax output would collapse to a one-hot distribution where one weight is 1 and all others are 0. This would cause the query to "latch on" to a single token, ignoring all other context. This not only kills the attention mechanism's ability to softly mix information but also introduces <strong>vanishing gradients</strong>, as small changes in extreme values barely change the output, preventing the network from adjusting the attention weights. The normalization by $\sqrt{d_k}$ is therefore crucial for keeping the softmax in a smooth, trainable zone.
+    </p>
+    <p>The final attention weights, which we can call $\alpha$, are calculated as:</p>
+    $$ \text{Attention Weights} = \text{softmax}\left(\frac{Q K^T}{\sqrt{d_k}}\right) $$
+    <p>This gives us an $n \times n$ matrix.</p>
+    
+    <h3>Weighted Sum and Final Projection</h3>
+    <p>Now, we use our attention weights to combine the <strong>Value</strong> vectors. For each token $i$, the output is a weighted sum of all other value vectors:</p>
+    $$ \text{Output}_i = \sum_j \alpha_{ij} V_j $$
+    <p>The entire output matrix is computed as $(\text{Attention Weights}) \times V$. The output has the shape $n \times d_k$.</p>
+    <p>
+        Finally, a learned linear projection matrix, $W_O$, is applied. This projection re-mixes the features after the attention step. Without it, the output would just be a weighted average of the values.
+    </p>
+    $$ \text{Final Output} = \text{softmax}\left(\frac{Q K^T}{\sqrt{d_k}}\right)V W_O $$
+    <p>
+        The matrix $W_O$ (with shape $d_k \times d_{model}$) adapts the output back to the model’s main feature space, $d_{model}$, so that it can be passed to subsequent feed-forward blocks consistently.
+    </p>
+
+    <hr>
+
+    <h2 id="mha">Multi-Head Attention</h2>
+    <p>
+        So far, for each token, we have learned a single representation of size $d_k$, meaning the model learns one type of relationship at a time. We can introduce <strong>multiple heads</strong> to allow the model to learn multiple types of relationships in parallel. Each head projects $Q$, $K$, and $V$ into a different learned subspace, enabling the model to look at the sequence in different ways simultaneously.
+    </p>
+    <p>
+        We split the model dimension, $d_{model}$, into $h$ smaller chunks (the heads), each with dimension $d_k = d_{model} / h$. For instance, we can take a 512-dimensional embedding and split it into 8 heads, each with 64 dimensions. Each head then runs its own scaled dot-product attention on its respective chunk.
+    </p>
+    <p>
+        Instead of one set of $W_Q, W_K, W_V$, we now learn separate projection matrices for each head $i$:
+    </p>
+    $$ Q^i = X W_Q^i $$
+    $$ K^i = X W_K^i $$
+    $$ V^i = X W_V^i $$
+    <p>Each head $i$ computes its own attention output, $Z^i$, with shape $n \times d_k$. After each head has independently analyzed the sequence through its own "lens," we concatenate the outputs:</p>
+    $$ Z = \text{concat}(Z^1, Z^2, \dots, Z^h) $$
+    <p>The resulting matrix $Z$ has a shape of $n \times (h \times d_k)$, which is equivalent to $n \times d_{model}$. We then apply a final learned projection matrix $W_O$ (with shape $d_{model} \times d_{model}$) to re-mix the information across all the heads, allowing the model to combine the different views each head produced.</p>
+    $$ O = Z W_O $$
+
+    <hr>
+    
+    <h2 id="masking">Masking in Attention</h2>
+    <p>
+        Masking is a concept in attention that prevents the mechanism from looking at every token. There are two main types of masking.
+    </p>
+    <h3>Padding Mask</h3>
+    <p>
+        A <strong>padding mask</strong> is typically applied when batching sequences where some are shorter than others. We pad these sequences with dummy tokens to make them the same shape, but we don’t want the model to attend to these dummy tokens. So, we mask these positions by setting their attention scores to $-\infty$ before applying the softmax.
+    </p>
+    <p>After computing the attention scores $S = QK^T / \sqrt{d_k}$, we apply a mask matrix $M$:</p>
+    $$ S' = S + M $$
+    <p>where $M_{ij} = 0$ for tokens that are allowed to attend and $-\infty$ for those that are blocked.</p>
+    <p>
+        For the padding mask, we want to mask out some <strong>keys</strong>, not queries. This means if key $j$ is padding, all queries $i$ should ignore it. It’s kind of like queries are the "listeners" and keys are the "speakers." If a padding token is a "speaker," that’s bad because a real "listener" might listen to it and get confused. We need both attention masking (to prevent confusion during context creation) and loss masking (to not penalize the model for its predictions at padded positions).
+    </p>
+    
+    <h3>Causal (Look-Ahead) Mask</h3>
+    <p>
+        There is also a <strong>causal</strong>, or <strong>look-ahead mask</strong>. In decoder models, when generating the next token, we don’t want the model to peek at future tokens. For a position $t$, we block attention to all positions $> t$ to enforce autoregressive behavior. This is achieved by adding an upper-triangular matrix of $-\infty$ values (where the diagonal is 0) to the score matrix.
+    </p>
+    $$ M_{ij} = \begin{cases} 0 & \text{if } j \le i \\ -\infty & \text{if } j > i \end{cases} $$
+    <p>At position 1, a token can only attend to itself. At position 2, it can attend to token 1 and itself. At position 3, it can attend to tokens 1, 2, and 3, and so on.</p>
+
+    <hr>
+    
+    <h2 id="encoder-decoder">The Encoder-Decoder Architecture</h2>
+    
+    <h3>The Encoder Block</h3>
+    <p>
+        An encoder block consists of a multi-head attention (MHA) layer followed by a feed-forward network (FFN). Each of these is wrapped with a residual connection and a layer normalization step.
+    </p>
+    $$ H_1 = \text{LayerNorm}(X + \text{MHA}(X)) $$
+    <p>The FFN is a 2-layer MLP applied independently at each position:</p>
+    $$ \text{FFN}(x) = \text{max}(0, xW_1 + b_1)W_2 + b_2 $$
+    <p>This expands the dimension from $d_{model}$ to typically $4 \times d_{model}$ and then projects it back down. A second residual connection and layer norm follow the FFN:</p>
+    $$ H_2 = \text{LayerNorm}(H_1 + \text{FFN}(H_1)) $$
+    
+    <h4>Pre-LN vs. Post-LN</h4>
+    <p>In the original paper, LayerNorm was applied <em>after</em> the residual connection (Post-LN). In modern practice, it is often applied <em>before</em> the sublayer, and the residual is added afterward (Pre-LN):</p>
+    $$ H = X + \text{MHA}(\text{LayerNorm}(X)) $$
+    <p>This keeps the residual path "clean," allowing gradients to flow backward more easily and making training more stable, especially for very deep networks.</p>
+    
+    <h3>The Decoder Block</h3>
+    <p>
+        The decoder block is similar to the encoder but has two key differences: it uses causal masking in its self-attention layer, and it adds a <strong>cross-attention</strong> layer to incorporate information from the encoder.
+    </p>
+    <p>
+        The decoder's input is the target sequence (e.g., the Farsi words in a translation task). It first applies masked self-attention to this sequence. Then comes cross-attention. Here, the <strong>queries</strong> come from the decoder's hidden state (representing what the target token needs), while the <strong>keys and values</strong> come from the encoder's output (representing the information from the source sentence).
+    </p>
+    <p>
+        Say the encoder processes an English sentence. The decoder query for the word "pishi" (Farsi for kitten) asks which English words are relevant. It compares its query with the encoder's keys and pulls in the <strong>value</strong> for the word "cat" into its own hidden state.
+    </p>
+    <p>The structure of one decoder block is:</p>
+    <ol>
+        <li>Masked Self-Attention on the decoder's input.</li>
+        <li>Add & Norm.</li>
+        <li>Cross-Attention, where <code>Q</code> is from the previous step, and <code>K, V</code> are from the final encoder output, <code>H_enc</code>.</li>
+        <li>Add & Norm.</li>
+        <li>Feed-Forward Network.</li>
+        <li>Add & Norm.</li>
+    </ol>
+    <p>
+        All decoder blocks use the same <code>H_enc</code> as their keys and values. The encoder output acts as a fixed memory of the source sequence, which the decoder needs consistent access to. What changes are the decoder's queries, which are progressively refined through the decoder stack.
+    </p>
+
+    <hr>
+    
+    <h2 id="pos-encoding">Positional Encoding, Output Layer, and Complexity</h2>
+    
+    <h3>Positional Encoding</h3>
+    <p>
+        Attention treats tokens as a set, not a sequence; it is permutation-invariant. To provide information about word order, we add a <strong>positional encoding</strong> vector to each token's embedding. The original paper used fixed sinusoidal encodings. For each position $t$ and dimension $i$:
+    </p>
+    $$ P_{t,2i} = \sin(t / 10000^{2i/d_{model}}) $$
+    $$ P_{t,2i+1} = \cos(t / 10000^{2i/d_{model}}) $$
+    <p>
+        Each dimension of the embedding gets a sinusoid of a different frequency. This gives each position a unique multi-frequency signature and allows the model to easily learn relative positions.
+    </p>
+
+    <h3>Output Layer and Weight Tying</h3>
+    <p>
+        At the decoder’s output, we have hidden states of shape $n_{target} \times d_{model}$. To predict the next token, we need logits over the vocabulary. This is done with a final linear layer:
+    </p>
+    $$ Z = H_{dec} W_{out} + b $$
+    <p>
+        where $W_{out}$ is an output projection matrix of shape $d_{model} \times |V|$. The input embedding matrix and this output projection matrix can be the transpose of each other. <strong>Weight tying</strong> ($W_{out} = E^T$) has been shown to consistently improve the performance of language models.
+    </p>
+
+    <h3>Computational Complexity</h3>
+    <ul>
+        <li><strong>RNNs:</strong> The complexity is $O(n \cdot d^2)$, which is linear over the sequence length but does not parallelize.</li>
+        <li><strong>CNNs:</strong> The complexity is roughly $O(n \cdot k \cdot d^2)$, which is parallelizable but has a limited receptive field.</li>
+        <li><strong>Transformers:</strong> The most expensive step is computing the score matrix $Q K^T$, which has a complexity of $O(n^2 \cdot d)$. This quadratic scaling with sequence length is the fundamental bottleneck of the attention mechanism.</li>
+    </ul>
+
+    <hr>
+    
+    <h2 id="streaming">Architectural Variants and Streaming Models</h2>
+    
+    <h3>Decoder-Only Transformers</h3>
+    <p>
+        The new family of modern large language models like GPTs and LLaMA are <strong>decoder-only</strong>, throwing away the encoder and cross-attention. This is perfect for autoregressive next-token prediction. For text generation, decoder-only models typically outperform encoder-decoder models because they can be scaled to larger sizes.
+    </p>
+    
+    <h3>Streaming Transformers</h3>
+    <p>
+        Streamable models, like those for online ASR or real-time translation, cannot see the entire sequence at once. Instead of full self-attention, they use a restricted <strong>windowed attention</strong>. Each query token only attends to nearby tokens in a fixed range, and the attention is causal. Stacking enough layers allows the effective "attention span" to grow, as the context propagates forward through the overlap between windows.
+    </p>
+    
+    <h2>The Conformer Model: Blending CNNs and Transformers</h2>
+    <p>
+        Vanilla Transformers are great for global context but weak at capturing local details. CNNs are excellent for local structure. The <strong>Conformer</strong>, a "convolution-augmented Transformer," has both. It is particularly effective for Automatic Speech Recognition (ASR).
+    </p>
+    <p>
+        For ASR, continuous audio is first converted into acoustic features like log-mel spectrograms. These features are then projected into the model dimension, $d_{model}$. The Conformer block modifies the standard Transformer encoder block with a "macaron-style" feed-forward network and a convolution module:
+    </p>
+    $$ x \rightarrow [\text{FFN}(0.5)] \rightarrow [\text{MHSA}] \rightarrow [\text{Conv}] \rightarrow [\text{FFN}(0.5)] \rightarrow \text{out} $$
+    <ul>
+        <li>The <strong>MHSA</strong> module uses <strong>relative positional encoding</strong>, which generalizes better to long sequences. It introduces an extra bias term into the attention score based on the relative distance between tokens.</li>
+        <li>The <strong>Convolution Module</strong> explicitly models local sequential structure using a depthwise separable convolution. It typically uses <strong>BatchNorm</strong>, which is well-suited for stabilizing convolution filters, followed by a Swish activation.</li>
+    </ul>
+    
+    <pre><code class="language-python">
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+# -------------------------------
+# 1. Macaron-style FeedForward
+# -------------------------------
+class ConformerFFN(nn.Module):
+    def __init__(self, d_model, d_ff, dropout=0.1):
+        super().__init__()
+        self.linear1 = nn.Linear(d_model, d_ff)
+        self.linear2 = nn.Linear(d_ff, d_model)
+        self.dropout = nn.Dropout(dropout)
+        self.activation = nn.SiLU()  # Swish
+
+    def forward(self, x):
+        out = self.linear1(x)
+        out = self.activation(out)
+        out = self.dropout(out)
+        out = self.linear2(out)
+        out = self.dropout(out)
+        return x + 0.5 * out  # Macaron: scale by 0.5
+
+# -------------------------------
+# 2. Multi-Head Self-Attention
+# -------------------------------
+class MHSA(nn.Module):
+    def __init__(self, d_model, num_heads, dropout=0.1):
+        super().__init__()
+        assert d_model % num_heads == 0
+        self.h = num_heads
+        self.d_k = d_model // num_heads
+        self.W_q = nn.Linear(d_model, d_model)
+        self.W_k = nn.Linear(d_model, d_model)
+        self.W_v = nn.Linear(d_model, d_model)
+        self.W_o = nn.Linear(d_model, d_model)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x, mask=None):
+        B, T, D = x.shape
+        Q = self.W_q(x).view(B, T, self.h, self.d_k).transpose(1, 2)
+        K = self.W_k(x).view(B, T, self.h, self.d_k).transpose(1, 2)
+        V = self.W_v(x).view(B, T, self.h, self.d_k).transpose(1, 2)
+
+        scores = torch.matmul(Q, K.transpose(-2, -1)) / (self.d_k ** 0.5)
+        if mask is not None:
+            scores = scores.masked_fill(mask == 0, float("-inf"))
+        attn = F.softmax(scores, dim=-1)
+        out = torch.matmul(attn, V)
+
+        out = out.transpose(1, 2).contiguous().view(B, T, D)
+        return x + self.dropout(self.W_o(out))  # residual
+
+# -------------------------------
+# 3. Convolution Module
+# -------------------------------
+class ConformerConvModule(nn.Module):
+    def __init__(self, d_model, kernel_size=15, dropout=0.1, causal=False):
+        super().__init__()
+        self.layer_norm = nn.LayerNorm(d_model)
+        self.pointwise_conv1 = nn.Conv1d(d_model, 2 * d_model, kernel_size=1)
+        padding = (kernel_size - 1) if causal else (kernel_size - 1) // 2
+        self.depthwise_conv = nn.Conv1d(
+            d_model, d_model, kernel_size,
+            groups=d_model, padding=padding
+        )
+        self.causal = causal
+        self.batch_norm = nn.BatchNorm1d(d_model)
+        self.pointwise_conv2 = nn.Conv1d(d_model, d_model, kernel_size=1)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        residual = x
+        x = self.layer_norm(x)
+        x = x.transpose(1, 2)  # (B, d_model, T)
+
+        x = self.pointwise_conv1(x)
+        A, B = x.chunk(2, dim=1)
+        x = A * torch.sigmoid(B)  # GLU
+
+        x = self.depthwise_conv(x)
+        if self.causal:
+            x = x[:, :, :residual.size(1)]  # trim if causal
+
+        x = self.batch_norm(x)
+        x = F.silu(x)
+        x = self.pointwise_conv2(x)
+        x = x.transpose(1, 2)  # back to (B, T, d_model)
+        return residual + self.dropout(x)  # residual
+
+# -------------------------------
+# 4. Full Conformer Block
+# -------------------------------
+class ConformerBlock(nn.Module):
+    def __init__(self, d_model=256, d_ff=1024, num_heads=4, kernel_size=15, dropout=0.1, causal=False):
+        super().__init__()
+        self.ffn1 = ConformerFFN(d_model, d_ff, dropout)
+        self.mhsa = MHSA(d_model, num_heads, dropout)
+        self.conv = ConformerConvModule(d_model, kernel_size, dropout, causal)
+        self.ffn2 = ConformerFFN(d_model, d_ff, dropout)
+        self.final_ln = nn.LayerNorm(d_model)
+
+    def forward(self, x, mask=None):
+        x = self.ffn1(x)
+        x = self.mhsa(x, mask)
+        x = self.conv(x)
+        x = self.ffn2(x)
+        return self.final_ln(x)
+    </code></pre>
+
+    <h3>Making the Conformer Work in Real-Time</h3>
+    <p>
+        Now, how do you make the Conformer work in real-time? The attention mechanism, as we mentioned earlier, needs to change to a <strong>streaming attention</strong> where we restrict how far queries can look back using a fixed attention window with causal masking. Sometimes speech can be ambiguous if you don’t peek a little into the future, so we can allow each frame to have a <strong>look ahead</strong> of a fixed number of frames. This adds some latency but improves the model, and it can be easily configured in the attention mask.
+    </p>
+    <p>
+        Additionally, you can make your multi-head attention into a <strong>multiscale multihead attention</strong>. Because information varies in length—phonemes can be shorter, while syllables and words are longer—one head might span more frames than another to capture these different relationships.
+    </p>
+    <p>
+        The convolution module, which uses <code>same</code> padding, will also need to be changed to use <strong>causal padding</strong>. The normalization, as we discussed in depth, needs to change as well to a streaming-friendly version.
+    </p>
+    
+    <h3>Mapping to Text and Using CTC Loss</h3>
+    <p>
+        Okay, now we have our Conformer block, and we can stack several Conformer blocks to enrich the acoustic embeddings. Now we need to map this to text. What we have are frame-level embeddings that need to be converted back to words or tokens.
+    </p>
+    <p>
+        You can add a linear layer after the stack of Conformer blocks that takes the final feature dimension, $d_{model}$, and projects it to $|V|$, the number of words, tokens, or phonemes in the vocabulary. The output is a logit matrix $Z$ of shape $B \times T \times |V|$ (Batch, Time, Vocabulary).
+    </p>
+    <p>
+        Then, you take the model outputs (the logits, which are unnormalized scores) and pass them through a softmax function for each frame to get token probabilities:
+    </p>
+    $$ P(t,v) = \frac{\exp(Z_{t,v})}{\sum_{v'} \exp(Z_{t,v'})} $$
+    <p>
+        Once you have these frame-level probabilities, you need to use a loss function like the <strong>Connectionist Temporal Classification (CTC) loss</strong> to align the output probabilities with the ground-truth text sequence.
+    </p>
+</body>
+</html>

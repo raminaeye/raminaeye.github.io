@@ -387,29 +387,45 @@ $$ Z = H_{dec} W_{out} + b $$
 $$ h_t = f(W_h h_{t-1} + W_x x_t) $$
 <p>Where:</p>
 <ul>
-    <li><code>x_t</code> is the input embedding at time t (dimension $d_{in}$)</li>
-    <li><code>H_t</code> is the hidden state at time t (dimension $d$)</li>
-    <li><code>W_h</code> is the hidden-to-hidden weights ($d \times d$)</li>
-    <li><code>W_x</code> is the input-to-hidden weights ($d \times d_{in}$)</li>
+    <li><code>x_t</code> is the input embedding at time t, with dimension $d_{in}$</li>
+    <li><code>H_t</code> is the hidden state at time t, with dimension $d$</li>
+    <li><code>W_h</code> is the hidden-to-hidden weights, with dimension $d \times d$</li>
+    <li><code>W_x</code> is the input-to-hidden weights, with dimension $d \times d_{in}$</li>
 </ul>
 <p>
-    The cost for each hidden state is dominated by the matrix multiplications ($W_h \times h_{t-1}$ is $O(d^2)$), making the total cost for a sequence of length $n$ about $O(n \cdot d^2)$, with memory for storing hidden states at $O(n \cdot d)$. This is linear over the sequence length, but it doesn’t parallelize.
+    The complexity of the matrix multiplications are:
+</p>
+<ul>
+    <li><code>W_h x h_t-1</code>: $O(d^2)$</li>
+    <li><code>W_x x_t</code>: $O(d \cdot d_{in})$, which is about $O(d^2)$</li>
+</ul>
+<p>
+    The cost for each hidden state is $O(d^2)$. For each time step across a sequence of length $n$, the total cost is $O(n \cdot d^2)$, and memory for storing hidden states is $O(n \cdot d)$. This is linear over the sequence length, but it doesn’t parallelize.
 </p>
 
 <h4>For CNNs</h4>
 <p>
-    In a 1D convolution over sequences with a kernel of size $k$ and hidden dimension $d$, for each of the $n$ positions, you have to compute the weighted sum of $k$ neighboring positions. The cost per position is roughly $O(k \cdot d_{in} \cdot d_{out})$, and the cost per layer is therefore $O(n \cdot k \cdot d^2)$. This is limited by the receptive field and needs depth for global context.
+    In a 1D convolution over sequences with a kernel size of $k$ and hidden dimension $d$, for each of the $n$ positions, you have to compute the weighted sum of $k$ neighboring positions. Each token has $d_{in}$ features, so one window has $k \cdot d_{in}$ features in total. The filter is a weight vector of size $k \cdot d_{in}$. To produce $d_{out}$ channels at position $t$, we need $d_{out}$ such filters. So, the weight matrix is $d_{out} \times (k \cdot d_{in})$. The output vector at position $t$ is calculated as $W \times \text{window}(t)$, which has a complexity of $O(k \cdot d_{in} \cdot d_{out})$.
+</p>
+<p>
+    So the cost per position is $O(k \cdot d_{in} \cdot d_{out})$ and the cost per layer is $O(n \cdot k \cdot d^2)$. This is limited by the receptive field; you need depth for a global view.
 </p>
 
 <h4>Now, the complexity of Transformers</h4>
 <p>
-    In attention, the expensive step is computing the score matrix. Let’s look at matrix multiplication complexity quickly. If A is $m \times d$ and B is $d \times n$, then C = AB is $m \times n$. The total cost is $O(m \cdot n \cdot d)$.
+    In attention, the expensive step is computing the score matrix.
 </p>
 <p>
-    In the attention mechanism, computing the score matrix $S = QK^T$ (multiplying an $n \times d_k$ matrix by a $d_k \times n$ matrix) has a complexity of $O(n^2 \cdot d_k)$. For $h$ heads, this becomes $O(h \cdot n^2 \cdot d_k)$, with $O(n^2)$ memory required for storing the score matrix for each head. Applying the $n \times n$ score matrix to the $n \times d_v$ value matrix is $O(n^2 \cdot d_v)$.
+    Let’s look at matrix multiplication complexity quickly. If A is $m \times d$ and B is $d \times n$, then C = AB is $m \times n$. For every element $C_{ij}$, we take the dot product between row $i$ of A and column $j$ of B, where $d$ is the length of each dot product. There are $m \times n$ elements, so the total cost is $O(m \cdot n \cdot d)$.
 </p>
 <p>
-    So, for short sequences and large hidden sizes, the complexity is dominated by the feed-forward layers ($O(n \cdot d^2)$). But for long sequences, it’s quadratic in the sequence length ($O(n^2 \cdot d)$). That’s why attention is generally considered expensive; $n^2$ grows quickly. This global receptive field comes with a cost, and it’s a fundamental bottleneck.
+    In attention, computing Q, K, and V has a complexity of roughly $O(n \cdot d_{model} \cdot d_k)$ for each, since X is $n \times d_{model}$ and the weight matrices are $d_{model} \times d_k$.
+</p>
+<p>
+    The score matrix is $S = Q K^T$. Multiplying Q ($n \times d_k$) by $K^T$ ($d_k \times n$) results in an $n \times n$ matrix. Each of the $n$ queries must dot product with all $n$ keys. For $h$ heads, the complexity is $O(h \cdot n^2 \cdot d_k)$, with $O(n^2)$ memory for storing the score matrix for each head.
+</p>
+<p>
+    Applying the $n \times n$ score matrix to V (an $n \times d_v$ matrix) is $O(n^2 \cdot d_v)$. So for short sequences and large hidden sizes, the complexity is dominated by the feed-forward layers ($O(n \cdot d^2)$), but for long sequences, it’s quadratic in the sequence length ($O(n^2 \cdot d)$). That’s why attention is generally considered expensive; $n^2$ grows quickly. This global receptive field comes with a cost, and it’s a fundamental bottleneck.
 </p>
 
 <hr>

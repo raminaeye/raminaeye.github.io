@@ -21,9 +21,15 @@
             margin: 0 auto;
             padding: 20px;
         }
-        h3 {
+        h1, h2 {
             border-bottom: 1px solid #eaecef;
             padding-bottom: 0.3em;
+        }
+        h1 {
+            font-size: 2em;
+        }
+        h2 {
+            font-size: 1.5em;
         }
         code {
             font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
@@ -37,11 +43,14 @@
 </head>
 <body>
 
+    <h1>The Conformer Model for Automatic Speech Recognition (ASR)</h1>
+    
+    <h2>Introduction: Blending CNNs and Transformers</h2>
     <p>Let’s take a look at an ASR model that blends CNNs with transformers for speech. Vanilla transformers are great for global context but are weak at capturing local details like phoneme edges and formants. CNNs are excellent for local structure, but they miss global dependencies. The <strong>Conformer</strong>, a "convolution-augmented transformer," has both.</p>
 
     <p>Unlike models for text, an ASR model takes continuous audio as input. Because audio data has a high sampling rate, such as 16 kHz, we first need to extract acoustic features. Common choices are log-mel spectrogram or filterbank features. For one second of speech, you might get 100 frames with 80 dimensions each ($100 \times 80$). Just as an embedding layer projects 1D tokens into a vector space, in speech processing, there is a linear or convolutional layer that projects the acoustic features into the model's dimension, $d_{model}$. For example, this can result in an $80 \times 256$ matrix, so your token embeddings now have the dimensions $T \times d_{model}$ (e.g., $100 \times 256$).</p>
 
-    <hr>
+    <h2>Core Architecture of the Conformer Block</h2>
 
     <p>A transformer encoder block looks like this:<br>
     <code>x → [MHSA] → +residual → [FFN] → +residual → out</code>
@@ -55,10 +64,11 @@
 
     <p>The first FFN applies a 2-layer MLP to each frame independently. The dimension might be expanded to $d_{ff}$ (e.g., 1024) with some activations, which is then scaled back so a half-scaled residual connection can be added to the input.</p>
 
+    <h3>Multi-Head Self-Attention with Relative Positional Encoding</h3>
     <p>So far, the input is $B \times T \times d_{model}$; this is the output from the first FFN and its residual connection. Now, you project this input, X, into queries, keys, and values:</p>
     $$Q = XW_q^i, \quad K = XW_k^i, \quad V = XW_v^i$$
 
-    <p>Where the $W$ weight matrices are $d_{model}/k \times d_{model}/k$ for $k$ heads. You then compute attention:</p>
+    <p>Where the $W$ weight matrices are ${d_{model}}/{k} \times {d_{model}}/{k}$ for $k$ heads. You then compute attention:</p>
     $$\text{Attn}(Q, K, V) = \text{Softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V$$
 
     <p>Concatenate the heads, project back with $W_o$, and add the residual:</p>
@@ -72,8 +82,7 @@
 
     <p>Here, $r_{(i-j)}$ is a learned embedding for the relative offset between positions $i$ and $j$. We define a maximum relative distance, and this offset can be anywhere between $-L \dots 0 \dots L$, where each row corresponds to a $d_k$ vector space. For a given pair, we look up the relative embedding and perform a dot product with the query, which gets added to the attention scores. The embedding table has dimensions $(2L+1) \times d_k$. You can share this R matrix across all heads.</p>
 
-    <hr>
-
+    <h3>The Convolution Module</h3>
     <p>Next is the convolution module, which is the big difference from vanilla transformers. This is a depthwise separable convolution used to explicitly model local sequential structure.</p>
 
     <p>The input is now the context-enriched sequence, wherein each frame has been mixed with others and long-range dependencies have been learned. The shape is still $B \times T \times d_{model}$. The convolution module takes this input and applies local convolutional patterns to learn short-term temporal patterns on top of the long-range dependencies already captured by the attention mechanism.</p>
@@ -85,21 +94,22 @@
         <li>Then, a <strong>depthwise convolution</strong> is applied along the time axis. Each channel has its own convolution filter (so there is no cross-channel mixing), often with a kernel size equivalent to 150 ms. This gives each feature map a local receptive field over time. The input is padded ('same') such that the output from this step remains the same size as the input. In streaming ASR, you’d switch to causal padding (padding only on the left, so the model doesn’t peek into the future). At this point, the representation is channel-local and time-dependent.</li>
     </ol>
 
+    <h3>Normalization Strategy: LayerNorm vs. BatchNorm</h3>
     <p>Let’s think: would you use LayerNorm or BatchNorm after this? LayerNorm would normalize per frame across all channels, so it could actually wash away the learned temporal filters. If you use BatchNorm, it normalizes per channel but across time and the batch. This way, each channel keeps its identity and normalization is consistent across time, which helps stabilize the convolution filters. So, BatchNorm makes more sense here, although it has challenges with running inference. BN would output zero-mean and unit-variance activations, so an activation function would help. <strong>Swish</strong> would let small negative values pass through, which can be crucial in audio processing.</p>
 
     <p>Let’s briefly discuss BatchNorm during training and inference. During training, BatchNorm computes the mean and variance of the batch and time dimensions for each channel to normalize the values, along with learnable scale ($\gamma$) and shift ($\beta$) parameters for each channel. It additionally keeps a running estimate of both mean and variance, which is not used during the training forward pass but is stored to be used during inference later. During inference, you don’t use the batch statistics of the test data. You use the stored running stats along with the same learnable parameters to normalize the data:</p>
     $$x_{norm} = \gamma \cdot \frac{x - \mu_{\text{running}}}{\sqrt{\sigma^2_{\text{running}} + \epsilon}} + \beta$$
 
     <p>Now, with streaming ASR, the issue is that during training, the stats were computed on long sequences and full batches of data. During streaming, you’re normalizing with global averages that don’t match the local chunk you’re currently processing. Additionally, in streaming, you don’t want to wait for future frames to compute stats, so you need a causal or online version of BatchNorm. There are variations of causal BN where the mean and variance are computed over frames $\le t$, so normalization only depends on the past. It’s incrementally updated as new frames arrive. There’s also a sliding-window BN that updates based only on the last W frames. In the beginning, however, these statistics can be unreliable, so they typically kick in once the state becomes reliable. Alternatively, you can use other normalizations that are more real-time friendly, like LayerNorm.</p>
-
+    
+    <h3>Completing the Conformer Block</h3>
     <p>Anyway, the Conformer then applies a BatchNorm and a Swish activation. Finally, another pointwise convolution with dropout is applied, which performs a $d_{model} \rightarrow d_{model}$ mapping. Lastly, a residual connection is added from the start of the module to its output. This might seem redundant, but it introduces another cross-channel interaction which can be helpful for expressiveness, as depthwise convolution is a per-channel, local filter.</p>
 
     <p>This is our convolution block. The output from the convolution block remains $B \times T \times d_{model}$. After this, another feed-forward network, similar to the one before, is applied to each frame with a residual connection to complete the macaron-style design. It expands $d_{model}$ to $d_{ff}$, applies a non-linearity, projects back to $d_{model}$ with dropout, and adds a scaled version of that as a residual. The shape remains $B \times T \times d_{model}$. This helps with stacking blocks, and we know that machine learning practitioners love stacking blocks!</p>
 
     <p>The first FFN before the attention module enriches the frame-level features before they interacted globally. The second FFN enriches the representation after it has been mixed both globally and locally. This FFN symmetry is what is claimed to make the block more expressive and stable.</p>
 
-    <hr>
-
+    <h2>PyTorch Implementation</h2>
 <pre><code class="language-python">
 import torch
 import torch.nn as nn
@@ -214,7 +224,7 @@ class ConformerBlock(nn.Module):
         return self.final_ln(x)
 </code></pre>
 
-    <hr>
+    <h2>Streaming, Real-Time Applications, and Output</h2>
 
     <p>Now, how do you make the Conformer work in real-time? The attention mechanism, as we mentioned earlier, needs to change to a streaming attention where we restrict how far queries can look back using a fixed attention window with a causal mask. Sometimes speech can be ambiguous if you don’t peek a little into the future, so we can allow each frame to have a look-ahead by a fixed number of frames. This adds some latency but improves the model, and it can be easily configured in the attention mask. Additionally, you can make your multi-head attention into a multi-scale multi-head attention. Because information varies in length—a phoneme can be shorter, while syllables and words are longer—one head might be configured to span more frames than others to capture these different relationships.</p>
 

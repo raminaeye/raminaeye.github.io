@@ -220,7 +220,43 @@
     This is an upper triangular matrix of $-\infty$ with a shape of <code>n x n</code> that gets broadcast across the batch. Each row corresponds to a query at position <code>i</code>, which can now only attend to columns where <code>j &lt;= i</code>. At position 1, a token can only attend to itself; at position 2, it can attend to token 1 and itself; at position 3, it can attend to tokens 1, 2, and 3.
 </p>
 <p>
-    The score matrix is <code>B x n x n</code> and the causal mask is <code>1 x n x n</code>. We then broadcast the mask along the batch dimension. Each element in the batch now has its own <code>n x n</code> attention score matrix, and each sample gets a copy of the upper-triangular mask.
+    So, after we compute the attention score and before applying the softmax:
+</p>
+$$ S = \frac{QK^T}{\sqrt{d_k}} \quad (\text{shape: } n \times n) $$
+<p>We want to apply a mask matrix M:</p>
+$$ S' = S + M $$
+<p>Where $M_{ij} = 0$ allows tokens to attend and $-\infty$ blocks them.</p>
+
+<h3>Padding Mask</h3>
+<p>
+    For a <strong>padding mask</strong> (a sequence-level mask), suppose we have a batch size of $B$. Some tokens are real and some are padding. We want to mask out some <strong>keys</strong>, not queries. That means if key $j$ is a padding token, all queries $i$ should ignore it. So, the masking needs to be along the key dimension.
+</p>
+$$ M_{bij} = \begin{cases} 0 & \text{if key position } j \text{ is real} \\ -\infty & \text{if key position } j \text{ is padding} \end{cases} \quad (\text{shape: } B \times 1 \times n) $$
+<p>
+    The <code>1</code> in the middle dimension means the same mask applies to all queries $i$. This will get broadcasted during addition: <code>(B x 1 x n) + (B x n x n) -> (B x n x n)</code>.
+</p>
+<p>
+    Broadcasting always confuses me, so let’s discuss it again. Broadcasting compares shapes element-wise from the right. If the dimensions match or one of them is 1, they’re compatible. The dimension of size 1 is stretched to match the other. The mask only told us which keys (columns) are real or padding. So, we apply the same restriction to every query row by repeating the mask along that dimension.
+</p>
+<p>
+    What about a padding query token? Say we have a categorical cross-entropy for next-token prediction. We don’t want to penalize the model for predicting something at <code>&lt;pad&gt;</code> positions, so we zero out the contribution of the padding tokens. We have to mask out key padding because it gets integrated into the context vector for that token. With the query padding, well, the model would actually predict nothing for that position, because padding positions are masked in the loss function as well. We just don’t want the model to waste time attending to padding keys here.
+</p>
+<p>
+    It’s kind of like queries are the "listeners" and keys are the "speakers." If queries hear non-sense, that’s fine because we would never ask for their opinion anyway. But, if a padding token is a "speaker," that’s bad because a real listener might listen to it and get confused. We need both <strong>attention masking</strong> and <strong>loss masking</strong>.
+</p>
+<ul>
+    <li><strong>Loss masking</strong> doesn't penalize the model for its outputs at padded positions. The output from a padded query position doesn't affect training.</li>
+    <li><strong>Attention masking</strong> makes sure real tokens don’t get confused by attending to padded inputs.</li>
+</ul>
+
+<h3>Causal Mask</h3>
+<p>For a causal mask we get:</p>
+$$ M_{ij} = \begin{cases} 0 & \text{if } j \le i \\ -\infty & \text{if } j > i \end{cases} $$
+<p>
+    This is an upper-triangular matrix of $-\infty$ with a shape of <code>n x n</code> that gets broadcast across the batch. Each row corresponds to a query at position <code>i</code>, which can now only attend to columns where <code>j &lt;= i</code>. At position 1, a token can only attend to itself; at position 2, it can attend to token 1 and itself; at position 3, it can attend to tokens 1, 2, and 3.
+</p>
+<p>
+    The score matrix has a shape of <code>B x n x n</code>, and the causal mask has a shape of <code>1 x n x n</code>. We then broadcast the mask along the batch dimension. Each element in the batch now has its own <code>n x n</code> attention score matrix, and each sample gets a copy of the upper-triangular mask.
 </p>
 
 <hr>

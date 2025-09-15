@@ -257,41 +257,52 @@ $$ M_{bij} = \begin{cases} 0 & \text{if key position } j \text{ is real} \\ -\in
     So far, we had our input sequence of <code>n x d_model</code> with some positional encoding added. We compute multi-head attention (MHA) and output a tensor of shape <code>n x d_model</code>, which is the same shape as the input.
 </p>
 
+<p>
+    So far, we had our input sequence of <code>n x d_model</code> with some positional encoding added (we’ll come back to this later). We compute multi-head attention (MHA) and output an <code>n x d_model</code> tensor that is the same shape as the input.
+</p>
+
 <h3>The Encoder Block</h3>
 <p>
-    Then, in our encoder block, we have an "add and norm" block using a residual connection. It adds the input <code>X</code> to the attention output and applies a layer norm to stabilize it.
+    Then in our encoder block, we have an "add and norm" block, which uses a <strong>residual connection</strong>. It adds the input <code>X</code> to the attention output and applies a <strong>LayerNorm</strong> to stabilize it.
 </p>
 $$ H_1 = \text{LayerNorm}(X + \text{MHA}(X)) \quad (\text{shape: } n \times d_{model}) $$
 <p>
-    Next is a 2-layer MLP applied independently at each position, known as the Position-wise Feed-Forward Network (FFN).
+    A 2-layer MLP, called a Position-wise Feed-Forward Network (FFN), is then applied independently to each position.
 </p>
 $$ \text{FFN}(x) = \text{max}(0, xW_1 + b_1)W_2 + b_2 $$
 <p>
-    This expands the dimension from $d_{model}$ to maybe $4 \times d_{model}$ and then projects it back to $d_{model}$ while preserving the sequence length. Then we add and norm again with another residual connection.
+    This expands the dimension from $d_{model}$ to maybe $4 \times d_{model}$ and then projects it back down to $d_{model}$ while preserving the sequence length. Then we add and norm again with another residual connection.
 </p>
 $$ H_2 = \text{LayerNorm}(H_1 + \text{FFN}(H_1)) $$
 <p>
-    Why do this? Deep networks suffer from vanishing gradients. The residual path provides a shortcut for gradients to flow backward, making optimization easier and allowing the whole block to safely act like an identity function at the start of training. The non-linear transformation is more expressive in a higher dimension, so the expansion process allows for richer combinations of features before compressing them back.
+    Why do this? Deep networks suffer from vanishing gradients. The residual path provides a shortcut for gradients to flow backward, making optimization easier and allowing the whole block to safely act like an identity function at the start of training. The non-linear transformation is more expressive in a higher dimension, so the expansion allows the model to process richer combinations of features before compressing them back. We always try to hold on to the original information using residual connections.
 </p>
 
 <h4>Pre-LN vs. Post-LN</h4>
 <p>
-    Now, you might have heard of **Pre-LN** and **Post-LN**. In the original Vaswani paper, layer normalization was applied *after* the residual connection was added (Post-LN, as shown above). In modern practice, LayerNorm is often applied *before* the sublayer, and the residual is added afterward (Pre-LN). This keeps the residual path clean and helps gradients remain stable.
+    Now, you might have heard of <strong>Pre-LN</strong> and <strong>Post-LN</strong>. In the original Vaswani paper, LayerNorm was applied *after* the residual connection was added (Post-LN, as shown above). In modern practice, LayerNorm is often applied *before* the sublayer, and the residual is added afterward (Pre-LN). This keeps the residual path clean and helps gradients remain stable.
 </p>
 $$ H = X + \text{MHA}(\text{LayerNorm}(X)) $$
 <p>
-    This ordering is important. If the input <code>X</code> is too large, we don’t want it to drown out the MHA output, so we apply LayerNorm to the input, not the output. This keeps the relative balance between the residual and the sublayer stable. Pre-Layer Norm addresses two things: a clean residual path and a strong, stable gradient flow. With a clean residual path $H = X + f(X)$, the gradient is:
+    This ordering is important. If the input <code>X</code> is too large, we don’t want it to drown out the MHA output, so we apply LayerNorm to the input, not the output. This keeps the relative balance between the residual and the sublayer stable. So, Pre-Layer Norm addresses two things: a clean residual path and a strong, stable gradient flow.
+</p>
+<p>
+    With a clean residual path $H = X + f(X)$, the gradient is:
 </p>
 $$ \frac{dH}{dX} = I + \frac{df(X)}{dX} $$
 <p>
     Where $I$ is the identity matrix. This is the magic of residuals. With Post-Layer Norm, $H = \text{LayerNorm}(X + f(X))$, the gradient has to go through the LayerNorm's Jacobian, which complicates the gradient flow.
 </p>
+
 <h4>Why LayerNorm?</h4>
 <p>
-    Why not use something like BatchNorm? On most sequential problems, sequences can have varying lengths. BatchNorm assumes consistent spatial dimensions, but LayerNorm doesn’t care about that; it works token by token. With big Transformer models, BatchNorm is only accurate if batch sizes are large, but due to memory constraints, we typically use smaller batches, making it noisy. Furthermore, with autoregressive models, we generate one token at a time at inference, so a batch size of 1 would make BatchNorm undefined.
+    Here, <code>X</code> is our <code>n x d_model</code> tensor, and LayerNorm is applied to the feature dimension ($d_{model}$) for each token. So, why not use something like <strong>BatchNorm</strong>? Why <strong>LayerNorm</strong>?
+</p>
+<p>
+    On most sequential problems, sequences can have varying lengths. BatchNorm assumes consistent spatial dimensions, but LayerNorm doesn’t care about that; it works token by token. With big Transformer models, BatchNorm is only accurate if batch sizes are large, but due to memory constraints, we typically use smaller batches, making it noisy. Furthermore, with autoregressive models, we generate one token at a time at inference, so a batch size of 1 would make BatchNorm undefined.
 </p>
 <p>LayerNorm computes the mean and standard deviation of a single token's feature vector. There is no mixing across tokens or the batch.</p>
-
+$$ \text{LayerNorm}(x) = \gamma \frac{x - \mu}{\sigma} + \beta $$
 <h3>The Decoder Block</h3>
 <p>
     The decoder block is similar to the encoder block but uses causal masking in its first attention layer. It ensures each position can only attend to itself and earlier tokens. Crucially, we also need to add information from the encoder block to the decoder block using <strong>cross-attention</strong>.

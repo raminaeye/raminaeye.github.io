@@ -440,12 +440,12 @@ $$ h_t = f(W_h h_{t-1} + W_x x_t) $$
     Some actually use a decoder-only model for language translation and simply use a <code>&lt;SEP&gt;</code> token before the prompt/context and the target after this token. In a decoder-only model, everything is just context; source or target don’t matter. As long as you mark the boundary, the model learns what’s source and what’s target.
 </p>
 
-<h3>Streaming Transformers</h3>
+<h3>Streaming Transformers with Windowed Attention</h3>
 <p>
-    Let’s now switch gears a bit. Consider streamable models like online ASR or real-time translation. They can’t see the entire sequence at once, so instead of a full self-attention, they use a restricted <strong>windowed attention</strong>. In a normal attention, it’s global (each query token attends to all past and future tokens). With windowed attention, it only attends to nearby tokens in a fixed range and is also causal because we can’t look into the future.
+    Let’s now switch gears a bit. Consider <strong>streamable models</strong> like online ASR or real-time translation. They can’t see the entire sequence at once, so instead of a full self-attention, you use a restricted window. In a normal attention model, attention is global—each query token attends to all past and future tokens. With <strong>windowed attention</strong>, a token only attends to nearby tokens in a fixed range, and it is also causal because we can’t look into the future.
 </p>
 <p>
-    This is done by masking the attention matrix, setting the scores outside the window to $-\infty$, and forcing the model to ignore keys/values beyond the window.
+    Say you have 10 ms frames and you want the model to make predictions in streaming chunks every 500 ms. We might want each query frame to look back at the last 50 frames. The **attention window** is how many past frames each frame is allowed to see. So, if we feed our attention mechanism 100 frames but only want it to look back 50 frames, we restrict how many keys a query can see using a sliding window. This is done by masking the attention matrix, setting the score outside the window to $-\infty$, and forcing the model to ignore keys/values beyond the window.
 </p>
 <pre><code class="language-python">
 # Create window mask (causal + limited)
@@ -455,10 +455,19 @@ for i in range(n):
     mask[i, start:i+1] = 0 # allow only last `window_size` frames
 </code></pre>
 <p>
-    You might ask, why not just feed the model overlapping windows? With overlapping windows, tokens are recomputed multiple times, and the model has no way of knowing the previous context. With a sliding window mask, the context can propagate forward through the overlap even if the window size is small. Stacking enough layers grows the attention span, much like a receptive field.
+    You might ask, why not feed the model overlapping windows? Why use masking with a sliding window? With overlapping windows, tokens are recomputed multiple times, and the model has no way of knowing the previous context.
 </p>
 <p>
-    The choice of window size balances accuracy, latency, and compute. For example, if you are feeding a model 1 second of audio data (100 frames at 10 ms per frame) and you care about phonemes (20-50 ms, or 2-5 frames), you might choose a context window of 10 frames. You don’t need the entire 100 frames, because that would be modeling at the word level and would increase computation and latency.
+    This notion of context might seem a bit fuzzy. Context is the information a token carries from other tokens it has attended to; it’s the weighted sum of the value vectors. Imagine at layer 1, you look 10 frames back, so each output token is a blend of 10 input tokens. Now, in layer 2, the enriched tokens from layer 1 can add their context. Your token at position 19 isn’t just token 19 anymore; it’s a representation of tokens 10 through 19 from the previous layer. And since token 10 from the previous layer saw tokens 0 through 9, the context has propagated. It’s kind of like the receptive field growing in each layer; by stacking enough layers, you grow the attention span.
+</p>
+<p>
+    If you were to just send 10 frames at a time in an overlapping fashion, the issue is that the new chunk has no memory of the past. There’s no connection between the chunks because the context gets reset at each chunk boundary. The sliding window with masking allows for the context to propagate forward through the overlap, even if the window size itself is small.
+</p>
+<p>
+    The choice of window size is a balance between accuracy, latency, and compute. You want a large enough window to disambiguate context, but you have to wait longer to fill up a larger window, and a longer window means more memory and FLOPs.
+</p>
+<p>
+    Say you’re feeding your model 1 second of audio data (100 frames at 10 ms per frame), and you care about phonemes, which are about 20 to 50 ms long (about 2 to 5 frames per phoneme). How do you choose the attention window? We would want to integrate the whole phoneme span and maybe a little extra because the boundaries can be blurry, so you might choose 10 frames as your context window. You don’t need the entire 100 frames, because then you would be modeling at the word-level context, which increases computation and latency. So, think about the natural dependencies in your data when you select the attention window in a streaming fashion. How long is the smallest unit you need to capture? A phoneme, a gesture, a word, a spike? Convert that to milliseconds and figure out how many frames/tokens it needs to be. You can increase the window if validation accuracy keeps improving and stop if latency and compute become unacceptable.
 </p>
 
 <hr>

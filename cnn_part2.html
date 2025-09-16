@@ -147,21 +147,90 @@
     
     <hr>
     
-    <h2 id="dilation">Dilated Causal Convolutions</h2>
-    <p>
-        To make causal convolutions more powerful, we can use <strong>dilation</strong>, which involves skipping input points at a certain rate $d$. When dilation is 1, the receptive field is just the kernel size. If we introduce a dilation greater than 1, we can look farther back in time without increasing the number of parameters. The total span of a dilated kernel is:
-    </p>
-    $$ \text{Total Span} = (k-1)d + 1 $$
-    <p>
-        When you stack two causal dilated convolution layers, the new layer sees the entire receptive field of the layer below. In the first layer, you usually don’t want to dilate, as you don't want to miss samples in the raw input by introducing blind spots.
-    </p>
-    <p>The receptive field for a stack of $L$ layers is:</p>
-    $$ RF = 1 + \sum_{l=1}^{L} (k-1) \prod_{j=1}^{l} d_j $$
-    <p>
-        Alternatively, we can define <strong>jump</strong> as the effective stride in raw input units. Jump is how far apart two adjacent outputs at layer $l$ are in terms of raw input indices. At each layer, the jump and receptive field are updated:
-    </p>
-    $$ jump_l = jump_{l-1} \times s_l \times d_l $$
-    $$ RF_l = RF_{l-1} + (k_l - 1) \times jump_{l-1} $$
+    <h3>Dilated Causal Convolutions and Receptive Field 🧠</h3>
+<p>
+    When dilation is 1, the receptive field (RF) is just the kernel size. If we introduce a dilation <code>d > 1</code>, we can look farther back in time. The total span of a single dilated kernel becomes:
+</p>
+$$ \text{Total Span} = (k-1)d + 1 $$
+<p>
+    Now let’s stack causal dilated convolution layers. In the first layer, you usually don’t want to dilate because you don't want to miss samples in the raw input or introduce blind spots. When you stack layers, the new layer sees the entire receptive field of the layer below.
+</p>
+<p>
+    Let’s define <strong>jump</strong>, the effective stride in raw input units. The jump is how far apart two adjacent outputs at layer <code>l</code> are in terms of raw input indices. At each layer, the jump is updated:
+</p>
+$$ \text{jump}_l = \text{jump}_{l-1} \cdot s_l \cdot d_l $$
+<p>
+    This is because stride ($s_l$) skips inputs from the previous layer, and dilation ($d_l$) spaces out the taps inside the kernel, both of which multiply the step size in the raw input. The receptive field can then be calculated iteratively:
+</p>
+$$ RF_l = RF_{l-1} + (k_l - 1) \cdot \text{jump}_{l-1} $$
+
+<h4>Example: Designing a CNN for a 300ms Receptive Field</h4>
+<p>
+    Let’s consider sensory data coming in at a <strong>1kHz sampling rate</strong>. We know that in our trial window, the activity corresponding to our label is about <strong>300 ms</strong> long. Therefore, we want our model’s receptive field to be at least 300 samples to see the entire structure.
+</p>
+<p>
+    Let's design a CNN model that has a receptive field (RF) greater than 300. We will mix standard convolutions, striding, and dilations. We start with an input receptive field of 1 and a jump of 1.
+</p>
+<ul>
+    <li>
+        <strong>Layer 1 (Input):</strong>
+        <ul>
+            <li><code>RF = 1</code></li>
+            <li><code>Jump = 1</code></li>
+        </ul>
+    </li>
+    <li>
+        <strong>Layer 2 (Conv Block 1):</strong> Use a standard convolution to capture initial fine-grained features.
+        <ul>
+            <li>Parameters: <code>Kernel (k)=7</code>, <code>Stride (s)=1</code>, <code>Dilation (d)=1</code></li>
+            <li>New Jump: $1 \times 1 \times 1 = \mathbf{1}$</li>
+            <li>New RF: $1 + (7-1) \times 1 = \mathbf{7}$</li>
+        </ul>
+    </li>
+    <li>
+        <strong>Layer 3 (Conv Block 2):</strong> Downsample the sequence with a strided convolution.
+        <ul>
+            <li>Parameters: <code>k=5</code>, <code>s=2</code>, <code>d=1</code></li>
+            <li>New Jump: $1 \times 2 \times 1 = \mathbf{2}$</li>
+            <li>New RF: $7 + (5-1) \times 1 = \mathbf{11}$</li>
+        </ul>
+    </li>
+    <li>
+        <strong>Layer 4 (Conv Block 3):</strong> Start expanding the receptive field with a small dilation.
+        <ul>
+            <li>Parameters: <code>k=3</code>, <code>s=1</code>, <code>d=2</code></li>
+            <li>New Jump: $2 \times 1 \times 2 = \mathbf{4}$</li>
+            <li>New RF: $11 + (3-1) \times 2 = \mathbf{15}$</li>
+        </ul>
+    </li>
+    <li>
+        <strong>Layer 5 (Conv Block 4):</strong> Continue expanding with a larger dilation.
+        <ul>
+            <li>Parameters: <code>k=3</code>, <code>s=1</code>, <code>d=4</code></li>
+            <li>New Jump: $4 \times 1 \times 4 = \mathbf{16}$</li>
+            <li>New RF: $15 + (3-1) \times 4 = \mathbf{23}$</li>
+        </ul>
+    </li>
+    <li>
+        <strong>Layer 6 (Conv Block 5):</strong> Double the dilation again.
+        <ul>
+            <li>Parameters: <code>k=3</code>, <code>s=1</code>, <code>d=8</code></li>
+            <li>New Jump: $16 \times 1 \times 8 = \mathbf{128}$</li>
+            <li>New RF: $23 + (3-1) \times 16 = \mathbf{55}$</li>
+        </ul>
+    </li>
+     <li>
+        <strong>Layer 7 (Conv Block 6):</strong> One final large dilation to cross our target.
+        <ul>
+            <li>Parameters: <code>k=3</code>, <code>s=1</code>, <code>d=16</code></li>
+            <li>New Jump: $128 \times 1 \times 16 = \mathbf{2048}$</li>
+            <li>New RF: $55 + (3-1) \times 128 = \mathbf{311}$</li>
+        </ul>
+    </li>
+</ul>
+<p>
+    After 6 convolutional layers, we have successfully designed a network with a receptive field of <strong>311 samples</strong>, which covers our target of 300 ms at a 1kHz sampling rate.
+</p>
 
     <hr>
 

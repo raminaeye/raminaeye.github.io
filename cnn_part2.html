@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -42,7 +41,7 @@
       font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
     }
     /* For inline code */
-    p > code, li > code, table td > code {
+    p > code, li > code, table td > code, ul ul li > code {
       background: #e8eaed;
       padding: 0.2em 0.4em;
       border-radius: 3px;
@@ -93,8 +92,8 @@
         <ul>
             <li><a href="#fundamentals">Fundamentals</a></li>
             <li><a href="#padding">Padding & Causality</a></li>
-            <li><a href="#dilation">Dilation</a></li>
-            <li><a href="#design">Design</a></li>
+            <li><a href="#dilation">Dilation & Receptive Field</a></li>
+            <li><a href="#design">Design Considerations</a></li>
             <li><a href="#normalization">Normalization</a></li>
             <li><a href="#separable-convs">Separable Convolutions</a></li>
             <li><a href="#advanced-arch">Advanced Architectures</a></li>
@@ -147,152 +146,141 @@
     
     <hr>
     
-    <h3>Dilated Causal Convolutions and Receptive Field 🧠</h3>
-<p>
-    When dilation is 1, the receptive field (RF) is just the kernel size. If we introduce a dilation <code>d > 1</code>, we can look farther back in time. The total span of a single dilated kernel becomes:
-</p>
-$$ \text{Total Span} = (k-1)d + 1 $$
-<p>
-    Now let’s stack causal dilated convolution layers. In the first layer, you usually don’t want to dilate because you don't want to miss samples in the raw input or introduce blind spots. When you stack layers, the new layer sees the entire receptive field of the layer below.
-</p>
-<p>
-    Let’s define <strong>jump</strong>, the effective stride in raw input units. The jump is how far apart two adjacent outputs at layer <code>l</code> are in terms of raw input indices. At each layer, the jump is updated:
-</p>
-$$ \text{jump}_l = \text{jump}_{l-1} \cdot s_l \cdot d_l $$
-<p>
-    This is because stride ($s_l$) skips inputs from the previous layer, and dilation ($d_l$) spaces out the taps inside the kernel, both of which multiply the step size in the raw input. The receptive field can then be calculated iteratively:
-</p>
-$$ RF_l = RF_{l-1} + (k_l - 1) \cdot \text{jump}_{l-1} $$
+    <h2 id="dilation">Dilated Causal Convolutions and Receptive Field</h2>
+    <p>
+        To make causal convolutions more powerful, we can use <strong>dilation</strong>, which involves skipping input points at a certain rate $d$. When dilation is 1, the receptive field (RF) is just the kernel size. If we introduce a dilation <code>d > 1</code>, we can look farther back in time. The total span of a single dilated kernel becomes:
+    </p>
+    $$ \text{Total Span} = (k-1)d + 1 $$
+    <p>
+        Now let’s stack causal dilated convolution layers. In the first layer, you usually don’t want to dilate because you don't want to miss samples in the raw input or introduce blind spots. When you stack layers, the new layer sees the entire receptive field of the layer below.
+    </p>
+    <p>
+        Let’s define <strong>jump</strong>, the effective stride in raw input units. The jump is how far apart two adjacent outputs at layer <code>l</code> are in terms of raw input indices. At each layer, the jump is updated:
+    </p>
+    $$ \text{jump}_l = \text{jump}_{l-1} \cdot s_l \cdot d_l $$
+    <p>
+        This is because stride ($s_l$) skips inputs from the previous layer, and dilation ($d_l$) spaces out the taps inside the kernel, both of which multiply the step size in the raw input. The receptive field can then be calculated iteratively:
+    </p>
+    $$ RF_l = RF_{l-1} + (k_l - 1) \cdot \text{jump}_{l-1} $$
 
-<h4>Example: Designing a CNN for a 300ms Receptive Field</h4>
-<p>
-    Let’s consider sensory data coming in at a <strong>1kHz sampling rate</strong>. We know that in our trial window, the activity corresponding to our label is about <strong>300 ms</strong> long. Therefore, we want our model’s receptive field to be at least 300 samples to see the entire structure.
-</p>
-<p>
-    Let's design a CNN model that has a receptive field (RF) greater than 300. We will mix standard convolutions, striding, and dilations. We start with an input receptive field of 1 and a jump of 1.
-</p>
-<ul>
-    <li>
-        <strong>Layer 1 (Input):</strong>
-        <ul>
-            <li><code>RF = 1</code></li>
-            <li><code>Jump = 1</code></li>
-        </ul>
-    </li>
-    <li>
-        <strong>Layer 2 (Conv Block 1):</strong> Use a standard convolution to capture initial fine-grained features.
-        <ul>
-            <li>Parameters: <code>Kernel (k)=7</code>, <code>Stride (s)=1</code>, <code>Dilation (d)=1</code></li>
-            <li>New Jump: $1 \times 1 \times 1 = \mathbf{1}$</li>
-            <li>New RF: $1 + (7-1) \times 1 = \mathbf{7}$</li>
-        </ul>
-    </li>
-    <li>
-        <strong>Layer 3 (Conv Block 2):</strong> Downsample the sequence with a strided convolution.
-        <ul>
-            <li>Parameters: <code>k=5</code>, <code>s=2</code>, <code>d=1</code></li>
-            <li>New Jump: $1 \times 2 \times 1 = \mathbf{2}$</li>
-            <li>New RF: $7 + (5-1) \times 1 = \mathbf{11}$</li>
-        </ul>
-    </li>
-    <li>
-        <strong>Layer 4 (Conv Block 3):</strong> Start expanding the receptive field with a small dilation.
-        <ul>
-            <li>Parameters: <code>k=3</code>, <code>s=1</code>, <code>d=2</code></li>
-            <li>New Jump: $2 \times 1 \times 2 = \mathbf{4}$</li>
-            <li>New RF: $11 + (3-1) \times 2 = \mathbf{15}$</li>
-        </ul>
-    </li>
-    <li>
-        <strong>Layer 5 (Conv Block 4):</strong> Continue expanding with a larger dilation.
-        <ul>
-            <li>Parameters: <code>k=3</code>, <code>s=1</code>, <code>d=4</code></li>
-            <li>New Jump: $4 \times 1 \times 4 = \mathbf{16}$</li>
-            <li>New RF: $15 + (3-1) \times 4 = \mathbf{23}$</li>
-        </ul>
-    </li>
-    <li>
-        <strong>Layer 6 (Conv Block 5):</strong> Double the dilation again.
-        <ul>
-            <li>Parameters: <code>k=3</code>, <code>s=1</code>, <code>d=8</code></li>
-            <li>New Jump: $16 \times 1 \times 8 = \mathbf{128}$</li>
-            <li>New RF: $23 + (3-1) \times 16 = \mathbf{55}$</li>
-        </ul>
-    </li>
-     <li>
-        <strong>Layer 7 (Conv Block 6):</strong> One final large dilation to cross our target.
-        <ul>
-            <li>Parameters: <code>k=3</code>, <code>s=1</code>, <code>d=16</code></li>
-            <li>New Jump: $128 \times 1 \times 16 = \mathbf{2048}$</li>
-            <li>New RF: $55 + (3-1) \times 128 = \mathbf{311}$</li>
-        </ul>
-    </li>
-</ul>
-<p>
-    After 6 convolutional layers, we have successfully designed a network with a receptive field of <strong>311 samples</strong>, which covers our target of 300 ms at a 1kHz sampling rate.
-</p>
+    <h4>Example: Designing a CNN for a 300ms Receptive Field</h4>
+    <p>
+        Let’s consider sensory data coming in at a <strong>1kHz sampling rate</strong>. We know that in our trial window, the activity corresponding to our label is about <strong>300 ms</strong> long. Therefore, we want our model’s receptive field to be at least 300 samples to see the entire structure.
+    </p>
+    <p>
+        Let's design a CNN model that has a receptive field (RF) greater than 300. We will mix standard convolutions, striding, and dilations. We start with an input receptive field of 1 and a jump of 1.
+    </p>
+    <ul>
+        <li>
+            <strong>Layer 1 (Input):</strong>
+            <ul>
+                <li><code>RF = 1</code></li>
+                <li><code>Jump = 1</code></li>
+            </ul>
+        </li>
+        <li>
+            <strong>Layer 2 (Conv Block 1):</strong> Use a standard convolution to capture initial fine-grained features.
+            <ul>
+                <li>Parameters: <code>Kernel (k)=7</code>, <code>Stride (s)=1</code>, <code>Dilation (d)=1</code></li>
+                <li>New Jump: $1 \times 1 \times 1 = \mathbf{1}$</li>
+                <li>New RF: $1 + (7-1) \times 1 = \mathbf{7}$</li>
+            </ul>
+        </li>
+        <li>
+            <strong>Layer 3 (Conv Block 2):</strong> Downsample the sequence with a strided convolution.
+            <ul>
+                <li>Parameters: <code>k=5</code>, <code>s=2</code>, <code>d=1</code></li>
+                <li>New Jump: $1 \times 2 \times 1 = \mathbf{2}$</li>
+                <li>New RF: $7 + (5-1) \times 1 = \mathbf{11}$</li>
+            </ul>
+        </li>
+        <li>
+            <strong>Layer 4 (Conv Block 3):</strong> Start expanding the receptive field with a small dilation.
+            <ul>
+                <li>Parameters: <code>k=3</code>, <code>s=1</code>, <code>d=2</code></li>
+                <li>New Jump: $2 \times 1 \times 2 = \mathbf{4}$</li>
+                <li>New RF: $11 + (3-1) \times 2 = \mathbf{15}$</li>
+            </ul>
+        </li>
+        <li>
+            <strong>Layer 5 (Conv Block 4):</strong> Continue expanding with a larger dilation.
+            <ul>
+                <li>Parameters: <code>k=3</code>, <code>s=1</code>, <code>d=4</code></li>
+                <li>New Jump: $4 \times 1 \times 4 = \mathbf{16}$</li>
+                <li>New RF: $15 + (3-1) \times 4 = \mathbf{23}$</li>
+            </ul>
+        </li>
+        <li>
+            <strong>Layer 6 (Conv Block 5):</strong> Double the dilation again.
+            <ul>
+                <li>Parameters: <code>k=3</code>, <code>s=1</code>, <code>d=8</code></li>
+                <li>New Jump: $16 \times 1 \times 8 = \mathbf{128}$</li>
+                <li>New RF: $23 + (3-1) \times 16 = \mathbf{55}$</li>
+            </ul>
+        </li>
+         <li>
+            <strong>Layer 7 (Conv Block 6):</strong> One final large dilation to cross our target.
+            <ul>
+                <li>Parameters: <code>k=3</code>, <code>s=1</code>, <code>d=16</code></li>
+                <li>New Jump: $128 \times 1 \times 16 = \mathbf{2048}$</li>
+                <li>New RF: $55 + (3-1) \times 128 = \mathbf{311}$</li>
+            </ul>
+        </li>
+    </ul>
+    <p>
+        After 6 convolutional layers, we have successfully designed a network with a receptive field of <strong>311 samples</strong>, which covers our target of 300 ms at a 1kHz sampling rate.
+    </p>
 
     <hr>
 
-    <h2 id="design">Designing CNNs for Sensory Data</h2>
-    <p>
-        Let’s consider sensory data coming in at a 1kHz sampling rate. Let’s say we know that in our trial window, the activity corresponding to our label is about 300 ms long. We would want our model’s receptive field to be large enough to see this entire structure (e.g., a receptive field of at least 300 samples).
-    </p>
-    <p>When designing a model, we have to make some decisions:</p>
+    <h2 id="design">Design Considerations for Sensory Data CNNs</h2>
+    <p>We want to design a CNN model that has a receptive field of, say, 256. With a kernel size of 3, mixing pooling and dilation, it could take us around 9 layers. We have to make some model decisions.</p>
     <ul>
-        <li><strong>Do we pool early or late?</strong> If we pool early, the sequence length reduces quickly, leading to faster computation and smaller memory usage, but we could be throwing away fine details. If we pool late, there’s a good chance we capture those fine details, but it would be more expensive. For noisy, high-frequency signals, you might want to pool early. For low-rate signals, you can postpone it.</li>
-        <li><strong>Dilation</strong> can help expand the receptive field at no extra computational cost, but too much dilation in the early layers can risk creating holes in the signal and missing local details. You may want to apply it once features have stabilized in deeper layers.</li>
-        <li><strong>Small kernels</strong> (e.g., size 3 or 5) are typically standard, as they stack well to approximate large filters. Sometimes, <strong>large kernels</strong> can be used in the first layer to capture broad spectral features.</li>
+        <li><strong>Do we pool early or late?</strong> If we pool early, the sequence length reduces quickly, leading to faster computation and smaller memory, but we could be throwing away fine details. Early pooling can also reduce latency. If we pool late, there’s a good chance we capture those fine details, but it would be more expensive. For noisy, high-frequency signals, you may want to do pooling early; for low-rate signals, you can postpone it.</li>
+        <li><strong>Dilation</strong> can help too, but too much dilation in the early layers can risk holes in the signal and missing local details. This comes at no extra cost, but you may want to apply it once features have stabilized.</li>
+        <li><strong>Small kernels</strong> are typically standard, as they stack well to approximate large filters. Sometimes, large kernels can be used in the first layer to capture spectral features.</li>
     </ul>
 
     <h3>The Role of Pooling in Final Layers</h3>
     <p>
-        Both <strong>pooling</strong> and <strong>striding</strong> downsample the time resolution. However, a strided convolution uses a learnable filter, while pooling is a fixed function.
+        Both <strong>pooling</strong> and <strong>striding</strong> downsample the time resolution. However, a strided convolution uses a learnable filter, while pooling is a fixed function. In early layers, you may want to keep stride 1 and no pooling. In mid-layers, you can start to compress time.
     </p>
     <p>
-        The final layers of a CNN often use <strong>Global Average Pooling (GAP)</strong> across time before a classification task. This squeezes the entire sequence dimension and gives you one feature value per channel. GAP is useful because:
+        The final layers of a CNN often use <strong>Global Average Pooling (GAP)</strong> across time before a classification task. This squeezes the entire sequence dimension and gives you one feature value per channel. GAP produces a fixed-size representation regardless of the input length and provides translation invariance in time. Instead of flattening a $C \times T$ feature map into a huge vector, GAP collapses it to just $C$ features, which prevents the classification head from exploding in size.
     </p>
-    <ol>
-        <li>It produces a fixed-size representation regardless of the input length.</li>
-        <li>It provides translation invariance in time, where the exact location of a pattern matters less than its existence somewhere in the window.</li>
-        <li>Instead of flattening a $C \times T$ feature map into a huge vector, GAP collapses it to just $C$ features, which prevents the classification head from exploding in size.</li>
-    </ol>
     <p>
-        Pooling is not the only option. You can also use an <strong>attention mechanism</strong> to learn a weight for each time step and let the model focus on the most informative parts of the signal.
+        Pooling is not the only way. You can learn a weight per time step and let the model focus on the most informative parts of the signal.
     </p>
     $$ z = \sum_t \alpha_t h_t \quad \text{where} \quad \alpha_t = \text{softmax}(W h_t) $$
     <p>
-        Alternatively, you can feed the CNN features into an LSTM or a Transformer to model long-range temporal dependencies.
+        We can also feed the CNN features into an LSTM or Transformer to model temporal dependencies.
     </p>
-
+    
     <hr>
-
+    
     <h2 id="normalization">Normalization for Time-Series Data</h2>
     <p>
-        <strong>Batch Normalization (BN)</strong> is typically used for images in CNNs to reduce internal covariate shift and stabilize training. For time-series signals with long windows, GPU memory is often tight, so the batch size might be small, making batch statistics unreliable. Furthermore, if the signals are non-stationary and drift over time, batch normalization can wash out useful information.
+        Let's talk about normalization. <strong>Batch Normalization (BN)</strong> is typically used for images in CNNs to reduce internal covariate shift and stabilize training. For time-series signals with long windows, GPU memory is often tight, so the batch size might be small. If the signals are non-stationary and drift over time, batch normalization can wash out useful information.
     </p>
     <p>
-        Let’s talk about this a bit. In images (<code>N, C, H, W</code>), BN computes the mean/variance per channel across the batch <code>N</code> and spatial dimensions <code>H, W</code>. For a 1D time-series signal (<code>N, C, T</code>), BN computes statistics per channel across the batch <code>N</code> and time <code>T</code>.
-    </p>
-    <p>
-        If you normalize a signal that has both weak and strong amplitudes using BN, the absolute difference in amplitude is lost. It erases scale cues that might indicate one burst was stronger than another. For images, we often don't care if an image is brighter or darker. For time-series signals, however, amplitude often carries important information.
+        In images (<code>N, C, H, W</code>), BN computes the mean/variance per channel across the batch <code>N</code> and spatial dimensions <code>H, W</code>. For a 1D time-series signal (<code>N, C, T</code>), BN computes statistics per channel across the batch <code>N</code> and time <code>T</code>. If you normalize a signal that has both weak and strong amplitudes using BN, the absolute difference in amplitude is lost. It erases scale cues that might indicate one burst was stronger than another.
     </p>
     <p>Other forms of normalization are often more suitable:</p>
     <ul>
-        <li><strong>InstanceNorm (IN)</strong>: Normalizes per sample, per channel, across the time dimension only. Each trial and channel gets its own mean and standard deviation. This can remove per-trial baseline shifts but also loses absolute amplitude information within that trial. If amplitude is important for the label, IN can hurt the model. It can be useful in early layers to remove baseline drift in raw signals.</li>
-        <li><strong>LayerNorm (LN)</strong>: Normalizes per sample, across all channels, at each individual time step. This works well for RNNs and Transformers with small batches and preserves differences between trials. However, if one channel is consistently dominant, normalization could suppress that important cue. It's often more helpful for later layers after features have been fused across channels.</li>
-        <li><strong>GroupNorm (GN)</strong>: Splits channels into groups and normalizes within each group. It’s a middle ground between IN and LN and lets you normalize different modalities separately before fusing them.</li>
+        <li><strong>InstanceNorm (IN)</strong>: Normalizes per sample, per channel, across the time dimension only. Each trial and channel gets its own mean and standard deviation. This can remove per-trial baseline shifts but also loses absolute amplitude information within that trial.</li>
+        <li><strong>LayerNorm (LN)</strong>: Normalizes per sample, across all channels, at each individual time step. This works well for RNNs and Transformers with small batches and preserves differences between trials. However, if one channel is consistently dominant, normalization could suppress that important cue.</li>
+        <li><strong>GroupNorm (GN)</strong>: Splits channels into groups and normalizes within each group. It’s a middle ground between IN and LN.</li>
     </ul>
-
-    <hr>
     
+    <hr>
+
     <h2 id="separable-convs">Depthwise Separable Convolutions in 1D</h2>
     <p>
         The number of parameters in a standard 1D convolution is $k \times C_{in} \times C_{out}$. Each filter mixes time and channels jointly. <strong>Depthwise separable convolution</strong> breaks this into two cheaper steps:
     </p>
     <ol>
-        <li>A <strong>depthwise convolution</strong> applies one filter per input channel independently (by setting <code>groups=in_channels</code>). Each filter has a size of $k \times 1$. This step captures temporal patterns <em>within</em> each channel but does not perform cross-channel mixing. The number of parameters is $k \times C_{in}$.</li>
-        <li>It is followed by a <strong>pointwise convolution</strong>, which is a <code>1x1</code> convolution that mixes information <em>across</em> channels. This step captures cross-channel correlations. The number of parameters is $C_{in} \times C_{out}$.</li>
+        <li>A <strong>depthwise convolution</strong> applies one filter per input channel independently (by setting <code>groups=in_channels</code>). This step captures temporal patterns <em>within</em> each channel. The number of parameters is $k \times C_{in}$.</li>
+        <li>It is followed by a <strong>pointwise convolution</strong>, which is a <code>1x1</code> convolution that mixes information <em>across</em> channels. The number of parameters is $C_{in} \times C_{out}$.</li>
     </ol>
     <p>
         The total number of parameters is $k \times C_{in} + C_{in} \times C_{out}$, which is significantly less than a standard convolution.
@@ -328,37 +316,22 @@ class SeparableConv1d(nn.Module):
         x = self.depthwise(x)  # per-channel temporal filtering
         x = self.pointwise(x)  # cross-channel mixing
         return x
-
-# Example usage
-# x = torch.randn(8, 32, 1000)  # batch=8, channels=32 (EMG), time=1000
-# model = SeparableConv1d(32, 64, kernel_size=5, padding=2)
-# y = model(x)
-# print(x.shape)  # torch.Size([8, 32, 1000])
-# print(y.shape)  # torch.Size([8, 64, 1000])
     </code></pre>
     
     <hr>
-    
-    <h2 id="advanced-arch">Advanced Architectures: TDS and Multi-Scale TDS</h2>
+
+    <h2 id="advanced-arch">Advanced Architectures for Temporal Signals</h2>
     
     <h3>Time-Depth Separable (TDS) Block</h3>
     <p>
-        A <strong>Time-Depth Separable (TDS) block</strong> is inspired by depthwise separable convolution and is tailored for temporal signals. It has three main steps:
-    </p>
-    <ol>
-        <li>A <strong>time-channel separable convolution</strong> (a large convolution along time applied independently to each channel).</li>
-        <li>A <strong>pointwise convolution</strong> that mixes across channels.</li>
-        <li>A <strong>residual connection</strong> combined with normalization and dropout.</li>
-    </ol>
-    <p>
-        It’s basically a temporal pattern extractor + channel mixer + residual block. <strong>LayerNorm</strong> is often used because it normalizes per sample across channels (not across the batch), which respects the structure of time-series data and doesn't erase trial-level amplitude differences like BatchNorm would.
+        A <strong>Time-Depth Separable (TDS) block</strong> is inspired by depthwise separable convolution and is tailored for temporal signals. It has three main steps: a time-channel separable convolution, a pointwise convolution, and a residual connection with normalization and dropout. It’s basically a temporal pattern extractor + channel mixer + residual block. <strong>LayerNorm</strong> is often used because it respects the time-series structure.
     </p>
     <pre><code class="language-python">
 import torch.nn.functional as F
 
 class TDSBlock(nn.Module):
     """
-    Time-Depth Separable (TDS) block for temporal signals.
+    Time-Depth Separable (TDS) block for temporal signals (EMG/IMU/Audio).
     Steps:
       1) Depthwise temporal conv (per-channel).
       2) Pointwise conv (1x1) to mix across channels.
@@ -367,7 +340,6 @@ class TDSBlock(nn.Module):
     def __init__(self, channels, kernel_size=5, dropout=0.1):
         super().__init__()
         
-        # Depthwise conv along time
         self.depthwise = nn.Conv1d(
             in_channels=channels,
             out_channels=channels,
@@ -377,7 +349,6 @@ class TDSBlock(nn.Module):
             bias=False
         )
         
-        # Pointwise convs
         self.pointwise1 = nn.Conv1d(channels, channels, kernel_size=1, bias=False)
         self.pointwise2 = nn.Conv1d(channels, channels, kernel_size=1, bias=False)
         
@@ -408,7 +379,7 @@ class TDSBlock(nn.Module):
 
     <h3>Multi-Scale TDS</h3>
     <p>
-        You can create <strong>Multi-Scale TDS blocks</strong> by running TDS blocks in parallel, with each branch operating on a different temporal scale achieved through downsampling. This allows the network to capture both fine-grained bursts and long-range temporal structures simultaneously, giving it multiple receptive field sizes.
+        You can create <strong>Multi-Scale TDS blocks</strong> by running TDS blocks in parallel, with each branch operating on a different temporal scale achieved through downsampling. This allows the network to capture both fine-grained bursts and long-range temporal structures simultaneously.
     </p>
     <p>
         <strong>Average pooling</strong> is used for downsampling as it acts as a low-pass filter to prevent aliasing. The output from each branch is then upsampled back to the original time resolution so it can be fused with the outputs from other branches.

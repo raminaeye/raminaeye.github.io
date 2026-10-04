@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Knowledge Distillation Explained with PyTorch</title>
   <style>
     body {
@@ -61,8 +62,50 @@
     strong {
         color: #2980b9;
     }
+    /* Rendered notebook output, not a print() call */
+    .output {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 1rem 1.2rem;
+      border-radius: 6px;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+      font-size: 0.9em;
+      margin: 1em 0;
+      overflow-x: auto;
+      border-left: 4px solid #22c55e;
+    }
+    .output .dim { color: #94a3b8; }
+    .output .good { color: #4ade80; font-weight: bold; }
+    .output .bad { color: #f87171; font-weight: bold; }
+    /* Interactive demo */
+    .demo {
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      padding: 1.2rem;
+      margin: 1.5em 0;
+      background: #fbfcfd;
+    }
+    .demo-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    .demo-controls label { font-weight: bold; color: #2c3e50; }
+    .demo-controls input[type=range] { width: 220px; accent-color: #3498db; }
+    .demo canvas { display: block; margin: 0 auto; max-width: 100%; }
+    .demo-stats {
+      text-align: center; margin-top: 0.8rem; font-size: 0.95em; color: #2c3e50;
+    }
+    .demo-stats strong { color: #2980b9; }
+    .caption {
+      font-size: 0.9em; color: #555; margin-top: 0.8rem;
+      border-left: 3px solid #3498db; padding-left: 0.8em;
+    }
+    .mjx-chtml.MJXc-display { overflow-x: auto; max-width: 100%; }
   </style>
-  
+
   <script type="text/javascript" async
     src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML">
   </script>
@@ -72,7 +115,9 @@
         inlineMath: [['$','$'], ['\\(','\\)']],
         displayMath: [['$$','$$'], ['\\[','\\]']],
         processEscapes: true
-      }
+      },
+      showProcessingMessages: false,
+      messageStyle: "none"
     });
   </script>
 
@@ -83,34 +128,25 @@
 <body>
    <nav>
      <ul>
-       <li><a href="index.html">Home</a></li> 
+       <li><a href="index.html">Home</a></li>
        <li><a href="https://github.com/raminaeye/model-optimization/blob/main/knowledge_distillation/knowledge_distillation.ipynb">Knowledge Distillation-Notebook</a></li>
      </ul>
    </nav>
 
    <h1>Knowledge Distillation</h1>
    <p>
-     How do you shrink a giant model into a small one without a significant loss in performance? <strong>Knowledge Distillation (KD)</strong> provides a powerful solution. The core idea is to use a large, accurate pre-trained model (the "teacher") to train a smaller, faster model (the "student") that mimics the teacher’s behavior.
+     How do you shrink a giant model into a small one without a significant loss in performance? <strong>Knowledge Distillation (KD)</strong> provides a powerful solution. The core idea is to use a large, accurate pre-trained model (the "teacher") to train a smaller, faster model (the "student") that mimics the teacher's behavior.
    </p>
    <p>
-     This technique has proven highly effective in practice. For example, <code>DistilBERT</code> was distilled from the <code>BERT-base</code> model, resulting in a 40% parameter reduction while retaining 95% of BERT's performance. Similarly, the original <code>MobileNet</code> was distilled from <code>ResNet-50</code>.
+     This technique has proven highly effective in practice. For example, <code>DistilBERT</code> was distilled from the <code>BERT-base</code> model, resulting in a 40% parameter reduction while retaining 95% of BERT's performance. Similarly, later distilled variants of <code>MobileNet</code> were taught by <code>ResNet-50</code>. The pattern is always the same: a big model that is too expensive to deploy teaches a small model that is cheap to run.
    </p>
-   <p>
-     Today, Knowledge Distillation is widely deployed for a variety of tasks, including:
-   </p>
-   <ul>
-     <li>Getting Automatic Speech Recognition (ASR) models to run efficiently on-device.</li>
-     <li>Performing real-time segmentation with smaller, faster models.</li>
-     <li>Creating tiny yet powerful transformer models for resource-constrained environments.</li>
-     <li>Developing lightweight reinforcement learning policies distilled from large, complex RL agents.</li>
-   </ul>
 
-   <h2>The Core Idea: Learning from "Soft" Predictions</h2>
+   <h2>The core idea: learning from "soft" predictions</h2>
    <p>
      Instead of training the student model solely on the hard ground-truth labels (e.g., "this image is a cat"), the student also learns from the "soft" predictions produced by the teacher. These soft predictions are the probability distribution over all classes that the teacher model outputs. This distribution contains richer information, revealing how the teacher "thinks" (e.g., "this image is 90% likely a cat, 8% a dog, and 2% a car").
    </p>
    <p>
-     To make this information more useful, the teacher's output logits are typically softened using a <strong>temperature scaling</strong> parameter, $T$.
+     To make this information more useful, the teacher's output logits are typically softened using a <strong>temperature scaling</strong> parameter, $T$:
    </p>
    $$ \text{soft_targets} = \text{softmax}\left(\frac{\text{logits}}{T}\right) $$
    <p>
@@ -122,36 +158,179 @@
      <li>When $T < 1$, the distribution becomes sharper, approaching a one-hot encoding.</li>
    </ul>
    <p>
-     Using a higher temperature helps the student learn the teacher’s inductive biases and provides a much better training signal, especially when true labels are sparse or noisy.
+     Using a higher temperature helps the student learn the teacher's inductive biases and provides a much better training signal, especially when true labels are sparse or noisy. Try it below with the teacher's logits for a cat image:
    </p>
 
-   <h2>The Distillation Loss Function</h2>
+   <div class="demo">
+     <div class="demo-controls">
+       <label for="temp">Temperature $T$: <span id="tempVal">1.0</span></label>
+       <input type="range" id="temp" min="0.5" max="20" value="1" step="0.5">
+     </div>
+     <canvas id="tempCanvas" width="560" height="340"></canvas>
+     <div class="demo-stats" id="tempStats"></div>
+     <p class="caption">
+       At $T = 1$ the teacher looks almost certain: about 89% cat, 8% dog, 2% car. Push the temperature up
+       and the hidden beliefs surface: dog is much closer to cat than car or bird are. That ranking is exactly
+       what the student learns from, and it is invisible in a hard label. (Logits used here: cat 4.6, dog 2.2,
+       car 0.8, bird 0.0.)
+     </p>
+   </div>
+
+   <script>
+   (function() {
+     var canvas = document.getElementById('tempCanvas');
+     var ctx = canvas.getContext('2d');
+     var dpr = window.devicePixelRatio || 1;
+     var W = 560, H = 340;
+     canvas.width = W * dpr; canvas.height = H * dpr;
+     canvas.style.width = '100%'; canvas.style.maxWidth = W + 'px'; canvas.style.height = 'auto';
+     ctx.scale(dpr, dpr);
+
+     var classes = ['cat', 'dog', 'car', 'bird'];
+     var logits = [4.6, 2.2, 0.8, 0.0];
+     var colors = ['#3498db', '#2ecc71', '#e67e22', '#9b59b6'];
+     var slider = document.getElementById('temp');
+     var valLabel = document.getElementById('tempVal');
+     var stats = document.getElementById('tempStats');
+
+     function softmax(z, T) {
+       var m = Math.max.apply(null, z.map(function(v) { return v / T; }));
+       var exps = z.map(function(v) { return Math.exp(v / T - m); });
+       var s = exps.reduce(function(a, b) { return a + b; }, 0);
+       return exps.map(function(e) { return e / s; });
+     }
+
+     function draw() {
+       var T = parseFloat(slider.value);
+       valLabel.textContent = T.toFixed(1);
+       var probs = softmax(logits, T);
+       ctx.clearRect(0, 0, W, H);
+
+       var padL = 50, padR = 20, padT = 34, padB = 44;
+       var plotW = W - padL - padR, plotH = H - padT - padB;
+       var bw = plotW / classes.length;
+
+       ctx.strokeStyle = '#bdc3c7'; ctx.lineWidth = 1;
+       ctx.beginPath(); ctx.moveTo(padL, padT + plotH); ctx.lineTo(padL + plotW, padT + plotH); ctx.stroke();
+       ctx.fillStyle = '#7f8c8d'; ctx.font = '12px sans-serif'; ctx.textAlign = 'right';
+       [0, 25, 50, 75, 100].forEach(function(pct) {
+         var y = padT + plotH - (pct / 100) * plotH;
+         ctx.fillText(pct + '%', padL - 8, y + 4);
+         ctx.strokeStyle = '#ecf0f1';
+         ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL + plotW, y); ctx.stroke();
+       });
+
+       probs.forEach(function(p, i) {
+         var bh = p * plotH;
+         var x = padL + i * bw + bw * 0.2, y = padT + plotH - bh;
+         ctx.fillStyle = colors[i];
+         ctx.fillRect(x, y, bw * 0.6, bh);
+         ctx.fillStyle = '#2c3e50'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center';
+         ctx.fillText((p * 100).toFixed(1) + '%', x + bw * 0.3, y - 8);
+         ctx.fillStyle = '#555'; ctx.font = '13px sans-serif';
+         ctx.fillText(classes[i], x + bw * 0.3, padT + plotH + 22);
+       });
+
+       var top = Math.max.apply(null, probs);
+       var runner = probs.slice().sort(function(a, b) { return b - a; })[1];
+       stats.innerHTML = 'Top class confidence: <strong>' + (top * 100).toFixed(1) +
+         '%</strong>. Runner-up gets <strong>' + (runner * 100).toFixed(1) + '%</strong>.';
+     }
+
+     slider.addEventListener('input', draw);
+     draw();
+   })();
+   </script>
+
+   <h2>How it works: the distillation loss</h2>
    <p>
      The student is trained by optimizing a composite loss function that combines two objectives. This encourages the student to match both the ground truth and the teacher's soft predictions.
    </p>
-   <ol>
-     <li><strong>Classification Loss:</strong> A standard cross-entropy loss between the student's predictions and the hard ground-truth labels.</li>
-     <li><strong>Distillation Loss:</strong> A loss that measures the difference between the student's and teacher's soft predictions. The Kullback-Leibler (KL) divergence is typically used for this.</li>
-   </ol>
-   <p>The final loss is a weighted average of these two components, controlled by a hyperparameter $\alpha$:</p>
-   $$ \mathcal{L} = \alpha \cdot \mathcal{L}_{CE}(\text{student_logits, true_labels}) + (1 - \alpha) \cdot \mathcal{L}_{KL}(\text{student_logits}_T, \text{teacher_logits}_T) $$
-   
-   <h2>Types of Knowledge Distillation</h2>
-   
+   <p>
+     The final loss is a weighted average of these two components, controlled by a hyperparameter $\alpha$:
+   </p>
+   $$ \mathcal{L} = (1−\alpha) \cdot \mathcal{L}_{CE}(\text{student_logits, true_labels}) + \alpha \cdot \mathcal{L}_{KL}(\text{student_logits}_T, \text{teacher_logits}_T) $$
+   <p>
+     Reading that in words: the first term is ordinary cross-entropy between the student's predictions and the hard ground-truth labels. The second term is the KL divergence between the student's and the teacher's temperature-softened distributions, which is how the student learns the teacher's "thinking." $\alpha$ decides how much you listen to the teacher versus the labels: $\alpha = 0.7$ means 70% teacher, 30% labels. Push $\alpha$ to 0 and you get plain cross-entropy on the true labels; push it to 1 and the student only ever sees the teacher. In code it is a few lines:
+   </p>
+   <pre><code>def blended_distillation_loss(student_logits, teacher_logits, labels, T=2.0, alpha=0.7):
+    # 1. Distillation (soft target) loss: KL divergence between softened distributions
+    soft_targets = F.softmax(teacher_logits / T, dim=1)
+    student_log_probs = F.log_softmax(student_logits / T, dim=1)
+    soft_loss = F.kl_div(student_log_probs, soft_targets, reduction='batchmean') * (T * T)
+
+    # 2. Hard loss: standard cross entropy with ground truth
+    hard_loss = F.cross_entropy(student_logits, labels)
+
+    # 3. Weighted combination
+    return alpha * soft_loss + (1.0 - alpha) * hard_loss</code></pre>
+   <p>
+     One detail worth noticing: the KL term is multiplied by $T^2$. Dividing logits by $T$ shrinks the gradients by roughly $T^2$, so the original paper suggests multiplying it back to keep the two loss terms on a comparable scale. Without it, the teacher's signal would barely move the weights.
+   </p>
+
+   <h2>What happens: distilling a ResNet-18 into a small CNN</h2>
+   <p>
+     Let me show you what this looks like in practice. The full experiment lives in the companion notebook. The setup: the <strong>teacher</strong> is a ResNet-18 (ImageNet-pretrained, classifier fine-tuned on STL-10), and the <strong>student</strong> is <code>DeeperStudentCNN</code>, a plain 4-block CNN with a fraction of the teacher's size. Distillation runs with $T = 2.0$, $\alpha = 0.7$, Adam at lr $1e-3$, for 10 epochs.
+   </p>
+   <p>First, the teacher's accuracy, which is the target we are chasing:</p>
+   <div class="output">
+     <span class="dim">Teacher: ResNet-18, classifier fine-tuned on STL-10</span><br>
+     Accuracy on STL10 test set: <span class="good">92.58%</span>
+   </div>
+   <p>Then the student, trained with the distillation loss above:</p>
+   <div class="output">
+     <span class="dim">Student: DeeperStudentCNN, response-based KD (T=2.0, alpha=0.7, Adam lr=1e-3, 10 epochs)</span><br>
+     <span class="dim">Loss:</span> 1.5223 -&gt; <span class="good">0.2487</span><br>
+     Accuracy on STL10 test set: <span class="good">53.46%</span>
+   </div>
+   <p>
+     53% is a long way from 93%, but keep perspective: this student is tiny, trained for only 10 epochs, and it learned entirely by watching the teacher. The loss fell steadily the whole way, so it was still improving when training stopped. Distillation got a small model somewhere meaningful in 10 epochs. That is a fast win.
+   </p>
+   <p>I also tried forcing the student to mimic the teacher's intermediate features, adding an MSE term between feature maps alongside the CE and KL terms ($\alpha=0.5$, $\beta=0.3$, $\gamma=0.2$, $T=2.0$, same 10 epochs):</p>
+   <div class="output">
+     <span class="dim">Student: DeeperStudentCNN, feature-based KD (alpha=0.5, beta=0.3, gamma=0.2, T=2.0, 10 epochs)</span><br>
+     <span class="dim">Loss:</span> 0.7449 -&gt; <span class="good">0.2122</span><br>
+     Accuracy on STL10 test set: <span class="bad">42.48%</span>
+   </div>
+   <p>
+     Worse, not better. More supervision is not always better supervision. Matching raw activations across very different architectures is hard: feature scales differ, and forcing a small network to reproduce a big network's internals can fight the classification objective. More on that in the caveats.
+   </p>
+
+   <h2>Other flavors of distillation</h2>
    <h3>Response-Based Distillation (Logit Distillation)</h3>
    <p>
-     This is the most common and straightforward form of KD, where only the final output logits from the teacher are used to train the student. While this method doesn't capture the teacher's internal reasoning process, its simplicity and effectiveness have made it very popular. Both <code>DistilBERT</code> and <code>MobileNet</code> used this approach. The distillation loss is the KL divergence between the temperature-scaled outputs of the student ($z_s$) and teacher ($z_t$).
+     This is the one I used in the experiment above, and it is the most common form of KD you will run into. The student only watches the teacher's final outputs, nothing internal. You never see the teacher's reasoning process, but you rarely need to: the softened logits already carry most of the signal. <code>DistilBERT</code> did exactly this, and later distilled <code>MobileNet</code> variants too. The distillation loss is the KL divergence between the temperature-scaled outputs of the student ($z_s$) and teacher ($z_t$):
    </p>
    $$ \mathcal{L}_{KD} = KL\left(\text{softmax}\left(\frac{z_s}{T}\right) \bigg|\bigg| \text{softmax}\left(\frac{z_t}{T}\right)\right) $$
-
    <h3>Feature-Based Distillation</h3>
-   <p>This approach goes deeper by forcing the student to mimic the teacher's intermediate feature representations from one or more layers, not just the final output.</p>
-
+   <p>Here you make the student copy the teacher's intermediate features, not just the final answers. It sounds like strictly more supervision, and sometimes it helps. But remember what happened in my experiment: forcing a tiny student to reproduce a ResNet's internals dropped accuracy from 53.46% to 42.48%. Feature scales differ across architectures, and the extra objective can fight your classification loss. If you try this, normalize the features and pick the layer carefully.</p>
    <h3>Relation-Based Distillation</h3>
-   <p>Here, the student learns from the relationships between different data points or layers as seen by the teacher, rather than the absolute values of the outputs.</p>
-   
+   <p>Instead of copying absolute values, the student copies relationships: which examples the teacher thinks are similar, how classes sit relative to each other in the teacher's space. Think of it as learning the teacher's map of the world rather than its exact coordinates. It is more forgiving when the student is too small to match the teacher's exact numbers.</p>
    <h3>Self-Distillation</h3>
-   <p>An interesting variant where a model teaches itself. Typically, a larger teacher model is used to train a student of the exact same architecture, often leading to improved performance and robustness.</p>
+   <p>The weird one: the model teaches itself. Train a teacher, then train a student with the exact same architecture on the teacher's outputs, and you somehow get a better model. It sounds like a free lunch, and it almost is: the soft targets act as a regularizer and smooth out the optimization. People usually iterate it once or twice and just bank the gains.</p>
+
+   <h2>Caveats</h2>
+   <ul>
+     <li>
+       More supervision is not always better supervision. In my notebook, adding the feature-matching MSE term dropped the student from <strong>53.46%</strong> to <strong>42.48%</strong>. If you do feature distillation, normalize the features and pick the layer carefully, or you will fight your own classification objective.
+     </li>
+     <li>
+       Mind the capacity gap. A student that is far smaller than the teacher may simply be unable to mimic it, and distillation stalls. When the gap is huge, an intermediate "teacher assistant" model sometimes helps more than distilling directly.
+     </li>
+     <li>
+       Temperature needs tuning. Too low and you get hard labels with no dark knowledge; too high and every class looks equally likely, washing out the signal. Values between 2 and 5 are the usual starting range.
+     </li>
+     <li>
+       The student inherits the teacher's mistakes. Whatever biases and blind spots the teacher has get baked into the soft targets, so distill from a teacher you trust.
+     </li>
+   </ul>
+
+   <h2>What is next</h2>
+   <p>
+     Distillation gives you a smaller model; <a href="quantization.html">quantization</a> then shrinks the weights that remain. The two compose well, which is why the pruning tutorial ends the same way. If you want to run the experiment yourself, the
+     <a href="https://github.com/raminaeye/model-optimization/blob/main/knowledge_distillation/knowledge_distillation.ipynb">companion notebook</a>
+     has the teacher training, both distillation variants, and all the numbers above.
+   </p>
 
 </body>
 </html>

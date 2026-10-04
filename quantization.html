@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Quantization Explained with PyTorch</title>
   <style>
     body {
@@ -41,11 +42,12 @@
       font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
     }
     /* For inline code */
-    p > code, li > code, table td > code {
+    p > code, li > code, table td > code, h1 > code, h2 > code, h3 > code, h4 > code {
       background: #e8eaed;
       padding: 0.2em 0.4em;
       border-radius: 3px;
       font-size: 0.85em;
+      overflow-wrap: break-word; /* long tokens wrap instead of pushing the page wide */
     }
     pre code { /* Reset for code inside pre, already handled by pre styling */
         background: none;
@@ -61,6 +63,46 @@
     strong {
         color: #2980b9;
     }
+    .output {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 1rem 1.2rem;
+      border-radius: 6px;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+      font-size: 0.9em;
+      margin: 1em 0;
+      overflow-x: auto;
+      border-left: 4px solid #22c55e;
+    }
+    .output .dim { color: #94a3b8; }
+    .figure { margin: 1.5em 0; text-align: center; }
+    .figure svg { max-width: 100%; height: auto; }
+    .caption {
+      font-size: 0.9em; color: #555; margin-top: 0.8rem;
+      border-left: 3px solid #3498db; padding-left: 0.8em;
+      text-align: left;
+    }
+    .bw-demo {
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      padding: 1.2rem;
+      margin: 1.5em 0;
+      background: #fbfcfd;
+    }
+    .bw-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      align-items: center;
+      margin-bottom: 0.6rem;
+    }
+    .bw-controls label { font-weight: bold; color: #2c3e50; }
+    .bw-controls input[type=range] { flex: 1 1 160px; max-width: 320px; accent-color: #3498db; }
+    #bwCanvas { display: block; width: 100%; height: 56px; }
+    .bw-stats {
+      text-align: center; margin: 0.8rem 0 0.4rem; font-size: 1em; color: #2c3e50;
+    }
+    .bw-stats strong { color: #2980b9; }
   </style>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/monokai.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
@@ -81,7 +123,7 @@
 
    <section>
      <h2>Dynamic Quantization</h2>
-     <p>This is the lazy version of quantization—and that’s not a bad thing. Super simple. You quantize the weights after training. Activations stay in float32 during inference but get quantized on the fly. No calibration. No fuss.</p>
+     <p>This is the lazy version of quantization, and that's not a bad thing. Super simple. You quantize the weights after training. Activations stay in float32 during inference but get quantized on the fly. No calibration. No fuss.</p>
      <pre><code class="language-python">
 import torch.quantization
 model = YourModel()
@@ -97,7 +139,11 @@ quantized_model = torch.quantization.quantize_dynamic(
         <li>Quantization of activations happens at runtime, per batch</li>
         <li>Dequantization happens immediately after matmul</li>
      </ul>
-     <p>So why use it? It’s stupid easy and gives you a fast win on CPUs—especially for LSTMs and Linear-heavy models.</p>
+     <p>So why use it? It’s stupid easy and gives you a fast win on CPUs, especially for LSTMs and Linear-heavy models. On a small MNIST CNN from the companion notebook, dynamic quantization barely moved the needle:</p>
+     <div class="output">
+Full-precision test accuracy: 91.36%<br>
+Dynamic int8 test accuracy: 91.30%
+     </div>
      <p>But why doesn’t it work well for CNNs? Because Conv2d is not matmul. Conv layers have gnarly memory access patterns and need pre-quantized activations to be efficient. Dynamic quantization doesn’t do that. You’d be quantizing every sliding window patch per inference. Not fun. Not fast.</p>
      <p>Also, dynamic quantization doesn’t touch things like BatchNorm or ReLU. It just swaps in dynamic versions of Linear and LSTM layers. So, no fusion here. No point fusing layers if you're not touching them.</p>
    </section>
@@ -108,33 +154,31 @@ quantized_model = torch.quantization.quantize_dynamic(
      <p>This works great for CNNs and edge deployment. You get full int8 inference.</p>
      <p>The workflow looks like this:</p>
      <pre><code class="language-python">
- class QuantCNN(nn.Module):
-     def fuse_model(self):
-         # Example: torch.quantization.fuse_modules(self.conv_relu_group, ['0', '1', '2'], inplace=True) # if conv, bn, relu are grouped
-         # Or fuse specific layers:
-          for module_name, module in self.named_children():
-              if "conv_bn_relu" in module_name: # A common pattern
-                 torch.quantization.fuse_modules(module, ['conv', 'bn', 'relu'], inplace=True)
-         pass # Actual fusion logic here
-
-model = QuantCNN() # Instantiate your model
+model = YourCNN()
 model.eval()
-model.fuse_model() # Apply fusion if defined in your model
 
-# Set qconfig
-model.qconfig = torch.quantization.get_default_qconfig('fbgemm')  # or 'qnnpack' for ARM
+# Fuse conv + bn + relu groups first. One op is cheaper than three.
+torch.quantization.fuse_modules(model, [['conv', 'bn', 'relu']], inplace=True)
+
+# Pick how to quantize: 'fbgemm' on x86, 'qnnpack' on ARM
+model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
 
 # Insert observers
- torch.quantization.prepare(model, inplace=True)
+torch.quantization.prepare(model, inplace=True)
 
-# Calibration step
- with torch.no_grad():
-     for images in calibration_loader: # calibration_loader should yield batches of input data
-         model(images)
+# Calibration: run real inputs through. No labels needed.
+with torch.no_grad():
+    for images in calibration_loader:
+        model(images)
 
 # Convert to int8
 torch.quantization.convert(model, inplace=True)
      </code></pre>
+     <p>Same MNIST CNN, this time with static quantization. The accuracy holds and the model shrinks to a quarter of its size:</p>
+     <div class="output">
+model size: 4.80 MB → 1.21 MB<br>
+inference time: 0.0190 s → 0.0145 s
+     </div>
      <p>Let’s talk about what’s going on.</p>
      <h3>Fusion</h3>
      <p>Before quantizing, you fuse Conv + BatchNorm + ReLU into a single op. Why? It reduces memory overhead, speeds things up, and minimizes numerical errors.</p>
@@ -166,6 +210,39 @@ class MinMaxObserverExample(ObserverBase): # Conceptual
         return x
      </code></pre>
      <p>During calibration, these observers record activation stats. Then PyTorch figures out the scale and zero-point needed to map float values to int8.</p>
+     <div class="figure">
+       <svg viewBox="0 0 900 140" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Calibration flow diagram">
+         <defs>
+           <marker id="qarrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+             <polygon points="0 0, 8 3, 0 6" fill="#3498db"/>
+           </marker>
+         </defs>
+         <g font-family="sans-serif" font-size="15" text-anchor="middle">
+           <rect x="10" y="30" width="150" height="80" rx="8" fill="#ecf0f1" stroke="#3498db" stroke-width="2"/>
+           <text x="85" y="63" fill="#2c3e50">real inputs</text>
+           <text x="85" y="85" fill="#555">(MNIST images)</text>
+           <rect x="190" y="30" width="150" height="80" rx="8" fill="#ecf0f1" stroke="#3498db" stroke-width="2"/>
+           <text x="265" y="63" fill="#2c3e50">model +</text>
+           <text x="265" y="85" fill="#2c3e50">observers</text>
+           <rect x="370" y="30" width="150" height="80" rx="8" fill="#ecf0f1" stroke="#3498db" stroke-width="2"/>
+           <text x="445" y="63" fill="#2c3e50">min/max</text>
+           <text x="445" y="85" fill="#2c3e50">per layer</text>
+           <rect x="550" y="30" width="150" height="80" rx="8" fill="#ecf0f1" stroke="#3498db" stroke-width="2"/>
+           <text x="625" y="63" fill="#2c3e50">scale &amp;</text>
+           <text x="625" y="85" fill="#2c3e50">zero-point</text>
+           <rect x="730" y="30" width="150" height="80" rx="8" fill="#2e86c1" stroke="#2c3e50" stroke-width="2"/>
+           <text x="805" y="63" fill="#ffffff">int8</text>
+           <text x="805" y="85" fill="#ffffff">model</text>
+         </g>
+         <g stroke="#3498db" stroke-width="2">
+           <line x1="160" y1="70" x2="188" y2="70" marker-end="url(#qarrow)"/>
+           <line x1="340" y1="70" x2="368" y2="70" marker-end="url(#qarrow)"/>
+           <line x1="520" y1="70" x2="548" y2="70" marker-end="url(#qarrow)"/>
+           <line x1="700" y1="70" x2="728" y2="70" marker-end="url(#qarrow)"/>
+         </g>
+       </svg>
+       <p class="caption">Calibration is just watching real data flow through the model so every layer gets an honest min and max. Those ranges become the scale and zero-point.</p>
+     </div>
      <p>But MinMax isn’t always enough.</p>
    </section>
 
@@ -205,6 +282,119 @@ model.qconfig = qconfig_hist
         <li><code>zero_point = round(qmin - x_min / scale)</code> (adjusted to be within [qmin, qmax])</li>
      </ul>
      <p>Used for activations. Better when data is skewed (e.g., ReLU output).</p>
+     <div class="figure">
+       <svg viewBox="0 0 900 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Scale and zero-point mapping diagram">
+         <g font-family="sans-serif" font-size="15">
+           <text x="60" y="25" fill="#2c3e50" font-weight="bold">float (activations, min 0, max 14.16)</text>
+           <line x1="60" y1="60" x2="840" y2="60" stroke="#2c3e50" stroke-width="2"/>
+           <g stroke="#2c3e50" stroke-width="2">
+             <line x1="60" y1="52" x2="60" y2="68"/><line x1="450" y1="52" x2="450" y2="68"/><line x1="840" y1="52" x2="840" y2="68"/>
+           </g>
+           <g fill="#2c3e50" text-anchor="middle">
+             <text x="60" y="90">0</text><text x="450" y="90">7.08</text><text x="840" y="90">14.16</text>
+           </g>
+           <text x="90" y="125" fill="#2c3e50" font-weight="bold">uint8 (0 to 255)</text>
+           <line x1="60" y1="155" x2="840" y2="155" stroke="#2e86c1" stroke-width="2"/>
+           <g stroke="#2e86c1" stroke-width="2">
+             <line x1="60" y1="147" x2="60" y2="163"/><line x1="450" y1="147" x2="450" y2="163"/><line x1="840" y1="147" x2="840" y2="163"/>
+           </g>
+           <g fill="#2e86c1" text-anchor="middle">
+             <text x="60" y="185">0</text><text x="450" y="185">128</text><text x="840" y="185">255</text>
+           </g>
+           <g stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5,4">
+             <line x1="60" y1="68" x2="60" y2="147"/><line x1="450" y1="68" x2="450" y2="147"/><line x1="840" y1="68" x2="840" y2="147"/>
+           </g>
+           <g>
+             <line x1="450" y1="200" x2="553" y2="200" stroke="#e67e22" stroke-width="2"/>
+             <line x1="450" y1="194" x2="450" y2="206" stroke="#e67e22" stroke-width="2"/>
+             <line x1="553" y1="194" x2="553" y2="206" stroke="#e67e22" stroke-width="2"/>
+             <text x="501" y="222" fill="#e67e22" text-anchor="middle" font-weight="bold">one bin = scale 0.0555</text>
+           </g>
+         </g>
+       </svg>
+       <p class="caption">Scale is the width of each integer bin. The float range gets chopped into 256 equal steps, and everything inside one bin rounds to the same number. Zero-point 0 means float 0 lands exactly on int 0.</p>
+     </div>
+     <p>Same idea, one dial. Drag the bit-width and watch what happens to the step size. Fixed range, plus/minus 1.2V, like the ADC tutorial:</p>
+     <div class="bw-demo">
+       <div class="bw-controls">
+         <label for="bwSlider">Bit-width N: <span id="bwBits">8</span></label>
+         <input type="range" id="bwSlider" min="2" max="8" step="1" value="8">
+       </div>
+       <canvas id="bwCanvas" aria-label="Quantization bins across a 2.4V range"></canvas>
+       <div class="bw-stats">
+         Bins: <strong id="bwBins">256</strong>
+         &nbsp;&middot;&nbsp; LSB: <strong id="bwLsb">9.375 mV</strong>
+         &nbsp;&middot;&nbsp; SNR: <strong id="bwSnr">49.92 dB</strong>
+       </div>
+       <p class="caption">Every bit you drop doubles the step size and costs you about 6 dB. That is the entire trade.</p>
+     </div>
+     <script>
+     (function () {
+       var slider = document.getElementById('bwSlider');
+       var bitsEl = document.getElementById('bwBits');
+       var binsEl = document.getElementById('bwBins');
+       var lsbEl = document.getElementById('bwLsb');
+       var snrEl = document.getElementById('bwSnr');
+       var canvas = document.getElementById('bwCanvas');
+
+       function fmtLsb(mv) {
+         return mv.toFixed(3).replace(/\.?0+$/, '');
+       }
+
+       function draw(n) {
+         var bins = Math.pow(2, n);
+         var segs = Math.min(256, bins);
+         var dpr = window.devicePixelRatio || 1;
+         var w = canvas.clientWidth;
+         var h = 56;
+         if (w <= 0) return;
+         canvas.width = Math.round(w * dpr);
+         canvas.height = Math.round(h * dpr);
+         var ctx = canvas.getContext('2d');
+         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+         ctx.clearRect(0, 0, w, h);
+         var x0 = 8, x1 = w - 8, bw = x1 - x0;
+         ctx.fillStyle = '#ecf0f1';
+         ctx.fillRect(x0, 6, bw, 24);
+         ctx.strokeStyle = '#3498db';
+         ctx.lineWidth = 1;
+         for (var i = 0; i <= segs; i++) {
+           var x = x0 + bw * i / segs;
+           ctx.beginPath();
+           ctx.moveTo(x, 6);
+           ctx.lineTo(x, 30);
+           ctx.stroke();
+         }
+         ctx.fillStyle = '#555';
+         ctx.font = '12px sans-serif';
+         ctx.textAlign = 'left';
+         ctx.fillText('-1.2V', x0, 48);
+         ctx.textAlign = 'center';
+         ctx.fillText('0', x0 + bw / 2, 48);
+         ctx.textAlign = 'right';
+         ctx.fillText('+1.2V', x1, 48);
+       }
+
+       function update() {
+         var n = parseInt(slider.value, 10);
+         if (isNaN(n)) n = 8;
+         var bins = Math.pow(2, n);
+         var lsbMv = 2400 / bins;
+         var snr = 6.02 * n + 1.76;
+         bitsEl.textContent = n;
+         binsEl.textContent = bins.toLocaleString('en-US');
+         lsbEl.textContent = fmtLsb(lsbMv) + ' mV';
+         snrEl.textContent = snr.toFixed(2) + ' dB';
+         draw(n);
+       }
+
+       slider.addEventListener('input', update);
+       window.addEventListener('resize', function () {
+         draw(parseInt(slider.value, 10) || 8);
+       });
+       update();
+     })();
+     </script>
    </section>
 
    <section>
@@ -290,20 +480,22 @@ class ObserverCNN(nn.Module):
 
 model_ptq_example = ObserverCNN().eval()
 
-# Fake calibration pass
+# Calibration pass: run real inputs through, no labels needed
 with torch.no_grad():
-    for _ in range(10):  # simulate 10 batches
-        dummy_input = torch.randn(8, 3, 32, 32)
-        _ = model_ptq_example(dummy_input)
-
-print("Conv1 activation range:", model_ptq_example.obs_act1.min_val.item(), model_ptq_example.obs_act1.max_val.item())
-print("Conv2 activation range:", model_ptq_example.obs_act2.min_val.item(), model_ptq_example.obs_act2.max_val.item())
-print("FC input range:", model_ptq_example.obs_fc_in.min_val.item(), model_ptq_example.obs_fc_in.max_val.item())
-
-print("Conv1 weight qparams:", model_ptq_example.obs_weight1.calculate_qparams())
-print("Conv2 weight qparams:", model_ptq_example.obs_weight2.calculate_qparams())
-print("FC weight qparams:", model_ptq_example.obs_weight_fc.calculate_qparams())
+    for images in calibration_loader:
+        _ = model_ptq_example(images)
         </code></pre>
+        <p>Here is what the observers actually report after calibrating the MNIST CNN from the companion notebook. Each layer gets its own min, max, scale, and zero-point:</p>
+        <div class="output">
+[conv.0]&nbsp;&nbsp;Min / Max = (0.000000, 6.478520)&nbsp;&nbsp;&nbsp;Scale / ZP = (0.050122, 0)<br>
+[conv.2]&nbsp;&nbsp;Min / Max = (0.000000, 17.662004)&nbsp;&nbsp;Scale / ZP = (0.129116, 0)
+        </div>
+        <p>And after <code>convert()</code>, those numbers are baked into real quantized layers:</p>
+        <div class="output">
+conv.0 is quantized: QuantizedConvReLU2d(1, 32, scale=0.050122, zero_point=0)<br>
+conv.2 is quantized: QuantizedConvReLU2d(32, 64, scale=0.129116, zero_point=0)<br>
+fc1 is quantized: QuantizedLinear(9216, 128, qscheme=torch.per_channel_affine)
+        </div>
         <p><code>calculate_qparams()</code> is a method used by observers in PyTorch to compute scale and zero-point. That's the observer's job to begin with.</p>
         <p>General quantization formula: <code>quantized = round(clamp(x / scale + zero_point, qmin, qmax))</code></p>
         <h4>For Symmetric Quantization:</h4>
@@ -362,11 +554,11 @@ max_val = (1 - α) * max_val + α * current_batch_max_val
 
     <section>
         <h2>QAT Training & FakeQuantize Details</h2>
-        <p>Training a QAT model often requires lower learning rates and more epochs to converge. It also needs careful initialization, for example, starting from a pretrained FP32 model. Similar to static quantization, layers such as BatchNorm (BN) are fused with preceding convolution or linear layers during the conversion step (<code>convert_fx</code>).</p>
-        <p>After inserting <code>FakeQuantize</code> modules and monitoring ranges, it helps to fine-tune the model to the "frozen" quantization noise. This means that after an initial "warm-up" phase where quantization parameters (scale and zero-point) are being learned, these parameters are then fixed, and the model continues training to adapt to these specific, now constant, quantization effects.</p>
+        <p>QAT is fussy. You need lower learning rates, more epochs, and a good starting point, so always start from your trained FP32 model. And same as static quantization, you fuse BatchNorm into the conv or linear layer before conversion. It stops being its own layer.</p>
+        <p>Here is the trick that actually works: warm up first. Let the observers watch data and learn the scale and zero-point while the model trains. Then freeze those numbers and keep training. The second phase is the model learning to live with one fixed, consistent flavor of quantization noise. If you keep moving the noise around while the model is trying to learn, it never settles.</p>
         
         <h3>A note on observers and FakeQuantize modules</h3>
-        <p>Inside the <code>FakeQuantize</code> modules, there is an observer instance (or logic) and a quantize-dequantize function. You can inspect them. The <code>activation_post_process</code> attribute on a layer (e.g., <code>model.layer_name.activation_post_process</code>) *is* the <code>FakeQuantize</code> module itself after <code>prepare_qat_fx</code>.</p>
+        <p>Under the hood, a <code>FakeQuantize</code> module is two things glued together: an observer that watches the range, and a quantize-then-dequantize simulator. You can poke at both. One thing that tripped me up the first time: the <code>activation_post_process</code> attribute on a layer (e.g., <code>model.conv1.activation_post_process</code>) *is* the <code>FakeQuantize</code> module itself after <code>prepare_qat_fx</code>. Same object, just wearing PyTorch's naming hat.</p>
         <pre><code class="language-python">
 if hasattr(model_prepared_qat, 'conv1') and hasattr(model_prepared_qat.conv1, 'activation_post_process'):
     fq_module = model_prepared_qat.conv1.activation_post_process # This IS the FakeQuantize module
@@ -379,47 +571,47 @@ if hasattr(model_prepared_qat, 'conv1') and hasattr(model_prepared_qat.conv1, 'a
 else:
     print("conv1 or activation_post_process not found in conceptual model_prepared_qat.")
         </code></pre>
-        <p>During the forward pass, observers (within <code>FakeQuantize</code>) are enabled to calculate the scale and zero-point. The fake quantizer then applies the quantize-dequantize simulation and uses STE during backpropagation. During QAT training (warm-up phase), observers are active, updating the range statistics, and the model learns under these evolving quantization conditions. Once the warm-up is done, the scale and zero-point are often "frozen." Training continues with this consistent quantization noise to improve stability.</p>
+        <p>So the full loop is: warm-up, observers on, ranges updating every batch, <code>FakeQuant</code> rounding your activations while STE handles the backward pass, and the model learning while the noise keeps shifting. Then you freeze scale and zero-point. Now the noise is fixed and the model just learns to live with it. That frozen phase is where most of the accuracy recovery happens.</p>
     </section>
 
     <section>
         <h2>Quantization Bugs</h2>
-        <p>Common issues include:</p>
+        <p>So you quantized your model and something broke. Been there. Here is how it usually shows up and what I check first:</p>
         <ul>
             <li><strong>Accuracy drops. A lot.</strong>
                 <ul>
-                    <li>Bad scale/zero-point, poor calibration.</li>
-                    <li>Layers not fused properly or unnecessary quant-dequant boundaries.</li>
-                    <li>ReLU ranges are too wide skewing observers.</li>
-                    <li>Using per-tensor quant when you should use per-channel.</li>
+                    <li>Scale and zero-point are garbage because calibration saw the wrong data.</li>
+                    <li>Layers weren't fused, or you have pointless float-int-float boundaries.</li>
+                    <li>One layer's ReLU range is huge and skews the observer.</li>
+                    <li>Per-tensor quantization when one bad channel is ruining it for everyone. Try per-channel.</li>
                 </ul>
             </li>
             <li><strong>Layers behave abnormally.</strong>
                 <ul>
-                    <li>Observer didn’t see representative data.</li>
-                    <li>Quant-dequant boundary in the wrong place.</li>
-                    <li>Rounding and clamping causing clipping.</li>
+                    <li>The observer calibrated on data that doesn't look like production.</li>
+                    <li>A quant-dequant boundary landed somewhere dumb.</li>
+                    <li>Clipping. Something got rounded or clamped into oblivion.</li>
                 </ul>
             </li>
-            <li><strong>FakeQuant not simulating, model not converging (QAT).</strong>
+            <li><strong><code>FakeQuant</code> not simulating, model not converging (QAT).</strong>
                 <ul>
-                    <li>Observers are not updating.</li>
-                    <li>Observers are frozen too soon.</li>
-                    <li>FakeQuant clipping too aggressively.</li>
+                    <li>Observers aren't updating, so the scale is stale.</li>
+                    <li>You froze the scale too early, before the ranges settled.</li>
+                    <li><code>FakeQuant</code> is clipping too hard and your activations are getting squashed.</li>
                 </ul>
             </li>
-            <li><strong><code>convert_fx()</code> fails - this happens a lot!</strong>
+            <li><strong><code>convert_fx()</code> fails. This happens a lot!</strong>
                 <ul>
-                    <li>Model wasn’t fused correctly.</li>
-                    <li>QConfig was missing for a submodule.</li>
-                    <li>FX graph couldn’t trace.</li>
+                    <li>You forgot to fuse, or fused the wrong layers.</li>
+                    <li>A submodule is missing its qconfig.</li>
+                    <li>FX couldn't trace your model. Usually some data-dependent control flow.</li>
                 </ul>
             </li>
         </ul>
     </section>
 
     <section>
-        <h2>How to Trace the Bugs?</h2>
+        <h2>How Do I Trace These Bugs?</h2>
         
         <h3>Print quantization parameters</h3>
         <pre><code class="language-python">
@@ -432,10 +624,10 @@ for name, module in model_prepared_qat.named_modules():
          print(f"{name}.weight_fake_quant -- scale: {module.weight_fake_quant.scale.item()}, "
                f"zero_point: {module.weight_fake_quant.zero_point.item()}")
         </code></pre>
-        <p>If you see scale is zero or NaN, then the observers aren’t seeing anything. If the scale is too large or too small, the range is skewed due to outliers.</p>
+        <p>My rule of thumb: scale is 0 or NaN, the observers saw nothing. Scale is absurdly large or tiny, an outlier skewed the range.</p>
         
         <h3>Visualize activation ranges</h3>
-        <p>It’s important to see what range of values a layer is producing. Make sure the quantization observers capture the range properly and avoid outliers. If the range is off you’ll get clipping, dead activation, and poor resolution due to wide range. Hook into a layer to see float ranges and compare it with what you see from the observer reports.</p>
+        <p>Plot the activations. Seriously, just look at them. Hook a layer, histogram the float values, and compare against what the observer claims. If the observer's range is way wider than the actual data, you know where your resolution went.</p>
         <pre><code class="language-python">
 activation_histograms = {}
 def capture_activations_hook(name):
@@ -446,7 +638,7 @@ def capture_activations_hook(name):
             activation_histograms[name] = data_to_log.detach().cpu().flatten().numpy()
     return hook
 
- model_to_debug = ObserverCNN().eval() # Or your specific model, ensure ObserverCNN is defined
+model_to_debug = ObserverCNN().eval() # Or your specific model, ensure ObserverCNN is defined
  hook_conv1 = model_to_debug.conv1.register_forward_hook(capture_activations_hook("conv1_output"))
  hook_relu1 = model_to_debug.relu1.register_forward_hook(capture_activations_hook("relu1_output"))
 
@@ -463,7 +655,7 @@ def capture_activations_hook(name):
 hook_conv1.remove() # Clean up hooks
 hook_relu1.remove()
         </code></pre>
-        <p>Compare float vs quantized outputs. If a single layer is the issue, that narrows down the layer-wise outputs.</p>
+        <p>Then compare float vs quantized outputs, layer by layer. When one layer's output suddenly diverges, you found your culprit.</p>
         
         <h3>Disable quantization from layers one by one</h3>
         <pre><code class="language-python">
@@ -475,7 +667,7 @@ if hasattr(model_prepared_qat, 'conv1') and \
         </code></pre>
         
         <h3>Run FX <code>print_tabular()</code></h3>
-        <p>This shows you which quantization observers are attached and where scale and zero points are applied. Look for missing <code>activation_post_process</code> or quant/dequant pairs due to bad layer fusion.</p>
+        <p>This dumps the FX graph with the observers attached. I use it to hunt for missing <code>activation_post_process</code> hooks and stray quant/dequant pairs, which usually means bad fusion.</p>
         <pre><code class="language-python">
 if hasattr(model_prepared_qat, 'graph'):
     model_prepared_qat.graph.print_tabular()
@@ -484,7 +676,7 @@ else:
         </code></pre>
         
         <h3>Inspect <code>activation_post_process</code></h3>
-        <p><code>activation_post_process</code> is the name of a hook module (<code>FakeQuantize</code> in QAT) that PyTorch uses to handle quantization of activation. It’s inserted when you call <code>prepare_qat_fx()</code>.</p>
+        <p>Remember, <code>activation_post_process</code> is just PyTorch's name for the <code>FakeQuantize</code> module that <code>prepare_qat_fx()</code> sticks on the layer. Print its scale and zero-point directly.</p>
         <pre><code class="language-python">
 # Example:
 self.conv = nn.Conv2d(...)
@@ -495,10 +687,10 @@ if hasattr(model_prepared_qat, 'conv1') and hasattr(model_prepared_qat.conv1, 'a
     if hasattr(fq_module_inspect, 'min_val'): # Check if min_val/max_val are directly on FakeQuant
         print("Observed min/max by FakeQuant:", fq_module_inspect.min_val.item(), fq_module_inspect.max_val.item())
         </code></pre>
-        <p>If the values are outside min/max, they’ll be clipped during quantization.</p>
+        <p>Anything outside [min, max] gets clipped. That is the trade.</p>
         
         <h3>Use <code>torch.ao.quantization.quant_debug</code></h3>
-        <p>This helps you record and compare float vs quantized activation, layer by layer differences, and histograms of differences. (API might vary across PyTorch versions).</p>
+        <p>When you want the full diff, this records float vs quantized activations layer by layer, with histograms of the differences. Fair warning, the API moves around between PyTorch versions.</p>
         <pre><code class="language-python">
 debug_model = add_debug_observers_qat(model_prepared_qat, qconfig_dict_qat)
 print(debug_model.activation_debug_stats) # Or similar attribute, API might change
@@ -516,14 +708,14 @@ plt.show()
     <section>
         <h2>Wrapping Up</h2>
         <ul>
-            <li>Use dynamic quantization for fast wins on CPU, LSTMs, and fully connected models.</li>
-            <li>Use static quantization for real performance gains, especially for CNNs and edge deployment.</li>
-            <li>Fuse before quantizing.</li>
+            <li>Dynamic quantization is your fast win on CPU, LSTMs, and fully connected models.</li>
+            <li>Static quantization is where the real speedups live, especially for CNNs and edge deployment.</li>
+            <li>Always fuse before you quantize.</li>
             <li>Choose the right observer.</li>
-            <li>Calibration must reflect real runtime data.</li>
+            <li>Calibrate on data that looks like production, or nothing else matters.</li>
             <li>Avoid unnecessary float-int boundaries.</li>
             <li>FX is your friend.</li>
-            <li>Don’t use <code>MovingAverageMinMaxObserver</code> directly in PTQ (it's primarily for QAT's <code>FakeQuantize</code> modules); PTQ typically uses observers like <code>MinMaxObserver</code> or <code>HistogramObserver</code> for one-shot calibration.</li>
+            <li>Don’t use <code>MovingAverageMinMaxObserver</code> for PTQ. That’s a QAT thing. PTQ wants <code>MinMaxObserver</code> or <code>HistogramObserver</code>, one shot and done.</li>
         </ul>
     </section>
 

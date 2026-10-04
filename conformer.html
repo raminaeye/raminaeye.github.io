@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>The Conformer ASR Model</title>
   <style>
     body {
@@ -68,6 +69,84 @@
       margin-top: 2em;
       margin-bottom: 2em;
     }
+    /* Styled result block, like the pruning tutorial */
+    .output {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 1rem 1.2rem;
+      border-radius: 6px;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+      font-size: 0.9em;
+      margin: 1em 0;
+      overflow-x: auto;
+      border-left: 4px solid #22c55e;
+    }
+    .output .dim { color: #94a3b8; }
+    .output .good { color: #4ade80; font-weight: bold; }
+    /* Labeled diagram */
+    .figure {
+      margin: 1.5em 0;
+      text-align: center;
+    }
+    .figure figcaption {
+      font-size: 0.9em;
+      color: #555;
+      margin-top: 0.6em;
+      max-width: 660px;
+      margin-left: auto;
+      margin-right: auto;
+      text-align: left;
+      line-height: 1.6;
+    }
+    /* Interactive demo */
+    .demo {
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      padding: 1.2rem;
+      margin: 1.5em 0;
+      background: #fbfcfd;
+    }
+    .demo-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    .demo-controls label { font-weight: bold; color: #2c3e50; }
+    .demo-controls input[type=range] { width: 220px; max-width: 100%; accent-color: #3498db; }
+    .bar-group { margin: 1rem 0; }
+    .bar-title { font-weight: bold; color: #2c3e50; margin-bottom: 0.4rem; }
+    .bar-title strong { color: #2980b9; }
+    .bar-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; }
+    .bar-label { flex: 0 0 78px; font-size: 0.85em; color: #555; text-align: right; }
+    .bar-track { flex: 1 1 auto; min-width: 0; background: #eef1f4; border-radius: 4px; height: 22px; overflow: hidden; }
+    .bar { height: 100%; border-radius: 4px; }
+    .bar-ffn { background: #27ae60; }
+    .bar-mhsa { background: #3498db; }
+    .bar-conv { background: #e67e22; }
+    .bar-val { flex: 0 0 96px; font-size: 0.85em; font-family: 'SFMono-Regular', Consolas, Menlo, Courier, monospace; color: #2c3e50; }
+    .demo-note { font-size: 0.85em; color: #777; margin-top: 0.6rem; }
+    .demo .caption {
+      font-size: 0.9em; color: #555; margin-top: 0.8rem;
+      border-left: 3px solid #3498db; padding-left: 0.8em;
+    }
+    @media (max-width: 480px) {
+      .bar-label { flex-basis: 58px; font-size: 0.8em; }
+      .bar-val { flex-basis: 80px; font-size: 0.75em; }
+    }
+    /* Conv-module cost demo */
+    #convDemo .cf-track { display: flex; }
+    #convDemo .cf-off { background: #e5e7eb; }
+    #convDemo .cf-head { color: #2c3e50; margin: 1rem 0 0.3rem; }
+    #convDemo .cf-head strong { color: #2c3e50; }
+    #convDemo .cf-dims { font-size: 0.85em; color: #777; margin-left: 0.6em; }
+    #convDemo .cf-stats { font-size: 0.88em; color: #555; margin: 0.25rem 0 0; }
+    #convDemo .cf-wer { font-weight: bold; color: #2c3e50; font-size: 1.2em; }
+    #convDemo .cf-ref { opacity: 0.8; }
+    @media (max-width: 480px) {
+      #convDemo .cf-dims { display: block; margin-left: 0; }
+    }
   </style>
 
   <script type="text/javascript" async
@@ -79,7 +158,9 @@
         inlineMath: [['$','$'], ['\\(','\\)']],
         displayMath: [['$$','$$'], ['\\[','\\]']],
         processEscapes: true
-      }
+      },
+      showProcessingMessages: false,
+      messageStyle: "none"
     });
   </script>
 
@@ -118,13 +199,133 @@
 
     <p>The Conformer block calls these two feed-forward networks a "macaron-style feed-forward network," so named because the main attention and convolution modules are sandwiched between two FFNs, like the filling in a macaron. They add capacity and non-linearity but don’t mix information across time steps. They scale the FFN by half to match the contribution of one FFN in a vanilla transformer.</p>
 
-    <p>The first FFN applies a 2-layer MLP to each frame independently. The dimension might be expanded to $d_{ff}$ (e.g., 1024) with some activations, which is then scaled back so a half-scaled residual connection can be added to the input.</p>
+    <figure class="figure">
+      <svg viewBox="0 0 720 252" width="100%" style="max-width:700px" role="img" aria-label="Diagram of one Conformer block: feed-forward times one half, then multi-head self-attention, then convolution, then feed-forward times one half, each with a residual connection">
+        <defs>
+          <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 Z" fill="#2c3e50"/>
+          </marker>
+        </defs>
+        <text x="360" y="22" text-anchor="middle" font-size="16" font-weight="bold" fill="#2c3e50">One Conformer block</text>
+        <text x="28" y="106" font-size="18" font-style="italic" fill="#2c3e50">x</text>
+        <line x1="44" y1="100" x2="92" y2="100" stroke="#2c3e50" stroke-width="2" marker-end="url(#arr)"/>
+        <g font-size="15" font-weight="bold" fill="#ffffff" text-anchor="middle">
+          <rect x="100" y="70" width="105" height="60" rx="8" fill="#27ae60"/>
+          <text x="152" y="106">FFN x 0.5</text>
+          <rect x="240" y="70" width="105" height="60" rx="8" fill="#3498db"/>
+          <text x="292" y="106">MHSA</text>
+          <rect x="380" y="70" width="105" height="60" rx="8" fill="#e67e22"/>
+          <text x="432" y="106">Conv</text>
+          <rect x="520" y="70" width="105" height="60" rx="8" fill="#27ae60"/>
+          <text x="572" y="106">FFN x 0.5</text>
+        </g>
+        <g stroke="#2c3e50" stroke-width="2">
+          <line x1="205" y1="100" x2="232" y2="100" marker-end="url(#arr)"/>
+          <line x1="345" y1="100" x2="372" y2="100" marker-end="url(#arr)"/>
+          <line x1="485" y1="100" x2="512" y2="100" marker-end="url(#arr)"/>
+          <line x1="625" y1="100" x2="668" y2="100" marker-end="url(#arr)"/>
+        </g>
+        <text x="688" y="106" font-size="18" font-style="italic" fill="#2c3e50">out</text>
+        <g fill="none" stroke="#7f8c8d" stroke-width="1.5" stroke-dasharray="5,3">
+          <path d="M 100 70 Q 152 38 205 70"/>
+          <path d="M 240 70 Q 292 38 345 70"/>
+          <path d="M 380 70 Q 432 38 485 70"/>
+          <path d="M 520 70 Q 572 38 625 70"/>
+        </g>
+        <g font-size="12.5" fill="#555" text-anchor="middle">
+          <text x="152" y="154">per-frame only</text>
+          <text x="292" y="154">global context</text>
+          <text x="432" y="154">local detail</text>
+          <text x="572" y="154">per-frame only</text>
+        </g>
+        <text x="360" y="188" text-anchor="middle" font-size="13" fill="#2c3e50">the filling mixes information across time steps</text>
+        <text x="360" y="208" text-anchor="middle" font-size="13" fill="#7f8c8d">the two FFN halves add capacity without mixing time steps (dashed arcs: residuals)</text>
+      </svg>
+      <figcaption><strong>Takeaway:</strong> the sandwich is the whole story. Attention handles the long-range relationships across frames, convolution handles the local stuff like phoneme edges, and the two half-strength FFNs on the outside just add per-frame capacity. Two halves make one whole: together they contribute exactly as much as the single FFN in a vanilla transformer block.</figcaption>
+    </figure>
+
+    <div class="demo" id="convDemo">
+      <h3 style="margin-top: 0;">What does the convolution module actually buy?</h3>
+      <p>Forget the toggle. These are the actual models from the paper, with the actual numbers. Flip the toggle and the conv module's params come out, while the reported WER stays put.</p>
+      <div class="demo-controls">
+        <label for="rmConv"><input type="checkbox" id="rmConv"> Remove the conv module <span class="demo-note" style="margin: 0;">(approximate)</span></label>
+      </div>
+      <div id="cfRows"></div>
+      <p class="demo-note">Param math, approximate: totals are the paper's reported params. Conv cost per block is about 2d<sup>2</sup> (the two pointwise projections; biases, LayerNorm, and the GLU gate are ignored), times the block count from the paper's table. That gives S: 2 x 144<sup>2</sup> x 16 = 0.66M, M: 2 x 256<sup>2</sup> x 16 = 2.10M, L: 2 x 512<sup>2</sup> x 17 = 8.91M. (The cards show kernel 32, the real kernel size in the paper's S/M/L configs; the walkthrough below uses 15 as a round working number. The kernel size does not enter this estimate anyway, since the depthwise conv's own params are ignored too.) The WER numbers are the paper's reported results with the conv module in place. The toggle only subtracts its param cost; it does not predict what WER would be without it. That is the point: isolate what local detail costs, and compare it to what it buys.</p>
+      <p class="caption"><strong>Takeaway:</strong> Conformer (M) is 30.7M params and scores 5.0 on test-other, beating a 139M transformer at 5.6. The conv module costs only about 2.1M of those 30.7M. Local detail, bought cheap. That is the whole trick.</p>
+    </div>
+    <script>
+    (function() {
+      var SCALE = 139.0; // million params; the transformer baseline sets the bar scale
+      var MODELS = [
+        { key: 'S', name: 'Conformer (S)', dims: '16 blocks, d=144, kernel 32', paramsM: 10.3, d: 144, layers: 16, clean: 2.7, other: 6.3 },
+        { key: 'M', name: 'Conformer (M)', dims: '16 blocks, d=256, kernel 32', paramsM: 30.7, d: 256, layers: 16, clean: 2.3, other: 5.0 },
+        { key: 'L', name: 'Conformer (L)', dims: '17 blocks, d=512, kernel 32', paramsM: 118.8, d: 512, layers: 17, clean: 2.1, other: 4.3 }
+      ];
+      var REF = { name: 'Transformer transducer', dims: 'paper baseline, no conv module', paramsM: 139.0, clean: 2.4, other: 5.6 };
+      var box = document.getElementById('cfRows');
+      var toggle = document.getElementById('rmConv');
+      function fmt1(x) { return (Math.round(x * 10) / 10).toFixed(1); }
+      function convM(m) { return 2 * m.d * m.d * m.layers / 1e6; }
+      function modelHtml(m) {
+        return '<div class="cf-model">' +
+          '<div class="cf-head"><strong>' + m.name + '</strong><span class="cf-dims">' + m.dims + '</span></div>' +
+          '<div class="bar-row">' +
+            '<span class="bar-label">Params</span>' +
+            '<div class="bar-track cf-track">' +
+              '<div class="bar bar-mhsa" id="cfBase' + m.key + '"></div>' +
+              '<div class="bar bar-conv" id="cfConv' + m.key + '"></div>' +
+            '</div>' +
+            '<span class="bar-val" id="cfVal' + m.key + '"></span>' +
+          '</div>' +
+          '<div class="cf-stats" id="cfStats' + m.key + '"></div>' +
+        '</div>';
+      }
+      function refHtml() {
+        return '<div class="cf-model cf-ref">' +
+          '<div class="cf-head"><strong>' + REF.name + '</strong><span class="cf-dims">' + REF.dims + '</span></div>' +
+          '<div class="bar-row">' +
+            '<span class="bar-label">Params</span>' +
+            '<div class="bar-track cf-track"><div class="bar bar-mhsa" style="width:100%"></div></div>' +
+            '<span class="bar-val">' + fmt1(REF.paramsM) + 'M</span>' +
+          '</div>' +
+          '<div class="cf-stats">test-other WER <span class="cf-wer">' + REF.other.toFixed(1) + '</span> (clean ' + REF.clean.toFixed(1) + ')</div>' +
+        '</div>';
+      }
+      box.innerHTML = MODELS.map(modelHtml).join('') + refHtml();
+      function render() {
+        var off = toggle.checked;
+        MODELS.forEach(function(m) {
+          var c = convM(m);
+          if (!isFinite(c) || c < 0) { c = 0; }
+          var base = m.paramsM - c;
+          if (!isFinite(base) || base < 0) { base = m.paramsM; }
+          var shown = off ? base : m.paramsM;
+          document.getElementById('cfBase' + m.key).style.width = (100 * base / SCALE).toFixed(2) + '%';
+          var convEl = document.getElementById('cfConv' + m.key);
+          convEl.style.width = (100 * c / SCALE).toFixed(2) + '%';
+          convEl.className = off ? 'bar cf-off' : 'bar bar-conv';
+          document.getElementById('cfVal' + m.key).textContent = fmt1(shown) + 'M';
+          var share = (100 * c / m.paramsM).toFixed(1);
+          var stats = 'test-other WER <span class="cf-wer">' + m.other.toFixed(1) + '</span> (clean ' + m.clean.toFixed(1) + ')';
+          stats += off
+            ? ' &middot; conv removed: ' + fmt1(m.paramsM) + ' - ' + fmt1(c) + ' = ' + fmt1(shown) + 'M'
+            : ' &middot; conv &asymp; ' + fmt1(c) + 'M (' + share + '% of params)';
+          document.getElementById('cfStats' + m.key).innerHTML = stats;
+        });
+      }
+      toggle.addEventListener('change', render);
+      render();
+    })();
+    </script>
+
+    <p>The first FFN applies a 2-layer MLP to each frame independently. The dimension might be expanded to $d_{ff}$ (e.g., 1024). The usual transformer choice is a 4x expansion, so with $d_{model}=256$ that gives you exactly 1024, which is what the code below uses. The demo up top does its own rough conv-only count (about 2d<sup>2</sup> per block); it never touches this FFN math. It is then scaled back so a half-scaled residual connection can be added to the input.</p>
 
     <h3>Multi-Head Self-Attention with Relative Positional Encoding</h3>
     <p>So far, the input is $B \times T \times d_{model}$; this is the output from the first FFN and its residual connection. Now, you project this input, X, into queries, keys, and values:</p>
     $$Q = XW_q^i, \quad K = XW_k^i, \quad V = XW_v^i$$
 
-    <p>Where the $W$ weight matrices are ${d_{model}}/{k} \times {d_{model}}/{k}$ for $k$ heads. You then compute attention:</p>
+    <p>Where the $W$ weight matrices are ${d_{model}} \times ({d_{model}}/{k})$ for $k$ heads. You then compute attention:</p>
     $$\text{Attn}(Q, K, V) = \text{Softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V$$
 
     <p>Concatenate the heads, project back with $W_o$, and add the residual:</p>
@@ -132,7 +333,7 @@
 
     <p>This is almost the same as a vanilla transformer, but instead of sinusoidal encodings, it uses <strong>relative positions</strong>, which generalize better to long sequences and relative timing. With absolute positional encodings, for each input position, you would update the input as $x_t \leftarrow x_t + PE(t)$. The model is given the known positions, and the query and key themselves get shifted by this absolute index.</p>
 
-    <p>With relative positional encoding, we don’t alter the input embeddings directly. Instead, we introduce an extra bias term in the attention score based on the relative distance. The model learns biases based on the relative distances between tokens. Speech is shift-invariant—a phoneme like "ba" at 1 second and 10 seconds should be treated the same. What matters is how far apart the tokens are, not their absolute index.</p>
+    <p>With relative positional encoding, we don’t alter the input embeddings directly. Instead, we introduce an extra bias term in the attention score based on the relative distance. The model learns biases based on the relative distances between tokens. Speech is shift-invariant: a phoneme like "ba" at 1 second and 10 seconds should be treated the same. What matters is how far apart the tokens are, not their absolute index.</p>
 
     $$\text{score}(i,j) = Q_i \cdot K_j + Q_i \cdot r_{(i-j)}$$
 
@@ -147,7 +348,7 @@
     <ol>
         <li>The features are first passed to a <strong>LayerNorm</strong> to be normalized along the $d_{model}$ dimension.</li>
         <li>Then, a <strong>pointwise convolution</strong> with a <strong>Gated Linear Unit (GLU)</strong> activation is applied. The pointwise convolution expands the number of channels to $2 \times d_{model}$. The GLU works by halving the channels and applying the operation $A \cdot \sigma(B)$, where B acts as a learned gate controlling how much of A to pass. The output dimension remains $B \times T \times d_{model}$.</li>
-        <li>Then, a <strong>depthwise convolution</strong> is applied along the time axis. Each channel has its own convolution filter (so there is no cross-channel mixing), often with a kernel size equivalent to 150 ms. This gives each feature map a local receptive field over time. The input is padded ('same') such that the output from this step remains the same size as the input. In streaming ASR, you’d switch to causal padding (padding only on the left, so the model doesn’t peek into the future). At this point, the representation is channel-local and time-dependent.</li>
+        <li>Then, a <strong>depthwise convolution</strong> is applied along the time axis. Each channel has its own convolution filter (so there is no cross-channel mixing), often a 15-tap kernel, which is 150 ms at 100 frames per second. That is why the code below uses kernel_size=15. This gives each feature map a local receptive field over time. The input is padded ('same') such that the output from this step remains the same size as the input. In streaming ASR, you’d switch to causal padding (padding only on the left, so the model doesn’t peek into the future). At this point, the representation is channel-local and time-dependent.</li>
     </ol>
 
     <h3>Normalization Strategy: LayerNorm vs. BatchNorm</h3>
@@ -167,15 +368,14 @@
 
     <hr>
     
-    <h2 id="implementation">PyTorch Implementation</h2>
+        <h2 id="implementation">PyTorch Implementation</h2>
+
+    <p>Let's build the block piece by piece. First, the macaron FFN. This is just a normal two-layer MLP, but notice the residual is scaled by 0.5. That is the whole macaron trick: two of these add up to one full FFN.</p>
 <pre><code class="language-python">
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# -------------------------------
-# 1. Macaron-style FeedForward
-# -------------------------------
 class ConformerFFN(nn.Module):
     def __init__(self, d_model, d_ff, dropout=0.1):
         super().__init__()
@@ -191,10 +391,10 @@ class ConformerFFN(nn.Module):
         out = self.linear2(out)
         out = self.dropout(out)
         return x + 0.5 * out   # Macaron: scale by 0.5
-        
-# -------------------------------
-# 2. Multi-Head Self-Attention (vanilla version, can extend with relative PE)
-# -------------------------------
+</code></pre>
+
+    <p>Next, self-attention. I am showing the vanilla version here to keep it readable. The relative positional bias we talked about above slots right into the score computation.</p>
+<pre><code class="language-python">
 class MHSA(nn.Module):
     def __init__(self, d_model, num_heads, dropout=0.1):
         super().__init__()
@@ -223,10 +423,10 @@ class MHSA(nn.Module):
 
         out = out.transpose(1, 2).contiguous().view(B, T, D)
         return x + self.dropout(self.W_o(out))  # residual
+</code></pre>
 
-# -------------------------------
-# 3. Convolution Module
-# -------------------------------
+    <p>Now the convolution module, the part that makes a Conformer a Conformer. Pointwise conv plus GLU, a depthwise conv over time, BatchNorm plus Swish, then pointwise back. Watch the transpose dance: Conv1d wants channels first.</p>
+<pre><code class="language-python">
 class ConformerConvModule(nn.Module):
     def __init__(self, d_model, kernel_size=15, dropout=0.1, causal=False):
         super().__init__()
@@ -261,10 +461,10 @@ class ConformerConvModule(nn.Module):
 
         x = x.transpose(1, 2)  # back to (B, T, d_model)
         return residual + self.dropout(x)  # residual
+</code></pre>
 
-# -------------------------------
-# 4. Full Conformer Block
-# -------------------------------
+    <p>And finally, the whole block. FFN, attention, conv, FFN, with a LayerNorm at the end, which is what most implementations do.</p>
+<pre><code class="language-python">
 class ConformerBlock(nn.Module):
     def __init__(self, d_model=256, d_ff=1024, num_heads=4, kernel_size=15, dropout=0.1, causal=False):
         super().__init__()
@@ -282,11 +482,26 @@ class ConformerBlock(nn.Module):
         return self.final_ln(x)
 </code></pre>
 
+    <p>So does the sandwich actually beat a plain transformer? Here are numbers reported in the original Conformer paper (Gulati et al., 2020) on LibriSpeech, without an external language model. WER is word error rate, lower is better:</p>
+
+    <div class="output">
+<span class="dim">LibriSpeech WER (%) -- test-clean / test-other, no external LM</span><br>
+<span class="dim">(numbers reported by Gulati et al., "Conformer", 2020)</span><br>
+<br>
+Transformer (transducer)&nbsp;&nbsp; 139.0M params&nbsp;&nbsp;&nbsp; 2.4 / 5.6<br>
+ContextNet (L)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 112.7M params&nbsp;&nbsp;&nbsp; 2.1 / 4.6<br>
+Conformer (M)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 30.7M params&nbsp;&nbsp;&nbsp; 2.3 / 5.0<br>
+<span class="good">Conformer (L)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 118.8M params&nbsp;&nbsp;&nbsp; 2.1 / 4.3</span>
+    </div>
+
+    <p>Look at the medium Conformer: at 30.7M params it already beats the 139M-param transformer transducer. Local plus global beats global alone. That is the payoff of the sandwich.</p>
+
+
     <hr>
     
     <h2 id="streaming">Streaming, Real-Time Applications, and Output</h2>
 
-    <p>Now, how do you make the Conformer work in real-time? The attention mechanism, as we mentioned earlier, needs to change to a streaming attention where we restrict how far queries can look back using a fixed attention window with a causal mask. Sometimes speech can be ambiguous if you don’t peek a little into the future, so we can allow each frame to have a look-ahead by a fixed number of frames. This adds some latency but improves the model, and it can be easily configured in the attention mask. Additionally, you can make your multi-head attention into a multi-scale multi-head attention. Because information varies in length—a phoneme can be shorter, while syllables and words are longer—one head might be configured to span more frames than others to capture these different relationships.</p>
+    <p>Now, how do you make the Conformer work in real-time? The attention mechanism, as we mentioned earlier, needs to change to a streaming attention where we restrict how far queries can look back using a fixed attention window with a causal mask. Sometimes speech can be ambiguous if you don’t peek a little into the future, so we can allow each frame to have a look-ahead by a fixed number of frames. This adds some latency but improves the model, and it can be easily configured in the attention mask. Additionally, you can make your multi-head attention into a multi-scale multi-head attention. Because information varies in length (a phoneme can be shorter, while syllables and words are longer), one head might be configured to span more frames than others to capture these different relationships.</p>
 
     <p>The convolution module uses "same" padding, which will need to change to causal padding, and the normalization, as we discussed in depth, needs to change as well.</p>
 

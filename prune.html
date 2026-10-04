@@ -13,7 +13,7 @@
       color: #333;
     }
     h1, h2, h3, h4 {
-      color: #2c3e50; /* Darker shade for better contrast */
+      color: #2c3e50;
       margin-top: 1.5em;
       margin-bottom: 0.5em;
     }
@@ -29,28 +29,27 @@
     nav a:hover { text-decoration: underline; color: #2980b9;}
 
     pre {
-      background: #f8f9f9; /* Lighter background for code blocks */
+      background: #f8f9f9;
       padding: 1rem;
       overflow-x: auto;
-      border: 1px solid #e1e4e8; /* Softer border */
-      border-left: 4px solid #3498db; /* Accent border */
+      border: 1px solid #e1e4e8;
+      border-left: 4px solid #3498db;
       border-radius: 4px;
       font-size: 0.9em;
     }
     code {
       font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
     }
-    /* For inline code */
     p > code, li > code, table td > code {
       background: #e8eaed;
       padding: 0.2em 0.4em;
       border-radius: 3px;
       font-size: 0.85em;
     }
-    pre code { /* Reset for code inside pre, already handled by pre styling */
+    pre code {
         background: none;
         padding: 0;
-        font-size: 1em; /* Ensure pre's font size is inherited */
+        font-size: 1em;
     }
     ul {
         padding-left: 20px;
@@ -61,6 +60,53 @@
     strong {
         color: #2980b9;
     }
+    /* Rendered notebook output, not a print() call */
+    .output {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 1rem 1.2rem;
+      border-radius: 6px;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+      font-size: 0.9em;
+      margin: 1em 0;
+      overflow-x: auto;
+      border-left: 4px solid #22c55e;
+    }
+    .output .dim { color: #94a3b8; }
+    .output .good { color: #4ade80; font-weight: bold; }
+    .output .bad { color: #f87171; font-weight: bold; }
+    /* Interactive demo */
+    .demo {
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      padding: 1.2rem;
+      margin: 1.5em 0;
+      background: #fbfcfd;
+    }
+    .demo-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    .demo-controls label { font-weight: bold; color: #2c3e50; }
+    .demo-controls input[type=range] { width: 220px; accent-color: #3498db; }
+    .mode-toggle { display: inline-flex; border: 1px solid #bdc3c7; border-radius: 6px; overflow: hidden; }
+    .mode-toggle button {
+      border: none; background: #fff; padding: 0.45em 1em; cursor: pointer;
+      font-size: 0.9em; color: #2c3e50;
+    }
+    .mode-toggle button.active { background: #3498db; color: #fff; font-weight: bold; }
+    #pruneCanvas { display: block; margin: 0 auto; max-width: 100%; }
+    .demo-stats {
+      text-align: center; margin-top: 0.8rem; font-size: 0.95em; color: #2c3e50;
+    }
+    .demo-stats strong { color: #2980b9; }
+    .caption {
+      font-size: 0.9em; color: #555; margin-top: 0.8rem;
+      border-left: 3px solid #3498db; padding-left: 0.8em;
+    }
   </style>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/monokai.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
@@ -69,11 +115,229 @@
 <body>
    <nav>
      <ul>
-      <li><a href="index.html">Home</a></li> 
+      <li><a href="index.html">Home</a></li>
       <li><a href="https://github.com/raminaeye/model-optimization/blob/main/pruning/pruning.ipynb">Pruning-Notebook</a></li>
      </ul>
    </nav>
+
    <h1>Pruning</h1>
+   <p>
+     Take a ResNet-18 that hits <strong>92.58%</strong> accuracy on STL-10. Delete half of its weights.
+     Accuracy collapses to <strong>66.25%</strong>. Fine-tune for a few epochs and it climbs back to
+     <strong>92.74%</strong>, with 5.5 million weights no longer doing any work.
+   </p>
+   <p>
+     That is pruning in one paragraph. Neural networks are overparameterized: most weights are just along
+     for the ride. If you can figure out which weights barely matter and remove them, you get a smaller,
+     faster, cheaper-to-deploy model without giving up what the network learned.
+   </p>
+
+   <h2>Two flavors of pruning</h2>
+   <p>
+     There are two ways to cut. <strong>Unstructured</strong> pruning removes individual weights wherever
+     they are, leaving a sparse Swiss cheese of a matrix. <strong>Structured</strong> pruning removes whole
+     filters or channels at a time, which actually shrinks the layer. Drag the slider and flip between the
+     two to feel the difference:
+   </p>
+
+   <div class="demo">
+     <div class="demo-controls">
+       <label for="sparsity">Sparsity: <span id="sparsityVal">50</span>%</label>
+       <input type="range" id="sparsity" min="0" max="90" value="50" step="5">
+       <div class="mode-toggle">
+         <button id="btnUnstructured" class="active">Unstructured</button>
+         <button id="btnStructured">Structured</button>
+       </div>
+     </div>
+     <canvas id="pruneCanvas" width="512" height="512"></canvas>
+     <div class="demo-stats" id="demoStats"></div>
+     <p class="caption">
+       Unstructured pruning just zeros weights. Those zeros are still multiplied at inference time, so the
+       model is not actually faster unless your backend has sparse kernels that skip them. Structured pruning
+       removes whole rows, so the layer genuinely gets smaller and every backend benefits.
+     </p>
+   </div>
+
+   <script>
+   (function() {
+     var N = 16, canvas = document.getElementById('pruneCanvas');
+     var ctx = canvas.getContext('2d');
+     var dpr = window.devicePixelRatio || 1;
+     var SIZE = 512;
+     canvas.width = SIZE * dpr; canvas.height = SIZE * dpr;
+     canvas.style.width = SIZE + 'px'; canvas.style.height = SIZE + 'px';
+     ctx.scale(dpr, dpr);
+
+     // fixed pseudo-random weights so the picture is stable
+     var seed = 7;
+     function rand() { seed = (seed * 16807) % 2147483647; return seed / 2147483647; }
+     var W = [];
+     for (var i = 0; i < N * N; i++) W.push(rand());
+
+     var mode = 'unstructured';
+     var slider = document.getElementById('sparsity');
+     var valLabel = document.getElementById('sparsityVal');
+     var stats = document.getElementById('demoStats');
+     var bU = document.getElementById('btnUnstructured');
+     var bS = document.getElementById('btnStructured');
+
+     function draw() {
+       var sparsity = slider.value / 100;
+       valLabel.textContent = slider.value;
+       var cell = SIZE / N;
+       ctx.clearRect(0, 0, SIZE, SIZE);
+
+       var pruned = new Array(N * N).fill(false);
+       if (mode === 'unstructured') {
+         var idx = W.map(function(w, i) { return i; });
+         idx.sort(function(a, b) { return W[a] - W[b]; });
+         var k = Math.floor(sparsity * N * N);
+         for (var q = 0; q < k; q++) pruned[idx[q]] = true;
+       } else {
+         var rowNorm = [];
+         for (var r = 0; r < N; r++) {
+           var s = 0;
+           for (var c = 0; c < N; c++) s += W[r * N + c];
+           rowNorm.push({r: r, s: s});
+         }
+         rowNorm.sort(function(a, b) { return a.s - b.s; });
+         var rowsToKill = Math.round(sparsity * N);
+         for (var q2 = 0; q2 < rowsToKill; q2++)
+           for (var c2 = 0; c2 < N; c2++) pruned[rowNorm[q2].r * N + c2] = true;
+       }
+
+       var prunedCount = 0;
+       for (var i2 = 0; i2 < N * N; i2++) {
+         var r2 = Math.floor(i2 / N), c3 = i2 % N;
+         var x = c3 * cell, y = r2 * cell;
+         if (pruned[i2]) {
+           prunedCount++;
+           ctx.fillStyle = '#eef1f4';
+           ctx.fillRect(x + 1, y + 1, cell - 2, cell - 2);
+           ctx.strokeStyle = '#c3ccd4';
+           ctx.lineWidth = 1;
+           ctx.beginPath();
+           ctx.moveTo(x + 4, y + 4); ctx.lineTo(x + cell - 4, y + cell - 4);
+           ctx.moveTo(x + cell - 4, y + 4); ctx.lineTo(x + 4, y + cell - 4);
+           ctx.stroke();
+         } else {
+           var v = W[i2];
+           var blue = Math.floor(120 + v * 135);
+           ctx.fillStyle = 'rgb(52, ' + Math.floor(120 + v * 60) + ', ' + blue + ')';
+           ctx.fillRect(x + 1, y + 1, cell - 2, cell - 2);
+         }
+       }
+       ctx.strokeStyle = '#bdc3c7';
+       ctx.strokeRect(0.5, 0.5, SIZE - 1, SIZE - 1);
+
+       var pct = Math.round(100 * prunedCount / (N * N));
+       if (mode === 'unstructured')
+         stats.innerHTML = '<strong>' + prunedCount + '</strong> of ' + (N * N) +
+           ' weights zeroed (' + pct + '%). Same shape, sparse values.';
+       else
+         stats.innerHTML = '<strong>' + prunedCount + '</strong> of ' + (N * N) +
+           ' weights removed (' + pct + '%) across ' + Math.round(slider.value / 100 * N) +
+           ' whole rows. Smaller matrix, dense values.';
+     }
+
+     slider.addEventListener('input', draw);
+     bU.addEventListener('click', function() {
+       mode = 'unstructured';
+       bU.classList.add('active'); bS.classList.remove('active'); draw();
+     });
+     bS.addEventListener('click', function() {
+       mode = 'structured';
+       bS.classList.add('active'); bU.classList.remove('active'); draw();
+     });
+     draw();
+   })();
+   </script>
+
+   <h2>How PyTorch actually does it</h2>
+   <p>
+     Here is the part that surprises people: PyTorch does not delete anything at first. When you prune a
+     layer, it keeps the original weights as <code>weight_orig</code> and attaches a binary
+     <code>weight_mask</code> next to them. During the forward pass the effective weight is just
+     <code>weight_orig * weight_mask</code>. The zeros are a fiction maintained by the mask, which is why
+     you can always unprune or finalize later.
+   </p>
+   <p>
+     Pruning every convolution and linear layer by L1 magnitude, keeping the 50% largest weights, is a few lines:
+   </p>
+   <pre><code>import torch.nn.utils.prune as prune
+
+def apply_unstructured_pruning(model, amount=0.5):
+    for name, module in model.named_modules():
+        if isinstance(module, (nn.Conv2d, nn.Linear)):
+            prune.l1_unstructured(module, name='weight', amount=amount)
+    return model</code></pre>
+   <p>
+     After running it, each pruned layer carries the two new attributes, and you can check they are there:
+   </p>
+   <pre><code>model_pruned.layer1[0].conv1.weight_orig   # untouched original weights
+model_pruned.layer1[0].conv1.weight_mask   # 1s where weights survive, 0s where pruned</code></pre>
+   <p>
+     If you are happy with the result and want to make it permanent, one call bakes the mask into the
+     weights and deletes the extra bookkeeping:
+   </p>
+   <pre><code>prune.remove(module, 'weight')</code></pre>
+
+   <h2>What happens when you prune half a ResNet</h2>
+   <p>
+     The full experiment, data loading and all, lives in the companion notebook. The setup is a ResNet-18
+     trained on STL-10. Applying the function above with <code>amount=0.5</code> gives:
+   </p>
+   <div class="output">
+     <span class="dim">Total params:</span> 11,172,032<br>
+     <span class="dim">Zeroed (pruned) params:</span> 5,586,016 <span class="good">(50.00%)</span>
+   </div>
+   <p>And the accuracy:</p>
+   <div class="output">
+     <span class="dim">Accuracy on STL10 test set:</span> 92.58% <span class="dim">-&gt;</span> <span class="bad">66.25%</span>
+   </div>
+   <p>
+     Half the weights gone, accuracy fell off a cliff. That is expected: the surviving weights were trained
+     assuming the pruned ones would do their share of the work.
+   </p>
+
+   <h2>Getting it back with fine-tuning</h2>
+   <p>
+     The fix is to let the survivors adjust. We retrain just the final classifier layer for 15 epochs with
+     plain SGD, so the network learns to compensate for everything that was cut:
+   </p>
+   <pre><code>optimizer = torch.optim.SGD(model_pruned.fc.parameters(), lr=1e-3, momentum=0.9)
+
+model.train()
+for epoch in range(15):
+    for x, y in train_loader:
+        optimizer.zero_grad()
+        loss = criterion(model_pruned(x), y)
+        loss.backward()
+        optimizer.step()</code></pre>
+   <p>
+     The loss falls from 0.40 to 0.23 across the 15 epochs, and when we evaluate again:
+   </p>
+   <div class="output">
+     <span class="dim">Accuracy on STL10 test set:</span> <span class="good">92.74%</span>
+   </div>
+   <p>
+     Fully recovered, slightly above where we started, with half the weights pruned. This is the standard
+     pruning workflow: cut aggressively, fine-tune to heal, and optionally quantize afterward to shrink the
+     model even further.
+   </p>
+
+   <h2>Caveats</h2>
+   <ul>
+     <li>Do not prune batch norm layers. They keep training stable and cost almost nothing.</li>
+     <li>ResNets need care: residual connections constrain which channels structured pruning is allowed to remove.</li>
+     <li>Sparse does not mean fast. Zeroed weights are still multiplied at inference time unless your backend has sparse kernels. Torch and ONNX compilers can help here.</li>
+   </ul>
+
+   <h2>What is next</h2>
+   <p>
+     Pruning pairs naturally with quantization: first remove the weights you do not need, then shrink the
+     ones that remain. The <a href="quantization.html">quantization tutorial</a> picks up where this one ends.
+   </p>
 
 </body>
 </html>

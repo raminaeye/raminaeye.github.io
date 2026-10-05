@@ -213,6 +213,19 @@
     .attn-bar-fill { background: #3498db; border-radius: 4px; height: 100%; }
     .attn-bar-fill.alt { background: #e67e22; }
     .attn-bar-row .val { width: 2.8em; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; color: #2c3e50; flex: none; }
+    /* headRoles paired bars: both heads side by side per token */
+    .pair-tracks { display: flex; gap: 0.5em; flex: 1; min-width: 0; }
+    .pair-tracks .attn-bar-track.dim { opacity: 0.3; }
+    .attn-bar-row .val.pair { width: 6.6em; font-size: 0.85em; }
+    .head-key { display: flex; flex-wrap: wrap; gap: 1.2em; justify-content: center; margin: 0.4rem 0 0.6rem; font-size: 0.9em; color: #555; }
+    .head-key .sw { display: inline-block; width: 1.4em; height: 0.9em; border-radius: 3px; margin-right: 0.4em; vertical-align: middle; }
+    .head-key .sw.blue { background: #3498db; }
+    .head-key .sw.orange { background: #e67e22; }
+    /* maskDemo legend key: lives outside the grid, so 0/-inf text never has to fit a cell */
+    .mask-legend { display: flex; flex-wrap: wrap; gap: 1.2em; justify-content: center; margin: 0.6rem 0; font-size: 0.9em; color: #555; }
+    .mask-legend .sw { display: inline-block; width: 1.4em; height: 1em; border-radius: 3px; margin-right: 0.4em; vertical-align: middle; border: 1px solid #bdc3c7; }
+    .mask-legend .sw.allow { background: rgba(46,204,113,0.55); }
+    .mask-legend .sw.block { background: rgba(231,76,60,0.55); }
     .demo-stats {
       text-align: center; margin-top: 0.8rem; font-size: 0.95em; color: #2c3e50;
     }
@@ -232,6 +245,7 @@
     .kvbar-fill { background: #e74c3c; border-radius: 4px; height: 100%; }
     .kvbar-fill.cache { background: #27ae60; }
     .kvbar-row .val { width: 7em; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; color: #2c3e50; flex: none; font-size: 0.85em; }
+    .kvbar-title { font-weight: bold; color: #2c3e50; margin: 0.7em 0 0.1em; }
     .mask-grid {
       border-collapse: collapse;
       table-layout: fixed;
@@ -929,18 +943,17 @@ class MultiHeadAttention(nn.Module):
   <div class="demo" id="headRoles">
     <p><strong>Two heads, one word.</strong> Both heads are answering for the query
     <strong>"it"</strong>. Watch what each one listens to.</p>
-    <p class="howto"><strong>How to play:</strong> hit Play and I hand the query "it" to
-    each head in turn, about 0.7 seconds each, narrating what each one is doing. Or click the
-    heads yourself. <strong>What you are seeing:</strong> two attention distributions over
-    the same sentence for the same query word. Head A is the coreference head: it slams
-    weight onto "animal". Head B is the syntax head: it spreads over the clause around
-    "it". The bars animate between the two, so you can feel how different the listening
-    pattern is. One head would have to average these two jobs into mush. That is the whole
-    argument for multihead.</p>
+    <p class="howto"><strong>How to play:</strong> hit Play and I walk through the two
+    heads in turn, about 0.7 seconds each, narrating what each one is doing. <strong>What
+    you are seeing:</strong> both heads at once, paired per token: the blue bar is Head A
+    (coreference), the orange bar is Head B (local syntax), and each number reads A / B.
+    Head A slams weight onto "animal". Head B spreads over the clause around "it". No
+    toggling, the difference sits right there side by side. One head would have to average
+    these two jobs into mush. That is the whole argument for multihead.</p>
     <div class="play-row"><button type="button" class="play-btn" id="headPlay">Play</button></div>
-    <div class="attn-toggle" role="group" aria-label="Attention head">
-      <button type="button" data-head="0" class="active">Head A: coreference</button>
-      <button type="button" data-head="1">Head B: local syntax</button>
+    <div class="head-key" aria-label="Head key">
+      <span><span class="sw blue"></span>Head A: coreference</span>
+      <span><span class="sw orange"></span>Head B: local syntax</span>
     </div>
     <div class="attn-bars" id="headBars"></div>
     <p class="demo-stats" id="headNarr"></p>
@@ -958,7 +971,7 @@ class MultiHeadAttention(nn.Module):
       { name: "Head B: local syntax",
         W: [0.01, 0.02, 0.02, 0.03, 0.05, 0.10, 0.25, 0.20, 0.15, 0.08, 0.06, 0.03] }
     ];
-    var head = 0;
+    var active = -1; // -1: both heads shown bright; else the head Play is narrating
     var NARR = [
       "Head A is the coreference head. Its whole job is answering \"who is it?\" It slams 0.55 onto \"animal\" and barely glances at the neighbors. Pronoun resolved, job done.",
       "Head B is the local-syntax head. It never looks at \"animal\" at all: 0.25 on \"because\", 0.20 on \"it\", 0.15 on \"was\". It is tracking the clause the pronoun sits in. Same query word, totally different job."
@@ -966,52 +979,65 @@ class MultiHeadAttention(nn.Module):
     var bars = document.getElementById("headBars");
     var stats = document.getElementById("headStats");
     var narr = document.getElementById("headNarr");
-    var btns = document.querySelectorAll('#headRoles [data-head]');
+
+    function top2(h) {
+      var W = HEADS[h].W;
+      var order = TOK.map(function(t, i) { return i; }).sort(function(a, b) { return W[b] - W[a]; });
+      return order.slice(0, 2).map(function(i) { return '"' + TOK[i] + '" ' + W[i].toFixed(2); });
+    }
 
     function draw() {
-      var W = HEADS[head].W;
       bars.innerHTML = "";
       TOK.forEach(function(t, i) {
-        var v = W[i];
         var row = document.createElement("div");
         row.className = "attn-bar-row";
         var lbl = document.createElement("span");
         lbl.className = "lbl";
         lbl.textContent = t;
-        var track = document.createElement("div");
-        track.className = "attn-bar-track";
-        var fill = document.createElement("div");
-        fill.className = "attn-bar-fill" + (head === 1 ? " alt" : "");
-        fill.style.width = (v * 100).toFixed(1) + "%";
-        track.appendChild(fill);
+        var pair = document.createElement("div");
+        pair.className = "pair-tracks";
+        for (var h = 0; h < 2; h++) {
+          var track = document.createElement("div");
+          track.className = "attn-bar-track";
+          var fill = document.createElement("div");
+          fill.className = "attn-bar-fill" + (h === 1 ? " alt" : "");
+          fill.style.width = (HEADS[h].W[i] * 100).toFixed(1) + "%";
+          track.appendChild(fill);
+          pair.appendChild(track);
+        }
         var val = document.createElement("span");
-        val.className = "val";
-        val.textContent = v.toFixed(2);
-        row.appendChild(lbl); row.appendChild(track); row.appendChild(val);
+        val.className = "val pair";
+        val.textContent = HEADS[0].W[i].toFixed(2) + " / " + HEADS[1].W[i].toFixed(2);
+        row.appendChild(lbl); row.appendChild(pair); row.appendChild(val);
         bars.appendChild(row);
       });
-      var order = TOK.map(function(t, i) { return i; }).sort(function(a, b) { return W[b] - W[a]; });
-      var top2 = order.slice(0, 2).map(function(i) { return '"' + TOK[i] + '" ' + W[i].toFixed(2); });
-      stats.innerHTML = "<strong>" + HEADS[head].name + "</strong>: &ldquo;it&rdquo; listens most to " +
-        top2.join(" and ") + ".";
-      narr.textContent = NARR[head];
+      applyDim();
     }
 
-    function setHead(h) {
-      stopPlay();
-      head = h;
-      for (var j = 0; j < btns.length; j++) {
-        btns[j].classList.toggle("active", +btns[j].getAttribute("data-head") === h);
+    function applyDim() {
+      var pairs = bars.querySelectorAll(".pair-tracks");
+      for (var i = 0; i < pairs.length; i++) {
+        var trs = pairs[i].querySelectorAll(".attn-bar-track");
+        for (var h = 0; h < 2; h++) {
+          trs[h].classList.toggle("dim", active >= 0 && h !== active);
+        }
       }
-      draw();
     }
 
-    for (var k = 0; k < btns.length; k++) {
-      (function(btn) {
-        btn.addEventListener("click", function() {
-          setHead(+btn.getAttribute("data-head"));
-        });
-      })(btns[k]);
+    function narrate(h) {
+      active = h;
+      narr.textContent = NARR[h];
+      stats.innerHTML = "<strong>" + HEADS[h].name + "</strong>: &ldquo;it&rdquo; listens most to " +
+        top2(h).join(" and ") + ".";
+      applyDim();
+    }
+
+    function idle() {
+      active = -1;
+      narr.textContent = "Both heads at once, no toggling: blue is Head A, orange is Head B. Head A slams 0.55 onto \"animal\"; Head B spreads 0.25 on \"because\", 0.20 on \"it\", 0.15 on \"was\".";
+      stats.innerHTML = "Head A: &ldquo;it&rdquo; listens most to " + top2(0).join(" and ") +
+        ". Head B: &ldquo;it&rdquo; listens most to " + top2(1).join(" and ") + ".";
+      applyDim();
     }
 
     // Play: step through the two heads, ~700ms each, narrating each job.
@@ -1021,27 +1047,22 @@ class MultiHeadAttention(nn.Module):
       if (playTimer) { clearInterval(playTimer); playTimer = null; }
       playBtn.textContent = "Play";
       playBtn.classList.remove("stop");
-    }
-    function showHead(h) {
-      head = h;
-      for (var j = 0; j < btns.length; j++) {
-        btns[j].classList.toggle("active", +btns[j].getAttribute("data-head") === h);
-      }
-      draw();
+      idle();
     }
     playBtn.addEventListener("click", function() {
       if (playTimer) { stopPlay(); return; }
       playBtn.textContent = "Stop";
       playBtn.classList.add("stop");
       var i = 0;
-      showHead(i);
+      narrate(i);
       playTimer = setInterval(function() {
         i++;
         if (i >= HEADS.length) { stopPlay(); return; }
-        showHead(i);
+        narrate(i);
       }, 700);
     });
     draw();
+    idle();
   })();
   </script>
 
@@ -1398,8 +1419,9 @@ pe = positional_encoding(seq_len=8, d_model=16)
     <p class="howto"><strong>How to play:</strong> hit Play and I walk through the three
     masks, one every 0.7 seconds, narrating when you would use each. Or click the masks
     yourself, and drag the padding slider to change how many dummy tokens sit at the end
-    and watch whole columns go dark live. <strong>What you are seeing:</strong> green
-    cells are allowed, red cells are blocked (-inf, which softmax turns into 0). The
+    and watch whole columns go dark live. <strong>What you are seeing:</strong> the key
+    above the grid tells the story: green cells are allowed (0), red cells are blocked
+    (-inf, which softmax turns into 0). The
     causal mask kills the upper triangle: no peeking into the future. The padding mask
     kills whole columns: dummies get no listeners.</p>
     <div class="play-row"><button type="button" class="play-btn" id="maskPlay">Play</button></div>
@@ -1411,6 +1433,10 @@ pe = positional_encoding(seq_len=8, d_model=16)
     <div class="demo-controls">
       <label for="padCount">Padding tokens at the end (dummies): <span id="padCountVal">2</span></label>
       <input type="range" id="padCount" min="0" max="4" step="1" value="2">
+    </div>
+    <div class="mask-legend" aria-label="Mask cell key">
+      <span><span class="sw allow"></span>0: allowed</span>
+      <span><span class="sw block"></span>-inf: blocked (softmax turns it into 0)</span>
     </div>
     <div class="table-scroll">
     <table class="attn-mini" id="maskGrid" aria-label="Attention mask explorer">
@@ -1457,8 +1483,6 @@ pe = positional_encoding(seq_len=8, d_model=16)
           var isBlocked = (mode === 'causal' && j > i) || (mode === 'padding' && j >= 5 - P);
           cells[j].style.background = isBlocked
             ? 'rgba(231,76,60,0.55)' : 'rgba(46,204,113,0.55)';
-          cells[j].style.color = '#2c3e50';
-          cells[j].textContent = isBlocked ? '-inf' : '0';
           if (isBlocked) { blocked++; }
         }
       }
@@ -1880,10 +1904,13 @@ def generate(model, idx, max_new_tokens, temperature=1.0):
     <p class="howto"><strong>How to play:</strong> pick how many tokens to generate with
     the slider, then hit Play and I generate them one per half second. <strong>What you
     are seeing:</strong> each green block is one cached token's key and value, growing as
-    generation runs. The two bars are total attention work with and without the cache, on
-    a log scale, and the step readout shows the cost of the token being generated right
-    now. Cached, a step only touches its own key and value; uncached, it redoes the whole
-    quadratic sum. Watch the red bar explode while the green one barely moves.</p>
+    generation runs. The two bars are the cost of the <strong>current step only</strong>,
+    on a linear scale: red is what the uncached path pays for this token, green is what
+    the cached path pays, and the step readout gives both numbers plus how many times
+    more the uncached path pays right now. Cached, a step only touches its own key and
+    value; uncached, it redoes the whole quadratic sum, so the red bar stays full width
+    while the green bar shrinks into a sliver as the token count grows. The whole-run
+    totals and their 85.7x ratio sit in the line below the bars.</p>
     <div class="play-row"><button type="button" class="play-btn" id="kvPlay">Play</button></div>
     <div class="demo-controls">
       <label for="kvT">Tokens to generate T: <span id="kvTVal">128</span></label>
@@ -1892,6 +1919,7 @@ def generate(model, idx, max_new_tokens, temperature=1.0):
     <div class="kv-stage">KV cache: <span id="kvStepLabel">128 / 128 blocks</span></div>
     <div class="kv-blocks" id="kvBlocks" aria-label="KV cache blocks"></div>
     <p class="demo-stats" id="kvStep"></p>
+    <p class="kvbar-title">Cost of the current step, linear scale</p>
     <div class="kvbar-row">
       <span class="lbl">No cache (recompute)</span>
       <div class="kvbar-track"><div class="kvbar-fill" id="kvBarNo"></div></div>
@@ -1903,9 +1931,13 @@ def generate(model, idx, max_new_tokens, temperature=1.0):
       <span class="val" id="kvValYes"></span>
     </div>
     <p class="demo-stats" id="kvStats"></p>
-    <p class="caption">Bars are on a log scale, because on a linear scale the green bar
-    would be invisible. The cache turns a cubic bill into a quadratic one: without it you
-    pay $4d\sum t^2$, with it you pay $4d\sum t$. At $T = 128$, generating the last token
+    <p class="caption">The bars are the cost of the current step on a linear scale, so
+    the red bar stays full width while the green bar shrinks from 100% to 0.78% as
+    $t$ goes from 1 to 128: the per-step ratio is exactly $t$. Two ratios, do not mix
+    them up. 128x is the per-step ratio at step 128: this token costs 128 times more
+    without the cache. 85.7x is the whole-run ratio: the cache does 1/85.7 of the total
+    work. The cache turns a cubic bill into a quadratic one: without it you pay
+    $4d\sum t^2$, with it you pay $4d\sum t$. At $T = 128$, generating the last token
     alone without a cache costs about twice as much as the entire cached run.</p>
   </div>
   <script>
@@ -1957,21 +1989,22 @@ def generate(model, idx, max_new_tokens, temperature=1.0):
       if (f >= 1e6) { return (f / 1e6).toFixed(1) + " MFLOPs"; }
       return Math.round(f).toLocaleString("en-US") + " FLOPs";
     }
-    var lo = Math.log10(4 * D * 1);
-    var hi = Math.log10(4 * D * sumSq(128));
     function render() {
       var T = +slider.value;
+      tVal.textContent = T;
+      // Per-step race on a linear axis: the uncached step is always the
+      // full-width bar, the cached step is exactly 1/T of it.
+      barNo.style.width = "100%";
+      barYes.style.width = (100 / T).toFixed(2) + "%";
+      valNo.textContent = fmtF(4 * D * T * T);
+      valYes.textContent = fmtF(4 * D * T);
       var no = 4 * D * sumSq(T);
       var yes = 4 * D * sumLin(T);
-      tVal.textContent = T;
-      barNo.style.width = ((Math.log10(no) - lo) / (hi - lo) * 100).toFixed(1) + "%";
-      barYes.style.width = ((Math.log10(yes) - lo) / (hi - lo) * 100).toFixed(1) + "%";
-      valNo.textContent = fmtF(no);
-      valYes.textContent = fmtF(yes);
       var ratio = no / yes;
       var lastStep = 4 * D * T * T;
-      stats.innerHTML = "T = <strong>" + T + "</strong>: the cache does <strong>1/" +
-        ratio.toFixed(1) + "</strong> of the work. Generating token " + T +
+      stats.innerHTML = "Whole run at T = <strong>" + T + "</strong>: " + fmtF(no) +
+        " uncached vs " + fmtF(yes) + " cached, so the cache does <strong>1/" +
+        ratio.toFixed(1) + "</strong> of the total work. Generating token " + T +
         " alone without a cache (" + fmtF(lastStep) + ") costs " +
         (lastStep / yes).toFixed(1) + "x the entire cached run.";
     }
@@ -1979,7 +2012,7 @@ def generate(model, idx, max_new_tokens, temperature=1.0):
       stopPlay();
       render();
       setBlocks(+slider.value);
-      stepLine.textContent = "";
+      stepLine.innerHTML = stepCost(+slider.value);
     }
     function onPlay() {
       if (playTimer) { stopPlay(); return; }
@@ -2001,6 +2034,7 @@ def generate(model, idx, max_new_tokens, temperature=1.0):
     slider.addEventListener("input", onSlider);
     render();
     setBlocks(+slider.value);
+    stepLine.innerHTML = stepCost(+slider.value);
     playBtn.addEventListener("click", onPlay);
   })();
   </script>
@@ -2276,47 +2310,38 @@ for i in range(n):
       // canvas fonts scale with displayed width, so grow them when squeezed.
       var dispW = canvas.clientWidth || 640;
       var fs = Math.max(15, Math.ceil(12 * 640 / dispW));
-      var padL = fs > 15 ? 88 : 64, padR = 14, padT = 14, padB = 40;
+      var padR = 14, padT = 14, padB = 40;
       var x0 = 3, x1 = 11;
       var ns = [];
       for (var e = x0; e <= x1; e++) { ns.push(Math.pow(2, e)); }
       var lo = Math.log10(attnF(8, d, L));
       var hi = Math.log10(attnF(2048, d, L));
+      ctx.font = fs + "px sans-serif";
+      // padL measured from the widest y-tick label, so nothing clips.
+      var marks = [1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13];
+      function tickLabel(m) {
+        return m >= 1e12 ? (m / 1e12) + "T" : m >= 1e9 ? (m / 1e9) + "G" : (m / 1e6) + "M";
+      }
+      var widest = 0;
+      for (var mw = 0; mw < marks.length; mw++) {
+        var lvw = Math.log10(marks[mw]);
+        if (lvw < lo || lvw > hi) { continue; }
+        widest = Math.max(widest, ctx.measureText(tickLabel(marks[mw])).width);
+      }
+      var padL = Math.ceil(widest + 16);
       function X(lx) { return padL + (lx - x0) / (x1 - x0) * (W - padL - padR); }
       function Y(lv) { return padT + (1 - (lv - lo) / (hi - lo)) * (H - padT - padB); }
 
       ctx.clearRect(0, 0, W, H);
-      ctx.font = fs + "px sans-serif";
-      // gridlines + labels
+      // marks first: gridlines
       ctx.strokeStyle = "#e5e8ec";
-      ctx.fillStyle = "#7f8c8d";
-      ctx.textAlign = "right";
       ctx.lineWidth = 1;
-      var marks = [1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13];
       for (var m = 0; m < marks.length; m++) {
         var lv = Math.log10(marks[m]);
         if (lv < lo || lv > hi) { continue; }
         var y = Y(lv);
         ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
-        if (y - padT < fs + 8) { continue; }
-        var lab = marks[m] >= 1e12 ? (marks[m] / 1e12) + "T" :
-                  marks[m] >= 1e9 ? (marks[m] / 1e9) + "G" : (marks[m] / 1e6) + "M";
-        ctx.fillText(lab, padL - 8, y + 4);
       }
-      ctx.textAlign = "center";
-      for (var e2 = x0; e2 <= x1; e2 += 2) {
-        var x = X(e2);
-        if (e2 === x1) {
-          ctx.textAlign = "right";
-          ctx.fillText("n=" + Math.pow(2, e2), W - padR, H - padB + 18);
-          ctx.textAlign = "center";
-        } else {
-          ctx.fillText("n=" + Math.pow(2, e2), x, H - padB + 18);
-        }
-      }
-      ctx.textAlign = "left";
-      ctx.fillStyle = "#7f8c8d";
-      ctx.fillText("FLOPs (log scale)", 14, padT + 4);
       // curves
       function curve(fn, color) {
         ctx.strokeStyle = color;
@@ -2338,16 +2363,57 @@ for i in range(n):
       ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(mx, padT); ctx.lineTo(mx, H - padB); ctx.stroke();
       ctx.setLineDash([]);
-      // crossover marker at n = 4d
+      // crossover dot, inset from the plot corner so it never half-clips
       var nc = 4 * d;
-      if (nc >= 8 && nc <= 2048) {
-        var cx = X(Math.log2(nc));
-        var cy = Y(Math.log10(attnF(nc, d, L)));
+      var hasCross = (nc >= 8 && nc <= 2048);
+      var cx = 0, cy = 0;
+      if (hasCross) {
+        cx = Math.min(X(Math.log2(nc)), W - padR - 8);
+        cy = Math.max(Y(Math.log10(attnF(nc, d, L))), padT + 8);
         ctx.fillStyle = "#2c3e50";
         ctx.beginPath(); ctx.arc(cx, cy, 5, 0, 2 * Math.PI); ctx.fill();
+      }
+      // labels AFTER the marks they annotate
+      ctx.fillStyle = "#7f8c8d";
+      ctx.textAlign = "right";
+      for (var m2 = 0; m2 < marks.length; m2++) {
+        var lv2 = Math.log10(marks[m2]);
+        if (lv2 < lo || lv2 > hi) { continue; }
+        var y2 = Y(lv2);
+        if (y2 - padT < fs + 8) { continue; }
+        ctx.fillText(tickLabel(marks[m2]), padL - 8, y2 + 4);
+      }
+      ctx.textAlign = "center";
+      // Fewer decade ticks on narrow canvases so x labels never collide.
+      var xStep = fs > 15 ? 4 : 2;
+      for (var e2 = x0; e2 < x1; e2 += xStep) {
+        ctx.fillText("n=" + Math.pow(2, e2), X(e2), H - padB + 18);
+      }
+      ctx.textAlign = "right";
+      ctx.fillText("n=" + Math.pow(2, x1), W - padR, H - padB + 18);
+      ctx.textAlign = "center";
+      ctx.textAlign = "left";
+      ctx.fillText("FLOPs (log scale)", 14, padT + 4);
+      // crossover tag: solid backdrop, with a two-line fallback when the room runs out
+      if (hasCross) {
+        var tag1 = fs > 15 ? "n=4d=" + nc : "crossover n=4d=" + nc;
+        var lx = cx - 12, ly = Math.min(cy + 5, H - padB - 6);
         ctx.textAlign = "right";
-        ctx.fillText(fs > 15 ? "n=4d=" + nc : "crossover n=4d=" + nc,
-          cx - 12, Math.min(cy + 5, H - padB - 6));
+        if (ctx.measureText(tag1).width > lx - padL - 4) {
+          var tag2 = "n=4d=" + nc;
+          var w2 = Math.max(ctx.measureText("crossover").width, ctx.measureText(tag2).width);
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(lx - w2 - 6, ly - 2 * fs - 4, w2 + 12, 2 * fs + 10);
+          ctx.fillStyle = "#2c3e50";
+          ctx.fillText("crossover", lx, ly - fs);
+          ctx.fillText(tag2, lx, ly);
+        } else {
+          var w1 = ctx.measureText(tag1).width;
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(lx - w1 - 6, ly - fs - 4, w1 + 12, fs + 10);
+          ctx.fillStyle = "#2c3e50";
+          ctx.fillText(tag1, lx, ly);
+        }
       }
 
       var a = attnF(n, d, L), f = ffnF(n, d, L);

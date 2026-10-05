@@ -301,13 +301,14 @@
     <canvas id="ppCanvas"></canvas>
     <div class="demo-stats" id="ppStats"></div>
     <p class="playhint">
-      <strong>How to play:</strong> press Play and it runs all 200 training steps, one step every 0.4 seconds.
+      <strong>How to play:</strong> press Play and it runs all 200 training steps, +4 steps per 0.4-second tick (about 20 seconds).
       Watch the green twin get dragged toward the blue anchor while the red strangers spread out to fill the
-      disk, and the red dot rides the loss curve down on the right. The top-1 readout flips to yes the moment
+      disk. The loss trail draws itself behind the red marker as training runs: each drop appears the moment it
+      happens, never before. The top-1 readout flips to yes the moment
       the twin becomes the anchor's nearest neighbor. Drag the slider yourself to scrub to any step.
     </p>
     <p class="caption">
-      <strong>Takeaway:</strong> this is the whole contrastive mechanism with no formula required. The loss drags the twin toward the anchor and shoves the strangers away, and the top-1 check flips to yes once the twin is the anchor's nearest neighbor. Every point lives on this disk because embeddings are L2 normalized, so similarity is just cosine similarity and the model cannot cheat by making vectors huge.
+      <strong>Takeaway:</strong> this is the whole contrastive mechanism with no formula required. Press Play and the loss trail draws itself step by step behind the red marker: it falls as the twin is dragged toward the anchor and the strangers are shoved away, and the top-1 check flips to yes once the twin is the anchor's nearest neighbor. Every point lives on this disk because embeddings are L2 normalized, so similarity is just cosine similarity and the model cannot cheat by making vectors huge.
     </p>
   </div>
 
@@ -316,11 +317,9 @@
     var canvas = document.getElementById('ppCanvas');
     var ctx = canvas.getContext('2d');
     var dpr = window.devicePixelRatio || 1;
-    var W = 560, H = 360;
-    canvas.width = W * dpr; canvas.height = H * dpr;
-    canvas.style.width = '100%'; canvas.style.maxWidth = W + 'px'; canvas.style.height = 'auto';
-    ctx.scale(dpr, dpr);
 
+    /* Simulation math: anchor at angle 0, twin starts 0.55 rad away and is pulled
+       in, 12 negatives start scattered and spread to even spacing. Deterministic. */
     function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
     var TAU = 0.5, N_NEG = 12, STEPS = 200;
     var rng = mulberry32(7);
@@ -359,9 +358,43 @@
       for (i = 0; i < sims.length; i++) sum += Math.exp(sims[i]/TAU - m);
       return -(sims[0]/TAU - m) + Math.log(sum);
     }
+    /* Per-step loss so the trail draws smoothly at any slider position. */
     var lossCurve = [];
-    for (var s = 0; s <= STEPS; s += 10) lossCurve.push(lossOf(simsOf(stateAt(s))));
-    var lossMax = Math.max.apply(null, lossCurve) * 1.15;
+    for (var s = 0; s <= STEPS; s++) lossCurve.push(lossOf(simsOf(stateAt(s))));
+    /* Y-axis rescaled to the data range (loss runs about 1.17 to 1.81). */
+    var YMIN = 1.0, YMAX = 2.0;
+
+    /* Responsive layout: side-by-side on desktop, disk on top and loss below
+       when the canvas shows narrower than about 480 CSS px. */
+    function computeLayout(){
+      var cssW = canvas.clientWidth || 560;
+      var narrow = cssW < 480;
+      var L;
+      if (narrow){
+        L = { W: 400, H: 566, narrow: true,
+              cx: 200, cy: 152, R: 112,
+              px0: 66, px1: 380, py0: 348, py1: 506, titleY: 322 };
+      } else {
+        L = { W: 560, H: 360, narrow: false,
+              cx: 170, cy: 185, R: 140,
+              px0: 404, px1: 548, py0: 60, py1: 300, titleY: 34 };
+      }
+      /* attnDemo pattern: draw text at 12*S attribute px so it renders ~12 CSS px. */
+      var S = L.W / cssW;
+      return { L: L, S: S, FS: Math.max(1, Math.round(12 * S)) };
+    }
+    function setup(){
+      canvas.style.width = '100%';
+      canvas.style.height = 'auto';
+      var lay = computeLayout();
+      var aw = Math.round(lay.L.W * dpr), ah = Math.round(lay.L.H * dpr);
+      if (canvas.width !== aw || canvas.height !== ah){
+        canvas.width = aw; canvas.height = ah;
+        canvas.style.maxWidth = lay.L.W + 'px';
+      }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      return lay;
+    }
 
     var slider = document.getElementById('ppSteps');
     var valLab = document.getElementById('ppStepsVal');
@@ -372,6 +405,8 @@
     function pt(cx, cy, R, a){ return [cx + R*Math.cos(a), cy - R*Math.sin(a)]; }
 
     function draw(){
+      var lay = setup();
+      var L = lay.L, S = lay.S, FS = lay.FS;
       var t = parseInt(slider.value, 10);
       valLab.textContent = t;
       var st = stateAt(t), sims = simsOf(st), loss = lossOf(sims);
@@ -381,8 +416,8 @@
         ' &nbsp;&middot;&nbsp; positive is the nearest neighbor: <strong style="color:' + (top1 ? '#1a7a3a' : '#c0392b') + '">' + (top1 ? 'yes' : 'not yet') + '</strong>' +
         ' &nbsp;&middot;&nbsp; &tau; = 0.5 (fixed here)';
 
-      ctx.clearRect(0, 0, W, H);
-      var cx = 170, cy = 185, R = 140;
+      ctx.clearRect(0, 0, L.W, L.H);
+      var cx = L.cx, cy = L.cy, R = L.R;
       ctx.strokeStyle = '#bdc3c7'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2); ctx.stroke();
       ctx.fillStyle = '#bdc3c7';
@@ -396,61 +431,86 @@
       ctx.fillStyle = '#e74c3c';
       for (i = 0; i < N_NEG; i++){
         var q = pt(cx, cy, R, st.negs[i]);
-        ctx.beginPath(); ctx.arc(q[0], q[1], 5, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(q[0], q[1], Math.max(3, Math.round(5*S)), 0, Math.PI*2); ctx.fill();
       }
       ctx.fillStyle = '#27ae60';
-      ctx.beginPath(); ctx.arc(pp[0], pp[1], 7, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(pp[0], pp[1], Math.max(4, Math.round(7*S)), 0, Math.PI*2); ctx.fill();
       ctx.fillStyle = '#2980b9';
-      ctx.beginPath(); ctx.arc(pa[0], pa[1], 8, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(pa[0], pa[1], Math.max(4, Math.round(8*S)), 0, Math.PI*2); ctx.fill();
 
-      ctx.font = '12px sans-serif'; ctx.fillStyle = '#2c3e50'; ctx.textAlign = 'left';
+      ctx.font = FS + 'px sans-serif'; ctx.fillStyle = '#2c3e50'; ctx.textAlign = 'left';
       var sep = Math.abs(wrapDelta(0, st.pos));
-      ctx.fillText('anchor', pa[0] + 12, pa[1] + 4);
       if (sep > 0.35){
-        ctx.fillText('positive', pp[0] + 11, pp[1] - 8);
+        ctx.fillText('anchor', pa[0] + Math.round(12*S), pa[1] + Math.round(4*S));
+        ctx.fillText('positive', pp[0] + Math.round(11*S), pp[1] - Math.round(8*S));
       } else {
+        /* Merged: one label only, never two stacked on each other. */
         ctx.fillStyle = '#1a7a3a';
-        ctx.fillText('anchor + positive', pa[0] - 118, pa[1] + 4);
+        ctx.fillText('anchor + positive', pa[0] - Math.round(118*S), pa[1] + Math.round(4*S));
       }
 
-      var px0 = 400, px1 = 545, py0 = 60, py1 = 300;
-      ctx.fillStyle = '#2c3e50'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText('NT-Xent loss', (px0+px1)/2, 34);
+      /* Loss plot. The trail draws only up to the current step: no future shown. */
+      var px0 = L.px0, px1 = L.px1, py0 = L.py0, py1 = L.py1;
+      function xOf(sv){ return px0 + (sv/STEPS)*(px1-px0); }
+      function yOf(lv){ return py1 - ((lv - YMIN)/(YMAX - YMIN))*(py1-py0); }
+      ctx.fillStyle = '#2c3e50'; ctx.font = 'bold ' + Math.max(1, Math.round(13*S)) + 'px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('NT-Xent loss', (px0+px1)/2, L.titleY);
       ctx.strokeStyle = '#bdc3c7'; ctx.lineWidth = 1;
       ctx.strokeRect(px0, py0, px1-px0, py1-py0);
-      ctx.fillStyle = '#7f8c8d'; ctx.font = '12px sans-serif';
+      ctx.font = FS + 'px sans-serif';
+      var yt;
+      for (yt = YMIN; yt <= YMAX + 1e-9; yt += 0.2){
+        var yy = yOf(yt);
+        ctx.strokeStyle = '#ecf0f1';
+        ctx.beginPath(); ctx.moveTo(px0, yy); ctx.lineTo(px1, yy); ctx.stroke();
+        ctx.fillStyle = '#7f8c8d'; ctx.textAlign = 'right';
+        ctx.fillText(yt.toFixed(1), px0 - Math.round(6*S), yy + Math.round(4*S));
+      }
+      ctx.fillStyle = '#7f8c8d'; ctx.textAlign = 'center';
       [0, 100, 200].forEach(function(sv){
-        ctx.fillText(sv, px0 + (sv/STEPS)*(px1-px0), py1 + 16);
+        ctx.fillText(sv, xOf(sv), py1 + Math.round(16*S));
       });
-      ctx.fillText('steps', (px0+px1)/2, py1 + 32);
+      ctx.fillText('steps', (px0+px1)/2, py1 + Math.round(32*S));
+      /* Trail: steps 0..t only. The future stays blank until you get there.
+         Clipped to the plot rect so the marker can never streak into the margin. */
+      ctx.save();
+      ctx.beginPath(); ctx.rect(px0, py0, px1-px0, py1-py0); ctx.clip();
       ctx.strokeStyle = '#2980b9'; ctx.lineWidth = 2;
       ctx.beginPath();
-      for (var k = 0; k < lossCurve.length; k++){
-        var x = px0 + (k*10/STEPS)*(px1-px0);
-        var y = py1 - (lossCurve[k]/lossMax)*(py1-py0);
-        if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      for (var k = 0; k <= t; k++){
+        var kx = xOf(k), ky = yOf(lossCurve[k]);
+        if (k === 0) ctx.moveTo(kx, ky); else ctx.lineTo(kx, ky);
       }
-      ctx.stroke();
-      var mxp = px0 + (t/STEPS)*(px1-px0);
-      var myp = py1 - (loss/lossMax)*(py1-py0);
+      if (t > 0) ctx.stroke();
+      var mxp = xOf(t), myp = yOf(loss);
       ctx.fillStyle = '#e74c3c';
-      ctx.beginPath(); ctx.arc(mxp, myp, 5, 0, Math.PI*2); ctx.fill();
-      ctx.fillStyle = '#2c3e50'; ctx.font = 'bold 12px sans-serif';
-      ctx.fillText(loss.toFixed(2), mxp, myp - 10);
+      ctx.beginPath(); ctx.arc(mxp, myp, Math.max(4, Math.round(5*S)), 0, Math.PI*2); ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = '#2c3e50'; ctx.font = 'bold ' + FS + 'px sans-serif'; ctx.textAlign = 'center';
+      /* Keep the value label clear of the y-tick labels at the left edge. */
+      var labX = Math.max(mxp, px0 + Math.round(34*S));
+      ctx.fillText(loss.toFixed(2), labX, myp - Math.round(10*S));
     }
     slider.addEventListener('input', draw);
     playBtn.addEventListener('click', function(){
       if (timer){ clearInterval(timer); timer = null; playBtn.textContent = 'Play'; return; }
       if (parseInt(slider.value, 10) >= STEPS) slider.value = 0;
       playBtn.textContent = 'Pause';
+      /* One visible timer tick every 400 ms, +4 sim steps per tick: 50 ticks, about 20 seconds. */
       timer = setInterval(function(){
         var t = parseInt(slider.value, 10);
         if (t >= STEPS){ clearInterval(timer); timer = null; playBtn.textContent = 'Play'; return; }
-        slider.value = t + 1; draw();
+        slider.value = Math.min(t + 4, STEPS); draw();
       }, 400);
+    });
+    var rzT = null;
+    window.addEventListener('resize', function(){
+      if (rzT) clearTimeout(rzT);
+      rzT = setTimeout(draw, 150);
     });
     draw();
   })();
+
   </script>
 
   <h2>SimCLR: The Simple One</h2>
@@ -669,12 +729,13 @@
     </div>
     <div class="viz-legend">
       <span><span class="sw" style="background:#2980b9"></span>positive (the twin)</span>
-      <span><span class="sw" style="background:#95a5a6"></span>negatives (12 others)</span>
+      <span><span class="sw" style="background:#e67e22"></span>hardest negative (most similar non-twin)</span>
+      <span><span class="sw" style="background:#95a5a6"></span>other negatives</span>
     </div>
     <canvas id="tau2Canvas"></canvas>
     <div class="demo-stats" id="tau2Stats"></div>
     <p class="playhint">
-      <strong>How to play:</strong> press Play and it sweeps &tau; from 0.05 up to 2.0, half a second per step. At low &tau; the bars collapse onto the positive and the hardest negatives, and the loss readout is decided by them. At high &tau; the bars spread flat and the loss barely moves. Drag the slider yourself to freeze any value.
+      <strong>How to play:</strong> press Play and it sweeps &tau; from 0.05 up to 2.0, half a second per step. At low &tau; the bars collapse onto the positive and the hardest negatives, and the loss readout is decided by them. At high &tau; the bars spread flat and the loss barely moves. The orange bar is the hardest negative: the non-twin the model finds most confusing. At &tau; = 0.5 it outweighs the blue positive bar, which is exactly why the temperature matters. Drag the slider yourself to freeze any value.
     </p>
     <p class="caption">
       <strong>Takeaway:</strong> low temperature sharpens the softmax onto the nearest candidates, so the loss obsesses over the hardest negatives and gradients vanish everywhere else. High temperature spreads the weight and every negative gets a vote. SimCLR's &tau; = 0.5 sits in the useful middle. Same frozen disk as the pull-and-push toy above, before any training.
@@ -726,42 +787,72 @@
         ' &nbsp;&middot;&nbsp; NT-Xent loss = <strong>' + loss.toFixed(4) + '</strong>' +
         ' &nbsp;&middot;&nbsp; weight on hardest negative = <strong>' + w[hardest].toFixed(4) + '</strong>';
 
+      /* attnDemo pattern: internal px scaled so text renders ~12 CSS px at any width. */
+      var cssW = canvas.clientWidth || W;
+      var S = W / cssW;
+      var FS = Math.max(1, Math.round(12 * S));
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
       ctx.clearRect(0, 0, W, H);
-      var padL = 46, padR = 16, padT = 34, padB = 52;
+      ctx.font = FS + 'px sans-serif';
+      /* padL measured from the widest tick label so nothing clips. */
+      var padL = Math.round(ctx.measureText('100%').width + 12*S);
+      var padR = Math.round(16*S), padT = Math.round(34*S), padB = Math.round(52*S);
       var plotW = W - padL - padR, plotH = H - padT - padB;
       var bw = plotW / sims.length;
 
-      ctx.fillStyle = '#2c3e50'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText('softmax weights over the 13 candidates', padL + plotW/2, 18);
+      ctx.fillStyle = '#2c3e50'; ctx.font = 'bold ' + Math.max(1, Math.round(14*S)) + 'px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('softmax weights over the 13 candidates', padL + plotW/2, Math.round(18*S));
 
       ctx.strokeStyle = '#bdc3c7'; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(padL, padT + plotH); ctx.lineTo(padL + plotW, padT + plotH); ctx.stroke();
-      ctx.fillStyle = '#7f8c8d'; ctx.font = '12px sans-serif'; ctx.textAlign = 'right';
+      ctx.fillStyle = '#7f8c8d'; ctx.font = FS + 'px sans-serif'; ctx.textAlign = 'right';
       [0, 25, 50, 75, 100].forEach(function(pct){
         var y = padT + plotH - (pct/100)*plotH;
-        ctx.fillText(pct + '%', padL - 8, y + 4);
+        ctx.fillText(pct + '%', padL - Math.round(8*S), y + Math.round(4*S));
         ctx.strokeStyle = '#ecf0f1';
         ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL + plotW, y); ctx.stroke();
       });
 
+      /* Bars first: the hardest negative gets its own color. Labels come after
+         every bar, so nothing annotates from underneath a later mark. */
       for (var i = 0; i < sims.length; i++){
         var p = w[i], bh = p * plotH;
         var x = padL + i*bw + bw*0.15, y = padT + plotH - bh;
-        ctx.fillStyle = i === 0 ? '#2980b9' : '#95a5a6';
+        ctx.fillStyle = i === 0 ? '#2980b9' : (i === hardest ? '#e67e22' : '#95a5a6');
         ctx.fillRect(x, y, bw*0.7, Math.max(bh, 1));
-        if (i === 0){
-          // Label only the positive bar: per-bar labels on all 13 narrow
-          // columns collide into an unreadable strip at high tau. The exact
-          // weights live in the readout below the plot.
-          var lab = (p*100).toFixed(1) + '%';
-          ctx.fillStyle = '#2c3e50'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
-          ctx.fillText(lab, x + bw*0.35, y - 5);
-          ctx.fillStyle = '#555'; ctx.font = '12px sans-serif';
-          ctx.fillText('positive', x + bw*0.35, padT + plotH + 22);
-        }
       }
-      ctx.fillStyle = '#7f8c8d'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText('12 negatives', padL + plotW*0.62, padT + plotH + 22);
+      /* % labels for the positive and the hardest negative only: per-bar labels
+         on all 13 narrow columns collide into an unreadable strip at high tau.
+         The exact weights live in the readout below the plot. If the two bars
+         stand close together, the hardest label stacks above the positive one. */
+      var placed = [];
+      function pctLabel(lx, yTop, text, color){
+        ctx.font = 'bold ' + FS + 'px sans-serif'; ctx.textAlign = 'center';
+        var tw = ctx.measureText(text).width;
+        var bx0 = lx - tw/2, bx1 = lx + tw/2;
+        var by1 = yTop - Math.round(5*S), by0 = by1 - FS - Math.round(4*S);
+        var guard = 0, clash = true, li, q;
+        while (clash && guard < 5){
+          clash = false;
+          for (li = 0; li < placed.length; li++){
+            q = placed[li];
+            if (bx0 < q.x1 + 4 && bx1 > q.x0 - 4 && by0 < q.y1 + 2 && by1 > q.y0 - 2){ clash = true; break; }
+          }
+          if (clash){ by0 -= (FS + Math.round(6*S)); by1 -= (FS + Math.round(6*S)); guard++; }
+        }
+        ctx.fillStyle = color;
+        ctx.fillText(text, lx, by1);
+        placed.push({x0: bx0, x1: bx1, y0: by0, y1: by1});
+      }
+      var x0 = padL + bw*0.15 + bw*0.35, y0 = padT + plotH - w[0]*plotH;
+      pctLabel(x0, y0, (w[0]*100).toFixed(1) + '%', '#2c3e50');
+      var xh = padL + hardest*bw + bw*0.15 + bw*0.35, yh = padT + plotH - w[hardest]*plotH;
+      pctLabel(xh, yh, (w[hardest]*100).toFixed(1) + '%', '#d35400');
+      ctx.fillStyle = '#555'; ctx.font = FS + 'px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('positive', x0, padT + plotH + Math.round(22*S));
+      ctx.fillStyle = '#7f8c8d';
+      ctx.fillText('12 negatives', padL + plotW*0.62, padT + plotH + Math.round(22*S));
     }
     slider.addEventListener('input', draw);
     playBtn.addEventListener('click', function(){
@@ -773,6 +864,11 @@
         if (tau >= 2.0 - 1e-9){ slider.value = '2.00'; draw(); clearInterval(timer); timer = null; playBtn.textContent = 'Play'; return; }
         slider.value = tau.toFixed(2); draw();
       }, 500);
+    });
+    var rzT = null;
+    window.addEventListener('resize', function(){
+      if (rzT) clearTimeout(rzT);
+      rzT = setTimeout(draw, 150);
     });
     draw();
   })();
@@ -807,7 +903,7 @@
 
   <p>$m$ is the momentum, 0.999 in practice. The key encoder $\theta_k$ barely moves each step, so the queued embeddings stay consistent with each other. The query encoder $\theta_q$ learns normally by gradient descent. Three lines of code:</p>
 
-  <p>Watch what that number means. Below, one coordinate of the query encoder jumps from 0 to 1 at step 10, and the target chases it with your choice of m. At m = 0.999 the target has barely noticed after 60 steps. That slowness is the entire point: the queued negatives were all computed by nearly the same encoder, so comparing against them is fair.</p>
+  <p>Watch what that number means. Below, one coordinate of the query encoder jumps from 0 to 1 at the first step, and the target chases it with your choice of m. At m = 0.999 the target has barely noticed after 60 steps. That slowness is the entire point: the queued negatives were all computed by nearly the same encoder, so comparing against them is fair.</p>
 
   <div class="demo">
     <div class="demo-controls">
@@ -826,10 +922,10 @@
     <canvas id="emaCanvas"></canvas>
     <div class="demo-stats" id="emaStats"></div>
     <p class="playhint">
-      <strong>How to play:</strong> press Play and it runs the 60 steps live. The dashed grey line is the query encoder jumping from 0 to 1 at step 10; the orange line is the key encoder chasing it. Try m = 0.9 and the orange line snaps up almost instantly. At m = 0.999 it has barely moved by step 60. That slowness is exactly what keeps the queue honest.
+      <strong>How to play:</strong> press Play and it runs the 60 steps live. The dashed grey line is the query encoder jumping from 0 to 1 at the first step; the orange line is the key encoder chasing it. The shaded band between them is the staleness gap: how far behind the key encoder lags. Try m = 0.9 and the orange line snaps up almost instantly, closing the gap. At m = 0.999 the callout at the orange endpoint reads only about 6% absorbed after 60 steps. That slowness is exactly what keeps the queue honest.
     </p>
     <p class="caption">
-      <strong>Takeaway:</strong> m = 0.999 means the key encoder absorbs only about 5% of a sudden change after 60 steps. The queue is a rolling memory, and the EMA keeps that memory honest: every embedding in it came from almost the same encoder.
+      <strong>Takeaway:</strong> m = 0.999 means the key encoder absorbs only about 6% of a sudden change after 60 steps. The queue is a rolling memory, and the EMA keeps that memory honest: every embedding in it came from almost the same encoder.
     </p>
   </div>
 
@@ -843,7 +939,7 @@
     canvas.style.width = '100%'; canvas.style.maxWidth = W + 'px'; canvas.style.height = 'auto';
     ctx.scale(dpr, dpr);
 
-    var T = 60, JUMP = 10;
+    var T = 60, JUMP = 0;
     function traces(m){
       var q = [], k = [], i;
       for (i = 0; i <= T; i++) q.push(i < JUMP ? 0 : 1);
@@ -869,41 +965,100 @@
       var absorbed = tr.k[tCur] * 100;
       stats.innerHTML = 'after ' + tCur + ' steps the target has absorbed <strong>' + absorbed.toFixed(1) + '%</strong> of the jump';
 
+      /* attnDemo pattern: internal px scaled so text renders ~12 CSS px at any width. */
+      var cssW = canvas.clientWidth || W;
+      var S = W / cssW;
+      var FS = Math.max(1, Math.round(12 * S));
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
       ctx.clearRect(0, 0, W, H);
-      var padL = 46, padR = 16, padT = 30, padB = 44;
+      ctx.font = FS + 'px sans-serif';
+      /* padL measured from the widest tick label so nothing clips. */
+      var padL = Math.round(ctx.measureText('1.0').width + 12*S);
+      var padR = Math.round(16*S), padT = Math.round(30*S), padB = Math.round(44*S);
       var plotW = W - padL - padR, plotH = H - padT - padB;
       var X = function(t){ return padL + (t/T)*plotW; };
       var Y = function(v){ return padT + plotH - (v/1.1)*plotH; };
 
-      ctx.fillStyle = '#2c3e50'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText('one encoder coordinate over 60 steps', padL + plotW/2, 18);
+      ctx.fillStyle = '#2c3e50'; ctx.font = 'bold ' + Math.max(1, Math.round(14*S)) + 'px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('one encoder coordinate over 60 steps', padL + plotW/2, Math.round(18*S));
 
       ctx.strokeStyle = '#bdc3c7'; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(padL, Y(0)); ctx.lineTo(padL + plotW, Y(0)); ctx.stroke();
-      ctx.fillStyle = '#7f8c8d'; ctx.font = '12px sans-serif'; ctx.textAlign = 'right';
+      ctx.fillStyle = '#7f8c8d'; ctx.font = FS + 'px sans-serif'; ctx.textAlign = 'right';
       [0, 0.5, 1].forEach(function(v){
-        ctx.fillText(v.toFixed(1), padL - 8, Y(v) + 4);
+        ctx.fillText(v.toFixed(1), padL - Math.round(8*S), Y(v) + Math.round(4*S));
         ctx.strokeStyle = '#ecf0f1';
         ctx.beginPath(); ctx.moveTo(padL, Y(v)); ctx.lineTo(padL + plotW, Y(v)); ctx.stroke();
       });
-      ctx.fillStyle = '#7f8c8d'; ctx.textAlign = 'center';
-      [0, 20, 40, 60].forEach(function(t){
-        ctx.fillText(t, X(t), padT + plotH + 20);
-      });
-      ctx.fillText('steps', padL + plotW/2, padT + plotH + 38);
 
-      ctx.strokeStyle = '#7f8c8d'; ctx.lineWidth = 2; ctx.setLineDash([6,4]);
+      /* Staleness gap: the wash between the query and the key, clipped to the
+         plot rect. Marks first, labels after: nothing annotates from underneath. */
+      ctx.save();
+      ctx.beginPath(); ctx.rect(padL, padT, plotW, plotH); ctx.clip();
+      if (tCur > 0){
+        ctx.fillStyle = 'rgba(230,126,34,0.12)';
+        ctx.beginPath();
+        ctx.moveTo(X(0), Y(tr.q[0]));
+        for (var tg = 1; tg <= tCur; tg++) ctx.lineTo(X(tg), Y(tr.q[tg]));
+        for (var tk = tCur; tk >= 0; tk--) ctx.lineTo(X(tk), Y(tr.k[tk]));
+        ctx.closePath(); ctx.fill();
+      }
+      ctx.strokeStyle = '#7f8c8d'; ctx.lineWidth = Math.max(1, Math.round(2*S)); ctx.setLineDash([6,4]);
       ctx.beginPath();
       for (var t = 0; t <= tCur; t++){ var x = X(t), y = Y(tr.q[t]); if (t === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); }
       ctx.stroke(); ctx.setLineDash([]);
-
-      ctx.strokeStyle = '#e67e22'; ctx.lineWidth = 2.5;
+      ctx.strokeStyle = '#e67e22'; ctx.lineWidth = Math.max(2, Math.round(2.5*S));
       ctx.beginPath();
       for (var t2 = 0; t2 <= tCur; t2++){ var x2 = X(t2), y2 = Y(tr.k[t2]); if (t2 === 0) ctx.moveTo(x2, y2); else ctx.lineTo(x2, y2); }
       ctx.stroke();
+      ctx.restore();
+
+      var ex = X(tCur), ey = Y(tr.k[tCur]);
       if (tCur > 0){
         ctx.fillStyle = '#e67e22';
-        ctx.beginPath(); ctx.arc(X(tCur), Y(tr.k[tCur]), 6, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(ex, ey, Math.max(4, Math.round(6*S)), 0, Math.PI*2); ctx.fill();
+      }
+
+      /* Tick labels after the marks they sit beside. */
+      ctx.fillStyle = '#7f8c8d'; ctx.font = FS + 'px sans-serif'; ctx.textAlign = 'center';
+      [0, 20, 40, 60].forEach(function(t){
+        ctx.fillText(t, X(t), padT + plotH + Math.round(20*S));
+      });
+      ctx.fillText('steps', padL + plotW/2, padT + plotH + Math.round(38*S));
+
+      /* Callout at the orange endpoint, drawn last, only while a real staleness
+         gap remains. The label sits inside the shaded gap with a leader arrow
+         down to the endpoint dot; it splits into two lines if too wide. */
+      var gap = tr.q[tCur] - tr.k[tCur];
+      if (tCur >= 10 && gap > 0.15){
+        var pct = absorbed.toFixed(1);
+        var lines = ['only ' + pct + '% absorbed after ' + tCur + ' steps'];
+        ctx.font = 'bold ' + FS + 'px sans-serif';
+        var tw = ctx.measureText(lines[0]).width;
+        if (tw > plotW * 0.92){
+          lines = ['only ' + pct + '% absorbed', 'after ' + tCur + ' steps'];
+          tw = Math.max(ctx.measureText(lines[0]).width, ctx.measureText(lines[1]).width);
+        }
+        var lh = FS + Math.round(6*S);
+        var lx = padL + plotW * 0.58;
+        lx = Math.max(lx, padL + tw/2 + Math.round(6*S));
+        lx = Math.min(lx, padL + plotW - tw/2 - Math.round(6*S));
+        var ly = Math.max((Y(1) + ey) / 2 - (lines.length - 1) * lh / 2, padT + lh);
+        ctx.textAlign = 'center'; ctx.fillStyle = '#7a4a12';
+        for (var li = 0; li < lines.length; li++) ctx.fillText(lines[li], lx, ly + li*lh);
+        var ax = ex - Math.round(4*S), ayy = ey - Math.round(9*S);
+        var sx = lx, sy = ly + (lines.length - 1)*lh + Math.round(8*S);
+        var aa = Math.atan2(ayy - sy, ax - sx);
+        var ahl = Math.round(8*S);
+        ctx.strokeStyle = '#7a4a12'; ctx.lineWidth = Math.max(1, Math.round(1.5*S));
+        ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ax, ayy); ctx.stroke();
+        ctx.fillStyle = '#7a4a12';
+        ctx.beginPath();
+        ctx.moveTo(ax, ayy);
+        ctx.lineTo(ax - ahl*Math.cos(aa - 0.4), ayy - ahl*Math.sin(aa - 0.4));
+        ctx.lineTo(ax - ahl*Math.cos(aa + 0.4), ayy - ahl*Math.sin(aa + 0.4));
+        ctx.closePath(); ctx.fill();
       }
     }
     slider.addEventListener('input', draw);
@@ -917,6 +1072,11 @@
         if (t >= T){ tSlider.value = T; draw(); clearInterval(timer); timer = null; playBtn.textContent = 'Play'; return; }
         tSlider.value = t; draw();
       }, 400);
+    });
+    var emaRzT = null;
+    window.addEventListener('resize', function(){
+      if (emaRzT) clearTimeout(emaRzT);
+      emaRzT = setTimeout(draw, 150);
     });
     draw();
   })();
@@ -1033,6 +1193,12 @@ def momentum_update(query_encoder, key_encoder, m=0.999):
         ' &nbsp;&middot;&nbsp; toy loss = <strong>' + res.loss.toFixed(4) + '</strong><br>' + status;
 
       ctx.clearRect(0, 0, W, H);
+      /* attnDemo pattern: internal px scaled so text renders ~12 CSS px at any width. */
+      var cssW = canvas.clientWidth || W;
+      var S = W / cssW;
+      var FS = Math.max(1, Math.round(12 * S));
+      var FS13 = Math.max(1, Math.round(13 * S));
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       var cx = 185, cy = 170, R = 130;
       ctx.strokeStyle = '#bdc3c7'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2); ctx.stroke();
@@ -1041,28 +1207,28 @@ def momentum_update(query_encoder, key_encoder, m=0.999):
       ctx.fillStyle = col;
       if (collapsed){
         var q = pt(cx, cy, R, 0);
-        ctx.beginPath(); ctx.arc(q[0], q[1], 10, 0, Math.PI*2); ctx.fill();
-        ctx.fillStyle = '#7f8c8d'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
-        ctx.fillText('all 20 points are here', q[0] - 10, q[1] + 26);
+        ctx.beginPath(); ctx.arc(q[0], q[1], Math.round(10*S), 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#7f8c8d'; ctx.font = FS + 'px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('all 20 points are here', q[0] - 10, q[1] + Math.round(26*S));
       } else {
         for (var i = 0; i < N; i++){
           var p = pt(cx, cy, R, res.angs[i]);
-          ctx.beginPath(); ctx.arc(p[0], p[1], 6, 0, Math.PI*2); ctx.fill();
+          ctx.beginPath(); ctx.arc(p[0], p[1], Math.max(3, Math.round(6*S)), 0, Math.PI*2); ctx.fill();
         }
       }
 
       var bx0 = 390, bx1 = 540, by = 140;
-      ctx.fillStyle = '#2c3e50'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText('spread', (bx0+bx1)/2, by - 34);
+      ctx.fillStyle = '#2c3e50'; ctx.font = 'bold ' + FS13 + 'px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('spread', (bx0+bx1)/2, by - Math.round(34*S));
       ctx.fillStyle = '#ecf0f1';
-      ctx.fillRect(bx0, by - 24, bx1 - bx0, 16);
+      ctx.fillRect(bx0, by - Math.round(24*S), bx1 - bx0, Math.round(16*S));
       ctx.fillStyle = col;
-      ctx.fillRect(bx0, by - 24, (bx1 - bx0) * Math.max(0, Math.min(1, res.spread)), 16);
+      ctx.fillRect(bx0, by - Math.round(24*S), (bx1 - bx0) * Math.max(0, Math.min(1, res.spread)), Math.round(16*S));
       ctx.strokeStyle = '#bdc3c7'; ctx.lineWidth = 1;
-      ctx.strokeRect(bx0, by - 24, bx1 - bx0, 16);
-      ctx.fillStyle = '#2c3e50'; ctx.font = '12px sans-serif';
-      ctx.fillText(res.spread.toFixed(2), (bx0+bx1)/2, by + 8);
-      ctx.fillText('loss ' + res.loss.toFixed(4), (bx0+bx1)/2, by + 32);
+      ctx.strokeRect(bx0, by - Math.round(24*S), bx1 - bx0, Math.round(16*S));
+      ctx.fillStyle = '#2c3e50'; ctx.font = FS + 'px sans-serif';
+      ctx.fillText(res.spread.toFixed(2), (bx0+bx1)/2, by + Math.round(8*S));
+      ctx.fillText('loss ' + res.loss.toFixed(4), (bx0+bx1)/2, by + Math.round(32*S));
     }
 
     slider.addEventListener('input', draw);
@@ -1077,6 +1243,11 @@ def momentum_update(query_encoder, key_encoder, m=0.999):
         if (t >= STEPS){ clearInterval(timer); timer = null; playBtn.textContent = 'Play'; return; }
         slider.value = t + 1; draw();
       }, 450);
+    });
+    var colRzT = null;
+    window.addEventListener('resize', function(){
+      if (colRzT) clearTimeout(colRzT);
+      colRzT = setTimeout(draw, 150);
     });
     draw();
   })();
@@ -1101,7 +1272,7 @@ def momentum_update(query_encoder, key_encoder, m=0.999):
     <canvas id="byolCanvas"></canvas>
     <div class="demo-stats" id="byolStats"></div>
     <p class="playhint">
-      <strong>How to play:</strong> press Play and it swings the angle from 0 to 180 degrees, half a second per step. The purple curve is the loss as a function of angle; watch the red dot ride it upward while the two arrows on the disk swing apart. Drag the dial yourself to park on any angle.
+      <strong>How to play:</strong> press Play and it swings the angle from 0 to 180 degrees, half a second per step. The purple curve is the loss as a function of angle; watch the red dot ride it upward while the two arrows on the disk swing apart. The live equation under the plot substitutes the current numbers into sim and loss = 2 - 2(sim) as you drag. Drag the dial yourself to park on any angle.
     </p>
     <p class="caption">
       <strong>Takeaway:</strong> the BYOL loss is just squared Euclidean distance between two unit vectors: |q - z'|^2 = 2 - 2·sim. Zero when they agree, 4 when they point opposite. No negatives needed for the loss to make sense; the collapse toy above shows why the machinery around it matters.
@@ -1113,10 +1284,29 @@ def momentum_update(query_encoder, key_encoder, m=0.999):
     var canvas = document.getElementById('byolCanvas');
     var ctx = canvas.getContext('2d');
     var dpr = window.devicePixelRatio || 1;
-    var W = 560, H = 310;
-    canvas.width = W * dpr; canvas.height = H * dpr;
-    canvas.style.width = '100%'; canvas.style.maxWidth = W + 'px'; canvas.style.height = 'auto';
-    ctx.scale(dpr, dpr);
+    var W = 560;
+    /* Responsive layout: a taller canvas below ~480 CSS px so the live
+       equation keeps room for large type. Mirrors ppDemo's computeLayout. */
+    function computeLayout(){
+      var cssW = canvas.clientWidth || W;
+      var narrow = cssW < 480;
+      var S = W / cssW;
+      return { H: narrow ? 560 : 460, S: S,
+               FS: Math.max(1, Math.round(12*S)),
+               FS13: Math.max(1, Math.round(13*S)),
+               FSeq: Math.max(1, Math.round(17*S)) };
+    }
+    function setup(){
+      canvas.style.width = '100%'; canvas.style.height = 'auto';
+      var lay = computeLayout();
+      var aw = Math.round(W*dpr), ah = Math.round(lay.H*dpr);
+      if (canvas.width !== aw || canvas.height !== ah){
+        canvas.width = aw; canvas.height = ah;
+        canvas.style.maxWidth = W + 'px';
+      }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      return lay;
+    }
 
     var slider = document.getElementById('byolAng');
     var valLab = document.getElementById('byolAngVal');
@@ -1124,18 +1314,42 @@ def momentum_update(query_encoder, key_encoder, m=0.999):
     var playBtn = document.getElementById('byolPlay');
     var timer = null;
 
-    function arrow(x0, y0, x1, y1, col){
-      ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 3;
+    function arrow(x0, y0, x1, y1, col, sc){
+      var lw = Math.max(2, Math.round(3*sc)), hl = Math.round(10*sc);
+      ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = lw;
       ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
       var a = Math.atan2(y1 - y0, x1 - x0);
       ctx.beginPath();
       ctx.moveTo(x1, y1);
-      ctx.lineTo(x1 - 10*Math.cos(a - 0.4), y1 - 10*Math.sin(a - 0.4));
-      ctx.lineTo(x1 - 10*Math.cos(a + 0.4), y1 - 10*Math.sin(a + 0.4));
+      ctx.lineTo(x1 - hl*Math.cos(a - 0.4), y1 - hl*Math.sin(a - 0.4));
+      ctx.lineTo(x1 - hl*Math.cos(a + 0.4), y1 - hl*Math.sin(a + 0.4));
       ctx.closePath(); ctx.fill();
     }
 
+    /* Segmented equation line: each [text, color, bold] chunk drawn in turn,
+       the whole line centered on x. */
+    function drawSegs(x, y, segs, big){
+      var total = 0, si, tw;
+      var prevAlign = ctx.textAlign;
+      for (si = 0; si < segs.length; si++){
+        ctx.font = (segs[si][2] ? 'bold ' : '') + big + 'px sans-serif';
+        total += ctx.measureText(segs[si][0]).width;
+      }
+      var xp = x - total/2;
+      ctx.textAlign = 'left';
+      for (si = 0; si < segs.length; si++){
+        ctx.font = (segs[si][2] ? 'bold ' : '') + big + 'px sans-serif';
+        ctx.fillStyle = segs[si][1];
+        ctx.fillText(segs[si][0], xp, y);
+        xp += ctx.measureText(segs[si][0]).width;
+      }
+      ctx.textAlign = prevAlign;
+    }
+
     function draw(){
+      var lay = setup();
+      var S = lay.S, H = lay.H, FS = lay.FS, FS13 = lay.FS13;
+      var FSeq = lay.FSeq;
       var deg = parseInt(slider.value, 10);
       valLab.textContent = deg;
       var th = deg * Math.PI / 180;
@@ -1144,34 +1358,44 @@ def momentum_update(query_encoder, key_encoder, m=0.999):
         ' &nbsp;&middot;&nbsp; loss = 2 - 2(' + sim.toFixed(3) + ') = <strong>' + loss.toFixed(3) + '</strong>';
 
       ctx.clearRect(0, 0, W, H);
-      var cx = 150, cy = 105, R = 80;
-      ctx.strokeStyle = '#bdc3c7'; ctx.lineWidth = 2;
+      /* Narrow: shrink the disk a touch so the 'loss vs angle' title below it
+         never sits on the circle. */
+      var cx = 150, cy = lay.narrow ? 102 : 105, R = lay.narrow ? 70 : 80;
+      ctx.strokeStyle = '#bdc3c7'; ctx.lineWidth = Math.max(1, Math.round(2*S));
       ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2); ctx.stroke();
-      ctx.fillStyle = '#2c3e50'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText('the unit disk, top view', cx, 14);
+      ctx.fillStyle = '#2c3e50'; ctx.font = 'bold ' + FS13 + 'px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('the unit disk, top view', cx, Math.round(14*S));
 
       var qx = cx + R, qy = cy;
       var zx = cx + R*Math.cos(th), zy = cy - R*Math.sin(th);
-      arrow(cx, cy, qx, qy, '#2980b9');
-      arrow(cx, cy, zx, zy, '#e67e22');
-      ctx.strokeStyle = '#7f8c8d'; ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.arc(cx, cy, 30, -th, 0); ctx.stroke();
-      ctx.fillStyle = '#2c3e50'; ctx.font = '12px sans-serif'; ctx.textAlign = 'left';
-      ctx.fillText('q', qx + 8, qy + 4);
-      if (th < 0.3) ctx.fillText("z'", zx + 8, zy + 20);
-      else ctx.fillText("z'", zx + 8, zy + 4);
+      arrow(cx, cy, qx, qy, '#2980b9', S);
+      arrow(cx, cy, zx, zy, '#e67e22', S);
+      ctx.strokeStyle = '#7f8c8d'; ctx.lineWidth = Math.max(1, Math.round(1.5*S));
+      ctx.beginPath(); ctx.arc(cx, cy, Math.round(30*S), -th, 0); ctx.stroke();
+      ctx.fillStyle = '#2c3e50'; ctx.font = FS + 'px sans-serif'; ctx.textAlign = 'left';
+      ctx.fillText('q', qx + Math.round(8*S), qy + Math.round(4*S));
+      if (th < 0.3) ctx.fillText("z'", zx + Math.round(8*S), zy + Math.round(20*S));
+      else ctx.fillText("z'", zx + Math.round(8*S), zy + Math.round(4*S));
 
       var ax0 = 60, ax1 = 500, ay = 262, ah = 40;
-      ctx.fillStyle = '#2c3e50'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText('loss vs angle', (ax0+ax1)/2, ay - ah - 24);
+      ctx.fillStyle = '#2c3e50'; ctx.font = 'bold ' + FS13 + 'px sans-serif'; ctx.textAlign = 'center';
+      /* Narrow: drop the title below the disk so it never sits on the circle. */
+      var titleY = lay.narrow ? 212 : ay - ah - Math.round(24*S);
+      ctx.fillText('loss vs angle', (ax0+ax1)/2, titleY);
       ctx.strokeStyle = '#bdc3c7'; ctx.lineWidth = 1;
       ctx.strokeRect(ax0, ay - ah, ax1 - ax0, ah);
-      ctx.fillStyle = '#7f8c8d'; ctx.font = '12px sans-serif';
+      ctx.fillStyle = '#7f8c8d'; ctx.font = FS + 'px sans-serif';
       [[0,'0 deg, loss 0'],[90,'90 deg, loss 2'],[180,'180 deg, loss 4']].forEach(function(tk){
-        var x = ax0 + (tk[0]/180)*(ax1-ax0);
-        ctx.fillText(tk[1], x, ay + 16);
+        var tx = ax0 + (tk[0]/180)*(ax1-ax0);
+        /* Clamp edge labels inside the canvas so they never clip. */
+        var tkw = ctx.measureText(tk[1]).width;
+        tx = Math.max(tkw/2 + 4, Math.min(W - tkw/2 - 4, tx));
+        ctx.fillText(tk[1], tx, ay + Math.round(16*S));
       });
-      ctx.strokeStyle = '#8e44ad'; ctx.lineWidth = 2.5;
+      /* Curve and riding marker clipped to the plot rect. */
+      ctx.save();
+      ctx.beginPath(); ctx.rect(ax0, ay - ah, ax1 - ax0, ah); ctx.clip();
+      ctx.strokeStyle = '#8e44ad'; ctx.lineWidth = Math.max(2, Math.round(2.5*S));
       ctx.beginPath();
       for (var d = 0; d <= 180; d += 3){
         var x = ax0 + (d/180)*(ax1-ax0);
@@ -1182,7 +1406,39 @@ def momentum_update(query_encoder, key_encoder, m=0.999):
       var mx = ax0 + (deg/180)*(ax1-ax0);
       var my = ay - (loss/4)*ah;
       ctx.fillStyle = '#e74c3c';
-      ctx.beginPath(); ctx.arc(mx, my, 6, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(mx, my, Math.max(4, Math.round(6*S)), 0, Math.PI*2); ctx.fill();
+      ctx.restore();
+
+      /* The live equation, large and annotated, drawn after every mark.
+         Row heights derive from the fitted type size, so the band always fits. */
+      var simTxt = sim.toFixed(3), lossTxt = loss.toFixed(3);
+      var longest = 'loss = 2 \u2212 2 \u00D7 ' + simTxt + ' = ' + lossTxt;
+      var floor = Math.max(1, Math.round(12*S));
+      ctx.font = FSeq + 'px sans-serif';
+      while (FSeq > floor && ctx.measureText(longest).width > W - 40){
+        FSeq -= 1; ctx.font = FSeq + 'px sans-serif';
+      }
+      var FSann = Math.max(floor, Math.round(FSeq*0.72));
+      var rowsH = [FS13 + 10, FSeq + 12, FSann + 14, FSeq + 12, FSann + 10];
+      var total = 0, ri;
+      for (ri = 0; ri < rowsH.length; ri++) total += rowsH[ri];
+      var bandTop = 296, bandH = H - 16 - bandTop;
+      var ey = bandTop + Math.max(4, (bandH - total)/2);
+      var eqx = W/2;
+      ctx.textAlign = 'center';
+      ey += rowsH[0];
+      ctx.fillStyle = '#2c3e50'; ctx.font = 'bold ' + FS13 + 'px sans-serif';
+      ctx.fillText('the live equation', eqx, ey);
+      ey += rowsH[1];
+      drawSegs(eqx, ey, [['sim = cos(' + deg + '\u00B0) = ', '#2c3e50', false],[simTxt, '#2980b9', true]], FSeq);
+      ey += rowsH[2];
+      ctx.font = FSann + 'px sans-serif'; ctx.fillStyle = '#7f8c8d';
+      ctx.fillText('cosine of the angle you dialed', eqx, ey);
+      ey += rowsH[3];
+      drawSegs(eqx, ey, [['loss = 2 \u2212 2 \u00D7 ' + simTxt + ' = ', '#2c3e50', false],[lossTxt, '#8e44ad', true]], FSeq);
+      ey += rowsH[4];
+      ctx.font = FSann + 'px sans-serif'; ctx.fillStyle = '#7f8c8d';
+      ctx.fillText('0 = aligned, 4 = opposite', eqx, ey);
     }
     slider.addEventListener('input', draw);
     playBtn.addEventListener('click', function(){
@@ -1194,6 +1450,11 @@ def momentum_update(query_encoder, key_encoder, m=0.999):
         if (d >= 180){ slider.value = 180; draw(); clearInterval(timer); timer = null; playBtn.textContent = 'Play'; return; }
         slider.value = d; draw();
       }, 500);
+    });
+    var byolRzT = null;
+    window.addEventListener('resize', function(){
+      if (byolRzT) clearTimeout(byolRzT);
+      byolRzT = setTimeout(draw, 150);
     });
     draw();
   })();

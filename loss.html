@@ -279,7 +279,10 @@
       font-size: 1.05em; color: #95a5a6; background: #fff; padding: 0;
     }
     .ctc-grid td.cell:hover { background: #eaf4fb; }
-    .ctc-grid td.cell.sel { background: #3498db; color: #fff; font-weight: bold; border-color: #2471a3; }
+    .ctc-grid td.cell.sel { outline: 3px solid #e74c3c; outline-offset: -3px; font-weight: bold; }
+    .ctc-grid th.axcap { font-size: 0.8em; color: #7f8c8d; font-weight: bold; letter-spacing: 3px; padding-bottom: 0; }
+    .ctc-grid th.cornerlab { font-size: 0.66em; color: #7f8c8d; font-weight: bold; white-space: nowrap; vertical-align: bottom; padding-bottom: 4px; }
+    .ctc-grid th.thead { font-weight: bold; color: #2c3e50; font-size: 0.85em; }
     .ctc-grid td.rowlab {
       cursor: default; border: none; background: none; font-family: sans-serif;
       font-weight: bold; color: #2c3e50; width: auto; padding: 0 10px 0 0; font-size: 0.95em; white-space: nowrap;
@@ -306,13 +309,14 @@
     /* CTC posterior heatmap */
     .ctc-grid td.collab {
       border: none; background: none; text-align: center; font-weight: bold;
-      color: #2c3e50; font-size: 0.95em; padding-top: 6px; min-width: 40px;
+      color: #2c3e50; font-size: 0.95em; padding: 4px 0 8px; min-width: 40px;
     }
     .post-grid td.cell.picked { outline: 3px solid #2c3e50; outline-offset: -3px; }
     .btn-row button.active { background: #2471a3; }
     .post-scale { font-size: 0.85em; color: #555; text-align: center; margin: 0.4rem 0 0.8rem; }
     @media (max-width: 480px) {
       .post-grid td.cell { width: 34px; height: 34px; font-size: 0.82em; }
+      #postDemo .ctc-grid td.cell { border: 2px solid #aeb6bf; }
       .ctc-grid td.collab { min-width: 34px; font-size: 0.85em; }
       .post-grid td.rowlab { padding-right: 6px; font-size: 0.85em; }
     }
@@ -480,7 +484,25 @@
      if (!slider || !canvas || !canvas.getContext) return;
      var ctx = canvas.getContext('2d');
      var W = canvas.width, H = canvas.height;
-     var padL = 56, padR = 16, padT = 14, padB = 48;
+     /* attnDemo clientWidth-relative font pattern: canvas text stays ~12 CSS px
+        at any display size. padL is measured from the widest tick label. */
+     var SC = 1, FS = 12, padL = 56, padR = 16, padT = 14, padB = 48;
+     function measure() {
+       var cssW = canvas.clientWidth || W;
+       SC = W / cssW;
+       FS = Math.ceil(12 * SC);
+       ctx.font = FS + 'px sans-serif';
+       var widest = 0, yt, wdt;
+       for (yt = 0; yt <= 5; yt++) {
+         wdt = ctx.measureText(String(yt)).width;
+         if (wdt > widest) widest = wdt;
+       }
+       padL = Math.ceil(Math.max(56 * SC, widest + 14 * SC));
+       padR = Math.round(16 * SC);
+       padT = Math.round(14 * SC);
+       /* narrow: taller bottom pad so the two-line caption never collides */
+       padB = Math.round((cssW < 520 ? 66 : 48) * SC);
+     }
      var pMin = 0.01, pMax = 0.99;
      var yMax = 5;
      /* Play sweep: dense near 0 where BCE moves fast, sparse near 1. 550ms per stop. */
@@ -495,33 +517,22 @@
      function mse(p) { var d = 1 - p; return d * d; }
 
      function draw(p) {
+       measure();
        ctx.clearRect(0, 0, W, H);
-       ctx.strokeStyle = '#e1e4e8'; ctx.lineWidth = 1;
-       ctx.font = '12px sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#777';
+       ctx.strokeStyle = '#e1e4e8'; ctx.lineWidth = Math.max(1, Math.round(1 * SC));
+       /* gridlines first */
        var ticks = [0.1, 0.3, 0.5, 0.7, 0.9];
        ticks.forEach(function (t) {
          var x = xPix(t);
          ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, H - padB); ctx.stroke();
-         ctx.fillText(t.toFixed(1), x, H - padB + 18);
        });
-       ctx.textAlign = 'right';
        for (var yt = 0; yt <= 5; yt++) {
          var y = yPix(yt);
          ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
-         ctx.fillText(String(yt), padL - 8, y + 4);
        }
-       ctx.textAlign = 'center'; ctx.fillStyle = '#555';
-       if (canvas.clientWidth >= 520) {
-         ctx.fillText('p (predicted probability, true label = 1)', (padL + W - padR) / 2, H - 8);
-       }
-       if (canvas.clientWidth >= 520) {
-         ctx.save();
-         ctx.translate(14, (padT + H - padB) / 2); ctx.rotate(-Math.PI / 2);
-         ctx.fillText('loss', 0, 0);
-         ctx.restore();
-       }
+       /* marks: the two loss curves */
        function curve(fn, color) {
-         ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.beginPath();
+         ctx.strokeStyle = color; ctx.lineWidth = Math.max(2, Math.round(3 * SC)); ctx.beginPath();
          for (var i = 0; i <= 240; i++) {
            var pp = pMin + (pMax - pMin) * i / 240;
            var x = xPix(pp), y = yPix(fn(pp));
@@ -532,16 +543,42 @@
        curve(bce, '#3498db');
        curve(mse, '#e67e22');
        var mx = xPix(p);
-       ctx.strokeStyle = '#95a5a6'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]);
+       ctx.strokeStyle = '#95a5a6'; ctx.lineWidth = Math.max(1, Math.round(1.5 * SC));
+       ctx.setLineDash([Math.round(5 * SC), Math.round(4 * SC)]);
        ctx.beginPath(); ctx.moveTo(mx, padT); ctx.lineTo(mx, H - padB); ctx.stroke();
        ctx.setLineDash([]);
        [['#3498db', bce(p)], ['#e67e22', mse(p)]].forEach(function (pair) {
          var my = yPix(pair[1]);
          ctx.fillStyle = pair[0];
-         ctx.beginPath(); ctx.arc(mx, my, 7, 0, 2 * Math.PI); ctx.fill();
+         ctx.beginPath(); ctx.arc(mx, my, Math.round(7 * SC), 0, 2 * Math.PI); ctx.fill();
          ctx.fillStyle = '#fff';
-         ctx.beginPath(); ctx.arc(mx, my, 3, 0, 2 * Math.PI); ctx.fill();
+         ctx.beginPath(); ctx.arc(mx, my, Math.max(2, Math.round(3 * SC)), 0, 2 * Math.PI); ctx.fill();
        });
+       /* labels last, after the marks they annotate */
+       ctx.font = FS + 'px sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#777';
+       ticks.forEach(function (t) {
+         ctx.fillText(t.toFixed(1), xPix(t), H - padB + Math.round(18 * SC));
+       });
+       ctx.textAlign = 'right';
+       for (var yt2 = 0; yt2 <= 5; yt2++) {
+         var y2 = yPix(yt2);
+         ctx.fillText(String(yt2), padL - Math.round(8 * SC), y2 + Math.round(4 * SC));
+       }
+       ctx.textAlign = 'center'; ctx.fillStyle = '#555';
+       if (canvas.clientWidth >= 520) {
+         ctx.fillText('p (predicted probability, true label = 1)', (padL + W - padR) / 2, H - Math.round(8 * SC));
+       } else {
+         /* two-line fallback for the wide caption at narrow widths */
+         var capY = H - padB + Math.round(18 * SC) + FS + Math.round(8 * SC);
+         ctx.fillText('p (predicted probability)', (padL + W - padR) / 2, capY);
+         ctx.fillText('true label = 1', (padL + W - padR) / 2, capY + FS + Math.round(4 * SC));
+       }
+       if (canvas.clientWidth >= 520) {
+         ctx.save();
+         ctx.translate(Math.round(14 * SC), (padT + H - padB) / 2); ctx.rotate(-Math.PI / 2);
+         ctx.fillText('loss', 0, 0);
+         ctx.restore();
+       }
      }
 
      function update() {
@@ -609,7 +646,9 @@
     #squashDemo .sq-banner.sig { background: #eafaf1; color: #1e8449; border: 1px solid #a9dfbf; }
     #squashDemo .sq-strip { max-width: 520px; margin: 0.35rem auto; }
     #squashDemo .sq-strip .sq-strip-label { font-size: 0.82em; color: #555; text-align: center; margin-bottom: 2px; }
-    #squashDemo .sq-strip .sq-strip-track { height: 10px; background: #d6eaf8; border-radius: 5px; border: 1px solid #aed6f1; }
+    #squashDemo .sq-strip .sq-strip-track { height: 12px; background: #d6eaf8; border-radius: 6px; border: 1px solid #aed6f1; display: flex; overflow: hidden; }
+    #squashDemo .sq-strip-seg { height: 100%; transition: width 0.35s ease; }
+    #squashDemo .sq-strip-seg + .sq-strip-seg { border-left: 1px solid #ffffff; }
     #squashDemo .sq-modebtn { background: #fff; color: #2471a3; border: 1px solid #2471a3; }
     #squashDemo .sq-modebtn.active { background: #2471a3; color: #fff; border-color: #2471a3; }
     #squashDemo .sq-truebtn, #squashDemo .sq-labbtn { background: #fff; color: #2471a3; border: 1px solid #2471a3; }
@@ -627,7 +666,7 @@
 
    <p>Softmax is a competition with a fixed prize. There is exactly 1.0 probability to hand out, so when class 0 gets more confident, classes 1 and 2 must get less. Drag the first logit and watch the blue bar steal height from the other two. That stealing is the whole reason cross-entropy works for classification. Now flip to sigmoid mode: same logits, but the bars stop caring about each other. Three separate coin flips. That is BCE, and it is why you use it when labels can co-occur.</p>
 
-   <p class="howto"><strong>How to play:</strong> the three sliders are the model's raw outputs (logits), one per class. The bars are the probabilities your loss actually sees. In <strong>Softmax</strong> mode the bars always add to 1.0: drag logit 0 upward and watch its bar steal height from the other two, then read the worked loss below. Press <strong>Play logit sweep</strong> and logit 0 marches from -5 to +5 in eleven half-second steps: in softmax mode watch class 0's bar steal height from the other two as it rises, in sigmoid mode watch each bar move on its own. Flip to <strong>Sigmoid</strong> mode and the same logits drive three independent bars: toggle each class label between 0 and 1 and watch which loss term lights up. <strong>What you are seeing:</strong> the little + / - chips are probability moving between bars as you drag. First experiment: in softmax mode, drag logit 0 to +5 and watch classes 1 and 2 drain to nearly zero.</p>
+   <p class="howto"><strong>How to play:</strong> the three sliders are the model's raw outputs (logits), one per class. The bars are the probabilities your loss actually sees. In <strong>Softmax</strong> mode the bars always add to 1.0: drag logit 0 upward and watch its bar steal height from the other two, then read the worked loss below. Press <strong>Play logit sweep</strong> and logit 0 marches from -5 to +5 in eleven half-second steps: in softmax mode watch class 0's bar steal height from the other two as it rises, in sigmoid mode watch each bar move on its own. Flip to <strong>Sigmoid</strong> mode and the same logits drive three independent bars: toggle each class label between 0 and 1 and watch which loss term lights up. <strong>What you are seeing:</strong> the little + / - chips are probability moving between bars as you drag. The strip above the bars stays full the whole time: that is the fixed 1.0 prize, chopped into the three classes' shares, and dragging a logit just moves the cuts between them. First experiment: in softmax mode, drag logit 0 to +5 and watch classes 1 and 2 drain to nearly zero.</p>
 
    <div class="demo" id="squashDemo">
      <div class="demo-controls" style="justify-content:center">
@@ -726,6 +765,17 @@
          barsBox.appendChild(row);
          fills.push(fill); vals.push(val); deltas.push(delta);
        }
+       /* the fixed 1.0 prize, chopped into the three classes' shares */
+       var track = strip.querySelector('.sq-strip-track');
+       if (track) {
+         track.innerHTML = '';
+         for (var k = 0; k < 3; k++) {
+           var seg = document.createElement('div');
+           seg.className = 'sq-strip-seg';
+           seg.style.width = '0%';
+           track.appendChild(seg);
+         }
+       }
      }
 
      function clearDeltas() {
@@ -737,6 +787,13 @@
      function update(showDelta) {
        var p = mode === 'softmax' ? softmax(z) : z.map(sigmoid);
        var i, d;
+       if (mode === 'softmax') {
+         var segs = strip.querySelectorAll('.sq-strip-seg');
+         for (var k = 0; k < 3; k++) {
+           segs[k].style.width = (p[k] * 100).toFixed(2) + '%';
+           segs[k].style.background = CLASS_COLORS[k];
+         }
+       }
        for (i = 0; i < 3; i++) {
          fills[i].style.width = (p[i] * 100).toFixed(2) + '%';
          fills[i].style.background = mode === 'softmax' ? CLASS_COLORS[i] : SIG_COLORS[i];
@@ -920,17 +977,17 @@
        <button type="button" id="landReset" class="ghost">Reset</button>
      </div>
      <canvas id="landCanvas" width="640" height="460"></canvas>
-     <canvas id="landCurve" width="640" height="110"></canvas>
+     <canvas id="landCurve" width="640" height="150"></canvas>
      <div class="demo-legend">
        <span><span class="sw" style="background:#27ae60"></span>start</span>
        <span><span class="ln" style="border-color:#e74c3c"></span>gradient descent trail</span>
        <span><span class="sw" style="background:#f1c40f"></span>minima</span>
      </div>
-     <p class="howto"><strong>How to play:</strong> pick a start and a learning rate, then press Play. Every half second the red trail takes two more steps downhill and the curve below extends. <strong>What you are seeing:</strong> the green dot is where you started, the red dot is where you are now, the yellow dots are the two dimples, and the loss curve below flatlines exactly when the trail stalls. First experiment: start on the saddle and watch the |grad| readout pin near zero while the curve flatlines for dozens of steps, then the trail suddenly escapes. Saddles do not trap you, they waste your time.</p>
+     <p class="howto"><strong>How to play:</strong> pick a start and a learning rate, then press Play. Every half second the red trail takes two more steps downhill and the curve below extends. <strong>What you are seeing:</strong> dark terrain with light contour lines, each line joins points of equal loss, so where lines bunch together the ground is steep. The ripples between the 0.1 and 0.5 lines are the 0.5 sin(3x) sin(3y) term in the formula. The green dot is where you started, the red dot is where you are now, the yellow dots are the two dimples. The loss curve below uses a fixed window per start preset so runs stay comparable: if a run leaves its window, the curve pins at the edge and a clipped tag appears. First experiment: start on the saddle and watch the |grad| readout pin near zero while the curve flatlines for dozens of steps, then the trail suddenly escapes. Saddles do not trap you, they waste your time. For a longer stall, drop the learning rate to about 0.03 first.</p>
      <div class="demo-stats" id="landStats"></div>
-     <div class="caption">Four experiments: (1) start next to a dimple, it converges fast; (2) start on the saddle and watch the |grad| readout sit near zero while the loss curve flatlines for dozens of steps, then it suddenly escapes, saddles do not trap you, they waste your time; (3) start in the far corner and you land in the <em>other</em> dimple, where you start decides where you end up; (4) crank the learning rate to max and watch it diverge, or set it tiny and watch 800 steps barely finish the job.</div>
+     <div class="caption">Four experiments: (1) start next to a dimple, it converges fast; (2) start on the saddle and watch the |grad| readout sit near zero while the loss curve flatlines for dozens of steps, then it suddenly escapes, saddles do not trap you, they waste your time; (3) start in the far corner and you land in the <em>other</em> dimple, where you start decides where you end up; (4) crank the learning rate to max and watch it diverge, or set it tiny and watch 800 steps barely finish the job. Contour levels are 0.1, 0.3, 0.5, 1, 2, 4, 8, 16. Each start preset gets a fixed loss window (dimple [-0.1, 2], saddle [-0.1, 0.5], far corner [-0.1, 16]); a clipped tag means the run left its window.</div>
    </div>
-   <script>
+      <script>
    (function () {
      var canvas = document.getElementById('landCanvas');
      var curve = document.getElementById('landCurve');
@@ -947,7 +1004,16 @@
 
      var X0 = -3, X1 = 3, Y0 = -3, Y1 = 3;
      var W = canvas.width, H = canvas.height;
-     var padL = 46, padR = 12, padT = 12, padB = 34;
+
+     /* Canvas text stays ~12 CSS px at any display size (attnDemo pattern). */
+     var SC = 1, FS = 12, padL = 46, padR = 12, padT = 12, padB = 34;
+     function measure() {
+       var cssW = canvas.clientWidth || W;
+       SC = W / cssW;
+       FS = Math.round(12 * SC);
+       padL = Math.round(46 * SC); padR = Math.round(12 * SC);
+       padT = Math.round(12 * SC); padB = Math.round(34 * SC);
+     }
      function xPix(x) { return padL + (x - X0) / (X1 - X0) * (W - padL - padR); }
      function yPix(y) { return H - padB - (y - Y0) / (Y1 - Y0) * (H - padT - padB); }
 
@@ -960,47 +1026,49 @@
      var STARTS = [[0.9, -0.75], [0.006, 0.003], [-2.4, 2.2]];
      var MINIMA = [[0.297, -0.227], [-0.297, 0.227]];
      var MAX_STEPS = 800;
+     /* Fixed loss windows per start preset, so runs stay comparable. */
+     var YWIN = [[-0.1, 2], [-0.1, 0.5], [-0.1, 16]];
+     var YTICKS = [[0, 0.5, 1, 1.5, 2], [0, 0.1, 0.2, 0.3, 0.4, 0.5], [0, 4, 8, 12, 16]];
 
-     /* background heatmap on a coarse grid */
+     /* Dark terrain with hillshading. Rows run top (y=+3) to bottom (y=-3)
+        so the image is not vertically flipped against the contours. */
      var HN = 90, hgrid = [];
-     var fmin = Infinity, fmax = -Infinity;
      (function () {
        for (var j = 0; j < HN; j++) {
          hgrid.push([]);
          for (var i = 0; i < HN; i++) {
-           var x = X0 + (X1 - X0) * i / (HN - 1), y = Y0 + (Y1 - Y0) * j / (HN - 1);
-           var v = landF(x, y);
-           hgrid[j].push(v);
-           if (v < fmin) fmin = v; if (v > fmax) fmax = v;
+           hgrid[j].push(landF(X0 + (X1 - X0) * i / (HN - 1), Y1 - (Y1 - Y0) * j / (HN - 1)));
          }
        }
      })();
-     function heatColor(v) {
-       var tn = Math.min(1, Math.max(0, (v - fmin) / (fmax - fmin)));
-       var t = Math.log(1 + 9 * tn) / Math.log(10);
-       var r = Math.round(8 + (247 - 8) * t);
-       var g = Math.round(48 + (251 - 48) * t);
-       var b = Math.round(107 + (255 - 107) * t);
-       return 'rgb(' + r + ',' + g + ',' + b + ')';
-     }
      var heat = document.createElement('canvas');
      heat.width = HN; heat.height = HN;
      (function () {
        var hctx = heat.getContext('2d');
        var img = hctx.createImageData(HN, HN);
+       var lmin = Math.log10(0.01), lmax = Math.log10(27.2);
+       var K = 9; /* relief exaggeration */
        for (var j = 0; j < HN; j++) for (var i = 0; i < HN; i++) {
-         var tn = Math.min(1, Math.max(0, (hgrid[j][i] - fmin) / (fmax - fmin)));
-         var t = Math.log(1 + 9 * tn) / Math.log(10);
+         var v = hgrid[j][i];
+         var t = (Math.log10(v + 0.06) - lmin) / (lmax - lmin);
+         t = Math.min(1, Math.max(0, t));
+         var im = i > 0 ? i - 1 : i, ip = i < HN - 1 ? i + 1 : i;
+         var jm = j > 0 ? j - 1 : j, jp = j < HN - 1 ? j + 1 : j;
+         var nx = -(hgrid[j][ip] - hgrid[j][im]) * K;
+         var ny = -(hgrid[jp][i] - hgrid[jm][i]) * K;
+         var nl = Math.sqrt(nx * nx + ny * ny + 1);
+         var shade = Math.max(0, (nx * -0.5 + ny * -0.5 + 0.7071) / nl);
+         var f = 0.55 + 0.8 * shade;
          var o = (j * HN + i) * 4;
-         img.data[o] = Math.round(8 + 239 * t);
-         img.data[o + 1] = Math.round(48 + 203 * t);
-         img.data[o + 2] = Math.round(107 + 148 * t);
+         img.data[o] = Math.min(255, Math.round((11 + 59 * t) * f));
+         img.data[o + 1] = Math.min(255, Math.round((22 + 83 * t) * f));
+         img.data[o + 2] = Math.min(255, Math.round((38 + 117 * t) * f));
          img.data[o + 3] = 255;
        }
        hctx.putImageData(img, 0, 0);
      })();
 
-     /* marching squares contours */
+     /* marching squares contours, stored in data coords so pads can rescale */
      var GN = 130, grid = [];
      (function () {
        for (var j = 0; j <= GN; j++) {
@@ -1008,16 +1076,15 @@
          for (var i = 0; i <= GN; i++) grid[j].push(landF(X0 + (X1 - X0) * i / GN, Y0 + (Y1 - Y0) * j / GN));
        }
      })();
-     var LEVELS = [-0.04, 0, 0.25, 0.5, 1, 2, 3.5, 5, 7, 10, 14, 19, 24];
+     var LEVELS = [0.1, 0.3, 0.5, 1, 2, 4, 8, 16];
      function contourSegs(level) {
        var segs = [];
        function pt(i, j, ii, jj) {
          var a = grid[j][i], b = grid[jj][ii];
          var t = (level - a) / (b - a);
          if (!isFinite(t)) t = 0.5;
-         var x = X0 + (X1 - X0) * (i + t * (ii - i)) / GN;
-         var y = Y0 + (Y1 - Y0) * (j + t * (jj - j)) / GN;
-         return [xPix(x), yPix(y)];
+         return [X0 + (X1 - X0) * (i + t * (ii - i)) / GN,
+                 Y0 + (Y1 - Y0) * (j + t * (jj - j)) / GN];
        }
        for (var j = 0; j < GN; j++) for (var i = 0; i < GN; i++) {
          var a = grid[j][i] > level, b = grid[j][i + 1] > level,
@@ -1047,6 +1114,10 @@
 
      function lrFromSlider(v) { return Math.pow(10, -3 + v * 3.3 / 100); }
      function fmtLr(lr) { return lr < 0.01 ? lr.toExponential(1) : lr.toFixed(3); }
+     function fmtTick(v) {
+       if (Math.abs(v) < 0.0005) return '0';
+       return Math.abs(v - Math.round(v)) < 1e-9 ? String(Math.round(v)) : v.toFixed(1);
+     }
 
      function reset() {
        stop();
@@ -1079,82 +1150,130 @@
      }
 
      function draw() {
+       measure();
        ctx.clearRect(0, 0, W, H);
+       ctx.fillStyle = '#0d1626';
+       ctx.fillRect(0, 0, W, H);
        ctx.save();
        ctx.imageSmoothingEnabled = true;
        ctx.drawImage(heat, padL, padT, W - padL - padR, H - padT - padB);
        ctx.restore();
-       ctx.strokeStyle = 'rgba(93,109,126,0.55)'; ctx.lineWidth = 1;
+       /* equal-loss contours, light on dark */
+       ctx.strokeStyle = 'rgba(215,228,242,0.55)';
+       ctx.lineWidth = 1.5;
        ctx.beginPath();
        CONTOURS.forEach(function (segs) {
-         segs.forEach(function (sg) { ctx.moveTo(sg[0][0], sg[0][1]); ctx.lineTo(sg[1][0], sg[1][1]); });
+         segs.forEach(function (sg) {
+           ctx.moveTo(xPix(sg[0][0]), yPix(sg[0][1]));
+           ctx.lineTo(xPix(sg[1][0]), yPix(sg[1][1]));
+         });
        });
        ctx.stroke();
        /* axes */
-       ctx.strokeStyle = '#7f8c8d'; ctx.fillStyle = '#555'; ctx.font = '12px sans-serif';
-       ctx.lineWidth = 1; ctx.textAlign = 'center';
+       ctx.strokeStyle = '#5d6d7e'; ctx.lineWidth = 1;
+       ctx.beginPath();
+       ctx.moveTo(padL, padT); ctx.lineTo(padL, H - padB); ctx.lineTo(W - padR, H - padB);
+       ctx.stroke();
+       ctx.fillStyle = '#9fb0c3'; ctx.font = FS + 'px sans-serif'; ctx.textAlign = 'center';
        for (var t = -3; t <= 3; t++) {
-         ctx.fillText(String(t), xPix(t), H - padB + 18);
-         ctx.fillText(String(t), padL - 14, yPix(t) + 4);
+         ctx.fillText(String(t), xPix(t), H - padB + Math.round(18 * SC));
+         ctx.textAlign = 'right';
+         ctx.fillText(String(t), padL - Math.round(8 * SC), yPix(t) + Math.round(4 * SC));
+         ctx.textAlign = 'center';
        }
-       /* axis letters omitted: they collided with the end ticks */
        /* minima + saddle */
        MINIMA.forEach(function (m) {
          ctx.fillStyle = '#f1c40f';
-         ctx.strokeStyle = '#7d6608'; ctx.lineWidth = 1.5;
-         ctx.beginPath(); ctx.arc(xPix(m[0]), yPix(m[1]), 6, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+         ctx.strokeStyle = '#3a2f04'; ctx.lineWidth = 1.5;
+         ctx.beginPath(); ctx.arc(xPix(m[0]), yPix(m[1]), Math.round(6 * SC), 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
        });
-       ctx.fillStyle = '#555'; ctx.textAlign = 'right';
-       ctx.fillText('saddle', xPix(0) - 16, yPix(0) + 4);
+       ctx.fillStyle = '#d5dde5'; ctx.textAlign = 'right';
+       ctx.font = Math.round(13 * SC) + 'px sans-serif';
+       ctx.fillText('saddle', xPix(0) - Math.round(14 * SC), yPix(0) + Math.round(4 * SC));
        ctx.textAlign = 'center';
        ctx.fillStyle = '#e74c3c';
-       ctx.beginPath(); ctx.arc(xPix(0), yPix(0), 4, 0, 2 * Math.PI); ctx.fill();
-       /* trail */
+       ctx.beginPath(); ctx.arc(xPix(0), yPix(0), Math.round(4 * SC), 0, 2 * Math.PI); ctx.fill();
+       /* trail, clipped to the plot rect so divergence stays inside */
        if (S.trail.length > 1) {
+         ctx.save();
+         ctx.beginPath();
+         ctx.rect(padL, padT, W - padL - padR, H - padT - padB);
+         ctx.clip();
          ctx.strokeStyle = '#e74c3c'; ctx.lineWidth = 2.5; ctx.beginPath();
          S.trail.forEach(function (p, i) {
            var px = xPix(p[0]), py = yPix(p[1]);
            if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
          });
          ctx.stroke();
+         ctx.restore();
        }
        /* start dot */
        ctx.fillStyle = '#27ae60';
-       ctx.beginPath(); ctx.arc(xPix(S.sx), yPix(S.sy), 6, 0, 2 * Math.PI); ctx.fill();
+       ctx.beginPath(); ctx.arc(xPix(S.sx), yPix(S.sy), Math.round(6 * SC), 0, 2 * Math.PI); ctx.fill();
        ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
        /* current dot with halo */
        ctx.fillStyle = 'rgba(255,255,255,0.85)';
-       ctx.beginPath(); ctx.arc(xPix(S.x), yPix(S.y), 9, 0, 2 * Math.PI); ctx.fill();
+       ctx.beginPath(); ctx.arc(xPix(S.x), yPix(S.y), Math.round(9 * SC), 0, 2 * Math.PI); ctx.fill();
        ctx.fillStyle = '#c0392b';
-       ctx.beginPath(); ctx.arc(xPix(S.x), yPix(S.y), 6, 0, 2 * Math.PI); ctx.fill();
+       ctx.beginPath(); ctx.arc(xPix(S.x), yPix(S.y), Math.round(6 * SC), 0, 2 * Math.PI); ctx.fill();
        drawCurve();
        updateStats();
      }
 
      function drawCurve() {
        var w = curve.width, h = curve.height;
+       var cw = curve.clientWidth || w;
+       var cS = w / cw;
+       var cFS = Math.round(12 * cS);
+       var pL = Math.round(52 * cS), pR = Math.round(10 * cS),
+           pT = Math.round(8 * cS), pB = Math.round(24 * cS);
        cctx.clearRect(0, 0, w, h);
-       var pL = 52, pR = 10, pT = 8, pB = 22;
+       cctx.fillStyle = '#0d1626';
+       cctx.fillRect(0, 0, w, h);
+       var preset = parseInt(startSel.value, 10) || 0;
+       var ylo = YWIN[preset][0], yhi = YWIN[preset][1];
        var hist = S.hist;
-       var mn = Math.min.apply(null, hist), mx = Math.max.apply(null, hist);
-       if (mx - mn < 1e-9) { mx = mn + 1; }
-       function cx(i) { return pL + i / Math.max(1, MAX_STEPS - 1) * (w - pL - pR); }
-       function cy(v) { return h - pB - (v - mn) / (mx - mn) * (h - pT - pB); }
-       cctx.strokeStyle = '#e1e4e8'; cctx.fillStyle = '#777'; cctx.font = '12px sans-serif';
-       cctx.lineWidth = 1; cctx.textAlign = 'right';
-       [mn, (mn + mx) / 2, mx].forEach(function (v) {
-         cctx.beginPath(); cctx.moveTo(pL, cy(v)); cctx.lineTo(w - pR, cy(v)); cctx.stroke();
-         cctx.fillText(v.toFixed(2), pL - 6, cy(v) + 4);
+       var clipped = false;
+       function cx(i) { return pL + i / Math.max(1, hist.length - 1) * (w - pL - pR); }
+       function cy(v) {
+         var vc = Math.min(yhi, Math.max(ylo, v));
+         if (vc !== v) clipped = true;
+         return h - pB - (vc - ylo) / (yhi - ylo) * (h - pT - pB);
+       }
+       /* gridlines first, curve drawn over them; thin ticks when narrow so
+          12px-effective labels never collide */
+       cctx.strokeStyle = '#2a3a4f'; cctx.lineWidth = 1;
+       cctx.fillStyle = '#8a99a8'; cctx.font = cFS + 'px sans-serif'; cctx.textAlign = 'right';
+       var ticks = YTICKS[preset];
+       if (cS > 1.3) ticks = ticks.filter(function (_, i) { return i % 2 === 0; });
+       ticks.forEach(function (v) {
+         var Y = cy(v);
+         cctx.beginPath(); cctx.moveTo(pL, Y); cctx.lineTo(w - pR, Y); cctx.stroke();
+         cctx.fillText(fmtTick(v), pL - Math.round(6 * cS), Y + Math.round(4 * cS));
        });
-       cctx.textAlign = 'center'; cctx.fillStyle = '#555';
-       cctx.fillText('loss vs step', (pL + w - pR) / 2, h - 6);
+       /* x-axis: elapsed steps only, with tick labels */
+       cctx.textAlign = 'center'; cctx.fillStyle = '#8a99a8';
+       var n = hist.length;
+       var lastStep = -1;
+       [0, 0.25, 0.5, 0.75, 1].forEach(function (f) {
+         var i = Math.round(f * (n - 1));
+         if (i === lastStep) return;
+         lastStep = i;
+         cctx.fillText(String(i), cx(i), h - Math.round(7 * cS));
+       });
+       cctx.textAlign = 'left'; cctx.fillStyle = '#aeb9c5';
+       cctx.fillText('loss vs step', pL + Math.round(4 * cS), pT + cFS);
        if (hist.length > 1) {
-         cctx.strokeStyle = '#8e44ad'; cctx.lineWidth = 2; cctx.beginPath();
+         cctx.strokeStyle = '#bb6bd9'; cctx.lineWidth = 2; cctx.beginPath();
          hist.forEach(function (v, i) {
            var X = cx(i), Y = cy(v);
            if (i === 0) cctx.moveTo(X, Y); else cctx.lineTo(X, Y);
          });
          cctx.stroke();
+       }
+       if (clipped) {
+         cctx.fillStyle = '#ff8a8a'; cctx.font = 'bold ' + cFS + 'px sans-serif'; cctx.textAlign = 'right';
+         cctx.fillText('clipped at window edge', w - pR, pT + cFS);
        }
      }
 
@@ -1187,11 +1306,17 @@
        S.lr = lrFromSlider(parseInt(lrSlider.value, 10));
        lrVal.textContent = fmtLr(S.lr);
      });
+     var rszT = null;
+     window.addEventListener('resize', function () {
+       if (rszT) clearTimeout(rszT);
+       rszT = setTimeout(draw, 150);
+     });
      S.lr = lrFromSlider(parseInt(lrSlider.value, 10));
      lrVal.textContent = fmtLr(S.lr);
      reset();
    })();
    </script>
+
 
 
    <h2 id="alignment">4. The Alignment Problem</h2>
@@ -1243,9 +1368,9 @@
        <button type="button" id="ctcCover" class="ghost">Show where all paths go</button>
        <button type="button" id="ctcClear" class="ghost">Clear</button>
      </div>
-     <p class="howto"><strong>How to play:</strong> press Play and it rebuilds the classic path for the chosen word one frame at a time, left to right, half a second per frame. <strong>What you are seeing:</strong> each landing cell lights up blue, the path string below grows frame by frame, and the running collapse keeps score as it goes. On the final frame the readout flips to a valid word and shows that one path's probability next to the full CTC sum over all 84 (cat) or 19,448 (hello) paths. Or click cells yourself to build a wrong path and read exactly why it fails.</p>
+     <p class="howto"><strong>How to play:</strong> press Play and it rebuilds the classic path for the chosen word one frame at a time, left to right, half a second per frame. <strong>What you are seeing:</strong> the grid is the model's output, one probability distribution per frame. Darker cells are more probable; each letter sits on its own probability, so the dark band is where the model is confident. Each landing cell gets a red outline, the path string below grows frame by frame, and the running collapse keeps score as it goes. On the final frame the readout shows that one path's probability as a product of the shaded numbers: check it, 0.700 x 0.716 x ... are the dark cells you just landed on. Next to it sits the full CTC sum over all 84 (cat) or 19,448 (hello) paths. Or click cells yourself to build a wrong path and read exactly why it fails. Toggle "Show where all paths go" to swap the probability shading for the coverage view: the fraction of all valid paths passing through each cell.</p>
      <div class="ctc-readout" id="ctcReadout"></div>
-     <div class="caption">The heatmap shows the fraction of <em>all</em> valid paths passing through each cell: every path must cross the letters in order, while blanks spread everywhere. CTC never picks one path. It sums all 84 (cat) or all 19,448 (hello). The per-frame probabilities are a fixed illustrative toy table, not a trained model.</div>
+     <div class="caption">Each cell's shading is the model's probability for that token at that frame: darker means the model is more sure. The readout multiplies the shaded numbers along your path, so you can check its arithmetic against the grid. Toggle "Show where all paths go" for the other view: the fraction of all 84 (cat) or 19,448 (hello) valid paths through each cell. CTC never picks one path, it sums them all. The per-frame probabilities are a fixed illustrative toy table, not a trained model.</div>
    </div>
    <script>
    (function () {
@@ -1404,10 +1529,18 @@
 
      function buildGrid() {
        grid.innerHTML = '';
+       var axrow = document.createElement('tr');
+       axrow.appendChild(document.createElement('th'));
+       var axth = document.createElement('th');
+       axth.colSpan = cfg.T; axth.className = 'axcap'; axth.textContent = 'frames \u2192';
+       axrow.appendChild(axth);
+       grid.appendChild(axrow);
        var header = document.createElement('tr');
-       var corner = document.createElement('th'); header.appendChild(corner);
+       var corner = document.createElement('th');
+       corner.className = 'cornerlab'; corner.textContent = 'vocabulary';
+       header.appendChild(corner);
        for (var t = 0; t < cfg.T; t++) {
-         var th = document.createElement('th'); th.textContent = 't' + t; header.appendChild(th);
+         var th = document.createElement('th'); th.className = 'thead'; th.textContent = 't' + t; header.appendChild(th);
        }
        grid.appendChild(header);
        cfg.vocab.forEach(function (sym, vi) {
@@ -1435,11 +1568,15 @@
        cells.forEach(function (td) {
          var v = parseInt(td.getAttribute('data-v'), 10), t = parseInt(td.getAttribute('data-t'), 10);
          td.classList.toggle('sel', path[t] === v);
-         if (showCover && path[t] !== v) {
-           td.style.background = 'rgba(52,152,219,' + (cov[t][v] * 0.75).toFixed(2) + ')';
-           td.style.color = cov[t][v] > 0.4 ? '#fff' : '#95a5a6';
+         if (showCover) {
+           var c = cov[t][v];
+           td.style.background = 'rgba(52,152,219,' + (c * 0.75).toFixed(2) + ')';
+           td.style.color = c > 0.4 ? '#fff' : '#95a5a6';
          } else {
-           td.style.background = ''; td.style.color = '';
+           /* base view: the model's per-frame probability table as a heatmap */
+           var p = cfg.probs[t][v];
+           td.style.background = 'rgba(44,62,80,' + (0.06 + 0.7 * p).toFixed(2) + ')';
+           td.style.color = p > 0.4 ? '#fff' : '#5d6d7e';
          }
        });
        updateReadout();
@@ -1489,7 +1626,6 @@
      if (playBtn) {
        playBtn.addEventListener('click', function () {
          if (playTimer) { ctcStopPlay(); return; }
-         targetSel.value = 'hello';
          reset();
          playIdx = 0;
          playBtn.textContent = 'Pause';
@@ -1630,12 +1766,25 @@ def ctc_forward(probs, target):
     return alpha[T-1][S-1] + alpha[T-1][S-2]
 </code></pre>
    <style>
-    #dpDemo td.cell.dp-rownew { background: #d6eaf8; color: #1a5276; }
-    #dpDemo td.cell.dp-spot { background: #3498db; color: #fff; font-weight: bold; }
+    #dpDemo td.cell.dp-spot { outline: 3px solid #1a252f; outline-offset: -3px; font-weight: bold; }
     #dpDemo td.cell.dp-src { outline: 3px solid #e67e22; outline-offset: -3px; }
-    #dpDemo td.cell.dp-tiny { color: #bdc3c7; }
+    #dpDemo td.cell.dp-zero { background: #e9ebec; }
+    #dpDemo td.cell.dp-merge { animation: dpMergePulse 0.55s ease-in-out 3; }
+    @keyframes dpMergePulse {
+      0%, 100% { outline: 3px solid #e67e22; outline-offset: -3px; }
+      50% { outline: 6px solid #e67e22; outline-offset: -5px; }
+    }
+    #dpDemo .ctc-grid-wrap { position: relative; }
+    #dpArrows { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 5; overflow: visible; }
+    #dpDemo .demo-stats { transition: opacity 0.4s; }
+    .dp-fly-plus {
+      position: absolute; transform: translate(-50%, -50%);
+      font-size: 30px; font-weight: bold; color: #e67e22; z-index: 10;
+      transition: left 0.9s ease-in-out, top 0.9s ease-in-out, opacity 0.4s;
+      pointer-events: none;
+    }
     #dpDemo .demo-legend .sw-src { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; border: 3px solid #e67e22; }
-    #dpDemo .demo-legend .sw-new { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; background: #3498db; }
+    #dpDemo .demo-legend .sw-new { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; background: #b1dfd0; }
     @media (max-width: 480px) {
       #dpDemo .ctc-grid td.cell { width: 34px; height: 34px; font-size: 0.82em; }
       #dpDemo .ctc-grid th { min-width: 34px; }
@@ -1647,7 +1796,7 @@ def ctc_forward(probs, target):
 
    <p>The code above looks like accounting. Watch it run once and it stops looking like accounting: every cell is just asking its three neighbors "how did you get here?" and adding up their answers times today's probability. That is the whole forward algorithm.</p>
 
-   <p class="howto"><strong>How to play:</strong> press <strong>Play</strong> and the table fills row by row, one row per beat. <strong>What you are seeing:</strong> each row is one frame, each column is a position in the stretched target -c-a-t-. A cell's number is the total probability of all alignments reaching that cell. The bright blue cell is the spotlight: the orange-outlined cells are the three neighbors it asked, and the readout spells out its arithmetic with real numbers. The last row's two numbers add to 0.3466, the model's total belief in "cat", shown as 0.347 in the prose above. Blanks are shown as -, same as the path toy. First experiment: watch row 0, then ask yourself why only two cells are nonzero.</p>
+   <p class="howto"><strong>How to play:</strong> press <strong>Play</strong> and the table fills row by row, one row per beat. <strong>What you are seeing:</strong> each row is one frame, each column is a position in the extended target - c - a - t - (a blank guard rail between every pair of letters, so three letters need seven columns). A cell's number is the total probability of all alignments reaching that cell, and its green shading says the same thing: darker green means more probability mass. Gray cells with no number are unreachable, no path can get there. The bright blue cell is the spotlight: the orange-outlined cells are the three neighbors it asked, with arrows showing the stay, step, and skip flows, and the readout spells out its arithmetic with real numbers. On the last row the two summed cells pulse and merge with a + into 0.3466, the model's total belief in "cat". First experiment: watch row 0, then ask yourself why only two cells are nonzero.</p>
 
    <div class="demo" id="dpDemo">
      <div class="demo-legend">
@@ -1659,6 +1808,7 @@ def ctc_forward(probs, target):
        <button type="button" id="dpStep" class="ghost">Step</button>
        <button type="button" id="dpReset" class="ghost">Reset</button>
      </div>
+     <p class="dimline" style="text-align:center;margin:0.2rem 0 0.5rem">Columns are the <strong>extended target</strong> - c - a - t -: a blank guard rail between every pair of letters (and at both ends), so three letters need seven columns.</p>
      <div class="ctc-grid-wrap"><table class="ctc-grid" id="dpGrid"></table></div>
      <div class="ctc-readout worked" id="dpRead">Press Play. Six rows, one per frame, and the last row adds up to the model's total belief.</div>
      <div class="demo-stats" id="dpTotal"></div>
@@ -1704,6 +1854,115 @@ def ctc_forward(probs, target):
 
      function fmt(x) { return x.toFixed(4); }
 
+     /* white-to-green linear heat over [0, global max]; unreachable zeros stay gray */
+     var GMAX = 0;
+     (function () {
+       for (var t = 0; t < T; t++) for (var s = 0; s < S; s++) if (AL[t][s] > GMAX) GMAX = AL[t][s];
+     })();
+     function greenHeat(t) {
+       return [Math.round(255 - t * (255 - 39)), Math.round(255 - t * (255 - 174)), Math.round(255 - t * (255 - 96))];
+     }
+     function mixLightBlue(rgb) {
+       return [Math.round(rgb[0] * 0.55 + 214 * 0.45), Math.round(rgb[1] * 0.55 + 234 * 0.45), Math.round(rgb[2] * 0.55 + 248 * 0.45)];
+     }
+     function rgbStr(rgb) { return 'rgb(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ')'; }
+
+     /* stay/step/skip arrows: an SVG overlay positioned over the table */
+     var svgNS = 'http://www.w3.org/2000/svg';
+     var arrowsSvg = null;
+     var lastArrows = null;
+     function drawArrows() {
+       var wrap = grid.parentElement;
+       if (!arrowsSvg) {
+         arrowsSvg = document.createElementNS(svgNS, 'svg');
+         arrowsSvg.setAttribute('id', 'dpArrows');
+         var defs = document.createElementNS(svgNS, 'defs');
+         var marker = document.createElementNS(svgNS, 'marker');
+         marker.setAttribute('id', 'dpArrowHead');
+         marker.setAttribute('markerWidth', '9'); marker.setAttribute('markerHeight', '9');
+         marker.setAttribute('refX', '7'); marker.setAttribute('refY', '4.5');
+         marker.setAttribute('orient', 'auto');
+         var mpath = document.createElementNS(svgNS, 'path');
+         mpath.setAttribute('d', 'M0,0 L9,4.5 L0,9 z');
+         mpath.setAttribute('fill', '#d35400');
+         marker.appendChild(mpath);
+         defs.appendChild(marker);
+         arrowsSvg.appendChild(defs);
+         wrap.appendChild(arrowsSvg);
+       }
+       var olds = arrowsSvg.querySelectorAll('line');
+       for (var k = 0; k < olds.length; k++) olds[k].parentNode.removeChild(olds[k]);
+       if (!lastArrows) { arrowsSvg.style.display = 'none'; return; }
+       var r = lastArrows.r, sp = lastArrows.sp;
+       var wrapRect = wrap.getBoundingClientRect(), tabRect = grid.getBoundingClientRect();
+       var ox = tabRect.left - wrapRect.left + wrap.scrollLeft;
+       var oy = tabRect.top - wrapRect.top + wrap.scrollTop;
+       arrowsSvg.style.display = 'block';
+       arrowsSvg.style.left = ox + 'px'; arrowsSvg.style.top = oy + 'px';
+       arrowsSvg.setAttribute('width', Math.round(tabRect.width));
+       arrowsSvg.setAttribute('height', Math.round(tabRect.height));
+       var spot = cellAt(r, sp);
+       if (!spot) return;
+       var sr = spot.getBoundingClientRect();
+       var sx = sr.left - tabRect.left + sr.width / 2, sy = sr.top - tabRect.top + sr.height / 2;
+       var srcs = [[r - 1, sp, true], [r - 1, sp - 1, sp - 1 >= 0], [r - 1, sp - 2, sp - 2 >= 0 && EXT[sp] !== EXT[sp - 2]]];
+       srcs.forEach(function (pr) {
+         if (!pr[2]) return;
+         var c = cellAt(pr[0], pr[1]);
+         if (!c) return;
+         var cr = c.getBoundingClientRect();
+         var x1 = cr.left - tabRect.left + cr.width / 2, y1 = cr.top - tabRect.top + cr.height / 2;
+         var dx = sx - x1, dy = sy - y1;
+         var len = Math.sqrt(dx * dx + dy * dy);
+         if (len < 1) return;
+         var ux = dx / len, uy = dy / len;
+         var line = document.createElementNS(svgNS, 'line');
+         line.setAttribute('x1', (x1 + ux * 16).toFixed(1)); line.setAttribute('y1', (y1 + uy * 16).toFixed(1));
+         line.setAttribute('x2', (sx - ux * 20).toFixed(1)); line.setAttribute('y2', (sy - uy * 20).toFixed(1));
+         line.setAttribute('stroke', '#d35400'); line.setAttribute('stroke-width', '2.5');
+         line.setAttribute('marker-end', 'url(#dpArrowHead)');
+         arrowsSvg.appendChild(line);
+       });
+     }
+
+     /* finale: the two summed cells pulse, a "+" flies into the total */
+     function finaleMerge() {
+       var token = rowsFilled;
+       var c1 = cellAt(T - 1, S - 1), c2 = cellAt(T - 1, S - 2);
+       [c1, c2].forEach(function (c) { if (c) c.classList.add('dp-merge'); });
+       setTimeout(function () {
+         [c1, c2].forEach(function (c) { if (c) c.classList.remove('dp-merge'); });
+       }, 1700);
+       totalEl.style.opacity = '0';
+       var tot = AL[T - 1][S - 1] + AL[T - 1][S - 2];
+       var eqHtml = 'p("cat"|x) = alpha[5][6] + alpha[5][5] = ' + fmt(AL[5][6]) + ' + ' + fmt(AL[5][5])
+         + ' = <strong>' + fmt(tot) + '</strong>';
+       try {
+         var demoRect = demo.getBoundingClientRect();
+         var r1 = c1.getBoundingClientRect(), r2 = c2.getBoundingClientRect();
+         var tRect = totalEl.getBoundingClientRect();
+         var plus = document.createElement('div');
+         plus.textContent = '+';
+         plus.className = 'dp-fly-plus';
+         var sx = (r1.left + r2.left) / 2 + r1.width / 2 - demoRect.left;
+         var sy = (r1.top + r2.top) / 2 + r1.height / 2 - demoRect.top;
+         plus.style.left = sx + 'px'; plus.style.top = sy + 'px';
+         if (window.getComputedStyle(demo).position === 'static') demo.style.position = 'relative';
+         demo.appendChild(plus);
+         var tx = tRect.left - demoRect.left + 10, ty = tRect.top - demoRect.top + 12;
+         requestAnimationFrame(function () {
+           plus.style.left = tx + 'px'; plus.style.top = ty + 'px';
+         });
+         setTimeout(function () { plus.style.opacity = '0'; }, 950);
+         setTimeout(function () { if (plus.parentNode) plus.parentNode.removeChild(plus); }, 1450);
+       } catch (e) { /* the animation is garnish; the equation below is the content */ }
+       setTimeout(function () {
+         if (rowsFilled !== token) return;
+         totalEl.innerHTML = eqHtml;
+         totalEl.style.opacity = '1';
+       }, 550);
+     }
+
      (function buildGrid() {
        var html = '<tr><th></th>';
        for (var s = 0; s < S; s++) html += '<th>' + EXT[s] + '</th>';
@@ -1747,29 +2006,45 @@ def ctc_forward(probs, target):
          t = parseInt(td.getAttribute('data-t'), 10);
          s = parseInt(td.getAttribute('data-s'), 10);
          td.className = 'cell';
+         td.style.background = ''; td.style.color = '';
          if (t < rowsFilled) {
            var v = AL[t][s];
-           td.textContent = fmt(v);
-           if (v < 0.0001) td.classList.add('dp-tiny');
-           if (t === rowsFilled - 1) td.classList.add('dp-rownew');
+           if (v === 0) {
+             td.classList.add('dp-zero');
+           } else {
+             var ht = v / GMAX;
+             var rgb = greenHeat(ht);
+             var newest = (t === rowsFilled - 1);
+             if (newest) rgb = mixLightBlue(rgb);
+             td.style.background = rgbStr(rgb);
+             td.textContent = fmt(v);
+             td.style.color = (newest || ht <= 0.45) ? '#1a5276' : '#fff';
+           }
          } else {
            td.textContent = '';
          }
        }
        totalEl.innerHTML = '';
+       totalEl.style.opacity = '';
        if (rowsFilled === 0) {
+         lastArrows = null; drawArrows();
          read.textContent = 'Press Play. Six rows, one per frame, and the last row adds up to the model\'s total belief.';
          return;
        }
        var r = rowsFilled - 1;
        var sp = spotlightOf(r);
        var std = cellAt(r, sp);
-       if (std) std.classList.add('dp-spot');
+       if (std) {
+         std.classList.add('dp-spot');
+         std.style.background = '#3498db';
+         std.style.color = '#fff';
+       }
        if (r === 0) {
+         lastArrows = null;
          read.innerHTML = '<ol class="walkthrough-steps">'
            + '<li>alpha[0][0] = y_0(\'-\') = <strong>' + fmt(AL[0][0]) + '</strong>: start on the first blank.</li>'
            + '<li>alpha[0][1] = y_0(\'c\') = <strong>' + fmt(AL[0][1]) + '</strong>: or start on the first letter.</li>'
-           + '<li>Every path starts at the first blank or the first letter. Nothing else is reachable in zero steps, so the rest of row 0 is 0.</li>'
+           + '<li>Every path starts at the first blank or the first letter. Nothing else is reachable in zero steps, so the rest of row 0 is gray: no path can get there.</li>'
            + '</ol>';
        } else {
          var y = PROBS[r][vidx(EXT[sp])];
@@ -1781,18 +2056,18 @@ def ctc_forward(probs, target):
          preds.forEach(function (pr) {
            if (pr[2]) { var c = cellAt(pr[0], pr[1]); if (c) c.classList.add('dp-src'); }
          });
+         lastArrows = { r: r, sp: sp };
          var skipTxt = skipOk ? fmt(skip) : '0 (blocked: same symbol)';
          var sumTxt = fmt(stay + prev + (skipOk ? skip : 0));
          read.innerHTML = '<ol class="walkthrough-steps">'
            + '<li>The spotlight is alpha[' + r + '][' + sp + '], position \'' + EXT[sp] + '\'. First grab today\'s probability: y_' + r + '(\'' + EXT[sp] + '\') = <strong>' + fmt(y) + '</strong>.</li>'
-           + '<li>Ask the three orange-outlined neighbors how they got here: stay = ' + fmt(stay) + ', step = ' + fmt(prev) + ', skip = ' + skipTxt + '. Add them: <strong>' + sumTxt + '</strong>.</li>'
-           + '<li>Multiply: ' + fmt(y) + ' x ' + sumTxt + ' = <strong>' + fmt(AL[r][sp]) + '</strong>. That is every alignment reaching this cell, summed.</li>'
+           + '<li>The three arrows show the probability flowing in: stay = ' + fmt(stay) + ', step = ' + fmt(prev) + ', skip = ' + skipTxt + '. Add them: <strong>' + sumTxt + '</strong>.</li>'
+           + '<li>Multiply: ' + fmt(y) + ' x ' + sumTxt + ' = <strong>' + fmt(AL[r][sp]) + '</strong>. That is every alignment reaching this cell, summed. Darker green means more mass.</li>'
            + '</ol><p class="dimline">stay: same position, previous frame. step: one position back. skip: over a blank between different symbols.</p>';
        }
+       drawArrows();
        if (rowsFilled === T) {
-         var tot = AL[T - 1][S - 1] + AL[T - 1][S - 2];
-         totalEl.innerHTML = 'p("cat"|x) = alpha[5][6] + alpha[5][5] = ' + fmt(AL[5][6]) + ' + ' + fmt(AL[5][5])
-           + ' = <strong>' + fmt(tot) + '</strong>';
+         finaleMerge();
          stop();
        }
      }
@@ -1815,6 +2090,7 @@ def ctc_forward(probs, target):
      });
      document.getElementById('dpStep').addEventListener('click', function () { stop(); step(); });
      document.getElementById('dpReset').addEventListener('click', function () { stop(); rowsFilled = 0; render(); });
+     window.addEventListener('resize', function () { drawArrows(); });
      render();
    })();
    </script>
@@ -2023,6 +2299,14 @@ def ctc_forward_backward(probs, target):
 
      function buildGrid() {
        grid.innerHTML = '';
+       /* column labels live above the grid, not below it */
+       var fr = document.createElement('tr');
+       var corner = document.createElement('td'); corner.className = 'collab'; fr.appendChild(corner);
+       EXT.forEach(function (sym) {
+         var td = document.createElement('td'); td.className = 'collab'; td.textContent = sym;
+         fr.appendChild(td);
+       });
+       grid.appendChild(fr);
        for (var t = 0; t < NT; t++) {
          (function (tt) {
            var tr = document.createElement('tr');
@@ -2041,13 +2325,6 @@ def ctc_forward_backward(probs, target):
            grid.appendChild(tr);
          })(t);
        }
-       var fr = document.createElement('tr');
-       var corner = document.createElement('td'); corner.className = 'collab'; fr.appendChild(corner);
-       EXT.forEach(function (sym) {
-         var td = document.createElement('td'); td.className = 'collab'; td.textContent = sym;
-         fr.appendChild(td);
-       });
-       grid.appendChild(fr);
      }
 
      function renderBars() {
@@ -2075,7 +2352,7 @@ def ctc_forward_backward(probs, target):
        var c = compute(mode);
        var cells = grid.querySelectorAll('td.cell');
        scaleNote.textContent = 'Cell color is the posterior probability. Darkest blue = ' +
-         c.gmax.toFixed(2) + ' (the max). White = 0. Click any cell for its numbers.';
+         c.gmax.toFixed(2) + ' (the max). White = 0. Columns are the extended target - c - a - t -, labeled above the grid. Click any cell for its numbers.';
        for (var i = 0; i < cells.length; i++) {
          (function (td) {
            var t = parseInt(td.getAttribute('data-t'), 10);
@@ -2185,8 +2462,10 @@ def ctc_forward_backward(probs, target):
     #beamDemo .bm-seg:last-child { border-right: none; }
     #beamDemo .bm-val { width: 76px; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; color: #2980b9; font-weight: bold; font-size: 0.9em; }
     #beamDemo .bm-nseg { width: 78px; font-size: 0.8em; color: #7f8c8d; }
-    #beamDemo .bm-pruned { max-width: 560px; margin: 0.5rem auto; font-size: 0.85em; color: #999; }
+    #beamDemo .bm-pruned { max-width: 560px; margin: 0.5rem auto; font-size: 1em; color: #7f8c8d; }
+    #beamDemo .bm-pruned-label { font-weight: bold; color: #2c3e50; }
     #beamDemo .bm-pruned .bm-ph { text-decoration: line-through; margin-right: 0.7em; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; }
+    #beamDemo .bm-table tr.bm-active td, #beamDemo .bm-table tr.bm-active th { background: #fef9e7; }
     #beamDemo .bm-sliver-track { height: 8px; background: #eef1f4; border-radius: 4px; overflow: hidden; max-width: 560px; margin: 0.3rem auto; }
     #beamDemo .bm-sliver { height: 100%; background: #bdc3c7; }
     #beamDemo .bm-merge { max-width: 560px; margin: 0.7rem auto; background: #f4f7f9; border-radius: 6px; padding: 0.7rem 1rem; font-size: 0.92em; }
@@ -2202,7 +2481,7 @@ def ctc_forward_backward(probs, target):
 
    <p>Greedy decoding is lazy. It takes the best symbol at each frame and calls it a day, which means it sees exactly one path: "ab", worth 0.0900. But fourteen other paths collapse to "ab" too, and greedy never looks at them. Press play with beam width 3 and watch the "ab" bar eat fifteen thin segments. That stacking IS beam search: it recovers probability mass by merging. The code above does this in twenty-seven lines; the bars show you what those lines are actually doing.</p>
 
-   <p class="howto"><strong>How to play:</strong> the table below is fixed and illustrative: four frames, three symbols each, with made-up probabilities. Press <strong>Play</strong> and the widget steps through the frames, about two-thirds of a second each. <strong>What you are seeing:</strong> each row is one hypothesis (a candidate string), its width is its probability, and the thin stripes inside are the separate paths that merged into it. Faded struck-through rows were pruned by the beam width. First experiment: set width to 1 and press play (one lonely path), then set it to 3 and watch the "ab" bar eat fifteen segments.</p>
+   <p class="howto"><strong>How to play:</strong> the table below is fixed and illustrative: four frames, three symbols each, with made-up probabilities. Press <strong>Play</strong> and the widget steps through the frames, about two-thirds of a second each. <strong>What you are seeing:</strong> each row is one hypothesis (a candidate string), its width is its probability, and the thin stripes inside are the separate paths that merged into it. Faded struck-through rows under the "pruned by beam width" label were pruned, and the active frame's row in the fixed probability table lights up as Play steps through the frames. First experiment: set width to 1 and press play (one lonely path), then set it to 3 and watch the "ab" bar eat fifteen segments.</p>
 
    <div class="demo" id="beamDemo">
      <table class="bm-table" aria-label="Fixed illustrative per-frame probabilities">
@@ -2309,6 +2588,10 @@ def ctc_forward_backward(probs, target):
        panel.innerHTML = '';
        mergeEl.style.display = 'none';
        punch.innerHTML = '';
+       /* highlight the active frame's row in the fixed probability table */
+       var trows = demo.querySelectorAll('.bm-table tr');
+       for (var ri = 0; ri < trows.length; ri++) trows[ri].classList.remove('bm-active');
+       if (frame >= 0 && trows[frame + 1]) trows[frame + 1].classList.add('bm-active');
        if (frame < 0) {
          frameEl.textContent = 'Press Play to step through the 4 frames.';
          return;
@@ -2365,7 +2648,7 @@ def ctc_forward_backward(probs, target):
        if (fr.dropped.length) {
          var pr = document.createElement('div');
          pr.className = 'bm-pruned';
-         pr.innerHTML = 'pruned: ' + fr.dropped.map(function (h) {
+         pr.innerHTML = '<span class="bm-pruned-label">pruned by beam width:</span> ' + fr.dropped.map(function (h) {
            return '<span class="bm-ph">"' + strOf(h.str) + '" ' + h.prob.toFixed(4) + '</span>';
          }).join('');
          panel.appendChild(pr);

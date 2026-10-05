@@ -153,7 +153,7 @@
         overflow-x: auto;
         max-width: 100%;
     }
-    .mjx-chtml.MJXc-display { overflow-x: auto; max-width: 100%; }
+    .mjx-chtml.MJXc-display { overflow-x: auto; overflow-y: hidden; max-width: 100%; }
     /* Rendered result, not a print() call */
     .output {
       background: #1e293b;
@@ -319,10 +319,17 @@
      .race-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 0.35em; }
      .race-note { font-size: 0.85em; color: #777; margin-top: 0.6rem; }
      #nasRaceLive { font-weight: bold; min-height: 1.5em; }
+     .race-radios.dimmed { opacity: 0.45; }
+     .race-radios.dimmed label { cursor: default; }
+     .race-seg { display: inline-flex; }
+     .race-seg .race-seg-btn { border-radius: 0; margin-left: -1px; padding: 0.45em 0.8em; }
+     .race-seg .race-seg-btn:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+     .race-seg .race-seg-btn:last-child { border-radius: 0 6px 6px 0; }
+     .race-seg .race-seg-btn[aria-pressed="true"] { background: #3498db; border-color: #2980b9; color: #fff; }
    </style>
    <p>Before you trust any search strategy, watch it race on a toy problem where we know the answer. The setup: 200 fake architectures with fixed true accuracies, mostly mediocre, with three good peaks hidden at #45, #130, and #185. Three strategies get the same GPU-hours budget. Random search samples uniformly. Evolution keeps mutating its current champion. Hill climbing takes small random steps and only moves uphill. Every architecture evaluated costs one GPU-hour, so the x-axis is money spent and the y-axis is the best accuracy found so far.</p>
 
-   <p><strong>How to play.</strong> Hit <strong>Play</strong> and all three strategies spend the budget in lockstep: every half second each one evaluates one more architecture and the three curves grow together. Watch green (evolution) climb to the top peak at #130, watch orange (hill climbing) get stuck on whichever peak it started near, and watch red (random search) jump around hoping to stumble onto a peak. The strip under the plot is the search space itself: the glowing dot is where each strategy is sampling right now, and the fading dots are everywhere it has already looked. Drag the budget slider to give everyone more or fewer GPU-hours, or use Run search and Overlay all three for instant results. The seeds are fixed, so every race is reproducible.</p>
+   <p><strong>How to play.</strong> Hit <strong>Play</strong> and all three strategies spend the budget in lockstep: each tick (every half second) each one evaluates more architectures and the three curves grow together. The <strong>Speed</strong> control sets how many GPU-hours one tick covers: 1, 2, or 4. A 200 GPU-hour race takes 100 seconds at 1x and 25 seconds at 4x. Watch green (evolution) climb to the top peak at #130, watch orange (hill climbing) get stuck on whichever peak it started near, and watch red (random search) jump around hoping to stumble onto a peak. The strip under the plot is the search space itself: the glowing dot is where each strategy is sampling right now, and the fading dots are everywhere it has already looked. Drag the budget slider to give everyone more or fewer GPU-hours, or use Run search and Overlay all three for instant results. The slider keeps whichever view you picked: single strategy or overlay. The seeds are fixed, so every race is reproducible.</p>
 
    <div class="demo" id="nasRace">
      <p><strong>The search race.</strong> Same toy as above: pick a strategy and a budget, then Run search for the instant result, Overlay all three to compare, or hit Play and watch the race unfold one GPU-hour at a time, with the strip below showing where each strategy is sampling.</p>
@@ -337,6 +344,12 @@
        <button class="race-btn primary" id="nasPlay" type="button">Play</button>
        <button class="race-btn" id="nasRun" type="button">Run search</button>
        <button class="race-btn" id="nasOverlay" type="button">Overlay all three</button>
+       <label id="nasSpeedLabel">Speed:</label>
+       <div class="race-seg" role="group" aria-labelledby="nasSpeedLabel">
+         <button class="race-btn race-seg-btn" type="button" data-per-tick="1" aria-pressed="true" title="1 GPU-hour per tick">1x</button>
+         <button class="race-btn race-seg-btn" type="button" data-per-tick="2" aria-pressed="false" title="2 GPU-hours per tick">2x</button>
+         <button class="race-btn race-seg-btn" type="button" data-per-tick="4" aria-pressed="false" title="4 GPU-hours per tick">4x</button>
+       </div>
      </div>
      <canvas id="nasRaceCanvas"></canvas>
      <canvas id="nasSpaceCanvas"></canvas>
@@ -443,6 +456,11 @@
      var playCurves = null;
      var playBudget = 100;
      var PLAY_MS = 500;
+     /* GPU-hours covered by one Play tick (ticks stay at 500ms, inside the
+        400 to 700ms pacing rule). Set by the Speed buttons. */
+     var PLAY_PER_TICK = 1;
+     /* Which instant view the budget slider re-renders: 'single' or 'overlay'. */
+     var viewMode = 'single';
 
      function currentStrategy() {
        var radios = document.getElementsByName('nasStrategy');
@@ -465,17 +483,26 @@
        ctx.scale(dpr, dpr);
        ctx.clearRect(0, 0, w, h);
 
-       var padL = 56, padR = 48, padT = 12, padB = 36;
        var yMin = 0.50, yMax = 1.00;
-       var X = function(gpu) { return padL + (gpu / budget) * (w - padL - padR); };
-       var Y = function(a) { return padT + (1 - (a - yMin) / (yMax - yMin)) * (h - padT - padB); };
+       /* attnDemo font pattern: 12px effective at any rendered width. */
+       var FS = Math.round(12 * w / canvas.clientWidth);
+       var padR = 48, padT = 12, padB = 36;
 
        ctx.strokeStyle = '#e1e4e8';
        ctx.fillStyle = '#777';
-       ctx.font = '12px sans-serif';
+       ctx.font = FS + 'px sans-serif';
        ctx.lineWidth = 1;
+       /* Measurement-driven left pad: widest tick label + gap + rotated title lane. */
+       var tickW = 0, yt;
+       for (yt = yMin; yt <= yMax + 1e-9; yt += 0.10) {
+         tickW = Math.max(tickW, ctx.measureText(yt.toFixed(1)).width);
+       }
+       var titleLane = FS + 10;
+       var padL = Math.ceil(tickW + 8 + titleLane);
+       var X = function(gpu) { return padL + (gpu / budget) * (w - padL - padR); };
+       var Y = function(a) { return padT + (1 - (a - yMin) / (yMax - yMin)) * (h - padT - padB); };
+
        ctx.textAlign = 'right';
-       var yt;
        for (yt = yMin; yt <= yMax + 1e-9; yt += 0.10) {
          ctx.beginPath();
          ctx.moveTo(padL, Y(yt));
@@ -493,13 +520,19 @@
        ctx.fillStyle = '#555';
        ctx.fillText('GPU hours', w - padR, h - 6);
        ctx.save();
-       ctx.translate(12, padT + 78);
+       ctx.translate(Math.round(titleLane / 2), padT + (h - padT - padB) / 2);
        ctx.rotate(-Math.PI / 2);
        ctx.textAlign = 'center';
        ctx.fillText('best accuracy so far', 0, 0);
        ctx.restore();
 
        var k, i;
+       /* Curves stay inside the plot rect even when a strategy starts below
+          the y-window (best-so-far can dip under 0.50 early on). */
+       ctx.save();
+       ctx.beginPath();
+       ctx.rect(padL, padT, w - padL - padR, h - padT - padB);
+       ctx.clip();
        for (k = 0; k < curves.length; k++) {
          var c = curves[k];
          var n = Math.min(c.best.length, uptoN);
@@ -512,6 +545,7 @@
          }
          ctx.stroke();
        }
+       ctx.restore();
      }
 
      /* The search space itself: true-accuracy landscape with each strategy's
@@ -530,18 +564,27 @@
        ctx.scale(dpr, dpr);
        ctx.clearRect(0, 0, w, h);
 
-       var padL = 40, padR = 14, padT = 16, padB = 30;
        var yMin = 0.40, yMax = 1.00;
+       /* attnDemo font pattern: 12px effective at any rendered width. */
+       var FS = Math.round(12 * w / spaceCanvas.clientWidth);
+       var padR = 14, padT = 16, padB = 30;
        var n = SPACE.length;
-       var X = function(idx) { return padL + (idx / (n - 1)) * (w - padL - padR); };
-       var Y = function(a) { return padT + (1 - (a - yMin) / (yMax - yMin)) * (h - padT - padB); };
-
-       var i, yt, gx, k, j;
 
        ctx.strokeStyle = '#e1e4e8';
        ctx.fillStyle = '#777';
-       ctx.font = '12px sans-serif';
+       ctx.font = FS + 'px sans-serif';
        ctx.lineWidth = 1;
+       /* Measurement-driven left pad: widest tick label + gap. */
+       var tickW = 0, yt;
+       for (yt = 0.5; yt <= 1.0 + 1e-9; yt += 0.25) {
+         tickW = Math.max(tickW, ctx.measureText(yt.toFixed(2)).width);
+       }
+       var padL = Math.ceil(tickW + 8);
+       var X = function(idx) { return padL + (idx / (n - 1)) * (w - padL - padR); };
+       var Y = function(a) { return padT + (1 - (a - yMin) / (yMax - yMin)) * (h - padT - padB); };
+
+       var i, gx, k, j;
+
        ctx.textAlign = 'right';
        for (yt = 0.5; yt <= 1.0 + 1e-9; yt += 0.25) {
          ctx.beginPath();
@@ -582,7 +625,12 @@
          ctx.fillText('#' + pi, X(pi), Y(SPACE[pi]) - 9);
        }
 
-       /* Evaluated picks as fading dots, current pick as a glowing dot. */
+       /* Evaluated picks as fading dots, current pick as a glowing dot,
+          clipped to the plot rect so the glow never bleeds into the margins. */
+       ctx.save();
+       ctx.beginPath();
+       ctx.rect(padL, padT, w - padL - padR, h - padT - padB);
+       ctx.clip();
        for (k = 0; k < curves.length; k++) {
          var c = curves[k];
          var m = Math.min(c.picks.length, uptoN);
@@ -606,6 +654,7 @@
            ctx.stroke();
          }
        }
+       ctx.restore();
        ctx.globalAlpha = 1;
      }
 
@@ -653,6 +702,16 @@
      function stopPlay() {
        if (playTimer !== null) { clearInterval(playTimer); playTimer = null; }
        if (playBtn) playBtn.textContent = 'Play';
+       setRadiosEnabled(true);
+     }
+
+     /* Strategy radios are meaningless mid-race, so dim and disable them while
+        Play runs; they come back the moment Play stops. */
+     function setRadiosEnabled(on) {
+       var radios = document.getElementsByName('nasStrategy');
+       for (var i = 0; i < radios.length; i++) radios[i].disabled = !on;
+       var box = document.querySelector('#nasRace .race-radios');
+       if (box) box.classList.toggle('dimmed', !on);
      }
 
      function renderTick() {
@@ -663,8 +722,8 @@
        statsEl.innerHTML = statsHtml(playCurves, playBudget, playTick);
      }
 
-     /* Play: all three strategies spend the budget in lockstep, one GPU-hour
-        per 500ms tick, so the race visibly unfolds instead of appearing. */
+     /* Play: all three strategies spend the budget in lockstep, PLAY_PER_TICK
+        GPU-hours per 500ms tick, so the race visibly unfolds instead of appearing. */
      function togglePlay() {
        if (playTimer !== null) { stopPlay(); return; }
        var budget = parseInt(budgetEl.value, 10);
@@ -676,9 +735,10 @@
          playTick = 0;
        }
        playBtn.textContent = 'Pause';
+       setRadiosEnabled(false);
        var step = function() {
          if (playTick >= playBudget) { stopPlay(); return; }
-         playTick++;
+         playTick = Math.min(playBudget, playTick + PLAY_PER_TICK);
          renderTick();
          if (playTick >= playBudget) stopPlay();
        };
@@ -686,12 +746,13 @@
        playTimer = setInterval(step, PLAY_MS);
      }
 
-     function runSingle() {
-       stopPlay();
-       liveEl.textContent = '';
+     function readBudget() {
        var budget = parseInt(budgetEl.value, 10);
        if (!isFinite(budget) || budget < 1) budget = 100;
-       budgetVal.textContent = String(budget);
+       return budget;
+     }
+
+     function renderSingle(budget) {
        var s = currentStrategy();
        var res = nasRunSearch(SPACE, s, budget, SEEDS[s]);
        var curves = [{ name: NAMES[s], color: COLORS[s], best: res.best, picks: res.picks }];
@@ -701,12 +762,7 @@
        statsEl.innerHTML = statsHtml(curves, budget);
      }
 
-     function runOverlay() {
-       stopPlay();
-       liveEl.textContent = '';
-       var budget = parseInt(budgetEl.value, 10);
-       if (!isFinite(budget) || budget < 1) budget = 100;
-       budgetVal.textContent = String(budget);
+     function renderOverlay(budget) {
        var curves = buildRaceCurves(budget);
        draw(curves, budget);
        drawSpace(curves);
@@ -714,14 +770,38 @@
        statsEl.innerHTML = statsHtml(curves, budget);
      }
 
+     /* Re-render the current view mode (single strategy or overlay) without
+        changing it: this is what the budget slider uses, so moving the slider
+        never kicks you out of the view you picked. */
+     function showCurrentMode() {
+       stopPlay();
+       liveEl.textContent = '';
+       var budget = readBudget();
+       budgetVal.textContent = String(budget);
+       if (viewMode === 'overlay') renderOverlay(budget); else renderSingle(budget);
+     }
+
+     function runSingle() { viewMode = 'single'; showCurrentMode(); }
+     function runOverlay() { viewMode = 'overlay'; showCurrentMode(); }
+
      document.getElementById('nasPlay').addEventListener('click', togglePlay);
      document.getElementById('nasRun').addEventListener('click', runSingle);
      document.getElementById('nasOverlay').addEventListener('click', runOverlay);
+     var speedBtns = document.querySelectorAll('#nasRace [data-per-tick]');
+     for (var sb = 0; sb < speedBtns.length; sb++) {
+       speedBtns[sb].addEventListener('click', function() {
+         var per = parseInt(this.getAttribute('data-per-tick'), 10);
+         PLAY_PER_TICK = (per === 2 || per === 4) ? per : 1;
+         for (var q = 0; q < speedBtns.length; q++) {
+           speedBtns[q].setAttribute('aria-pressed', speedBtns[q] === this ? 'true' : 'false');
+         }
+       });
+     }
      var radios = document.getElementsByName('nasStrategy');
      for (var r = 0; r < radios.length; r++) {
        radios[r].addEventListener('change', runSingle);
      }
-     budgetEl.addEventListener('input', runSingle);
+     budgetEl.addEventListener('input', showCurrentMode);
      window.addEventListener('resize', function() {
        if (playTimer !== null) { renderTick(); return; }
        if (lastCurves) { draw(lastCurves.curves, lastCurves.budget); drawSpace(lastCurves.curves); }

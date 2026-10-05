@@ -215,6 +215,19 @@
     }
     .mode-toggle button.active { background: #3498db; color: #fff; font-weight: bold; }
     #pruneCanvas { display: block; margin: 0 auto; max-width: 100%; }
+    #accCanvas { display: block; margin: 1rem auto 0; max-width: 100%; }
+    /* Legend strip: HTML outside the data area, never drawn over the grid */
+    .prune-legend {
+      display: flex; gap: 1.4em; justify-content: center; align-items: center;
+      flex-wrap: wrap; margin: 0.7rem 0 0.4rem; font-size: 0.9em; color: #2c3e50;
+    }
+    .legend-item { display: inline-flex; align-items: center; gap: 0.45em; white-space: nowrap; }
+    .legend-gradient {
+      display: inline-block; width: 96px; height: 12px; border-radius: 3px;
+      background: linear-gradient(to right, rgb(52,120,120), rgb(52,180,255));
+      border: 1px solid #bdc3c7;
+    }
+    .acc-curve-label { text-align: center; font-size: 0.9em; color: #555; margin: 0.5rem 0 0; }
     .demo-stats {
       text-align: center; margin-top: 0.8rem; font-size: 0.95em; color: #2c3e50;
     }
@@ -336,20 +349,31 @@
        </div>
        <button id="playBtn" class="play-btn" type="button">Play</button>
      </div>
-     <p class="howto"><strong>How to play:</strong> drag the slider to prune more or fewer weights and watch the
-     accuracy number move with it, or press Play and let the sweep run from 0% to 95% in 5% steps, one step every
-     half second. The grid drops out the weakest weights first and you can watch them go; the toy accuracy
-     readout shows what that does to a model, fitted to the real ResNet numbers from this page (92.58% at full
-     size, 66.25% at half). The accuracy number is green at 85% and above, red below 50%, and plain in between.
-     Unstructured picks off the smallest individual weights anywhere; structured kills
-     whole rows at once, which is what actually shrinks the layer.</p>
+     <p class="howto"><strong>How to play:</strong> drag the slider to prune more or fewer weights, or press Play
+     and let the sweep run from 0% to 95% in 5% steps, one step every half second. Flip between unstructured
+     and structured to feel the difference: unstructured picks off the smallest individual weights anywhere,
+     structured kills whole rows at once.</p>
+     <p class="howto"><strong>What you are seeing:</strong> the grid drops out the weakest weights first. The
+     legend strip above the grid reads the colors: blue intensity is the weight magnitude and a gray X means
+     pruned. In structured mode the killed rows collapse, so the matrix physically shrinks inside its dashed
+     original footprint, and the readout under the grid shows the live layer shape as it shrinks. The curve
+     below traces toy accuracy against sparsity, and the marker rides it as you drag or play. The toy accuracy
+     is fitted to the real ResNet numbers from this page: 92.58% at full size, 66.25% at half. The accuracy
+     readout is green at 85% and above, red below 50%, and plain in between.</p>
+     <div class="prune-legend">
+       <span class="legend-item"><span class="legend-gradient"></span>small |w| to large |w|</span>
+       <span class="legend-item"><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><rect x="1" y="1" width="16" height="16" fill="#eef1f4" stroke="#c3ccd4"/><path d="M5 5 L13 13 M13 5 L5 13" stroke="#8b98a5" stroke-width="1.6"/></svg>pruned</span>
+     </div>
      <canvas id="pruneCanvas" width="512" height="512"></canvas>
      <div class="demo-stats" id="demoStats"></div>
+     <p class="acc-curve-label"><strong>Toy accuracy vs sparsity.</strong> The marker rides the curve as you drag the slider or press Play. Shaded bands mark the 85% and 50% thresholds used by the readout.</p>
+     <canvas id="accCanvas" width="512" height="240"></canvas>
      <p class="caption">
        Unstructured pruning just zeros weights. Those zeros are still multiplied at inference time, so the
        model is not actually faster unless your backend has sparse kernels that skip them. Structured pruning
-       removes whole rows, so the layer genuinely gets smaller and every backend benefits.
-     </p>
+       removes whole rows, so the layer genuinely gets smaller and every backend benefits. The accuracy curve
+       tells the same story as the numbers: accuracy holds up early, then falls off a cliff past about 70%
+       sparsity.</p>
    </div>
 
    <script>
@@ -361,6 +385,13 @@
      canvas.width = SIZE * dpr; canvas.height = SIZE * dpr;
      canvas.style.width = '100%'; canvas.style.maxWidth = SIZE + 'px'; canvas.style.height = 'auto';
      ctx.scale(dpr, dpr);
+
+     var accCanvas = document.getElementById('accCanvas');
+     var actx = accCanvas.getContext('2d');
+     var AW = 512, AH = 240;
+     accCanvas.width = AW * dpr; accCanvas.height = AH * dpr;
+     accCanvas.style.width = '100%'; accCanvas.style.maxWidth = AW + 'px'; accCanvas.style.height = 'auto';
+     actx.scale(dpr, dpr);
 
      // fixed pseudo-random weights so the picture is stable
      var seed = 7;
@@ -393,13 +424,11 @@
        }
      }
 
-     function draw() {
-       var sparsity = slider.value / 100;
-       valLabel.textContent = slider.value;
-       var cell = SIZE / N;
-       ctx.clearRect(0, 0, SIZE, SIZE);
-
+     // Weakest-first pruning. Returns the prune mask plus, in structured mode,
+     // the list of killed row indices (weakest rows first).
+     function computePruned(sparsity) {
        var pruned = new Array(N * N).fill(false);
+       var rowsKilled = [];
        if (mode === 'unstructured') {
          var idx = W.map(function(w, i) { return i; });
          idx.sort(function(a, b) { return W[a] - W[b]; });
@@ -414,33 +443,172 @@
          }
          rowNorm.sort(function(a, b) { return a.s - b.s; });
          var rowsToKill = Math.round(sparsity * N);
-         for (var q2 = 0; q2 < rowsToKill; q2++)
+         for (var q2 = 0; q2 < rowsToKill; q2++) {
+           rowsKilled.push(rowNorm[q2].r);
            for (var c2 = 0; c2 < N; c2++) pruned[rowNorm[q2].r * N + c2] = true;
-       }
-
-       var prunedCount = 0;
-       for (var i2 = 0; i2 < N * N; i2++) {
-         var r2 = Math.floor(i2 / N), c3 = i2 % N;
-         var x = c3 * cell, y = r2 * cell;
-         if (pruned[i2]) {
-           prunedCount++;
-           ctx.fillStyle = '#eef1f4';
-           ctx.fillRect(x + 1, y + 1, cell - 2, cell - 2);
-           ctx.strokeStyle = '#c3ccd4';
-           ctx.lineWidth = 1;
-           ctx.beginPath();
-           ctx.moveTo(x + 4, y + 4); ctx.lineTo(x + cell - 4, y + cell - 4);
-           ctx.moveTo(x + cell - 4, y + 4); ctx.lineTo(x + 4, y + cell - 4);
-           ctx.stroke();
-         } else {
-           var v = W[i2];
-           var blue = Math.floor(120 + v * 135);
-           ctx.fillStyle = 'rgb(52, ' + Math.floor(120 + v * 60) + ', ' + blue + ')';
-           ctx.fillRect(x + 1, y + 1, cell - 2, cell - 2);
          }
        }
-       ctx.strokeStyle = '#bdc3c7';
-       ctx.strokeRect(0.5, 0.5, SIZE - 1, SIZE - 1);
+       return { pruned: pruned, rowsKilled: rowsKilled };
+     }
+
+     function weightFill(v) {
+       return 'rgb(52, ' + Math.floor(120 + v * 60) + ', ' + Math.floor(120 + v * 135) + ')';
+     }
+
+     function drawPrunedCell(x, y, cell) {
+       ctx.fillStyle = '#eef1f4';
+       ctx.fillRect(x + 1, y + 1, cell - 2, cell - 2);
+       ctx.strokeStyle = '#c3ccd4';
+       ctx.lineWidth = 1;
+       ctx.beginPath();
+       ctx.moveTo(x + 4, y + 4); ctx.lineTo(x + cell - 4, y + cell - 4);
+       ctx.moveTo(x + cell - 4, y + 4); ctx.lineTo(x + 4, y + cell - 4);
+       ctx.stroke();
+     }
+
+     // Accuracy-vs-sparsity mini-curve with a live marker riding it.
+     function drawCurve() {
+       var w = AW, h = AH;
+       actx.clearRect(0, 0, w, h);
+       var cw = accCanvas.clientWidth || w;
+       var FS = Math.round(12 * w / cw);
+       // measurement-driven layout: padL fits the widest y tick label,
+       // and the paddings scale with FS so text stays legible at 390px
+       actx.font = FS + 'px sans-serif';
+       var tickLabels = ['0%', '25%', '50%', '75%', '100%'];
+       var maxTickW = 0;
+       tickLabels.forEach(function(t) {
+         var tw = actx.measureText(t).width;
+         if (tw > maxTickW) maxTickW = tw;
+       });
+       var padL = Math.ceil(maxTickW) + 12;
+       var padT = FS + 4;
+       var padB = 14 + 2 * FS;
+       var padR = Math.round(10 + FS * 1.1);
+       var xMax = 95, yMin = 0, yMax = 100;
+       function X(s) { return padL + (s / xMax) * (w - padL - padR); }
+       function Y(a) { return padT + (1 - (a - yMin) / (yMax - yMin)) * (h - padT - padB); }
+
+       // threshold bands: green at 85% and above, red below 50%
+       actx.fillStyle = 'rgba(22,163,74,0.10)';
+       actx.fillRect(padL, Y(100), w - padL - padR, Y(85) - Y(100));
+       actx.fillStyle = 'rgba(220,38,38,0.10)';
+       actx.fillRect(padL, Y(50), w - padL - padR, Y(0) - Y(50));
+
+       // gridlines and y ticks
+       actx.fillStyle = '#555';
+       actx.textAlign = 'right'; actx.textBaseline = 'middle';
+       [0, 25, 50, 75, 100].forEach(function(a) {
+         actx.strokeStyle = '#e3e8ec'; actx.lineWidth = 1;
+         actx.beginPath(); actx.moveTo(padL, Y(a)); actx.lineTo(w - padR, Y(a)); actx.stroke();
+         actx.fillText(a + '%', padL - 6, Y(a));
+       });
+       // axes
+       actx.strokeStyle = '#7f8c8d';
+       actx.beginPath(); actx.moveTo(padL, padT); actx.lineTo(padL, h - padB); actx.lineTo(w - padR, h - padB); actx.stroke();
+       // x ticks
+       actx.textAlign = 'center'; actx.textBaseline = 'top';
+       [0, 25, 50, 75, 95].forEach(function(s) { actx.fillText(s + '%', X(s), h - padB + 6); });
+       // axis titles (y ticks carry % already, so no rotated title that would collide)
+       actx.fillStyle = '#2c3e50';
+       actx.fillText('sparsity', (padL + w - padR) / 2, h - padB + 8 + FS);
+
+       // the curve and the dashed guide are clipped to the plot rect;
+       // tick and reference labels are painted after, on top of the marks
+       actx.save();
+       actx.beginPath();
+       actx.rect(padL, padT, w - padL - padR, h - padT - padB);
+       actx.clip();
+
+       // the curve itself
+       actx.strokeStyle = '#2980b9'; actx.lineWidth = 2.5;
+       actx.beginPath();
+       for (var s = 0; s <= xMax; s += 1) {
+         var px = X(s), py = Y(toyAccuracy(s));
+         if (s === 0) actx.moveTo(px, py); else actx.lineTo(px, py);
+       }
+       actx.stroke();
+
+       var cur = Number(slider.value);
+       // live marker: dashed vertical guide plus a dot on the curve
+       actx.save();
+       actx.setLineDash([5, 4]);
+       actx.strokeStyle = '#8b98a5'; actx.lineWidth = 1.5;
+       actx.beginPath(); actx.moveTo(X(cur), Y(toyAccuracy(cur))); actx.lineTo(X(cur), h - padB); actx.stroke();
+       actx.restore();
+       actx.restore();
+
+       // the marker dot rides on top, unclipped so it is never half-cut at
+       // the 95% edge; its radius always lands inside the empty padR margin
+       actx.beginPath();
+       actx.arc(X(cur), Y(toyAccuracy(cur)), 6, 0, 2 * Math.PI);
+       actx.fillStyle = '#ffffff'; actx.fill();
+       actx.strokeStyle = '#2980b9'; actx.lineWidth = 3; actx.stroke();
+
+       // reference dots from the real ResNet numbers on this page.
+       // The s=0 label sits right of its dot so it never mashes the 100% tick.
+       var refs = [{s: 0, label: '92.58%', side: true}, {s: 50, label: '66.25%', side: false}];
+       actx.fillStyle = '#2c3e50';
+       refs.forEach(function(rf) {
+         var a = toyAccuracy(rf.s);
+         actx.beginPath();
+         actx.arc(X(rf.s), Y(a), 4, 0, 2 * Math.PI);
+         actx.fillStyle = '#2c3e50'; actx.fill();
+         actx.fillStyle = '#2c3e50';
+         if (rf.side) {
+           actx.textAlign = 'left'; actx.textBaseline = 'bottom';
+           actx.fillText(rf.label, X(rf.s) + 10, Y(a) - 9);
+         } else {
+           actx.textAlign = 'center'; actx.textBaseline = 'bottom';
+           actx.fillText(rf.label, X(rf.s), Y(a) - 9);
+         }
+       });
+     }
+
+     function draw() {
+       var sparsity = slider.value / 100;
+       valLabel.textContent = slider.value;
+       var cell = SIZE / N;
+       ctx.clearRect(0, 0, SIZE, SIZE);
+
+       var info = computePruned(sparsity);
+       var pruned = info.pruned;
+
+       var prunedCount = 0;
+       for (var i2 = 0; i2 < N * N; i2++) if (pruned[i2]) prunedCount++;
+
+       if (mode === 'unstructured') {
+         for (var j = 0; j < N * N; j++) {
+           var r2 = Math.floor(j / N), c3 = j % N;
+           var x = c3 * cell, y = r2 * cell;
+           if (pruned[j]) drawPrunedCell(x, y, cell);
+           else { ctx.fillStyle = weightFill(W[j]); ctx.fillRect(x + 1, y + 1, cell - 2, cell - 2); }
+         }
+         ctx.strokeStyle = '#bdc3c7'; ctx.lineWidth = 1;
+         ctx.strokeRect(0.5, 0.5, SIZE - 1, SIZE - 1);
+       } else {
+         // faint dashed outline of the original 16x16 footprint
+         ctx.save();
+         ctx.setLineDash([9, 7]);
+         ctx.strokeStyle = '#9aa7b2'; ctx.lineWidth = 1.5;
+         ctx.strokeRect(1, 1, SIZE - 2, SIZE - 2);
+         ctx.restore();
+         // surviving rows keep their order and collapse into a smaller block
+         var killed = {};
+         info.rowsKilled.forEach(function(r) { killed[r] = true; });
+         var kept = [];
+         for (var r = 0; r < N; r++) if (!killed[r]) kept.push(r);
+         var y0 = (SIZE - kept.length * cell) / 2;
+         for (var j2 = 0; j2 < kept.length; j2++) {
+           for (var c = 0; c < N; c++) {
+             var idx = kept[j2] * N + c;
+             ctx.fillStyle = weightFill(W[idx]);
+             ctx.fillRect(c * cell + 1, y0 + j2 * cell + 1, cell - 2, cell - 2);
+           }
+         }
+         ctx.strokeStyle = '#bdc3c7'; ctx.lineWidth = 1;
+         ctx.strokeRect(0.5, y0 + 0.5, SIZE - 1, kept.length * cell - 1);
+       }
 
        var pct = Math.round(100 * prunedCount / (N * N));
        var acc = toyAccuracy(Number(slider.value));
@@ -448,17 +616,24 @@
        var accHtml = '<br>Toy accuracy: <strong class="' + accClass + '">' + acc.toFixed(2) + '%</strong>';
        if (mode === 'unstructured')
          stats.innerHTML = '<strong>' + prunedCount + '</strong> of ' + (N * N) +
-           ' weights zeroed (' + pct + '%). Same shape, sparse values.' + accHtml;
+           ' weights zeroed (' + pct + '%). Layer shape: 16 x 16, same shape, sparse values.' + accHtml;
        else {
-         var rowsKilled = Math.round(slider.value / 100 * N);
+         var rowsKilled = info.rowsKilled.length;
          stats.innerHTML = '<strong>' + prunedCount + '</strong> of ' + (N * N) +
            ' weights removed (' + pct + '%) across ' + rowsKilled +
            (rowsKilled === 1 ? ' whole row. ' : ' whole rows. ') +
-           'Smaller matrix, dense values.' + accHtml;
+           'Layer shape: ' + (N - rowsKilled) + ' x 16 (was 16 x 16). Smaller matrix, dense values.' + accHtml;
        }
+       drawCurve();
      }
 
      slider.addEventListener('input', draw);
+     // keep the clientWidth-relative font sizing correct when the viewport changes
+     var resizeTimer = null;
+     window.addEventListener('resize', function() {
+       if (resizeTimer) clearTimeout(resizeTimer);
+       resizeTimer = setTimeout(draw, 150);
+     });
      bU.addEventListener('click', function() {
        mode = 'unstructured';
        bU.classList.add('active'); bS.classList.remove('active'); draw();

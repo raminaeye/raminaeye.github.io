@@ -788,16 +788,52 @@ class GRUCell(nn.Module):
             }
             return s;
         }
+        var dragging = false;
         function sizeCanvas() {
             var cw = cv.parentElement.clientWidth - 4;
             if (!(cw > 220)) cw = 300;
             if (cw > 640) cw = 640;
+            var Hh = (cw < 480) ? 492 : H;
             var dpr = window.devicePixelRatio || 1;
             cv.width = Math.round(cw * dpr);
-            cv.height = Math.round(cw * H / W * dpr);
+            cv.height = Math.round(cw * Hh / W * dpr);
             cv.style.width = cw + 'px';
-            cv.style.height = Math.round(cw * H / W) + 'px';
+            cv.style.height = Math.round(cw * Hh / W) + 'px';
             geom = { cw: cw, dpr: dpr };
+        }
+        // Narrow layout (<480px): same diagram, roomier boxes and labels so every
+        // label reads 12px+ effective; the keep/take/r equation labels move to a
+        // legend lane under the diagram instead of sitting on the pipes.
+        function gruLayout() {
+            var narrow = geom.cw < 480;
+            var FS = narrow ? Math.round(12 * W / geom.cw) : 12;
+            var FS13 = narrow ? Math.round(13 * W / geom.cw) : 13;
+            var FS20 = narrow ? Math.round(20 * W / geom.cw) : 20;
+            var L = { narrow: narrow, FS: FS, FS13: FS13, FS20: FS20, H: narrow ? 492 : 400 };
+            if (!narrow) {
+                L.oldBox = [20, 64, 120, 54]; L.keepY = 91; L.keepX0 = 140; L.keepElb = [376, 91, 393, 148];
+                L.rX = 80; L.rTop = 118; L.rBot = 220; L.rValveY = 169;
+                L.candBox = [20, 220, 150, 110]; L.takeX0 = 170; L.takeY = 275; L.takeElb = [358, 275, 393, 182];
+                L.xX = 95; L.xLabY = 358;
+                L.keepLab = [200, 62]; L.takeLab = [264, 308]; L.rLab = [143, 172];
+                L.capZ = [262, 28, 'center']; L.cap0 = [282, 60, 'left'];
+                L.cap1 = [282, 322, 'left']; L.capZv = [282, 200, 'left'];
+                L.hy0 = 91; L.hy1 = 275; L.valveR = 13; L.hitR = 22;
+                L.mixX = 410; L.mixY = 165; L.outX1 = 514; L.newBox = [514, 138, 106, 54];
+                L.legendY = null;
+            } else {
+                L.oldBox = [16, 64, 234, 84]; L.keepY = 106; L.keepX0 = 250; L.keepElb = [376, 106, 393, 148];
+                L.rX = 80; L.rTop = 148; L.rBot = 220; L.rValveY = 184;
+                L.candBox = [16, 220, 244, 110]; L.takeX0 = 266; L.takeY = 275; L.takeElb = [358, 275, 393, 182];
+                L.xX = 95; L.xLabY = 358;
+                L.keepLab = null; L.takeLab = null; L.rLab = null;
+                L.capZ = [300, 30, 'left']; L.cap0 = [250, 56, 'right'];
+                L.cap1 = [282, 326, 'left']; L.capZv = [282, 200, 'left'];
+                L.hy0 = 106; L.hy1 = 275; L.valveR = 16; L.hitR = 28;
+                L.mixX = 410; L.mixY = 165; L.outX1 = 463; L.newBox = [463, 123, 170, 84];
+                L.legendY = [404, 440, 476];
+            }
+            return L;
         }
         function update() {
             var t = parseInt(tS.value, 10);
@@ -823,15 +859,28 @@ class GRUCell(nn.Module):
             ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
             ctx.setLineDash([]);
         }
-        function box(x, y, w, h, fill, stroke, l1, l2) {
+        function fitFont(text, maxW, px, floorPx) {
+            ctx.font = px + 'px sans-serif';
+            var w = ctx.measureText(text).width;
+            while (w > maxW && px > floorPx) { px -= 1; ctx.font = px + 'px sans-serif'; w = ctx.measureText(text).width; }
+            return px;
+        }
+        function box(x, y, w, h, fill, stroke, l1, l2, fs1, fs2, floorPx) {
             ctx.fillStyle = fill; ctx.strokeStyle = stroke; ctx.lineWidth = 2;
             ctx.beginPath();
             if (ctx.roundRect) ctx.roundRect(x, y, w, h, 8); else ctx.rect(x, y, w, h);
             ctx.fill(); ctx.stroke();
             ctx.textAlign = 'center';
-            ctx.fillStyle = '#2c3e50'; ctx.font = '13px sans-serif';
-            ctx.fillText(l1, x + w / 2, y + h / 2 - 1);
-            if (l2) { ctx.fillStyle = '#555'; ctx.font = '12px sans-serif'; ctx.fillText(l2, x + w / 2, y + h / 2 + 17); }
+            var fl = floorPx || 12;
+            var f1 = fitFont(l1, w - 16, fs1 || 13, fl);
+            ctx.fillStyle = '#2c3e50'; ctx.font = f1 + 'px sans-serif';
+            var y1 = y + h / 2 - 1;
+            ctx.fillText(l1, x + w / 2, y1);
+            if (l2) {
+                var f2 = fitFont(l2, w - 16, fs2 || 12, fl);
+                ctx.fillStyle = '#555'; ctx.font = f2 + 'px sans-serif';
+                ctx.fillText(l2, x + w / 2, y1 + Math.round((f1 + f2) * 0.72));
+            }
         }
         function frame() {
             if (!visible) { running = false; return; }
@@ -843,60 +892,88 @@ class GRUCell(nn.Module):
             shown.take += (tTake - shown.take) * 0.15;
             shown.r += (tR - shown.r) * 0.15;
             dash -= 1.6;
+            var L = gruLayout();
             var sc = geom.cw / W, dpr = geom.dpr;
             ctx.setTransform(dpr * sc, 0, 0, dpr * sc, 0, 0);
-            ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+            ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, L.H);
             ctx.textAlign = 'center';
+            var FS = L.FS, FS13 = L.FS13;
             // z valve track behind pipes
             ctx.fillStyle = '#dfe6e9';
             ctx.fillRect(258, 36, 8, 296);
-            ctx.fillStyle = '#555'; ctx.font = '12px sans-serif';
-            ctx.fillText('update gate z', 262, 28);
+            ctx.fillStyle = '#555'; ctx.font = FS + 'px sans-serif';
+            ctx.textAlign = L.capZ[2];
+            ctx.fillText('update gate z', L.capZ[0], L.capZ[1]);
+            ctx.textAlign = 'center';
             // old memory box
-            box(20, 64, 120, 54, '#ebf5fb', '#2980b9', 'old memory', 'h(t-1) = ' + fmt(s.hPrev));
+            box(L.oldBox[0], L.oldBox[1], L.oldBox[2], L.oldBox[3], '#ebf5fb', '#2980b9',
+                'old memory', 'h(t-1) = ' + fmt(s.hPrev), FS13, FS, FS);
             // keep pipe (blue) into mixer
-            pipe(140, 91, 376, 91, shown.keep, '#2980b9');
-            pipe(376, 91, 393, 148, shown.keep, '#2980b9');
-            ctx.fillStyle = '#2471a3'; ctx.font = '13px sans-serif';
-            ctx.fillText('keep (1-z) x h = ' + fmt(s.keep), 200, 62);
+            pipe(L.keepX0, L.keepY, L.keepElb[0], L.keepElb[1], shown.keep, '#2980b9');
+            pipe(L.keepElb[0], L.keepElb[1], L.keepElb[2], L.keepElb[3], shown.keep, '#2980b9');
+            if (L.keepLab) {
+                ctx.fillStyle = '#2471a3'; ctx.font = FS13 + 'px sans-serif';
+                ctx.fillText('keep (1-z) x h = ' + fmt(s.keep), L.keepLab[0], L.keepLab[1]);
+            }
             // r pipe down into candidate mixer
-            pipe(80, 118, 80, 220, shown.r, '#e67e22');
-            ctx.fillStyle = '#a65d00'; ctx.font = '12px sans-serif';
-            ctx.fillText('r x h = ' + fmt(s.gated), 143, 172);
+            pipe(L.rX, L.rTop, L.rX, L.rBot, shown.r, '#e67e22');
+            if (L.rLab) {
+                ctx.fillStyle = '#a65d00'; ctx.font = FS + 'px sans-serif';
+                ctx.fillText('r x h = ' + fmt(s.gated), L.rLab[0], L.rLab[1]);
+            }
             // r valve handle
             ctx.fillStyle = '#7f8c8d';
-            ctx.beginPath(); ctx.arc(80, 169, 9, 0, Math.PI * 2); ctx.fill();
-            ctx.fillStyle = '#fff'; ctx.font = 'bold 12px sans-serif';
-            ctx.fillText('r', 80, 173);
+            ctx.beginPath(); ctx.arc(L.rX, L.rValveY, 9, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#fff'; ctx.font = 'bold ' + FS + 'px sans-serif';
+            ctx.fillText('r', L.rX, L.rValveY + Math.round(FS * 0.35));
             // candidate mixer box
-            box(20, 220, 150, 110, '#f4ecf7', '#8e44ad', 'candidate mixer', 'tanh(r x h + x)');
+            box(L.candBox[0], L.candBox[1], L.candBox[2], L.candBox[3], '#f4ecf7', '#8e44ad',
+                'candidate mixer', 'tanh(r x h + x)', FS13, FS, FS);
             // x_t inlet
-            ctx.fillStyle = '#555'; ctx.font = '13px sans-serif';
-            ctx.fillText('x(t) = ' + fmt(s.xt), 95, 358);
-            pipe(95, 346, 95, 330, 6, '#95a5a6');
+            ctx.fillStyle = '#555'; ctx.font = FS13 + 'px sans-serif';
+            ctx.fillText('x(t) = ' + fmt(s.xt), L.xX, L.xLabY);
+            pipe(L.xX, L.xLabY - 12, L.xX, L.xLabY - 28, 6, '#95a5a6');
             // candidate pipe (purple) into mixer
-            pipe(170, 275, 358, 275, shown.take, '#8e44ad');
-            pipe(358, 275, 393, 182, shown.take, '#8e44ad');
-            ctx.fillStyle = '#7d3c98'; ctx.font = '13px sans-serif';
-            ctx.fillText('take z x cand = ' + fmt(s.nw), 264, 308);
-            // z valve handle on top
-            var hy = 91 + z * (275 - 91);
-            ctx.fillStyle = '#2c3e50';
-            ctx.beginPath(); ctx.arc(262, hy, 13, 0, Math.PI * 2); ctx.fill();
-            ctx.fillStyle = '#fff'; ctx.font = 'bold 13px sans-serif';
-            ctx.fillText('z', 262, hy + 5);
-            ctx.fillStyle = '#555'; ctx.font = '12px sans-serif'; ctx.textAlign = 'left';
-            ctx.fillText('z = ' + z.toFixed(2), 282, 200);
-            ctx.fillText('0: keep all', 282, 60);
-            ctx.fillText('1: take all', 282, 322);
+            pipe(L.takeX0, L.takeY, L.takeElb[0], L.takeElb[1], shown.take, '#8e44ad');
+            pipe(L.takeElb[0], L.takeElb[1], L.takeElb[2], L.takeElb[3], shown.take, '#8e44ad');
+            if (L.takeLab) {
+                ctx.fillStyle = '#7d3c98'; ctx.font = FS13 + 'px sans-serif';
+                ctx.fillText('take z x cand = ' + fmt(s.nw), L.takeLab[0], L.takeLab[1]);
+            }
+            // z valve handle on the track (draggable)
+            var hy = L.hy0 + z * (L.hy1 - L.hy0);
+            ctx.fillStyle = dragging ? '#1a252f' : '#2c3e50';
+            ctx.beginPath(); ctx.arc(262, hy, L.valveR, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#fff'; ctx.font = 'bold ' + FS13 + 'px sans-serif';
+            ctx.fillText('z', 262, hy + Math.round(FS13 * 0.38));
+            ctx.fillStyle = '#555'; ctx.font = FS + 'px sans-serif';
+            ctx.textAlign = L.capZv[2];
+            ctx.fillText('z = ' + z.toFixed(2), L.capZv[0], L.capZv[1]);
+            ctx.textAlign = L.cap0[2];
+            ctx.fillText('0: keep all', L.cap0[0], L.cap0[1]);
+            ctx.textAlign = L.cap1[2];
+            ctx.fillText('1: take all', L.cap1[0], L.cap1[1]);
+            ctx.textAlign = 'center';
             // mixer circle
             ctx.fillStyle = '#eaf7ea'; ctx.strokeStyle = '#27ae60'; ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.arc(410, 165, 24, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-            ctx.fillStyle = '#2c3e50'; ctx.font = '20px sans-serif'; ctx.textAlign = 'center';
-            ctx.fillText('+', 410, 172);
+            ctx.beginPath(); ctx.arc(L.mixX, L.mixY, 24, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+            ctx.fillStyle = '#2c3e50'; ctx.font = L.FS20 + 'px sans-serif';
+            ctx.fillText('+', L.mixX, L.mixY + Math.round(L.FS20 * 0.35));
             // output pipe + box
-            pipe(434, 165, 514, 165, 14, '#27ae60');
-            box(514, 138, 106, 54, '#eaf7ea', '#27ae60', 'new memory', 'h(t) = ' + fmt(s.h));
+            pipe(L.mixX + 24, L.mixY, L.outX1, L.mixY, 14, '#27ae60');
+            box(L.newBox[0], L.newBox[1], L.newBox[2], L.newBox[3], '#eaf7ea', '#27ae60',
+                'new memory', 'h(t) = ' + fmt(s.h), FS13, FS, FS);
+            // narrow screens: the keep/take/r equations live in this legend lane,
+            // off the pipes, instead of as labels on the diagram
+            if (L.legendY) {
+                ctx.font = FS13 + 'px sans-serif';
+                ctx.fillStyle = '#2471a3';
+                ctx.fillText('keep (1-z) x h = ' + fmt(s.keep), W / 2, L.legendY[0]);
+                ctx.fillStyle = '#7d3c98';
+                ctx.fillText('take z x cand = ' + fmt(s.nw), W / 2, L.legendY[1]);
+                ctx.fillStyle = '#a65d00';
+                ctx.fillText('r x h = ' + fmt(s.gated), W / 2, L.legendY[2]);
+            }
             if (gruPlaying) {
                 var nowMs = performance.now();
                 if (nowMs - gruPlayT0 >= 600) {
@@ -920,6 +997,66 @@ class GRUCell(nn.Module):
             gruPlaying = true; this.textContent = 'Pause';
             gruPlayT0 = performance.now();
         });
+        // Drag the z valve directly on its track (the walkthrough promises this).
+        function gruValveGeom() {
+            var L = gruLayout();
+            var z = parseFloat(zS.value);
+            return { L: L, vy: L.hy0 + z * (L.hy1 - L.hy0) };
+        }
+        function gruToLogical(e) {
+            var rect = cv.getBoundingClientRect();
+            return {
+                x: (e.clientX - rect.left) * W / rect.width,
+                y: (e.clientY - rect.top) * gruLayout().H / rect.height
+            };
+        }
+        function gruNearValve(p) {
+            var g = gruValveGeom();
+            var dx = p.x - 262, dy = p.y - g.vy;
+            return dx * dx + dy * dy <= g.L.hitR * g.L.hitR;
+        }
+        // Touch: prevent page scroll only when the gesture starts on the valve,
+        // so the valve drag works on mobile without hijacking page scroll elsewhere.
+        cv.addEventListener('touchstart', function(e) {
+            if (!e.touches || !e.touches.length) return;
+            var t = e.touches[0];
+            if (gruNearValve(gruToLogical({ clientX: t.clientX, clientY: t.clientY }))) {
+                e.preventDefault();
+            }
+        }, { passive: false });
+        cv.addEventListener('pointerdown', function(e) {
+            if (!gruNearValve(gruToLogical(e))) return;
+            dragging = true;
+            gruStopPlay();
+            try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+            cv.style.touchAction = 'none';
+            cv.style.cursor = 'grabbing';
+            e.preventDefault();
+        });
+        cv.addEventListener('pointermove', function(e) {
+            if (dragging) {
+                var g = gruValveGeom();
+                var p = gruToLogical(e);
+                var zN = (p.y - g.L.hy0) / (g.L.hy1 - g.L.hy0);
+                zN = Math.max(0, Math.min(1, zN));
+                zN = Math.round(zN / 0.05) * 0.05;
+                zN = Math.round(zN * 100) / 100;
+                zS.value = zN.toFixed(2);
+                update();
+                e.preventDefault();
+            } else {
+                cv.style.cursor = gruNearValve(gruToLogical(e)) ? 'grab' : '';
+            }
+        });
+        function gruEndDrag(e) {
+            if (!dragging) return;
+            dragging = false;
+            cv.style.touchAction = '';
+            cv.style.cursor = '';
+            try { cv.releasePointerCapture(e.pointerId); } catch (err) {}
+        }
+        cv.addEventListener('pointerup', gruEndDrag);
+        cv.addEventListener('pointercancel', gruEndDrag);
         window.addEventListener('resize', sizeCanvas);
         if ('IntersectionObserver' in window) {
             new IntersectionObserver(function(es) {
@@ -1160,11 +1297,48 @@ class GRUCell(nn.Module):
             if (!(cw > 220)) cw = 300;
             if (cw > 640) cw = 640;
             var dpr = window.devicePixelRatio || 1;
+            geom.cw = cw;
+            geom.dpr = dpr;
+            var Hh = lstmLayout().H;
             cv.width = Math.round(cw * dpr);
-            cv.height = Math.round(cw * H / W * dpr);
+            cv.height = Math.round(cw * Hh / W * dpr);
             cv.style.width = cw + 'px';
-            cv.style.height = Math.round(cw * H / W) + 'px';
-            geom = { cw: cw, dpr: dpr };
+            cv.style.height = Math.round(cw * Hh / W) + 'px';
+        }
+        // Narrow layout (<480px): clientWidth-relative fonts (12px+ effective) and
+        // FS-relative stacking; the phase narration moves to its own lane at the
+        // bottom so it cannot collide with the input slip or the gate label.
+        function lstmLayout() {
+            var narrow = geom.cw < 480;
+            var FS = narrow ? Math.round(12 * W / geom.cw) : 12;
+            var FS13 = narrow ? Math.round(13 * W / geom.cw) : 13;
+            var FS20 = narrow ? Math.round(20 * W / geom.cw) : 20;
+            var L = { narrow: narrow, FS: FS, FS13: FS13, FS20: FS20 };
+            if (!narrow) {
+                L.H = 486;
+                L.phaseX = TX + TW / 2; L.phaseY = 22;
+                L.slip = [24, 12, 150, 38]; L.slipTextX = 99;
+                L.gateX = TX + TW + 78; L.gateY = 30;
+                L.forgetY1 = 120; L.forgetY2 = 136; L.connX = 150; L.connY = 128;
+                L.capY = TY + TH + 16; L.valY = TY + TH + 32;
+                L.by = 316; L.shutLabY = 358;
+                L.headY = 384; L.sy = 404; L.tLabY = 398; L.svalY = 464;
+            } else {
+                L.capY = TY + TH + 10 + FS;
+                L.valY = L.capY + 10 + FS;
+                L.by = L.valY + 14;
+                L.shutLabY = L.by + 24 + 12 + FS13;
+                L.headY = L.shutLabY + 12 + FS13;
+                L.tLabY = L.headY + 12 + FS;
+                L.sy = L.tLabY + 10;
+                L.svalY = L.sy + 46 + 12 + FS;
+                L.phaseX = W / 2; L.phaseY = L.svalY + 18 + FS13;
+                L.H = L.phaseY + 18;
+                L.slip = [24, 12, 200, 38]; L.slipTextX = 124;
+                L.gateX = TX + TW + 78; L.gateY = 30;
+                L.forgetY1 = 96; L.forgetY2 = 124; L.connX = 150; L.connY = 128;
+            }
+            return L;
         }
         function ease(p) { return p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2; }
         function spawn(x, y, vx, vy, color, r) {
@@ -1174,7 +1348,7 @@ class GRUCell(nn.Module):
         // tank geometry: big tank
         var TX = 250, TY = 62, TW = 140, TH = 218;
         function yOf(v) { return TY + (HI - v) / (HI - LO) * TH; }
-        function drawTank(x, y, w, h, v, lo, hi, label, val) {
+        function drawTank(x, y, w, h, v, lo, hi, label, val, fs, capY, valY) {
             var y0 = y + (hi - 0) / (hi - lo) * h;
             ctx.fillStyle = '#f7f9fb';
             ctx.strokeStyle = '#2c3e50'; ctx.lineWidth = 2;
@@ -1191,10 +1365,11 @@ class GRUCell(nn.Module):
                 ctx.fillStyle = 'rgba(231,76,60,0.75)';
                 ctx.fillRect(x + 3, y0, w - 6, yv - y0);
             }
-            ctx.fillStyle = '#2c3e50'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
-            ctx.fillText(label, x + w / 2, y + h + 16);
-            ctx.font = '12px sans-serif'; ctx.fillStyle = '#2471a3';
-            ctx.fillText('= ' + fmt(val), x + w / 2, y + h + 32);
+            var f = fs || 12;
+            ctx.fillStyle = '#2c3e50'; ctx.font = f + 'px sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText(label, x + w / 2, (capY === undefined) ? y + h + 16 : capY);
+            ctx.font = f + 'px sans-serif'; ctx.fillStyle = '#2471a3';
+            ctx.fillText('= ' + fmt(val), x + w / 2, (valY === undefined) ? y + h + 32 : valY);
         }
         function refresh() {
             var t = parseInt(tS.value, 10);
@@ -1252,8 +1427,9 @@ class GRUCell(nn.Module):
             var steps5 = trajectory(f, i, o, 5);
             var vanH = vanilla(5);
             var sc = geom.cw / W, dpr = geom.dpr;
+            var L = lstmLayout();
             ctx.setTransform(dpr * sc, 0, 0, dpr * sc, 0, 0);
-            ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+            ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, L.H);
             ctx.textAlign = 'center';
 
             var level = shownLevel, hShown = shownH, phaseLabel = '';
@@ -1311,41 +1487,41 @@ class GRUCell(nn.Module):
             // input slip + pour pipe
             ctx.fillStyle = '#eaf2f8'; ctx.strokeStyle = '#2980b9'; ctx.lineWidth = 2;
             ctx.beginPath();
-            if (ctx.roundRect) ctx.roundRect(24, 12, 150, 38, 8); else ctx.rect(24, 12, 150, 38);
+            if (ctx.roundRect) ctx.roundRect(L.slip[0], L.slip[1], L.slip[2], L.slip[3], 8); else ctx.rect(L.slip[0], L.slip[1], L.slip[2], L.slip[3]);
             ctx.fill(); ctx.stroke();
-            ctx.fillStyle = '#2c3e50'; ctx.font = '13px sans-serif';
-            ctx.fillText('input x_' + t + ' = ' + fmt(XS[t - 1]), 99, 36);
+            ctx.fillStyle = '#2c3e50'; ctx.font = L.FS13 + 'px sans-serif';
+            ctx.fillText('input x_' + t + ' = ' + fmt(XS[t - 1]), L.slipTextX, 36);
             ctx.fillStyle = '#2980b9';
             ctx.fillRect(TX + TW / 2 - 7, 30, 14, TY - 30);
-            ctx.fillStyle = '#555'; ctx.font = '12px sans-serif';
-            ctx.fillText('input gate i = ' + i.toFixed(2), TX + TW + 78, 30);
+            ctx.fillStyle = '#555'; ctx.font = L.FS + 'px sans-serif';
+            ctx.fillText('input gate i = ' + i.toFixed(2), L.gateX, L.gateY);
 
             // drops
             for (var d = drops.length - 1; d >= 0; d--) {
                 var dr = drops[d];
                 dr.x += dr.vx * 0.016; dr.y += dr.vy * 0.016; dr.life -= 0.016;
-                if (dr.life <= 0 || dr.y > H) { drops.splice(d, 1); continue; }
+                if (dr.life <= 0 || dr.y > L.H) { drops.splice(d, 1); continue; }
                 ctx.globalAlpha = Math.max(0, Math.min(1, dr.life * 1.5));
                 ctx.fillStyle = dr.color;
                 ctx.beginPath(); ctx.arc(dr.x, dr.y, dr.r, 0, Math.PI * 2); ctx.fill();
             }
             ctx.globalAlpha = 1;
 
-            // big tank
-            drawTank(TX, TY, TW, TH, level, LO, HI, 'cell state (long-term memory)', level);
-            ctx.fillStyle = '#2c3e50'; ctx.font = '13px sans-serif';
-            ctx.fillText(phaseLabel, TX + TW / 2, 22);
+            // big tank (labels drawn after the tank they annotate)
+            drawTank(TX, TY, TW, TH, level, LO, HI, 'cell state (long-term memory)', level, L.FS, L.capY, L.valY);
+            ctx.fillStyle = '#2c3e50'; ctx.font = L.FS13 + 'px sans-serif';
+            ctx.fillText(phaseLabel, L.phaseX, L.phaseY);
             // forget drain label
-            ctx.fillStyle = '#7f8c8d'; ctx.font = '12px sans-serif'; ctx.textAlign = 'left';
-            ctx.fillText('forget drain', 24, 120);
-            ctx.fillText('f = ' + f.toFixed(2), 24, 136);
+            ctx.fillStyle = '#7f8c8d'; ctx.font = L.FS + 'px sans-serif'; ctx.textAlign = 'left';
+            ctx.fillText('forget drain', 24, L.forgetY1);
+            ctx.fillText('f = ' + f.toFixed(2), 24, L.forgetY2);
             ctx.strokeStyle = '#95a5a6'; ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.moveTo(150, 128); ctx.lineTo(TX - 8, 200); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(L.connX, L.connY); ctx.lineTo(TX - 8, 200); ctx.stroke();
             ctx.fillStyle = '#95a5a6';
             ctx.beginPath(); ctx.moveTo(TX - 8, 200); ctx.lineTo(TX - 16, 192); ctx.lineTo(TX - 14, 204); ctx.fill();
 
             // output shutter + h bar
-            var by = 316, bw = 260, bx = TX + TW / 2 - bw / 2;
+            var by = L.by, bw = 260, bx = TX + TW / 2 - bw / 2;
             var th = Math.tanh(level), hh = hShown;
             var half = bw / 2, cx0 = bx + half;
             ctx.fillStyle = '#eef1f4';
@@ -1360,12 +1536,12 @@ class GRUCell(nn.Module):
             ctx.fillRect(bx + bw - (bw - hole) / 2, by, (bw - hole) / 2, 24);
             ctx.strokeStyle = '#2c3e50'; ctx.lineWidth = 1.5;
             ctx.strokeRect(bx, by, bw, 24);
-            ctx.fillStyle = '#2c3e50'; ctx.font = '13px sans-serif'; ctx.textAlign = 'center';
-            ctx.fillText('output shutter o = ' + o.toFixed(2) + ' reveals h_' + t + ' = ' + fmt(hh), TX + TW / 2, by + 42);
+            ctx.fillStyle = '#2c3e50'; ctx.font = L.FS13 + 'px sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText('output shutter o = ' + o.toFixed(2) + ' reveals h_' + t + ' = ' + fmt(hh), TX + TW / 2, L.shutLabY);
 
             // strip of mini tanks
-            ctx.fillStyle = '#555'; ctx.font = '13px sans-serif'; ctx.textAlign = 'left';
-            ctx.fillText('memory at every step, same gates:', 24, 384);
+            ctx.fillStyle = '#555'; ctx.font = L.FS13 + 'px sans-serif'; ctx.textAlign = 'left';
+            ctx.fillText('memory at every step, same gates:', 24, L.headY);
             var nSlots = van.checked ? 6 : 5;
             var sw = (W - 48) / nSlots;
             for (var k = 0; k < 5; k++) {
@@ -1373,7 +1549,7 @@ class GRUCell(nn.Module):
                 var cur = (k === t - 1);
                 ctx.lineWidth = cur ? 3 : 1.5;
                 ctx.strokeStyle = cur ? '#e74c3c' : '#2c3e50';
-                var sh = 46, sy = 404;
+                var sh = 46, sy = L.sy;
                 var sy0 = sy + (HI - 0) / (HI - LO) * sh;
                 ctx.fillStyle = '#f7f9fb';
                 ctx.beginPath();
@@ -1383,15 +1559,15 @@ class GRUCell(nn.Module):
                 ctx.fillStyle = sv >= 0 ? 'rgba(52,152,219,0.75)' : 'rgba(231,76,60,0.75)';
                 if (sv >= 0) ctx.fillRect(sx + 2, syv, sw - 16, sy0 - syv);
                 else ctx.fillRect(sx + 2, sy0, sw - 16, syv - sy0);
-                ctx.fillStyle = '#2c3e50'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
-                ctx.fillText('t=' + (k + 1), sx + (sw - 12) / 2, sy - 6);
-                ctx.fillStyle = '#2471a3'; ctx.font = '12px sans-serif';
-                ctx.fillText(fmt(sv), sx + (sw - 12) / 2, sy + sh + 14);
+                ctx.fillStyle = '#2c3e50'; ctx.font = L.FS + 'px sans-serif'; ctx.textAlign = 'center';
+                ctx.fillText('t=' + (k + 1), sx + (sw - 12) / 2, L.tLabY);
+                ctx.fillStyle = '#2471a3'; ctx.font = L.FS + 'px sans-serif';
+                ctx.fillText(fmt(sv), sx + (sw - 12) / 2, L.svalY);
             }
             if (van.checked) {
                 var sx6 = 24 + 5 * sw + 6;
                 ctx.lineWidth = 1.5; ctx.strokeStyle = '#7f8c8d';
-                var sh6 = 46, sy6 = 404;
+                var sh6 = 46, sy6 = L.sy;
                 var v6 = vanH[t - 1];
                 var y06 = sy6 + (1 - 0) / 2 * sh6, yv6 = sy6 + (1 - v6) / 2 * sh6;
                 ctx.fillStyle = '#f7f9fb';
@@ -1400,10 +1576,10 @@ class GRUCell(nn.Module):
                 ctx.fill(); ctx.stroke();
                 ctx.fillStyle = 'rgba(149,165,166,0.8)';
                 ctx.fillRect(sx6 + 2, yv6, sw - 16, y06 - yv6);
-                ctx.fillStyle = '#2c3e50'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
-                ctx.fillText('vanilla', sx6 + (sw - 12) / 2, sy6 - 6);
-                ctx.fillStyle = '#7f8c8d'; ctx.font = '12px sans-serif';
-                ctx.fillText(fmt(v6), sx6 + (sw - 12) / 2, sy6 + sh6 + 14);
+                ctx.fillStyle = '#2c3e50'; ctx.font = L.FS + 'px sans-serif'; ctx.textAlign = 'center';
+                ctx.fillText('vanilla', sx6 + (sw - 12) / 2, L.tLabY);
+                ctx.fillStyle = '#7f8c8d'; ctx.font = L.FS + 'px sans-serif';
+                ctx.fillText(fmt(v6), sx6 + (sw - 12) / 2, L.svalY);
             }
             requestAnimationFrame(frame);
         }
@@ -1435,7 +1611,7 @@ class GRUCell(nn.Module):
     <div class="demo" id="sfToy">
         <h4>Toy: gate safari, you set the routing policy</h4>
         <p>
-            Last one, and it is the whole point of gating. Two things happen in this sequence: the important 7 at t = 1 and a loud, meaningless 9.9 at t = 4. Each column below is a pipe into the memory tank, and your six sliders are the valves on those pipes. Blue is the important 7, red is the loud distractor, gray is the quiet stuff. Press <strong>Play the sequence</strong> and watch the two contenders race into the tank one step at a time. The presets show the three fates. Your job: make the network remember the 7 and only the 7.
+            Last one, and it is the whole point of gating. Two things happen in this sequence: the important 7 at t = 1 and a loud, meaningless 9.9 at t = 4. Each column below is a pipe into the memory tank, and your six sliders are the valves on those pipes. Blue is the important 7, red is the loud distractor, gray is the quiet stuff. Press <strong>Play the sequence</strong> and watch the two contenders race into the tank one step at a time. The presets show the three fates. Your job: make the network remember the 7 and only the 7. The bar under the tank shows who poured what: one segment per step, sized by |gate x input| in that step's color, so you can see exactly which steps filled the tank. The bar is full only when every gate is wide open.
         </p>
         <div class="demo-controls">
             <button type="button" class="btn sec" id="sfP1">Remember everything</button>
@@ -1489,11 +1665,12 @@ class GRUCell(nn.Module):
             var cw = cv.parentElement.clientWidth - 4;
             if (!(cw > 220)) cw = 300;
             if (cw > 640) cw = 640;
+            var Hh = (cw < 480) ? 508 : 500;
             var dpr = window.devicePixelRatio || 1;
             cv.width = Math.round(cw * dpr);
-            cv.height = Math.round(cw * H / W * dpr);
+            cv.height = Math.round(cw * Hh / W * dpr);
             cv.style.width = cw + 'px';
-            cv.style.height = Math.round(cw * H / W) + 'px';
+            cv.style.height = Math.round(cw * Hh / W) + 'px';
             geom = { cw: cw, dpr: dpr };
         }
         function compute() {
@@ -1542,21 +1719,19 @@ class GRUCell(nn.Module):
                 if (Math.abs(tankTarget - tankShown) < 0.002) tankShown = tankTarget;
             }
             var sc = geom.cw / W, dpr = geom.dpr;
+            var narrow = geom.cw < 480;
+            var FS = narrow ? Math.round(12 * W / geom.cw) : 12;
+            var FS13 = narrow ? Math.round(13 * W / geom.cw) : 13;
+            var HN = narrow ? 508 : 500;
             ctx.setTransform(dpr * sc, 0, 0, dpr * sc, 0, 0);
-            ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+            ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, HN);
             var colX = function(k) { return 60 + k * 96; };
-            // pipes
+            // pipes (marks drawn first, labels after them)
             for (var k = 0; k < N; k++) {
                 var g = parseFloat(sliders[k].value);
                 var cx = colX(k), pw = 3 + 24 * g;
                 var cc = colColor(k);
                 var hot = playing && k === playK;
-                ctx.textAlign = 'center';
-                ctx.fillStyle = hot ? '#2c3e50' : '#555';
-                ctx.font = (hot ? 'bold ' : '') + '13px sans-serif';
-                ctx.fillText('t=' + (k + 1), cx, 34);
-                ctx.font = '12px sans-serif'; ctx.fillStyle = '#555';
-                ctx.fillText('x=' + XS[k], cx, 52);
                 // pipe body
                 ctx.fillStyle = g < 0.05 ? '#eef1f4' : cc;
                 ctx.globalAlpha = g < 0.05 ? 1 : 0.28 + 0.72 * g;
@@ -1579,10 +1754,16 @@ class GRUCell(nn.Module):
                     ctx.moveTo(cx + 9, 66); ctx.lineTo(cx - 9, 84);
                     ctx.stroke();
                 }
-                ctx.fillStyle = '#555'; ctx.font = '12px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillStyle = hot ? '#2c3e50' : '#555';
+                ctx.font = (hot ? 'bold ' : '') + FS13 + 'px sans-serif';
+                ctx.fillText('t=' + (k + 1), cx, 34);
+                ctx.font = FS + 'px sans-serif'; ctx.fillStyle = '#555';
+                ctx.fillText('x=' + XS[k], cx, 52);
+                ctx.fillStyle = '#555'; ctx.font = FS + 'px sans-serif';
                 ctx.fillText('i=' + g.toFixed(2), cx, 274);
-                if (hot) {
-                    ctx.fillStyle = '#2c3e50'; ctx.font = 'bold 12px sans-serif';
+                if (hot && !narrow) {
+                    ctx.fillStyle = '#2c3e50'; ctx.font = 'bold ' + FS + 'px sans-serif';
                     ctx.fillText('pouring ' + fmt(contribs[k]), cx, 292);
                 }
             }
@@ -1600,12 +1781,71 @@ class GRUCell(nn.Module):
             if (tankShown >= 0) ctx.fillRect(tx + 3, yv, tw - 6, y0 - yv);
             else ctx.fillRect(tx + 3, y0, tw - 6, yv - y0);
             ctx.globalAlpha = 1;
-            ctx.fillStyle = '#2c3e50'; ctx.font = '13px sans-serif'; ctx.textAlign = 'left';
+            ctx.fillStyle = '#2c3e50'; ctx.font = FS13 + 'px sans-serif'; ctx.textAlign = 'left';
             ctx.fillText('memory tank', tx + 10, ty + 22);
             ctx.textAlign = 'right'; ctx.fillStyle = '#2471a3';
             ctx.fillText('c_6 = ' + fmt(tankShown), tx + tw - 10, ty + 22);
-            ctx.textAlign = 'center'; ctx.fillStyle = '#555'; ctx.font = '12px sans-serif';
-            ctx.fillText('dominated by ' + domName, tx + tw / 2, ty + th - 10);
+            ctx.textAlign = 'center'; ctx.fillStyle = '#555'; ctx.font = FS + 'px sans-serif';
+            var domTxt = 'dominated by ' + domName;
+            if (narrow && playing && playK >= 0) domTxt = 'pouring t=' + (playK + 1) + ': ' + fmt(contribs[playK]);
+            ctx.fillText(domTxt, tx + tw / 2, ty + th - 10);
+            // segmented contribution bar: one segment per timestep, width ~ |i_k * x_k|,
+            // colored by column, labeled t=k; the bar is full only when every gate is open
+            var bX0 = 40, bX1 = 600, bW = bX1 - bX0;
+            var barTitleY = narrow ? 430 : 424, barY = narrow ? 440 : 434, barH = 26;
+            var tickY = barY + barH + (narrow ? 22 : 20);
+            ctx.textAlign = 'left'; ctx.fillStyle = '#2c3e50'; ctx.font = FS13 + 'px sans-serif';
+            ctx.fillText('who poured what into the tank:', bX0, barTitleY);
+            var maxSum = 17.3;
+            var segs = [], segX = bX0, totAbs = 0;
+            for (var sk = 0; sk < N; sk++) {
+                var swd = Math.abs(contribs[sk]) / maxSum * bW;
+                totAbs += Math.abs(contribs[sk]);
+                segs.push({ x: segX, w: swd });
+                segX += swd;
+            }
+            ctx.fillStyle = '#eef1f4';
+            ctx.fillRect(bX0, barY, bW, barH);
+            for (var sk2 = 0; sk2 < N; sk2++) {
+                if (segs[sk2].w > 0.5) {
+                    ctx.fillStyle = colColor(sk2);
+                    ctx.fillRect(segs[sk2].x, barY, segs[sk2].w, barH);
+                }
+            }
+            ctx.fillStyle = '#ffffff';
+            for (var sk3 = 1; sk3 < N; sk3++) {
+                if (segs[sk3].w > 0.5) ctx.fillRect(segs[sk3].x - 1, barY, 2, barH);
+            }
+            ctx.strokeStyle = '#bdc3c7'; ctx.lineWidth = 1;
+            ctx.strokeRect(bX0, barY, bW, barH);
+            ctx.textAlign = 'center';
+            if (totAbs < 1e-9) {
+                ctx.fillStyle = '#7f8c8d'; ctx.font = FS + 'px sans-serif';
+                for (var zk = 0; zk < N; zk++) ctx.fillText('t=' + (zk + 1), bX0 + (zk + 0.5) / N * bW, tickY);
+            } else {
+                var placedX = [];
+                for (var lk = 0; lk < N; lk++) {
+                    if (segs[lk].w < 0.5) continue;
+                    if (segs[lk].w >= 44) {
+                        ctx.fillStyle = '#ffffff'; ctx.font = 'bold ' + FS + 'px sans-serif';
+                        ctx.fillText('t=' + (lk + 1), segs[lk].x + segs[lk].w / 2, barY + barH / 2 + Math.round(FS * 0.35));
+                    } else {
+                        var lx = segs[lk].x + segs[lk].w / 2, okL = true;
+                        for (var qk = 0; qk < placedX.length; qk++) {
+                            if (Math.abs(lx - placedX[qk]) < 44) { okL = false; break; }
+                        }
+                        if (okL) {
+                            placedX.push(lx);
+                            ctx.fillStyle = '#555'; ctx.font = FS + 'px sans-serif';
+                            ctx.fillText('t=' + (lk + 1), lx, tickY);
+                        }
+                    }
+                }
+            }
+            if (playing && playK >= 0) {
+                ctx.strokeStyle = '#2c3e50'; ctx.lineWidth = 2.5;
+                ctx.strokeRect(segs[playK].x, barY, Math.max(segs[playK].w, 4), barH);
+            }
             requestAnimationFrame(frame);
         }
         for (var k = 0; k < N; k++) {

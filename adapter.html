@@ -321,6 +321,14 @@
         .hw-chart .hw-label { font-size: 13px; fill: #555; }
         .hw-chart .hw-op { font-size: 26px; fill: #7f8c8d; }
         .hw-chart .hw-r { font-size: 15px; fill: #2c3e50; font-weight: bold; }
+        .hw-chart .hw-col { fill: #eef2f7; stroke: #95a5a6; stroke-width: 2; }
+        .hw-chart .hw-corridor { fill: #fdebd0; stroke: #e67e22; stroke-width: 2.5; }
+        .hw-chart .hw-guide { stroke: #d5dbdb; stroke-width: 1.5; stroke-dasharray: 5 4; }
+        .hw-chart .hw-dot { fill: #d35400; }
+        .hw-chart .hw-pill { fill: #fef5e7; stroke: #e67e22; stroke-width: 2; }
+        .hw-chart .hw-pill-text { font-size: 13px; fill: #7e5109; font-weight: bold; }
+        .hw-chart .hw-tag { font-size: 13px; fill: #7e5109; font-weight: bold; }
+        .rank-chart .ft-label { font-size: 12px; }
         .hw-cap { font-size: 0.9em; color: #555; text-align: center; margin: 0.1rem 0 0.2rem 0; }
         .hw-cap strong { color: #e67e22; }
         /* Readability sweep: stat cards and walkthrough steps */
@@ -528,7 +536,7 @@
         <span><span class="lg-sw lg-gray"></span>Full fine-tune reference</span>
       </div>
       <svg class="rank-chart" id="rankChart" viewBox="0 0 640 380" role="img" aria-label="Accuracy versus LoRA rank for an easy task and a hard task"></svg>
-      <svg class="hw-chart" id="hwChart" viewBox="0 0 640 200" role="img" aria-label="The LoRA update as two skinny matrices whose narrow side is the rank">
+      <svg class="hw-chart" id="hwChart" viewBox="0 0 640 200" role="img" aria-label="Squeeze flow: the 768-wide input is squeezed through one orange hallway of width r, then expanded back and added to the frozen W">
         <rect class="hw-frozen" x="30" y="25" width="130" height="130" rx="6"/>
         <text class="hw-label" x="95" y="174" text-anchor="middle">W frozen</text>
         <text class="hw-label" x="95" y="190" text-anchor="middle">768 &#215; 768</text>
@@ -541,8 +549,8 @@
         <text class="hw-r" id="hwR" x="574" y="96" text-anchor="middle">r = 8</text>
         <text class="hw-label" x="574" y="116" text-anchor="middle">hallway width</text>
       </svg>
-      <p class="hw-cap">The rank is the skinny side of the two orange matrices. Right now <strong>r = <span id="hwCapR">8</span></strong>: the hallway is that many numbers wide. Drag the slider and watch it widen.</p>
-      <p class="demo-howto"><strong>How to play with this.</strong> The slider is your rank dial. Drag it, or click any dot on the chart, and three things update live: the hallway diagram above (the rank is the width of the orange hallway, physically), the exact trainable parameter count against the frozen 110M backbone, and the accuracy readout against the dashed full fine-tuning lines. Hit <strong>Play</strong> and the rank sweeps from 1 to 64 at half a second per step. Watch the hallway widen while the orange slice in the budget bar grows and the hard-task curve keeps buying accuracy the easy-task curve stopped wanting steps ago. That is the whole trade in one animation: a wider hallway, more parameters, and on the hard task only, more accuracy to show for it.</p>
+      <p class="hw-cap">The orange hallway is the only part that learns. Right now <strong>r = <span id="hwCapR">8</span></strong>: the hallway is <span id="hwCapW">8</span> numbers wide and this one update costs <strong style="white-space:nowrap"><span id="hwCapP">12,288</span> params</strong> (see the pill under it). Drag the slider and watch it widen. At r = 64 the hallway is as tall as the input itself: a dense matrix with extra steps.</p>
+      <p class="demo-howto"><strong>How to play with this.</strong> The slider is your rank dial. Drag it, or click any dot on the chart, and three things update live: the squeeze-flow diagram (dots stream through the orange hallway, which physically widens with r; the pill under it counts this one update's parameters), the exact trainable parameter count against the frozen 110M backbone, and the accuracy readout against the dashed full fine-tuning lines, labeled at the right edge. Hit <strong>Play</strong> and the rank sweeps from 1 to 64 at half a second per step. Watch the hallway widen while the orange slice in the budget bar grows and the hard-task curve keeps buying accuracy the easy-task curve stopped wanting steps ago. At r = 64 the hallway is as tall as the input itself, which is the joke: nearly a dense matrix with extra steps. That is the whole trade in one animation: a wider hallway, more parameters, and on the hard task only, more accuracy to show for it.</p>
       <div class="param-budget">
         <div class="pb-caption-row">
           <span>Frozen backbone: <strong>110M params</strong> (never moves)</span>
@@ -565,15 +573,10 @@
       var easy = [88.0, 90.5, 92.0, 92.1, 92.1, 92.1, 92.1];
       var hard = [70.0, 74.0, 79.0, 84.0, 87.5, 89.5, 90.5];
       var easyFT = 92.5, hardFT = 91.5;
-
-      var W = 640, H = 380, ML = 68, MR = 16, MT = 16, MB = 46;
-      var PW = W - ML - MR, PH = H - MT - MB;
       var yMin = 68, yMax = 94;
 
-      function X(i) { return ML + i * PW / 6; }
-      function Y(a) { return MT + PH - (a - yMin) * PH / (yMax - yMin); }
-
       var svg = document.getElementById('rankChart');
+      var hw = document.getElementById('hwChart');
       var NS = 'http://www.w3.org/2000/svg';
       function el(name, attrs) {
         var e = document.createElementNS(NS, name);
@@ -585,64 +588,283 @@
         t.textContent = s;
         return t;
       }
+      function fmt(n) { return n.toLocaleString('en-US'); }
 
-      [70, 75, 80, 85, 90].forEach(function(a) {
-        svg.appendChild(el('line', {x1: ML, y1: Y(a), x2: W - MR, y2: Y(a), 'class': 'grid'}));
-        svg.appendChild(label(ML - 8, Y(a) + 4, a + '%', 'tick-label', 'end'));
-      });
-      ranks.forEach(function(r, i) {
-        svg.appendChild(label(X(i), H - MB + 22, 'r=' + r, 'tick-label'));
-      });
-      svg.appendChild(label(ML + PW / 2, H - 6, 'LoRA rank (log scale)', 'axis-label'));
-      var yl = label(18, MT + PH / 2, 'accuracy', 'axis-label');
-      yl.setAttribute('transform', 'rotate(-90 18 ' + (MT + PH / 2) + ')');
-      svg.appendChild(yl);
-      function fitYTitle() {
-        var cw = svg.clientWidth || 640;
-        yl.style.display = (cw < 520) ? 'none' : '';
+      /* Sweep (b): measure the widest tick label instead of guessing padL. */
+      var measureCtx = null;
+      function textW(s, px) {
+        try {
+          if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d');
+          measureCtx.font = px + 'px sans-serif';
+          var w = measureCtx.measureText(s).width;
+          if (isFinite(w) && w > 0) return w;
+        } catch (e) {}
+        return s.length * px * 0.62;
       }
-      fitYTitle();
-      if (typeof window !== 'undefined') window.addEventListener('resize', fitYTitle);
+      /* Center desiredCx, clamped so a w-wide item stays inside [m, VBW-m].
+         Sweep (b): two-line fallback for wide labels is handled by the
+         callers; this keeps one-line labels on the plot. */
+      function clampCx(desiredCx, w, VBW, m) {
+        var lo = m + w / 2, hi = VBW - m - w / 2;
+        if (lo > hi) return VBW / 2;
+        return Math.min(hi, Math.max(lo, desiredCx));
+      }
 
-      var selLine = el('line', {'class': 'sel-line'});
-      svg.appendChild(selLine);
-
-      function pathFor(data) {
+      /* ---------------- accuracy-vs-rank chart ---------------- */
+      var geom = null, dyn = {};
+      function pathFor(data, X, Y) {
         return data.map(function(a, i) {
           return (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(a).toFixed(1);
         }).join(' ');
       }
-      svg.appendChild(el('line', {x1: ML, y1: Y(easyFT), x2: W - MR, y2: Y(easyFT), 'class': 'ft-line', stroke: '#3498db'}));
-      svg.appendChild(el('line', {x1: ML, y1: Y(hardFT), x2: W - MR, y2: Y(hardFT), 'class': 'ft-line', stroke: '#e67e22'}));
-      svg.appendChild(el('path', {d: pathFor(easy), 'class': 'curve-easy'}));
-      svg.appendChild(el('path', {d: pathFor(hard), 'class': 'curve-hard'}));
-
-      var ringE = el('circle', {'class': 'sel-ring', r: 7});
-      var ringH = el('circle', {'class': 'sel-ring', r: 7});
-      svg.appendChild(ringE);
-      svg.appendChild(ringH);
-
-      var slider = document.getElementById('rankSlider');
       function pick(i) { slider.value = i; update(); }
-      ranks.forEach(function(r, i) {
-        var dot1 = el('circle', {cx: X(i), cy: Y(easy[i]), r: 4.5, fill: '#3498db'});
-        var dot2 = el('circle', {cx: X(i), cy: Y(hard[i]), r: 4.5, fill: '#e67e22'});
-        var hit = el('circle', {cx: X(i), cy: (Y(easy[i]) + Y(hard[i])) / 2, r: 16, fill: '#000', 'fill-opacity': '0', 'class': 'pt'});
-        hit.setAttribute('style', 'pointer-events:all');
-        hit.addEventListener('click', function() { pick(i); });
-        svg.appendChild(hit);
-        svg.appendChild(dot1);
-        svg.appendChild(dot2);
-      });
+      function renderChart() {
+        while (svg.firstChild) svg.removeChild(svg.firstChild);
+        var cw = svg.clientWidth || 640;
+        var mobile = cw < 520;
+        /* Sweep (d): the viewBox tracks the measured CSS width, so one unit
+           is one CSS pixel and 13px type is exactly 13px effective at 390px. */
+        var VBW = Math.max(280, Math.round(cw));
+        var VBH = mobile ? Math.round(VBW * 1.2) : Math.round(VBW * 0.594);
+        svg.setAttribute('viewBox', '0 0 ' + VBW + ' ' + VBH);
+        var yTicks = mobile ? [70, 80, 90] : [70, 75, 80, 85, 90];
+        var maxTickW = 0, i;
+        for (i = 0; i < yTicks.length; i++) {
+          maxTickW = Math.max(maxTickW, textW(yTicks[i] + '%', 13));
+        }
+        var ML = Math.ceil(maxTickW) + 14;
+        if (!mobile) ML += 22; /* lane for the rotated y-axis title */
+        var ftETxt = mobile ? 'FT 92.5%' : 'full fine-tune 92.5%';
+        var ftHTxt = mobile ? 'FT 91.5%' : 'full fine-tune 91.5%';
+        var MR = Math.ceil(Math.max(textW(ftETxt, 12), textW(ftHTxt, 12))) + 16;
+        var MT = mobile ? 14 : 16, MB = mobile ? 56 : 46;
+        var PW = VBW - ML - MR, PH = VBH - MT - MB;
+        function X(ii) { return ML + ii * PW / 6; }
+        function Y(a) { return MT + PH - (a - yMin) * PH / (yMax - yMin); }
+        geom = {ML: ML, MR: MR, MT: MT, MB: MB, PW: PW, PH: PH,
+                VBW: VBW, VBH: VBH, mobile: mobile, X: X, Y: Y};
 
+        var a, t;
+        for (i = 0; i < yTicks.length; i++) {
+          a = yTicks[i];
+          svg.appendChild(el('line', {x1: ML, y1: Y(a), x2: VBW - MR, y2: Y(a), 'class': 'grid'}));
+          t = label(ML - 8, Y(a) + 4.5, a + '%', 'tick-label', 'end');
+          svg.appendChild(t);
+        }
+        for (i = 0; i < ranks.length; i++) {
+          t = label(X(i), VBH - MB + 22, mobile ? String(ranks[i]) : 'r=' + ranks[i], 'tick-label');
+          svg.appendChild(t);
+        }
+        svg.appendChild(label(ML + PW / 2, VBH - 8, 'LoRA rank (log scale)', 'axis-label'));
+        if (!mobile) {
+          var titleX = Math.max(14, ML - maxTickW - 18);
+          var yl = label(titleX, MT + PH / 2, 'accuracy', 'axis-label');
+          yl.setAttribute('transform', 'rotate(-90 ' + titleX + ' ' + (MT + PH / 2) + ')');
+          svg.appendChild(yl);
+        }
+        /* Dashed full-fine-tune lines, then their direct right-edge labels.
+           Sweep (a): labels are drawn after the marks they annotate. */
+        svg.appendChild(el('line', {x1: ML, y1: Y(easyFT), x2: VBW - MR, y2: Y(easyFT),
+                                   'class': 'ft-line', stroke: '#3498db'}));
+        svg.appendChild(el('line', {x1: ML, y1: Y(hardFT), x2: VBW - MR, y2: Y(hardFT),
+                                   'class': 'ft-line', stroke: '#e67e22'}));
+        var le = label(VBW - MR + 8, Y(easyFT) - 3, ftETxt, 'ft-label', 'start');
+        le.setAttribute('fill', '#2471a3');
+        le.setAttribute('dominant-baseline', 'central');
+        var lh = label(VBW - MR + 8, Y(hardFT) + 4, ftHTxt, 'ft-label', 'start');
+        lh.setAttribute('fill', '#b45309');
+        lh.setAttribute('dominant-baseline', 'central');
+        svg.appendChild(le);
+        svg.appendChild(lh);
+        /* Curves, then the selection line, then dots, then rings on top. */
+        svg.appendChild(el('path', {d: pathFor(easy, X, Y), 'class': 'curve-easy'}));
+        svg.appendChild(el('path', {d: pathFor(hard, X, Y), 'class': 'curve-hard'}));
+        dyn.selLine = el('line', {'class': 'sel-line'});
+        svg.appendChild(dyn.selLine);
+        for (i = 0; i < ranks.length; i++) {
+          (function(idx) {
+            var dot1 = el('circle', {cx: X(idx), cy: Y(easy[idx]), r: 4.5, fill: '#3498db'});
+            var dot2 = el('circle', {cx: X(idx), cy: Y(hard[idx]), r: 4.5, fill: '#e67e22'});
+            var hit = el('circle', {cx: X(idx), cy: (Y(easy[idx]) + Y(hard[idx])) / 2, r: 16,
+                                    fill: '#000', 'fill-opacity': '0', 'class': 'pt'});
+            hit.setAttribute('style', 'pointer-events:all');
+            hit.addEventListener('click', function() { pick(idx); });
+            svg.appendChild(dot1);
+            svg.appendChild(dot2);
+            svg.appendChild(hit);
+          })(i);
+        }
+        dyn.ringE = el('circle', {'class': 'sel-ring', r: 7});
+        dyn.ringH = el('circle', {'class': 'sel-ring', r: 7});
+        svg.appendChild(dyn.ringE);
+        svg.appendChild(dyn.ringH);
+      }
+
+      /* ---------------- squeeze-flow hallway diagram ---------------- */
+      var hwGeom = null, hwDyn = {};
+      var dispH = 10, targetH = 10, targetR = 8;
+      var dots = [];
+      function spreadAt(x, g) {
+        var c0 = g.cX, c1 = g.cX + g.cLen, z = 12;
+        if (x <= c0 - z || x >= c1 + z) return g.S;
+        if (x >= c0 + z && x <= c1 - z) return dispH;
+        var t = x < c0 + z ? (x - (c0 - z)) / (2 * z) : ((c1 + z) - x) / (2 * z);
+        t = t * t * (3 - 2 * t);
+        return g.S + (dispH - g.S) * t;
+      }
+      function renderHallway() {
+        while (hw.firstChild) hw.removeChild(hw.firstChild);
+        dots = [];
+        var cw = hw.clientWidth || 640;
+        var mobile = cw < 520;
+        var VBW = Math.max(280, Math.round(cw));
+        var VBH = mobile ? 200 : 250;
+        hw.setAttribute('viewBox', '0 0 ' + VBW + ' ' + VBH);
+        var S = mobile ? 72 : 130;
+        var colW = mobile ? 22 : 38;
+        var m = mobile ? 12 : 24, gap = mobile ? 8 : 14;
+        var centerY = mobile ? 105 : 120;
+        var wX = m;
+        var plusX = wX + S + gap + 10;
+        var inX = wX + S + gap + 20 + gap;
+        var cX = inX + colW + gap;
+        var oX = VBW - m - colW;
+        var cLen = oX - gap - cX;
+        var top = centerY - S / 2;
+        var g = {S: S, colW: colW, m: m, centerY: centerY, wX: wX, plusX: plusX,
+                 inX: inX, cX: cX, oX: oX, cLen: cLen, top: top,
+                 VBW: VBW, VBH: VBH, mobile: mobile};
+        hwGeom = g;
+
+        /* Sweep (c): clip the animated dots to the flow region. */
+        var defs = el('defs', {});
+        var clip = el('clipPath', {id: 'hwFlowClip'});
+        clip.appendChild(el('rect', {x: inX - 4, y: top - 6,
+                                     width: (oX + colW + 4) - (inX - 4), height: S + 12}));
+        defs.appendChild(clip);
+        hw.appendChild(defs);
+
+        /* Guide lines at the input's full width: at r=64 the corridor
+           visibly meets them, which is the punchline. */
+        hw.appendChild(el('line', {x1: inX, y1: top, x2: oX + colW, y2: top, 'class': 'hw-guide'}));
+        hw.appendChild(el('line', {x1: inX, y1: top + S, x2: oX + colW, y2: top + S, 'class': 'hw-guide'}));
+
+        hw.appendChild(el('rect', {x: wX, y: top, width: S, height: S, rx: 6, 'class': 'hw-frozen'}));
+        var plus = label(plusX, centerY, '+', 'hw-op');
+        plus.setAttribute('dominant-baseline', 'central');
+        plus.setAttribute('font-size', mobile ? 20 : 26);
+        hw.appendChild(plus);
+        hw.appendChild(el('rect', {x: inX, y: top, width: colW, height: S, rx: 4, 'class': 'hw-col'}));
+        hwDyn.corridor = el('rect', {x: cX, y: centerY - dispH / 2, width: cLen,
+                                     height: dispH, rx: 4, 'class': 'hw-corridor'});
+        hw.appendChild(hwDyn.corridor);
+        hw.appendChild(el('rect', {x: oX, y: top, width: colW, height: S, rx: 4, 'class': 'hw-col'}));
+
+        var dg = el('g', {'clip-path': 'url(#hwFlowClip)'});
+        var nDots = mobile ? 10 : 14, k;
+        for (k = 0; k < nDots; k++) {
+          var dc = el('circle', {r: mobile ? 3 : 3.4, 'class': 'hw-dot'});
+          dg.appendChild(dc);
+          dots.push({el: dc, p: k / nDots, v: 0.20 + (k % 3) * 0.035,
+                     j: (((k * 0.6180339887) % 1) * 2 - 1)});
+        }
+        hw.appendChild(dg);
+
+        /* Sweep (a): every label is drawn after the marks it annotates. */
+        var lx = wX + S / 2;
+        hw.appendChild(label(lx, top + S + 20, 'W frozen', 'hw-label'));
+        hw.appendChild(label(lx, top + S + 38, '768 × 768', 'hw-label'));
+        if (mobile) {
+          /* Rotated inside the columns: keeps the row below the flow clear
+             for the param pill, which would otherwise collide with the
+             "768 out" label at large r. */
+          var inLab = label(inX + colW / 2, centerY, '768 in', 'hw-label');
+          inLab.setAttribute('transform', 'rotate(-90 ' + (inX + colW / 2) + ' ' + centerY + ')');
+          inLab.setAttribute('font-size', 12);
+          hw.appendChild(inLab);
+          var outLab = label(oX + colW / 2, centerY, '768 out', 'hw-label');
+          outLab.setAttribute('transform', 'rotate(-90 ' + (oX + colW / 2) + ' ' + centerY + ')');
+          outLab.setAttribute('font-size', 12);
+          hw.appendChild(outLab);
+        } else {
+          hw.appendChild(label(inX + colW / 2, top + S + 20, '768 in', 'hw-label'));
+          hw.appendChild(label(oX + colW / 2, top + S + 20, '768 out', 'hw-label'));
+        }
+
+        hwDyn.pill = el('rect', {rx: 13, 'class': 'hw-pill'});
+        hwDyn.pillText = label(0, 0, '', 'hw-pill-text');
+        hwDyn.pillText.setAttribute('dominant-baseline', 'central');
+        hw.appendChild(hwDyn.pill);
+        hw.appendChild(hwDyn.pillText);
+
+        /* r=64 punchline tag above the corridor; two lines on mobile. */
+        hwDyn.tag = el('g', {});
+        if (mobile) {
+          var t1 = label(VBW / 2, top - 28, 'hallway = input width:', 'hw-tag');
+          var t2 = label(VBW / 2, top - 12, 'nearly a dense matrix with extra steps', 'hw-tag');
+          t1.setAttribute('font-size', 12);
+          t2.setAttribute('font-size', 12);
+          hwDyn.tag.appendChild(t1);
+          hwDyn.tag.appendChild(t2);
+        } else {
+          var tagTxt = 'hallway = input width: nearly a dense matrix with extra steps';
+          var tagW = textW(tagTxt, 13);
+          var t0 = label(clampCx(cX + cLen / 2, tagW, VBW, m), top - 14, tagTxt, 'hw-tag');
+          hwDyn.tag.appendChild(t0);
+        }
+        hwDyn.tag.style.display = 'none';
+        hw.appendChild(hwDyn.tag);
+      }
+
+      var lastT = 0;
+      function hwTick(t) {
+        var dt = Math.min(0.05, ((t - lastT) / 1000) || 0.016);
+        lastT = t;
+        dispH += (targetH - dispH) * Math.min(1, dt * 9);
+        if (Math.abs(targetH - dispH) < 0.3) dispH = targetH;
+        var g = hwGeom, k;
+        if (g) {
+          hwDyn.corridor.setAttribute('y', (g.centerY - dispH / 2).toFixed(1));
+          hwDyn.corridor.setAttribute('height', Math.max(0.5, dispH).toFixed(1));
+          var pillY = g.centerY + dispH / 2 + 10;
+          hwDyn.pill.setAttribute('y', pillY.toFixed(1));
+          hwDyn.pillText.setAttribute('y', (pillY + 13).toFixed(1));
+          hwDyn.tag.style.display = (targetR === 64 && dispH > targetH - 1.5) ? '' : 'none';
+          var x0 = g.inX + g.colW / 2, x1 = g.oX + g.colW / 2;
+          for (k = 0; k < dots.length; k++) {
+            var d = dots[k];
+            d.p += d.v * dt;
+            if (d.p > 1) d.p -= 1;
+            var x = x0 + d.p * (x1 - x0);
+            var sp = spreadAt(x, g);
+            d.el.setAttribute('cx', x.toFixed(1));
+            d.el.setAttribute('cy', (g.centerY + d.j * sp * 0.42).toFixed(1));
+            d.el.setAttribute('opacity', Math.min(1, d.p * 10, (1 - d.p) * 10).toFixed(2));
+          }
+        }
+        requestAnimationFrame(hwTick);
+      }
+
+      function sizePill() {
+        var g = hwGeom;
+        if (!g || !hwDyn.pillText) return;
+        var w = Math.ceil(textW(hwDyn.pillText.textContent, 13)) + 30;
+        var cx = clampCx(g.cX + g.cLen / 2, w, g.VBW, g.m);
+        hwDyn.pill.setAttribute('x', (cx - w / 2).toFixed(1));
+        hwDyn.pill.setAttribute('width', w.toFixed(1));
+        hwDyn.pill.setAttribute('height', 26);
+        hwDyn.pillText.setAttribute('x', cx.toFixed(1));
+      }
+
+      /* ---------------- wiring ---------------- */
+      var slider = document.getElementById('rankSlider');
       var rankVal = document.getElementById('rankVal');
       var statsEl = document.getElementById('rankStats');
       var pbBar = document.getElementById('pbTrainBar');
       var pbNum = document.getElementById('pbTrainNum');
-      var hwB = document.getElementById('hwB');
-      var hwA = document.getElementById('hwA');
-      var hwR = document.getElementById('hwR');
       var hwCapR = document.getElementById('hwCapR');
+      var hwCapW = document.getElementById('hwCapW');
+      var hwCapP = document.getElementById('hwCapP');
       var playBtn = document.getElementById('rankPlay');
       var playTimer = null;
       var maxSqrt = Math.sqrt(100 * (2 * 64 * D) * (L * 2) / MODEL);
@@ -668,8 +890,6 @@
         }, 500);
       });
 
-      function fmt(n) { return n.toLocaleString('en-US'); }
-
       function verdict(r) {
         if (r <= 2) return 'Starvation rations. Even the easy task is not done yet.';
         if (r === 4) return 'The easy task is done at 92.0%. The hard task is underfitting hard at 79.0%.';
@@ -687,23 +907,28 @@
         var total = L * 2 * perProj;
         var share = 100 * total / MODEL;
         rankVal.textContent = r;
-        selLine.setAttribute('x1', X(i));
-        selLine.setAttribute('x2', X(i));
-        selLine.setAttribute('y1', MT);
-        selLine.setAttribute('y2', MT + PH);
-        ringE.setAttribute('cx', X(i));
-        ringE.setAttribute('cy', Y(easy[i]));
-        ringH.setAttribute('cx', X(i));
-        ringH.setAttribute('cy', Y(hard[i]));
+        var X = geom.X, Y = geom.Y;
+        dyn.selLine.setAttribute('x1', X(i));
+        dyn.selLine.setAttribute('x2', X(i));
+        dyn.selLine.setAttribute('y1', geom.MT);
+        dyn.selLine.setAttribute('y2', geom.MT + geom.PH);
+        dyn.ringE.setAttribute('cx', X(i));
+        dyn.ringE.setAttribute('cy', Y(easy[i]));
+        dyn.ringH.setAttribute('cx', X(i));
+        dyn.ringH.setAttribute('cy', Y(hard[i]));
         var shareTxt = share.toFixed(2) + '%';
         pbBar.style.width = (100 * Math.sqrt(share) / maxSqrt).toFixed(2) + '%';
         pbNum.textContent = fmt(total) + ' (' + shareTxt + ')';
-        var hw = 8 + (r / 64) * 122;
-        hwB.style.width = hw.toFixed(1) + 'px';
-        hwA.style.height = hw.toFixed(1) + 'px';
-        hwA.style.y = (25 + (130 - hw) / 2).toFixed(1) + 'px';
-        hwR.textContent = 'r = ' + r;
+        targetR = r;
+        targetH = Math.max(8, hwGeom.S * r / 64);
         hwCapR.textContent = r;
+        hwCapW.textContent = r;
+        hwCapP.textContent = fmt(perProj);
+        var pillStr = 'r = ' + r + ' · ' + fmt(perProj) + ' params';
+        if (hwDyn.pillText.textContent !== pillStr) {
+          hwDyn.pillText.textContent = pillStr;
+          sizePill();
+        }
         statsEl.innerHTML =
           'Rank r = <strong>' + r + '</strong>, ' + L + ' layers x 2 projections (q, v)<br>' +
           'Per projection: <strong>' + fmt(perProj) + '</strong> params &nbsp;&bull;&nbsp; ' +
@@ -713,8 +938,33 @@
           verdict(r);
       }
       slider.addEventListener('input', function() { stopPlay(); update(); });
+
+      var lastCW = 0, lastMode = '', rzT = null;
+      function checkResize() {
+        var cw = svg.clientWidth || 640;
+        var mode = cw < 520 ? 'm' : 'd';
+        if (mode !== lastMode || Math.abs(cw - lastCW) > 40) {
+          lastMode = mode;
+          lastCW = cw;
+          renderChart();
+          renderHallway();
+          update();
+        }
+      }
+      if (typeof window !== 'undefined' && window.addEventListener) {
+        window.addEventListener('resize', function() {
+          if (rzT) clearTimeout(rzT);
+          rzT = setTimeout(checkResize, 200);
+        });
+      }
+      lastCW = svg.clientWidth || 640;
+      lastMode = lastCW < 520 ? 'm' : 'd';
+      renderChart();
+      renderHallway();
       update();
+      requestAnimationFrame(hwTick);
     })();
+
     </script>
 
     <p>A quarter of one percent of the model, and it usually lands within a point of full fine-tuning on classification-style tasks. That is stupid easy and gives you a fast win.</p>

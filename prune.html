@@ -200,6 +200,14 @@
     }
     .demo-controls label { font-weight: bold; color: #2c3e50; }
     .demo-controls input[type=range] { width: 220px; accent-color: #3498db; }
+    .play-btn {
+      border: 1px solid #3498db; background: #3498db; color: #fff;
+      padding: 0.45em 1.2em; border-radius: 6px; cursor: pointer;
+      font-size: 0.9em; font-weight: bold;
+    }
+    .play-btn:hover { background: #2980b9; }
+    .howto { font-size: 0.92em; color: #555; margin: 0 0 1rem; }
+    .howto strong { color: #2980b9; }
     .mode-toggle { display: inline-flex; border: 1px solid #bdc3c7; border-radius: 6px; overflow: hidden; }
     .mode-toggle button {
       border: none; background: #fff; padding: 0.45em 1em; cursor: pointer;
@@ -211,9 +219,56 @@
       text-align: center; margin-top: 0.8rem; font-size: 0.95em; color: #2c3e50;
     }
     .demo-stats strong { color: #2980b9; }
+    .demo-stats .good { color: #16a34a; font-weight: bold; }
+    .demo-stats .bad { color: #dc2626; font-weight: bold; }
     .caption {
       font-size: 0.9em; color: #555; margin-top: 0.8rem;
       border-left: 3px solid #3498db; padding-left: 0.8em;
+    }
+    /* Stat cards: replace monospace data dumps with scannable numbers */
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      margin: 1.2em 0;
+    }
+    .stat-card {
+      border: 1px solid #bdc3c7;
+      border-radius: 8px;
+      padding: 14px 16px;
+      background: #f7f9fb;
+    }
+    .stat-num {
+      font-size: 1.9em;
+      font-weight: 800;
+      color: #2c3e50;
+      line-height: 1.15;
+    }
+    .stat-unit, .stat-vs {
+      font-size: .55em;
+      font-weight: 600;
+      color: #7f8c8d;
+    }
+    .stat-label {
+      font-size: .92em;
+      font-weight: 600;
+      margin-top: 6px;
+      color: #2c3e50;
+    }
+    .stat-note {
+      font-size: .82em;
+      color: #7f8c8d;
+      margin-top: 3px;
+    }
+    /* Numbered walkthrough steps: one computation per step */
+    .walkthrough-steps {
+      max-width: 620px;
+      margin: .8em 0;
+      padding-left: 1.6em;
+      line-height: 1.7;
+    }
+    .walkthrough-steps li {
+      margin-bottom: .35em;
     }
   </style>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
@@ -250,11 +305,13 @@
     </div>
 
    <h1>Pruning</h1>
-   <p>
-     Take a ResNet-18 that hits <strong>92.58%</strong> accuracy on STL-10. Delete half of its weights.
-     Accuracy collapses to <strong>66.25%</strong>. Fine-tune for a few epochs and it climbs back to
-     <strong>92.74%</strong>, with 5.5 million weights no longer doing any work.
-   </p>
+   <p>Pruning in one paragraph:</p>
+   <ol class="walkthrough-steps">
+     <li>Take a ResNet-18 that hits <strong>92.58%</strong> accuracy on STL-10.</li>
+     <li>Delete half of its weights. Accuracy collapses to <strong>66.25%</strong>.</li>
+     <li>Fine-tune for a few epochs. It climbs back to <strong>92.74%</strong>.</li>
+     <li>End result: <strong>5.6 million</strong> weights no longer doing any work, and accuracy back where it started.</li>
+   </ol>
    <p>
      That is pruning in one paragraph. Neural networks are overparameterized: most weights are just along
      for the ride. If you can figure out which weights barely matter and remove them, you get a smaller,
@@ -272,12 +329,20 @@
    <div class="demo">
      <div class="demo-controls">
        <label for="sparsity">Sparsity: <span id="sparsityVal">50</span>%</label>
-       <input type="range" id="sparsity" min="0" max="90" value="50" step="5">
+       <input type="range" id="sparsity" min="0" max="95" value="50" step="5">
        <div class="mode-toggle">
          <button id="btnUnstructured" class="active">Unstructured</button>
          <button id="btnStructured">Structured</button>
        </div>
+       <button id="playBtn" class="play-btn" type="button">Play</button>
      </div>
+     <p class="howto"><strong>How to play:</strong> drag the slider to prune more or fewer weights and watch the
+     accuracy number move with it, or press Play and let the sweep run from 0% to 95% in 5% steps, one step every
+     half second. The grid drops out the weakest weights first and you can watch them go; the toy accuracy
+     readout shows what that does to a model, fitted to the real ResNet numbers from this page (92.58% at full
+     size, 66.25% at half). The accuracy number is green at 85% and above, red below 50%, and plain in between.
+     Unstructured picks off the smallest individual weights anywhere; structured kills
+     whole rows at once, which is what actually shrinks the layer.</p>
      <canvas id="pruneCanvas" width="512" height="512"></canvas>
      <div class="demo-stats" id="demoStats"></div>
      <p class="caption">
@@ -309,6 +374,24 @@
      var stats = document.getElementById('demoStats');
      var bU = document.getElementById('btnUnstructured');
      var bS = document.getElementById('btnStructured');
+     var playBtn = document.getElementById('playBtn');
+     var playTimer = null;
+
+     // Toy accuracy model fitted to the real numbers reported on this page:
+     // 92.58% at full size, 66.25% at 50% sparsity. Accuracy falls faster
+     // the more you cut, floored at chance level (10% for STL-10).
+     function toyAccuracy(sparsityPct) {
+       var acc = 92.58 - 26.33 * Math.pow(sparsityPct / 50, 1.5);
+       return Math.max(acc, 10);
+     }
+
+     function stopPlay() {
+       if (playTimer) {
+         clearInterval(playTimer);
+         playTimer = null;
+         playBtn.textContent = 'Play';
+       }
+     }
 
      function draw() {
        var sparsity = slider.value / 100;
@@ -360,13 +443,19 @@
        ctx.strokeRect(0.5, 0.5, SIZE - 1, SIZE - 1);
 
        var pct = Math.round(100 * prunedCount / (N * N));
+       var acc = toyAccuracy(Number(slider.value));
+       var accClass = acc >= 85 ? 'good' : (acc >= 50 ? '' : 'bad');
+       var accHtml = '<br>Toy accuracy: <strong class="' + accClass + '">' + acc.toFixed(2) + '%</strong>';
        if (mode === 'unstructured')
          stats.innerHTML = '<strong>' + prunedCount + '</strong> of ' + (N * N) +
-           ' weights zeroed (' + pct + '%). Same shape, sparse values.';
-       else
+           ' weights zeroed (' + pct + '%). Same shape, sparse values.' + accHtml;
+       else {
+         var rowsKilled = Math.round(slider.value / 100 * N);
          stats.innerHTML = '<strong>' + prunedCount + '</strong> of ' + (N * N) +
-           ' weights removed (' + pct + '%) across ' + Math.round(slider.value / 100 * N) +
-           ' whole rows. Smaller matrix, dense values.';
+           ' weights removed (' + pct + '%) across ' + rowsKilled +
+           (rowsKilled === 1 ? ' whole row. ' : ' whole rows. ') +
+           'Smaller matrix, dense values.' + accHtml;
+       }
      }
 
      slider.addEventListener('input', draw);
@@ -378,6 +467,20 @@
        mode = 'structured';
        bS.classList.add('active'); bU.classList.remove('active'); draw();
      });
+     playBtn.addEventListener('click', function() {
+       if (playTimer) { stopPlay(); return; }
+       playBtn.textContent = 'Stop';
+       var s = 0;
+       slider.value = 0;
+       draw();
+       playTimer = setInterval(function() {
+         s += 5;
+         if (s > 95) { stopPlay(); return; }
+         slider.value = s;
+         draw();
+       }, 500);
+     });
+     slider.addEventListener('input', stopPlay);
      draw();
    })();
    </script>
@@ -416,13 +519,24 @@ model_pruned.layer1[0].conv1.weight_mask   # 1s where weights survive, 0s where 
      The full experiment, data loading and all, lives in the companion notebook. The setup is a ResNet-18
      trained on STL-10. Applying the function above with <code>amount=0.5</code> gives:
    </p>
-   <div class="output">
-     <span class="dim">Total params:</span> 11,172,032<br>
-     <span class="dim">Zeroed (pruned) params:</span> 5,586,016 <span class="good">(50.00%)</span>
+   <div class="stat-grid">
+     <div class="stat-card">
+       <div class="stat-num">11,172,032</div>
+       <div class="stat-label">Prunable weight params</div>
+       <div class="stat-note">Conv2d and Linear weights only, the tensors the pruning loop touches</div>
+     </div>
+     <div class="stat-card">
+       <div class="stat-num">5,586,016 <span class="stat-unit">(50.00%)</span></div>
+       <div class="stat-label">Zeroed (pruned) params</div>
+     </div>
    </div>
    <p>And the accuracy:</p>
-   <div class="output">
-     <span class="dim">Accuracy on STL10 test set:</span> 92.58% <span class="dim">-&gt;</span> <span class="bad">66.25%</span>
+   <div class="stat-grid">
+     <div class="stat-card">
+       <div class="stat-num">92.58% <span class="stat-vs">&rarr;</span> 66.25%</div>
+       <div class="stat-label">Accuracy on STL10 test set</div>
+       <div class="stat-note">Before &rarr; after pruning half the weights</div>
+     </div>
    </div>
    <p>
      Half the weights gone, accuracy fell off a cliff. That is expected: the surviving weights were trained
@@ -446,8 +560,12 @@ for epoch in range(15):
    <p>
      The loss falls from 0.40 to 0.23 across the 15 epochs, and when we evaluate again:
    </p>
-   <div class="output">
-     <span class="dim">Accuracy on STL10 test set:</span> <span class="good">92.74%</span>
+   <div class="stat-grid">
+     <div class="stat-card">
+       <div class="stat-num">92.74%</div>
+       <div class="stat-label">Accuracy on STL10 test set</div>
+       <div class="stat-note">After 15 epochs of fine-tuning the final layer</div>
+     </div>
    </div>
    <p>
      Fully recovered, slightly above where we started, with half the weights pruned. This is the standard

@@ -184,6 +184,49 @@
     .output .dim { color: #94a3b8; }
     .output .good { color: #4ade80; font-weight: bold; }
     .output .bad { color: #f87171; font-weight: bold; }
+    /* Stat cards: replace monospace data dumps with scannable cards */
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      margin: 1.2em 0;
+    }
+    .stat-card {
+      border: 1px solid #bdc3c7;
+      border-radius: 8px;
+      padding: 14px 16px;
+      background: #f7f9fb;
+    }
+    .stat-num {
+      font-size: 1.9em;
+      font-weight: 800;
+      color: #2c3e50;
+      line-height: 1.15;
+    }
+    .stat-unit, .stat-vs {
+      font-size: .55em;
+      font-weight: 600;
+      color: #7f8c8d;
+    }
+    .stat-label {
+      font-size: .92em;
+      font-weight: 600;
+      margin-top: 6px;
+      color: #2c3e50;
+    }
+    .stat-note {
+      font-size: .82em;
+      color: #7f8c8d;
+      margin-top: 3px;
+    }
+    /* Numbered walkthrough steps for dense read-it-out-loud passages */
+    .walkthrough-steps {
+      max-width: 620px;
+      margin: .8em 0;
+      padding-left: 1.6em;
+      line-height: 1.7;
+    }
+    .walkthrough-steps li { margin-bottom: .35em; }
     /* Interactive demo */
     .demo {
       border: 1px solid #e1e4e8;
@@ -206,11 +249,33 @@
       text-align: center; margin-top: 0.8rem; font-size: 0.95em; color: #2c3e50;
     }
     .demo-stats strong { color: #2980b9; }
+    .howto {
+      font-size: 0.95em; color: #2c3e50; margin-top: 1rem;
+    }
+    .howto strong { color: #2c3e50; }
+    .demo button {
+      font-family: sans-serif; font-size: 0.95em; font-weight: 600;
+      padding: 8px 16px; border-radius: 6px; border: 1px solid #3498db;
+      background: #3498db; color: #fff; cursor: pointer; min-width: 88px;
+    }
+    .demo button:hover { background: #2980b9; border-color: #2980b9; }
+    .demo button.secondary {
+      background: #fff; color: #2c3e50; border-color: #bdc3c7;
+    }
+    .demo button.secondary:hover { border-color: #2c3e50; background: #fff; }
     .caption {
       font-size: 0.9em; color: #555; margin-top: 0.8rem;
       border-left: 3px solid #3498db; padding-left: 0.8em;
     }
-    .mjx-chtml.MJXc-display { overflow-x: auto; max-width: 100%; }
+    .mjx-chtml.MJXc-display { overflow-x: auto; overflow-y: hidden; max-width: 100%; }
+    /* Source-level containment for display equations: keeps the raw $$ text
+       (and the MathJax preview spans) inside the viewport while MathJax loads */
+    .math-display {
+      text-align: center;
+      margin: 1rem 0;
+      overflow-x: auto;
+      max-width: 100%;
+    }
   </style>
 
   <script type="text/javascript" async
@@ -276,9 +341,14 @@
    <p>
      To make this information more useful, the teacher's output logits are typically softened using a <strong>temperature scaling</strong> parameter, $T$:
    </p>
+   <div class="math-display">
    $$ \text{soft_targets} = \text{softmax}\left(\frac{\text{logits}}{T}\right) $$
+   </div>
    <p>
-     The temperature $T$ controls the smoothness of the output distribution.
+     The temperature $T$ controls the smoothness of the output distribution. Read the formula out loud:
+     take the teacher's raw scores for each class, the logits, divide them by $T$, then run the usual
+     softmax to get probabilities. That is the whole operation, and the toy below shows what dividing
+     by $T$ does to the bars.
    </p>
    <ul>
      <li>When $T = 1$, you get the standard <code>softmax</code> output.</li>
@@ -293,7 +363,20 @@
      <div class="demo-controls">
        <label for="temp">Temperature $T$: <span id="tempVal">1.0</span></label>
        <input type="range" id="temp" min="0.5" max="20" value="1" step="0.5">
+       <button type="button" id="playBtn">Play</button>
+       <button type="button" id="resetBtn" class="secondary">Reset</button>
      </div>
+     <p class="howto">
+       <strong>How to play.</strong> I keep my hands off it for this one: hit <strong>Play</strong> and watch the
+       temperature climb from $T = 1$ to $T = 10$ in one-degree steps, pausing about half a second on each.
+       Everything updates in lockstep: the bars, the confidence numbers, and the entropy readout below the plot.
+       <strong>What you are seeing.</strong> Each bar is the teacher's probability for one class after dividing its
+       logits by $T$. The confidence number is the tallest bar; the runner-up number is the second tallest, and it
+       is the dark knowledge the student learns from. The entropy number measures how spread out the distribution
+       is in bits: 0 means dead certain, 2.00 would be perfectly uniform over the four classes. Watch the dog bar
+       swell as entropy climbs, that is the temperature pulling the teacher's hidden beliefs out into the open.
+       You can also drag the slider yourself at any point; it takes over and stops the animation.
+     </p>
      <canvas id="tempCanvas" width="560" height="340"></canvas>
      <div class="demo-stats" id="tempStats"></div>
      <p class="caption">
@@ -326,6 +409,14 @@
        var exps = z.map(function(v) { return Math.exp(v / T - m); });
        var s = exps.reduce(function(a, b) { return a + b; }, 0);
        return exps.map(function(e) { return e / s; });
+     }
+
+     function entropyBits(probs) {
+       var h = 0;
+       probs.forEach(function(p) {
+         if (p > 0) h -= p * (Math.log(p) / Math.log(2));
+       });
+       return h;
      }
 
      function draw() {
@@ -362,10 +453,49 @@
        var top = Math.max.apply(null, probs);
        var runner = probs.slice().sort(function(a, b) { return b - a; })[1];
        stats.innerHTML = 'Top class confidence: <strong>' + (top * 100).toFixed(1) +
-         '%</strong>. Runner-up gets <strong>' + (runner * 100).toFixed(1) + '%</strong>.';
+         '%</strong>. Runner-up gets <strong>' + (runner * 100).toFixed(1) + '%</strong>.<br>' +
+         'Distribution entropy: <strong>' + entropyBits(probs).toFixed(2) +
+         ' bits</strong> (0 = certain, 2.00 = uniform).';
      }
 
-     slider.addEventListener('input', draw);
+     // Play: sweep T = 1..10 in one-degree steps, 600 ms per step.
+     var playBtn = document.getElementById('playBtn');
+     var resetBtn = document.getElementById('resetBtn');
+     var playing = false, playTimer = null, playStep = 1;
+
+     function stopPlay() {
+       playing = false;
+       if (playTimer) { clearInterval(playTimer); playTimer = null; }
+       playBtn.textContent = 'Play';
+     }
+
+     function playTick() {
+       if (playStep > 10) { stopPlay(); return; }
+       slider.value = playStep;
+       draw();
+       playStep += 1;
+     }
+
+     playBtn.addEventListener('click', function() {
+       if (playing) { stopPlay(); return; }
+       playing = true;
+       playBtn.textContent = 'Pause';
+       playStep = 1;
+       slider.value = 1;
+       draw();
+       playTimer = setInterval(playTick, 600);
+     });
+
+     resetBtn.addEventListener('click', function() {
+       stopPlay();
+       slider.value = 1;
+       draw();
+     });
+
+     slider.addEventListener('input', function() {
+       if (playing) stopPlay();
+       draw();
+     });
      draw();
    })();
    </script>
@@ -377,9 +507,20 @@
    <p>
      The final loss is a weighted average of these two components, controlled by a hyperparameter $\alpha$:
    </p>
+   <div class="math-display">
    $$ \mathcal{L} = (1-\alpha) \cdot \mathcal{L}_{CE}(\text{student_logits, true_labels}) + \alpha \cdot \mathcal{L}_{KL}(\text{student_logits}_T, \text{teacher_logits}_T) $$
+   </div>
    <p>
-     Reading that in words: the first term is ordinary cross-entropy between the student's predictions and the hard ground-truth labels. The second term is the KL divergence between the student's and the teacher's temperature-softened distributions, which is how the student learns the teacher's "thinking." $\alpha$ decides how much you listen to the teacher versus the labels: $\alpha = 0.7$ means 70% teacher, 30% labels. Push $\alpha$ to 0 and you get plain cross-entropy on the true labels; push it to 1 and the student only ever sees the teacher. In code it is a few lines:
+     Reading that in words:
+   </p>
+   <ol class="walkthrough-steps">
+     <li>The first term is ordinary cross-entropy between the student's predictions and the hard ground-truth labels.</li>
+     <li>The second term is the KL divergence between the student's and the teacher's temperature-softened distributions: this is how the student learns the teacher's "thinking."</li>
+     <li>$\alpha$ decides how much you listen to the teacher versus the labels. With <strong>$\alpha = 0.7$</strong>, the loss is <strong>70% teacher, 30% labels</strong>.</li>
+     <li>The extremes: push $\alpha$ to <strong>0</strong> and you get plain cross-entropy on the true labels; push it to <strong>1</strong> and the student only ever sees the teacher.</li>
+   </ol>
+   <p>
+     In code it is a few lines:
    </p>
    <pre><code>def blended_distillation_loss(student_logits, teacher_logits, labels, T=2.0, alpha=0.7):
     # 1. Distillation (soft target) loss: KL divergence between softened distributions
@@ -401,24 +542,41 @@
      Let me show you what this looks like in practice. The full experiment lives in the companion notebook. The setup: the <strong>teacher</strong> is a ResNet-18 (ImageNet-pretrained, classifier fine-tuned on STL-10), and the <strong>student</strong> is <code>DeeperStudentCNN</code>, a plain 4-block CNN with a fraction of the teacher's size. Distillation runs with $T = 2.0$, $\alpha = 0.7$, Adam at lr $1e-3$, for 10 epochs.
    </p>
    <p>First, the teacher's accuracy, which is the target we are chasing:</p>
-   <div class="output">
-     <span class="dim">Teacher: ResNet-18, classifier fine-tuned on STL-10</span><br>
-     Accuracy on STL10 test set: <span class="good">92.58%</span>
+   <div class="stat-grid">
+     <div class="stat-card">
+       <div class="stat-num">92.58<span class="stat-unit">%</span></div>
+       <div class="stat-label">Teacher test accuracy (STL-10)</div>
+       <div class="stat-note">ResNet-18, ImageNet-pretrained, classifier fine-tuned on STL-10</div>
+     </div>
    </div>
    <p>Then the student, trained with the distillation loss above:</p>
-   <div class="output">
-     <span class="dim">Student: DeeperStudentCNN, response-based KD (T=2.0, alpha=0.7, Adam lr=1e-3, 10 epochs)</span><br>
-     <span class="dim">Loss:</span> 1.5223 -&gt; <span class="good">0.2487</span><br>
-     Accuracy on STL10 test set: <span class="good">53.46%</span>
+   <div class="stat-grid">
+     <div class="stat-card">
+       <div class="stat-num">53.46<span class="stat-unit">%</span></div>
+       <div class="stat-label">Student test accuracy (STL-10)</div>
+       <div class="stat-note">DeeperStudentCNN, response-based KD</div>
+     </div>
+     <div class="stat-card">
+       <div class="stat-num">1.5223 <span class="stat-vs">&rarr; 0.2487</span></div>
+       <div class="stat-label">Training loss (start to end)</div>
+       <div class="stat-note">T=2.0, alpha=0.7, Adam lr=1e-3, 10 epochs</div>
+     </div>
    </div>
    <p>
      53% is a long way from 93%, but keep perspective: this student is tiny, trained for only 10 epochs, and it learned entirely by watching the teacher. The loss fell steadily the whole way, so it was still improving when training stopped. Distillation got a small model somewhere meaningful in 10 epochs. That is a fast win.
    </p>
    <p>I also tried forcing the student to mimic the teacher's intermediate features, adding an MSE term between feature maps alongside the CE and KL terms ($\alpha=0.5$, $\beta=0.3$, $\gamma=0.2$, $T=2.0$, same 10 epochs):</p>
-   <div class="output">
-     <span class="dim">Student: DeeperStudentCNN, feature-based KD (alpha=0.5, beta=0.3, gamma=0.2, T=2.0, 10 epochs)</span><br>
-     <span class="dim">Loss:</span> 0.7449 -&gt; <span class="good">0.2122</span><br>
-     Accuracy on STL10 test set: <span class="bad">42.48%</span>
+   <div class="stat-grid">
+     <div class="stat-card">
+       <div class="stat-num">42.48<span class="stat-unit">%</span></div>
+       <div class="stat-label">Student test accuracy (STL-10)</div>
+       <div class="stat-note">DeeperStudentCNN, feature-based KD</div>
+     </div>
+     <div class="stat-card">
+       <div class="stat-num">0.7449 <span class="stat-vs">&rarr; 0.2122</span></div>
+       <div class="stat-label">Training loss (start to end)</div>
+       <div class="stat-note">alpha=0.5, beta=0.3, gamma=0.2, T=2.0, 10 epochs</div>
+     </div>
    </div>
    <p>
      Worse, not better. More supervision is not always better supervision. Matching raw activations across very different architectures is hard: feature scales differ, and forcing a small network to reproduce a big network's internals can fight the classification objective. More on that in the caveats.
@@ -429,7 +587,18 @@
    <p>
      This is the one I used in the experiment above, and it is the most common form of KD you will run into. The student only watches the teacher's final outputs, nothing internal. You never see the teacher's reasoning process, but you rarely need to: the softened logits already carry most of the signal. <code>DistilBERT</code> did exactly this, and later distilled <code>MobileNet</code> variants too. The distillation loss is the KL divergence between the temperature-scaled outputs of the student ($z_s$) and teacher ($z_t$):
    </p>
+   <div class="math-display">
    $$ \mathcal{L}_{KD} = KL\left(\text{softmax}\left(\frac{z_s}{T}\right) \bigg|\bigg| \text{softmax}\left(\frac{z_t}{T}\right)\right) $$
+   </div>
+   <p>
+     Reading it out loud: $z_s$ and $z_t$ are the student's and teacher's raw scores, both softened with the
+     same temperature $T$, and $KL$ is the KL divergence, which measures how far the student's softened
+     distribution sits from the teacher's. A concrete feel for the numbers: if the teacher says
+     $[0.65, 0.19, 0.10, 0.06]$ and the student says $[0.55, 0.25, 0.12, 0.08]$, the KL is about
+     <strong>0.02</strong>. When the student matches the teacher exactly, it is <strong>0</strong>.
+     Minimizing this term is what drags the student's bars onto the teacher's, the same motion you watched
+     in the temperature toy above.
+   </p>
    <h3>Feature-Based Distillation</h3>
    <p>Here you make the student copy the teacher's intermediate features, not just the final answers. It sounds like strictly more supervision, and sometimes it helps. But remember what happened in my experiment: forcing a tiny student to reproduce a ResNet's internals dropped accuracy from 53.46% to 42.48%. Feature scales differ across architectures, and the extra objective can fight your classification loss. If you try this, normalize the features and pick the layer carefully.</p>
    <h3>Relation-Based Distillation</h3>

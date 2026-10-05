@@ -249,10 +249,15 @@
       text-align: center; margin-top: 0.8rem; font-size: 0.95em; color: #2c3e50;
     }
     .demo-stats strong { color: #2980b9; }
-    .spread-wrap { display: inline-block; vertical-align: middle; margin-left: 10px; }
-    .spread-bar { position: relative; display: inline-block; width: 170px; height: 10px; border-radius: 5px;
-      background: linear-gradient(to right, #2c3e50, #2980b9, #f1c40f, #e74c3c); vertical-align: middle; }
-    .spread-marker { position: absolute; top: -3px; width: 3px; height: 16px; background: #111; border-radius: 2px; }
+    .canvas-wrap { position: relative; max-width: 560px; margin: 0 auto; }
+    .play-narr {
+      position: absolute; left: 50%; transform: translateX(-50%); bottom: 12px;
+      max-width: 92%; background: rgba(44,62,80,0.94); color: #fff;
+      font-size: 13px; line-height: 1.4; padding: 8px 16px; border-radius: 16px;
+      text-align: center; pointer-events: none; opacity: 0;
+      transition: opacity 0.6s ease; z-index: 2;
+    }
+    .play-narr.on { opacity: 1; }
     .howto {
       font-size: 0.95em; color: #2c3e50; margin-top: 1rem;
     }
@@ -351,8 +356,7 @@
    <p>
      The temperature $T$ controls the smoothness of the output distribution. Read the formula out loud:
      take the teacher's raw scores for each class, the logits, divide them by $T$, then run the usual
-     softmax to get probabilities. That is the whole operation, and the toy below shows what dividing
-     by $T$ does to the bars.
+     softmax to get probabilities. That is the whole operation, and the toy below shows a student learning those softened probabilities live.
    </p>
    <ul>
      <li>When $T = 1$, you get the standard <code>softmax</code> output.</li>
@@ -363,44 +367,26 @@
      Using a higher temperature helps the student learn the teacher's inductive biases and provides a much better training signal, especially when true labels are sparse or noisy. Try it below with the teacher's logits for a cat image:
    </p>
 
-   <div class="demo">
+   <div class="demo" id="tempToy">
      <div class="demo-controls">
-       <label for="temp">Temperature $T$: <span id="tempVal">1.0</span></label>
-       <input type="range" id="temp" min="0.5" max="20" value="1" step="0.5">
+       <label for="temp">Temperature $T$: <span id="tempVal">2.0</span></label>
+       <input type="range" id="temp" min="0.5" max="20" value="2" step="0.5">
        <button type="button" id="playBtn">Play</button>
        <button type="button" id="resetBtn" class="secondary">Reset</button>
        <label><input type="checkbox" id="ghostChk"> show what the hard label alone would teach</label>
      </div>
-     <p class="howto">
-       <strong>How to play.</strong> I keep my hands off it for this one: hit <strong>Play</strong> and watch the
-       temperature climb from $T = 0.5$ to $T = 10$ in half-degree steps, pausing about half a second on each step.
-       It starts below 1 on purpose: at $T = 0.5$ the distribution sharpens toward the hard label, then softens as
-       $T$ rises.
-       Everything updates in lockstep: the bars, the dark-knowledge bracket, the confidence numbers, and the
-       entropy readout below the plot. Watch for the moment the y-axis rescales itself: notice the axis just
-       shrank. The cat bar did not stay confident, the ruler changed.
-       <strong>What you are seeing.</strong> Each bar is the teacher's probability for one class after dividing its
-       logits by $T$. The confidence number is the tallest bar. The bracket over the dog, car, and bird bars marks
-       the dark knowledge, the part a hard label throws away: the bracket's number is the live summed runner-up
-       probability and it updates every frame. The
-       faint dashed outline is the one-hot hard label (cat at 100%, everything else at zero). Entropy in bits measures
-       how spread out the distribution is: 0 means dead certain, 2.00
-       would be perfectly uniform over the four classes, and the spread meter under the plot heat-encodes the same
-       idea. Watch the dog bar swell as entropy climbs: that is the temperature pulling the teacher's hidden beliefs
-       out into the open. Tick the checkbox to overlay the hard label as a dashed ghost
-       and compare it against the softened bars. You can also drag the slider yourself at any point; it takes over
-       and stops the animation.
-     </p>
-     <canvas id="tempCanvas" width="560" height="340"></canvas>
+     <div class="canvas-wrap">
+       <canvas id="tempCanvas" width="560" height="380"></canvas>
+       <div class="play-narr" id="tempNarr" aria-live="polite"></div>
+     </div>
+     <canvas id="klCanvas" width="560" height="110"></canvas>
      <div class="demo-stats" id="tempStats"></div>
+     <p class="howto" id="tempHowto">
+       <strong>How to play.</strong> Hit <strong>Play</strong> and watch the student learn: ten gradient steps, half a second each, on the teacher's soft targets at the current temperature. The student starts knowing nothing (25% on every class) and its bars get dragged onto the teacher's as the KL falls, with each step narrated in the caption over the plot. Dragging the temperature slider resets the student, because the lesson changes.
+       <strong>What you are seeing.</strong> Solid bars: the teacher, fixed for this temperature. Light bars: the student, learning. The readout is the exact loss being descended, $L_{KD} = T^2 \cdot \mathrm{KL}(\text{teacher}_T \,\|\, \text{student}_T)$, and the curve plots it falling step by step on a per-run axis. The verdict line says what the student actually learned. Each Play step runs <code>z_s -= lr * T^2 * (q_s - p_t) / T</code>, i.e. $\frac{d}{dz_s}[T^2 \cdot KL] = T \cdot (q_s - p_t)$, with $lr = 1$. This toy is the teacher term alone: $\alpha = 1$ in the page's blended loss. Tick the checkbox to see what the hard label alone would teach: a single spike at cat.
+     </p>
      <p class="caption">
-       The bracket over dog, car, and bird is the dark knowledge a hard label throws away: about 11% of the
-       teacher's belief at $T = 1$, growing to about 68% at $T = 10$. At $T = 1$ the teacher looks almost certain:
-       about 89% cat, 8% dog, 2% car. Push the temperature up
-       and the hidden beliefs surface: dog is much closer to cat than car or bird are. That ranking is exactly
-       what the student learns from, and it is invisible in a hard label. Toggle the ghost checkbox to see the
-       one-hot label the student would get without distillation: a single spike at cat. (Logits used here: cat 4.6,
-       dog 2.2, car 0.8, bird 0.0.)
+       The student learns the teacher's ranking, not just its answer. At $T = 2$ the teacher says 64% cat, 19% dog, 10% car, 6% bird: the lesson is cat &gt; dog &gt; car &gt; bird, and after ten steps the student's bars match it. A hard label would teach only "cat". The temperature sets the lesson: near $T = 1$ the teacher is almost one-hot, with barely any ranking to copy; near $T = 20$ it is nearly uniform and the ranking washes out. (Logits: cat 4.6, dog 2.2, car 0.8, bird 0.0. Student starts uniform, $lr = 1$.)
      </p>
    </div>
 
@@ -408,259 +394,332 @@
 (function() {
   var canvas = document.getElementById('tempCanvas');
   var ctx = canvas.getContext('2d');
+  var klCanvas = document.getElementById('klCanvas');
+  var kctx = klCanvas.getContext('2d');
   var dpr = window.devicePixelRatio || 1;
-  var W = 560, H = 340;
-  canvas.width = W * dpr; canvas.height = H * dpr;
-  canvas.style.width = '100%'; canvas.style.maxWidth = W + 'px'; canvas.style.height = 'auto';
-  ctx.scale(dpr, dpr);
+  var W = 560, KW = 560, KH = 110;
+
+  function sizeCanvas(cv, c2, w, h) {
+    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+    cv.style.width = '100%'; cv.style.maxWidth = w + 'px'; cv.style.height = 'auto';
+    c2.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
 
   var classes = ['cat', 'dog', 'car', 'bird'];
-  var logits = [4.6, 2.2, 0.8, 0.0];
-  var colors = ['#3498db', '#2ecc71', '#e67e22', '#9b59b6'];
+  var zt = [4.6, 2.2, 0.8, 0.0];
+  var teacherCols = ['#3498db', '#2ecc71', '#e67e22', '#9b59b6'];
+  var studentCols = ['#aed6f1', '#a9dfbf', '#fad7a0', '#d2b4de'];
+  var LR = 1.0, STEPS = 10, STEP_MS = 500;
+
   var slider = document.getElementById('temp');
   var valLabel = document.getElementById('tempVal');
   var stats = document.getElementById('tempStats');
   var ghostChk = document.getElementById('ghostChk');
+  var howtoEl = document.getElementById('tempHowto');
+  var narrEl = document.getElementById('tempNarr');
+
+  var zs = [0, 0, 0, 0];
+  var klHist = [];
+  var step = 0;
+  var prevQs = null;
+  var playing = false, playTimer = null, narrToken = 0;
+
+  function curT() { return parseFloat(slider.value); }
 
   function softmax(z, T) {
-    var m = Math.max.apply(null, z.map(function(v) { return v / T; }));
-    var exps = z.map(function(v) { return Math.exp(v / T - m); });
-    var s = exps.reduce(function(a, b) { return a + b; }, 0);
-    return exps.map(function(e) { return e / s; });
+    var m = -Infinity, i, v;
+    for (i = 0; i < z.length; i++) { v = z[i] / T; if (v > m) m = v; }
+    var exps = [], s = 0;
+    for (i = 0; i < z.length; i++) { exps[i] = Math.exp(z[i] / T - m); s += exps[i]; }
+    for (i = 0; i < z.length; i++) exps[i] /= s;
+    return exps;
   }
 
-  function entropyBits(probs) {
-    var h = 0;
-    probs.forEach(function(p) {
-      if (p > 0) h -= p * (Math.log(p) / Math.log(2));
-    });
-    return h;
+  function teacherProbs(T) { return softmax(zt, T); }
+  function studentProbs(T) { return softmax(zs, T); }
+
+  // L_KD = T^2 * KL(teacher_T || student_T): the page's own soft loss,
+  // F.kl_div(student_log_probs, soft_targets) * T^2.
+  function lkd(pt, qs, T) {
+    var kl = 0, i;
+    for (i = 0; i < pt.length; i++) kl += pt[i] * Math.log(pt[i] / qs[i]);
+    return T * T * kl;
   }
 
-  function axisFor(maxp) {
-    if (maxp >= 0.5) return 100;
-    if (maxp >= 0.3) return 50;
-    return 30;
+  function gdStep(T) {
+    var pt = teacherProbs(T), qs = studentProbs(T), i;
+    // Gradient descent on L_KD.
+    // d/dz_s [T^2 * KL(teacher_T || student_T)] = T * (q_s - p_t), so the update
+    // keeps the page's T^2 factor visible: z_s -= lr * T^2 * (q_s - p_t) / T.
+    for (i = 0; i < zs.length; i++) zs[i] -= LR * T * T * (qs[i] - pt[i]) / T;
   }
 
-  function axisTicks(ax) {
-    if (ax === 100) return [0, 25, 50, 75, 100];
-    if (ax === 50) return [0, 25, 50];
-    return [0, 15, 30];
+  function resetRun() {
+    var T = curT();
+    zs = [0, 0, 0, 0];
+    step = 0;
+    prevQs = null;
+    klHist = [lkd(teacherProbs(T), studentProbs(T), T)];
   }
 
-  var prevAxis = null, rescaleNarrated = false, bannerTicks = 0, playing = false;
+  function verdict(T) {
+    var pt = teacherProbs(T), qs = studentProbs(T), i;
+    var mx = -Infinity, mn = Infinity;
+    for (i = 0; i < pt.length; i++) { if (pt[i] > mx) mx = pt[i]; if (pt[i] < mn) mn = pt[i]; }
+    var runnerUp = 1 - mx, spread = mx - mn;
+    var orderOK = qs[1] > qs[2] && qs[2] > qs[3];
+    if (runnerUp < 0.20) return "teacher nearly one-hot: almost no ranking to learn";
+    if (spread < 0.10) return "ranking washed out: teacher is nearly uniform";
+    if (orderOK) return "student learned the teacher's ranking: cat > dog > car > bird";
+    return "student did not reproduce the teacher's ranking.";
+  }
 
-  function draw() {
-    var T = parseFloat(slider.value);
-    valLabel.textContent = T.toFixed(1);
-    var probs = softmax(logits, T);
-    var cw = canvas.clientWidth || W;
-    // ceil (not round) so the effective on-screen size stays at or above 12px:
-    // at a 390px viewport cw is about 288, so FS=24 renders at 24*288/560 ~= 12.3px
-    var FS = Math.max(12, Math.ceil(12 * W / cw));
+  function ranking(qs) {
+    var idx = [0, 1, 2, 3];
+    idx.sort(function(a, b) { return qs[b] - qs[a]; });
+    return idx.map(function(i) { return classes[i]; }).join(' > ');
+  }
 
-    var maxp = Math.max.apply(null, probs);
-    var ax = axisFor(maxp);
-    var axFrac = ax / 100;
-
-    if (prevAxis !== null && ax !== prevAxis && playing && !rescaleNarrated) {
-      rescaleNarrated = true;
-      bannerTicks = 4;
+  function narrate(n, kl, qs) {
+    if (n === 0) return 'The student starts flat: 25% on every class, knowing nothing.';
+    if (n >= STEPS) return 'Done: KL ' + kl.toFixed(4) + '. The student ranks ' + ranking(qs) + ', like the teacher.';
+    var mover = 0, dm = -1, i;
+    for (i = 0; i < qs.length; i++) {
+      var d = Math.abs(qs[i] - prevQs[i]);
+      if (d > dm) { dm = d; mover = i; }
     }
-    prevAxis = ax;
+    return 'Step ' + n + ': KL ' + kl.toFixed(3) + '. The ' + classes[mover] + ' bar moves most.';
+  }
 
-    ctx.clearRect(0, 0, W, H);
+  function showNarr(text) {
+    narrToken++;
+    narrEl.textContent = text;
+    narrEl.classList.add('on');
+  }
+  function hideNarr(delay) {
+    var tok = ++narrToken;
+    if (delay) {
+      setTimeout(function() { if (tok === narrToken) narrEl.classList.remove('on'); }, delay);
+    } else {
+      narrEl.classList.remove('on');
+    }
+  }
 
-    var padL = 56, padR = 20, padB = 48;
-    // measurement-driven layout: padL fits the widest tick; the top band stacks
-    // by FS; the bracket label splits to two lines when it cannot fit centered
+  function yTicks(x0, x1, yTop, yBot, FS) {
+    var ticks = [0, 25, 50, 75, 100], i;
     ctx.font = FS + 'px sans-serif';
-    padL = Math.ceil(ctx.measureText('100%').width) + 16;
-    var plotW = W - padL - padR;
-    var bw = plotW / classes.length;
-    var bx0 = padL + bw + bw * 0.2, bx1 = padL + 3 * bw + bw * 0.8;
-    var bcx = (bx0 + bx1) / 2;
-    var y = 8;
-    var scaleY = y + FS + 2; y = scaleY + 10;
-    var blFull = 'dark knowledge: what the hard label hides';
-    var blAvail = 2 * Math.min(bcx - 8, W - 8 - bcx);
-    var blTwo = ctx.measureText(blFull).width > blAvail;
-    var blabY = y + FS; y = blabY + 8;
-    var blabY2 = 0;
-    if (blTwo) { blabY2 = y + FS; y = blabY2 + 8; }
-    var brY = y + 10; y = brY + 12;
-    ctx.font = 'bold ' + (FS + 1) + 'px sans-serif';
-    var runY = y + FS; y = runY + 14;
-    var padT = y;
-    var plotH = H - padT - padB;
-    var yOf = function(frac) { return padT + plotH - (frac / axFrac) * plotH; };
-
-    // axes
-    ctx.strokeStyle = '#bdc3c7'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(padL, padT + plotH); ctx.lineTo(padL + plotW, padT + plotH); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(padL, padT); ctx.lineTo(padL, padT + plotH); ctx.stroke();
-    ctx.fillStyle = '#7f8c8d'; ctx.font = FS + 'px sans-serif'; ctx.textAlign = 'right';
-    axisTicks(ax).forEach(function(pct) {
-      var y = yOf(pct / 100);
-      ctx.fillText(pct + '%', padL - 8, y + FS * 0.35);
-      ctx.strokeStyle = '#ecf0f1';
-      ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL + plotW, y); ctx.stroke();
-    });
-    // large scale label on its own line at the top-left, above the y-axis
-    ctx.fillStyle = '#2c3e50'; ctx.font = 'bold ' + (FS + 2) + 'px sans-serif'; ctx.textAlign = 'left';
-    ctx.fillText('axis 0-' + ax + '%', 10, scaleY);
-
-    // one-hot ghost: what the hard label alone would teach (cat 100%, rest 0).
-    // The dashed rect is a background mark; its "100%" label is drawn after the
-    // bars below, so no bar can cover it (labels are drawn after their marks).
-    if (ghostChk.checked) {
-      ctx.save();
-      ctx.setLineDash([7, 5]);
-      ctx.strokeStyle = '#95a5a6'; ctx.lineWidth = 2;
-      var gx = padL + bw * 0.2, gw = bw * 0.6;
-      ctx.strokeRect(gx, padT + 2, gw, plotH - 2);
-      ctx.restore();
-      ctx.save();
-      ctx.setLineDash([5, 4]);
-      ctx.strokeStyle = '#95a5a6'; ctx.lineWidth = 2;
-      for (var gi = 1; gi < classes.length; gi++) {
-        var zx = padL + gi * bw + bw * 0.2;
-        ctx.beginPath(); ctx.moveTo(zx, padT + plotH); ctx.lineTo(zx + bw * 0.6, padT + plotH); ctx.stroke();
-      }
-      ctx.restore();
+    for (i = 0; i < ticks.length; i++) {
+      var y = yBot - (ticks[i] / 100) * (yBot - yTop);
+      ctx.fillStyle = '#7f8c8d'; ctx.textAlign = 'right';
+      ctx.fillText(ticks[i] + '%', x0 - 8, y + FS * 0.35);
+      ctx.strokeStyle = '#ecf0f1'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
     }
+    ctx.strokeStyle = '#bdc3c7'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x0, yTop); ctx.lineTo(x0, yBot); ctx.stroke();
+  }
 
-    // bars, clipped to the plot rect; the value labels stay unclipped and are
-    // drawn after the bars so no mark can cover them
-    var catBox = null;
-    probs.forEach(function(p, i) {
-      var bh = (p / axFrac) * plotH;
-      var x = padL + i * bw + bw * 0.2, y = padT + plotH - bh;
-      ctx.save();
-      ctx.beginPath(); ctx.rect(padL, padT, plotW, plotH); ctx.clip();
-      ctx.fillStyle = colors[i];
-      ctx.fillRect(x, y, bw * 0.6, bh);
-      ctx.restore();
-      ctx.fillStyle = '#2c3e50'; ctx.font = 'bold ' + FS + 'px sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText((p * 100).toFixed(1) + '%', x + bw * 0.3, y - 8);
-      if (i === 0) {
-        var vw = ctx.measureText((p * 100).toFixed(1) + '%').width;
-        catBox = { x0: x + bw * 0.3 - vw / 2, x1: x + bw * 0.3 + vw / 2, y0: y - 8 - FS, y1: y - 8 };
+  // Draws one group of 4 bars with class labels. Returns bar geometry.
+  function barGroup(x0, gw, probs, cols, yTop, yBot, title, FS, ghost) {
+    var i, slotW = gw / 4, barW = slotW * 0.55;
+    ctx.font = 'bold ' + (FS + 1) + 'px sans-serif';
+    ctx.fillStyle = '#2c3e50'; ctx.textAlign = 'center';
+    ctx.fillText(title, x0 + gw / 2, yTop - 10);
+    for (i = 0; i < 4; i++) {
+      var bh = probs[i] * (yBot - yTop);
+      var x = x0 + i * slotW + (slotW - barW) / 2;
+      var y = yBot - bh;
+      ctx.fillStyle = cols[i];
+      ctx.fillRect(x, y, barW, bh);
+      if (ghost && i === 0) {
+        ctx.save();
+        ctx.setLineDash([7, 5]); ctx.strokeStyle = '#95a5a6'; ctx.lineWidth = 2;
+        ctx.strokeRect(x, yTop + 2, barW, (yBot - yTop) - 2);
+        ctx.restore();
       }
       ctx.fillStyle = '#555'; ctx.font = FS + 'px sans-serif';
-      ctx.fillText(classes[i], x + bw * 0.3, padT + plotH + FS + 8);
-    });
-
-    // ghost "100%" label, drawn after the bars. On rescaled-axis frames the cat
-    // value label can sit where the ghost label wants to be; when the two text
-    // boxes intersect, the ghost label stacks above the value label instead.
-    if (ghostChk.checked) {
-      var glX = gx + gw + 6, glBase = padT + FS + 4;
-      ctx.font = 'bold ' + FS + 'px sans-serif';
-      var glW = ctx.measureText('100%').width;
-      if (catBox && glX < catBox.x1 && glX + glW > catBox.x0 &&
-          glBase - FS < catBox.y1 && glBase > catBox.y0) {
-        glBase = catBox.y0 - 6;
-      }
-      ctx.fillStyle = '#7f8c8d'; ctx.textAlign = 'left';
-      ctx.fillText('100%', glX, glBase);
+      ctx.fillText(classes[i], x + barW / 2, yBot + FS + 8);
     }
-
-    // dark-knowledge bracket over the runner-up bars (dog, car, bird)
-    var runner = 1 - probs[0];
-    var runTxt = 'runner-up total: ' + (runner * 100).toFixed(1) + '%';
-    var runHalf = ctx.measureText(runTxt).width / 2;
-    var runCx = Math.min(Math.max(bcx, 8 + runHalf), W - 8 - runHalf);
-    ctx.strokeStyle = '#c0392b'; ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(bx0, brY + 8); ctx.lineTo(bx0, brY); ctx.lineTo(bx1, brY); ctx.lineTo(bx1, brY + 8);
-    ctx.stroke();
-    ctx.fillStyle = '#c0392b'; ctx.font = FS + 'px sans-serif'; ctx.textAlign = 'center';
-    if (blTwo) {
-      ctx.fillText('dark knowledge:', bcx, blabY);
-      ctx.fillText('what the hard label hides', bcx, blabY2);
-    } else {
-      ctx.fillText(blFull, bcx, blabY);
-    }
-    ctx.font = 'bold ' + (FS + 1) + 'px sans-serif';
-    ctx.fillText(runTxt, runCx, runY);
-
-    // rescale narration banner (Play only, first rescale)
-    if (bannerTicks > 0) {
-      var msg1 = 'The axis just shrank: 100% became ' + ax + '%.';
-      var msg2 = 'The cat bar did not stay confident. The ruler changed.';
-      ctx.font = 'bold ' + FS + 'px sans-serif';
-      var mw = Math.max(ctx.measureText(msg1).width, ctx.measureText(msg2).width);
-      var bcx = padL + plotW / 2, bcy = padT + plotH * 0.45;
-      ctx.fillStyle = 'rgba(255,255,255,0.93)';
-      ctx.fillRect(bcx - mw / 2 - 10, bcy - FS - 10, mw + 20, FS * 2 + 28);
-      ctx.strokeStyle = '#c0392b'; ctx.lineWidth = 2;
-      ctx.strokeRect(bcx - mw / 2 - 10, bcy - FS - 10, mw + 20, FS * 2 + 28);
-      ctx.fillStyle = '#c0392b'; ctx.textAlign = 'center';
-      ctx.fillText(msg1, bcx, bcy);
-      ctx.fillText(msg2, bcx, bcy + FS + 6);
-    }
-
-    var ent = entropyBits(probs);
-    var spreadPct = Math.max(0, Math.min(100, ent / 2 * 100));
-    canvas.setAttribute('data-axis', String(ax));
-    canvas.setAttribute('data-banner', bannerTicks > 0 ? 'on' : 'off');
-    stats.innerHTML = 'Top class confidence: <strong>' + (maxp * 100).toFixed(1) +
-      '%</strong>. Dark knowledge (runner-up total): <strong>' + (runner * 100).toFixed(1) + '%</strong>.<br>' +
-      'Distribution entropy: <strong>' + ent.toFixed(2) +
-      ' bits</strong> (0 = certain, 2.00 = uniform).' +
-      '<span class="spread-wrap"><span class="spread-bar">' +
-      '<span class="spread-marker" style="left:' + spreadPct.toFixed(1) + '%"></span></span></span>';
+    return { x0: x0, slotW: slotW, barW: barW };
   }
 
-  // Play: sweep T = 0.5..10 in half-degree steps, 600 ms per step (19 ticks, about 11.5 s).
-  var playBtn = document.getElementById('playBtn');
-  var resetBtn = document.getElementById('resetBtn');
-  var playTimer = null, playStep = 0.5;
+  function bracket(g, pt, yTop, yBot, FS) {
+    var bx0 = g.x0 + 1 * g.slotW + (g.slotW - g.barW) / 2;
+    var bx1 = g.x0 + 3 * g.slotW + (g.slotW + g.barW) / 2;
+    var maxR = Math.max(pt[1], pt[2], pt[3]);
+    var bY = yBot - maxR * (yBot - yTop) - 14;
+    bY = Math.max(yTop + FS + 18, Math.min(bY, yBot - 24));
+    ctx.strokeStyle = '#c0392b'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(bx0, bY + 7); ctx.lineTo(bx0, bY); ctx.lineTo(bx1, bY); ctx.lineTo(bx1, bY + 7);
+    ctx.stroke();
+    ctx.fillStyle = '#c0392b'; ctx.font = FS + 'px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('copy this ranking', (bx0 + bx1) / 2, bY - 6);
+  }
+
+  function draw() {
+    var T = curT();
+    valLabel.textContent = T.toFixed(1);
+    var pt = teacherProbs(T), qs = studentProbs(T);
+    var cw = canvas.clientWidth || W;
+    // ceil (not round) so the effective on-screen size stays at or above 12px
+    var FS = Math.max(12, Math.ceil(12 * W / cw));
+    var narrow = cw < 480;
+    var h = narrow ? 450 : 380;
+    sizeCanvas(canvas, ctx, W, h);
+
+    ctx.clearRect(0, 0, W, h);
+    ctx.font = FS + 'px sans-serif';
+    var padL = Math.ceil(ctx.measureText('100%').width) + 14;
+    var padR = 14;
+    var plotW = W - padL - padR;
+    var ghost = ghostChk.checked;
+
+    if (!narrow) {
+      // Side by side: teacher left, student right. Fixed 0-100% axis, never rescaled.
+      var ly = 10 + FS;
+      var sw = FS * 0.9;
+      ctx.textAlign = 'left';
+      ctx.fillStyle = teacherCols[0];
+      ctx.fillRect(8, ly - sw + 2, sw, sw - 4);
+      ctx.fillStyle = '#2c3e50';
+      ctx.fillText('teacher (fixed)', 8 + sw + 6, ly);
+      var w1 = sw + 6 + ctx.measureText('teacher (fixed)').width;
+      var lx2 = 8 + w1 + 26;
+      var w2 = sw + 6 + ctx.measureText('student (learning)').width;
+      var ly2 = ly;
+      if (lx2 + w2 > W - 8) { lx2 = 8; ly2 = ly + FS + 8; }
+      ctx.fillStyle = studentCols[0];
+      ctx.fillRect(lx2, ly2 - sw + 2, sw, sw - 4);
+      ctx.strokeStyle = '#7f8c8d'; ctx.lineWidth = 1;
+      ctx.strokeRect(lx2, ly2 - sw + 2, sw, sw - 4);
+      ctx.fillStyle = '#2c3e50';
+      ctx.fillText('student (learning)', lx2 + sw + 6, ly2);
+      var topY = Math.max(ly, ly2);
+
+      var yTop = topY + FS + 22, yBot = h - (FS + 22);
+      var gap = 44, gw = (plotW - gap) / 2;
+      yTicks(padL, padL + plotW, yTop, yBot, FS);
+      var gT = barGroup(padL, gw, pt, teacherCols, yTop, yBot, 'teacher', FS, false);
+      barGroup(padL + gw + gap, gw, qs, studentCols, yTop, yBot, 'student', FS, ghost);
+      bracket(gT, pt, yTop, yBot, FS);
+    } else {
+      // Stacked: teacher row on top, student row below; each row its own 0-100% axis.
+      var y = 10;
+      ctx.fillStyle = '#2c3e50'; ctx.textAlign = 'left'; ctx.font = 'bold ' + (FS + 1) + 'px sans-serif';
+      ctx.fillText('teacher: solid bars (fixed)', padL, y + FS); y += FS + 12;
+      var rH = 108;
+      var yT1 = y, yB1 = y + rH; y = yB1 + FS + 12;
+      yTicks(padL, padL + plotW, yT1, yB1, FS);
+      var g1 = barGroup(padL, plotW, pt, teacherCols, yT1, yB1, '', FS, false);
+      y += 26;
+      ctx.fillStyle = '#2c3e50'; ctx.textAlign = 'left'; ctx.font = 'bold ' + (FS + 1) + 'px sans-serif';
+      ctx.fillText('student: light bars (learning)', padL, y + FS); y += FS + 12;
+      var yT2 = y, yB2 = y + rH; y = yB2 + FS + 12;
+      yTicks(padL, padL + plotW, yT2, yB2, FS);
+      barGroup(padL, plotW, qs, studentCols, yT2, yB2, '', FS, ghost);
+      bracket(g1, pt, yT1, yB1, FS);
+    }
+  }
+
+  function drawKL() {
+    var cw = klCanvas.clientWidth || KW;
+    var FS2 = Math.max(12, Math.ceil(12 * KW / cw));
+    sizeCanvas(klCanvas, kctx, KW, KH);
+    kctx.clearRect(0, 0, KW, KH);
+    var kl0 = klHist[0] || 1;
+    kctx.font = FS2 + 'px sans-serif';
+    var padL2 = Math.ceil(kctx.measureText(kl0.toFixed(2)).width) + 12;
+    var padR2 = 34, padT2 = FS2 + 14, padB2 = FS2 + 12;
+    var x0 = padL2, x1 = KW - padR2, y0 = KH - padB2, y1 = padT2;
+    function X(s) { return x0 + (s / STEPS) * (x1 - x0); }
+    function Y(kl) { return y0 - Math.min(1, kl / kl0) * (y0 - y1); }
+    kctx.strokeStyle = '#bdc3c7'; kctx.lineWidth = 1;
+    kctx.beginPath(); kctx.moveTo(x0, y1); kctx.lineTo(x0, y0); kctx.lineTo(x1, y0); kctx.stroke();
+    kctx.fillStyle = '#7f8c8d'; kctx.textAlign = 'right';
+    kctx.fillText('0', x0 - 6, y0 + FS2 * 0.35);
+    kctx.fillText(kl0.toFixed(2), x0 - 6, y1 + FS2 * 0.35);
+    kctx.textAlign = 'left';
+    kctx.fillText('step 0', X(0), y0 + FS2 + 6);
+    kctx.textAlign = 'right';
+    kctx.fillText('step 10', X(STEPS), y0 + FS2 + 6);
+    kctx.fillStyle = '#2c3e50'; kctx.font = 'bold ' + FS2 + 'px sans-serif'; kctx.textAlign = 'left';
+    kctx.fillText('Distillation loss per step', x0, FS2 + 2);
+    kctx.strokeStyle = '#2980b9'; kctx.lineWidth = 2;
+    kctx.beginPath();
+    var s;
+    for (s = 0; s < klHist.length; s++) {
+      if (s === 0) kctx.moveTo(X(s), Y(klHist[s])); else kctx.lineTo(X(s), Y(klHist[s]));
+    }
+    kctx.stroke();
+    kctx.fillStyle = '#2980b9';
+    for (s = 0; s < klHist.length; s++) {
+      kctx.beginPath(); kctx.arc(X(s), Y(klHist[s]), 3, 0, 2 * Math.PI); kctx.fill();
+    }
+  }
+
+  function updateStats() {
+    var T = curT();
+    var kl = klHist[klHist.length - 1];
+    var html = 'L<sub>KD</sub> = T<sup>2</sup> &middot; KL(teacher<sub>T</sub> || student<sub>T</sub>) = <strong>' +
+      kl.toFixed(3) + '</strong> &nbsp;&middot;&nbsp; step <strong>' + step + ' / ' + STEPS + '</strong><br>' +
+      'Verdict: <strong>' + verdict(T) + '</strong>';
+    if (ghostChk.checked) {
+      html += '<br><span style="color:#7f8c8d">A hard-label student learns only: cat.</span>';
+    }
+    stats.innerHTML = html;
+  }
 
   function stopPlay() {
     playing = false;
-    bannerTicks = 0;
     if (playTimer) { clearInterval(playTimer); playTimer = null; }
     playBtn.textContent = 'Play';
   }
 
   function playTick() {
-    if (playStep > 10) { stopPlay(); return; }
-    slider.value = playStep;
-    draw();
-    if (bannerTicks > 0) bannerTicks--;
-    playStep += 0.5;
+    var T = curT();
+    if (step >= STEPS) {
+      stopPlay();
+      hideNarr(600);
+      return;
+    }
+    prevQs = studentProbs(T);
+    gdStep(T);
+    step++;
+    var qs = studentProbs(T);
+    var kl = lkd(teacherProbs(T), qs, T);
+    klHist.push(kl);
+    showNarr(narrate(step, kl, qs));
+    draw(); drawKL(); updateStats();
   }
 
   playBtn.addEventListener('click', function() {
-    if (playing) { stopPlay(); return; }
+    if (playing) { stopPlay(); hideNarr(0); draw(); drawKL(); updateStats(); return; }
+    resetRun();
     playing = true;
     playBtn.textContent = 'Pause';
-    playStep = 1.0; // slider already sits at 0.5 and drew it; first tick advances to 1.0
-    prevAxis = null;
-    rescaleNarrated = false;
-    bannerTicks = 0;
-    slider.value = 0.5;
-    draw();
-    playTimer = setInterval(playTick, 600);
+    var T = curT();
+    showNarr(narrate(0, klHist[0], studentProbs(T)));
+    draw(); drawKL(); updateStats();
+    var wrapEl = document.querySelector('#tempToy .canvas-wrap');
+    if (wrapEl && wrapEl.scrollIntoView) wrapEl.scrollIntoView({ block: 'nearest' });
+    playTimer = setInterval(playTick, STEP_MS);
   });
 
   resetBtn.addEventListener('click', function() {
-    stopPlay();
-    prevAxis = null;
-    rescaleNarrated = false;
-    slider.value = 1;
-    draw();
+    stopPlay(); hideNarr(0); resetRun();
+    draw(); drawKL(); updateStats();
   });
 
   slider.addEventListener('input', function() {
     if (playing) stopPlay();
-    draw();
+    hideNarr(0); resetRun();
+    draw(); drawKL(); updateStats();
   });
-  ghostChk.addEventListener('change', function() { draw(); });
-  draw();
+  ghostChk.addEventListener('change', function() { draw(); updateStats(); });
+
+  resetRun();
+  draw(); drawKL(); updateStats();
 })();
    </script>
 
@@ -749,13 +808,13 @@
    <h2>Other flavors of distillation</h2>
    <h3>Response-Based Distillation (Logit Distillation)</h3>
    <p>
-     This is the one I used in the experiment above, and it is the most common form of KD you will run into. The student only watches the teacher's final outputs, nothing internal. You never see the teacher's reasoning process, but you rarely need to: the softened logits already carry most of the signal. <code>DistilBERT</code> did exactly this, and later distilled <code>MobileNet</code> variants too. The distillation loss is the KL divergence between the temperature-scaled outputs of the student ($z_s$) and teacher ($z_t$):
+     This is the one I used in the experiment above, and it is the most common form of KD you will run into. The student only watches the teacher's final outputs, nothing internal. You never see the teacher's reasoning process, but you rarely need to: the softened logits already carry most of the signal. <code>DistilBERT</code> did exactly this, and later distilled <code>MobileNet</code> variants too. The distillation loss is the KL divergence between the temperature-scaled outputs of the teacher ($z_t$) and student ($z_s$):
    </p>
    <div class="math-display">
-   $$ \mathcal{L}_{KD} = KL\left(\text{softmax}\left(\frac{z_s}{T}\right) \bigg|\bigg| \text{softmax}\left(\frac{z_t}{T}\right)\right) $$
+   $$ \mathcal{L}_{KD} = KL\left(\text{softmax}\left(\frac{z_t}{T}\right) \bigg|\bigg| \text{softmax}\left(\frac{z_s}{T}\right)\right) $$
    </div>
    <p>
-     Reading it out loud: $z_s$ and $z_t$ are the student's and teacher's raw scores, both softened with the
+     Reading it out loud: $z_t$ and $z_s$ are the teacher's and student's raw scores, both softened with the
      same temperature $T$, and $KL$ is the KL divergence, which measures how far the student's softened
      distribution sits from the teacher's. A concrete feel for the numbers: if the teacher says
      $[0.65, 0.19, 0.10, 0.06]$ and the student says $[0.55, 0.25, 0.12, 0.08]$, the KL is about

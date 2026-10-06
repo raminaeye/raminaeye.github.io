@@ -257,45 +257,6 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
   <script>hljs.highlightAll();</script>
-  <script>
-  /* Batch 4 refocus: shared Play-narration pill helper. One instance per widget:
-     playNarr('<base>-narr', [sentences]) -> {show(i), end(), kill()}.
-     show(i) displays sentence i; end() fades the pill 600ms later; kill() hides it at once. */
-  function playNarr(id, lines){
-    var el = document.getElementById(id);
-    var fadeT = null;
-    function readingMs(){
-      if (!el) return 0;
-      var t = (el.textContent || '').trim();
-      if (!t) return 0;
-      var d = 800 + 150 * t.split(/\s+/).length;
-      return d > 4000 ? 4000 : d;
-    }
-    return {
-      show: function(i){
-        if (!el) return;
-        if (fadeT){ clearTimeout(fadeT); fadeT = null; }
-        var s = lines[Math.max(0, Math.min(lines.length - 1, i))];
-        if (el.textContent !== s) el.textContent = s;
-        el.classList.add('on');
-      },
-      /* Reading-time pacing for the currently shown sentence. */
-      ms: function(baseMs){
-        return Math.max(baseMs, readingMs());
-      },
-      end: function(){
-        if (!el) return;
-        if (fadeT) clearTimeout(fadeT);
-        fadeT = setTimeout(function(){ el.textContent = ''; fadeT = null; }, Math.max(2000, readingMs()));
-      },
-      kill: function(){
-        if (!el) return;
-        if (fadeT) clearTimeout(fadeT);
-        fadeT = setTimeout(function(){ el.textContent = ''; fadeT = null; }, 600);
-      },
-    };
-  }
-  </script>
 </head>
 <body>
        <nav class="topnav" aria-label="Site">
@@ -357,7 +318,7 @@
      .race-legend { display: flex; gap: 1.2rem; flex-wrap: wrap; justify-content: center; margin-top: 0.6rem; font-size: 0.9em; color: #555; }
      .race-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 0.35em; }
      .race-note { font-size: 0.85em; color: #777; margin-top: 0.6rem; }
-     /* Batch 4 refocus: caption card + narration pill, shared by every widget. */
+     /* Caption card, shared by every widget. */
      .cap-card {
        font-size: 15px;
        line-height: 1.65;
@@ -383,16 +344,8 @@
      }
      .cap-card li.try-it::before { left: 12px; top: 16px; }
      .canvas-wrap { position: relative; }
-     .narr-strip {
-       min-height: 44px; box-sizing: border-box;
-       display: flex; align-items: center; justify-content: center; text-align: center;
-       font-size: 13.5px; line-height: 1.45; color: #2c3e50;
-       background: rgba(44, 62, 80, 0.07); border-radius: 8px;
-       padding: 6px 14px; margin: 10px 0 4px;
-     }
      
      @media (max-width: 480px){
-       .narr-strip { font-size: 12px; padding: 4px 10px; }
      }
      .race-seg { display: inline-flex; }
      .race-seg .race-seg-btn { border-radius: 0; margin-left: -1px; padding: 0.45em 0.8em; }
@@ -419,7 +372,6 @@
      <div class="canvas-wrap">
        <canvas id="nasRaceCanvas"></canvas>
      </div>
-     <div class="narr-strip" id="nasRace-narr" aria-live="polite"></div>
      <canvas id="nasSpaceCanvas"></canvas>
      <p class="caption">The toy search space itself: left to right is architecture #0 to #199, height is true accuracy, and the three bumps are the hidden peaks. Fading dots are architectures each strategy has already evaluated; the glowing dot is where it is sampling right now. During Play, watch the green dots pile onto the tallest bump while orange rattles around one spot and red teleports everywhere.</p>
      <div class="race-legend" id="nasLegend"></div>
@@ -535,21 +487,6 @@
      /* GPU-hours covered by one Play tick (ticks stay at 500ms, inside the
         400 to 700ms pacing rule). Set by the Speed buttons. */
      var PLAY_PER_TICK = 1;
-
-     var nasNarr = playNarr('nasRace-narr', [
-       "Evolution's first samples already read 0.93: it started near the peak. Random teleports, hill starts low.",
-       "Green's curve sits flat near 0.93; it found the peak by hour 10. Orange climbs its first bump late.",
-       "Green refines onto #130 at 0.972. Red's lottery lucks into #45 at 0.942; orange is parked on its bump.",
-       "Race over: evolution holds #130 at 0.972. Random found #45 at 0.942; hill never left its bump at 0.909."
-     ]);
-     /* Phases as fractions of the budget, so they hold for any 20-200 budget
-        and any 1x/2x/4x speed. */
-     function nasPhase(tick, budget){
-       if (tick < 0.25 * budget) return 0;
-       if (tick < 0.55 * budget) return 1;
-       if (tick < budget) return 2;
-       return 3;
-     }
 
      function draw(curves, budget, upto) {
        lastCurves = { curves: curves, budget: budget };
@@ -783,7 +720,6 @@
      function stopPlay() {
        if (playTimer !== null) { clearTimeout(playTimer); playTimer = null; }
        if (playBtn) playBtn.textContent = 'Play';
-       nasNarr.end();
      }
 
      function renderTick() {
@@ -792,7 +728,6 @@
        legendEl.innerHTML = legendHtml(playCurves);
        statsEl.innerHTML = '<strong>GPU-hour ' + playTick + ' of ' + playBudget + '</strong><br>' +
          statsHtml(playCurves, playBudget, playTick);
-       nasNarr.show(nasPhase(playTick, playBudget));
      }
 
      /* Play: all three strategies spend the budget in lockstep, PLAY_PER_TICK
@@ -816,13 +751,12 @@
          renderTick();
          if (playTick >= playBudget) stopPlay();
        };
-       /* Chained timeout: each race tick is paced by the reading time of the
-          sentence step() just showed, via nasNarr.ms(PLAY_MS). */
+       /* Chained timeout: one race tick every PLAY_MS (500ms). */
        function nasSchedule(){
          playTimer = setTimeout(function(){
            step();
            if (playTimer !== null) nasSchedule();
-         }, nasNarr.ms(PLAY_MS));
+         }, PLAY_MS);
        }
        step();
        nasSchedule();
@@ -838,7 +772,6 @@
         strategies together; Play runs the same lockstep race. */
      function renderAll(budget) {
        stopPlay();
-       nasNarr.kill();
        var curves = buildRaceCurves(budget);
        draw(curves, budget);
        drawSpace(curves);
@@ -1146,25 +1079,25 @@ for step in range(200):
                     }
                 });
             }
-            var links = Array.prototype.slice.call(document.querySelectorAll('.tab-strip a.tab-pill[href^="#"]'));
+            var links = Array.prototype.slice.call(document.querySelectorAll('.tab-strip a.tab-chip[href^="#"]'));
             if (!links.length) return;
-            var pills = {};
-            links.forEach(function (a) { pills[a.getAttribute('href').slice(1)] = a; });
+            var tabEls = {};
+            links.forEach(function (a) { tabEls[a.getAttribute('href').slice(1)] = a; });
             var current = null;
-            function centerPill(pill) {
-                var strip = pill.parentElement;
+            function centerTab(tab) {
+                var strip = tab.parentElement;
                 if (!strip || !strip.classList.contains('tab-strip')) return;
                 var sr = strip.getBoundingClientRect();
-                var pr = pill.getBoundingClientRect();
+                var pr = tab.getBoundingClientRect();
                 strip.scrollLeft += (pr.left - sr.left) - (sr.width - pr.width) / 2;
             }
             function setActive(id) {
-                if (!pills[id] || id === current) return;
+                if (!tabEls[id] || id === current) return;
                 current = id;
                 links.forEach(function (a) {
                     a.classList.toggle('active', a.getAttribute('href') === '#' + id);
                 });
-                centerPill(pills[id]);
+                centerTab(tabEls[id]);
             }
             links.forEach(function (a) {
                 a.addEventListener('click', function () {
@@ -1178,7 +1111,7 @@ for step in range(200):
                         if (en.isIntersecting) setActive(en.target.id);
                     });
                 }, { rootMargin: '-35% 0px -55% 0px' });
-                Object.keys(pills).forEach(function (id) {
+                Object.keys(tabEls).forEach(function (id) {
                     var el = document.getElementById(id);
                     if (el) obs.observe(el);
                 });
@@ -1191,16 +1124,7 @@ for step in range(200):
         })();
     </script>
   <script>
-  /* Shared Play helpers: readable narration pacing + no-yank scrolling. */
-  function narrStepMs(narrEl, baseMs) {
-    if (!narrEl) return baseMs;
-    var t = (narrEl.textContent || '').trim();
-    if (!t) return baseMs;
-    var w = t.split(/\s+/).length;
-    var d = 800 + 150 * w;
-    if (d > 4000) d = 4000;
-    return Math.max(baseMs, d);
-  }
+  /* Shared Play helper: no-yank scrolling. */
   function playScrollEnsure(el) {
     if (!el) return;
     var target = null;

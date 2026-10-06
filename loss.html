@@ -407,6 +407,7 @@
         <a class="tab-chip" href="#bce">BCE</a>
         <a class="tab-chip" href="#categorical-ce">Categorical CE</a>
         <a class="tab-chip" href="#loss-landscape">Loss Landscape</a>
+        <a class="tab-chip" href="#optimizers">Optimizers</a>
         <a class="tab-chip" href="#alignment">Alignment</a>
         <a class="tab-chip" href="#ctc">CTC</a>
         <a class="tab-chip" href="#forward-backward">Forward-Backward</a>
@@ -1390,7 +1391,263 @@
 
 
 
-   <h2 id="alignment">4. The Alignment Problem</h2>
+   <h2 id="optimizers">4. Optimizers: how you walk downhill</h2>
+
+   <p>
+     Above, you walked the hill yourself: pick a start, pick a learning rate, watch the red trail wind down.
+     In a real network nobody hand-walks. The optimizer does the stepping, and the stepping strategy is half the game.
+     So here is the same idea as a race: one hill, one start, three walkers.
+   </p>
+
+   <style>
+     #optCanvas { width: 100%; max-width: 640px; height: 400px; display: block; }
+     #optLossCanvas { width: 100%; max-width: 640px; height: 150px; display: block; }
+     .opt-legend { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 10px 0 6px; max-width: 640px; }
+     .opt-runner { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+     .opt-chip { width: 14px; height: 14px; border-radius: 50%; display: inline-block; flex: none; }
+     .opt-name { font-weight: bold; color: #2c3e50; }
+     .opt-status { color: #7f8c8d; font-size: 13px; }
+   </style>
+
+   <div class="demo" id="optRace">
+     <div class="demo-controls">
+       <label for="optLr">Learning rate: <span id="optLrVal">0.035</span></label>
+       <input type="range" id="optLr" min="0" max="100" step="1" value="53" aria-label="Learning rate, log scale from 0.005 to 0.2">
+       <button type="button" class="toy-btn" id="optPlay">Play</button>
+       <button type="button" class="toy-btn" id="optReset">Reset</button>
+     </div>
+     <div class="canvas-wrap">
+       <canvas id="optCanvas" role="img" aria-label="Contour hill with three optimizer trails racing downhill"></canvas>
+     </div>
+     <div class="opt-legend" id="optLegend">
+       <div class="opt-runner"><span class="opt-chip" style="background:#e74c3c"></span><span class="opt-name">SGD</span><span class="opt-status" id="optStatusSgd">ready</span></div>
+       <div class="opt-runner"><span class="opt-chip" style="background:#e67e22"></span><span class="opt-name">Momentum</span><span class="opt-status" id="optStatusMom">ready</span></div>
+       <div class="opt-runner"><span class="opt-chip" style="background:#2980b9"></span><span class="opt-name">Adam</span><span class="opt-status" id="optStatusAdam">ready</span></div>
+     </div>
+     <div class="canvas-wrap">
+       <canvas id="optLossCanvas" role="img" aria-label="Loss curves for the three optimizers, log scale"></canvas>
+     </div>
+     <div class="caption-card" id="optCap">
+       <p class="cc-head">How to play</p>
+       <ul>
+         <li>One hill, three walkers: plain SGD, SGD with momentum, Adam. Same start, same hill.</li>
+         <li>Press Play and watch their trails: SGD zigzags across the valley, momentum swings wide before settling, Adam glides straight in.</li>
+         <li>Crank the learning rate: SGD and momentum fly off the hill. Adam is the only one still standing.</li>
+         <li class="tryit"><strong>Try it:</strong> set the learning rate high, play, and see who is left.</li>
+       </ul>
+     </div>
+     <p class="caption">One honest footnote: with a fixed learning rate Adam never quite lands on the bottom. It orbits the minimum, circling within about one step-size of it, while the other two stop dead on it.</p>
+   </div>
+   <script>
+   (function () {
+     var X0 = -2, Y0 = 2;
+     var MAX_STEPS = 80, SETTLE = 0.5, STEP_MS = 400;
+     var MU = 0.9, B1 = 0.9, B2 = 0.999, EPS = 1e-8;
+     var cv = document.getElementById('optCanvas');
+     var ctx = cv.getContext('2d');
+     var lc = document.getElementById('optLossCanvas');
+     var lctx = lc.getContext('2d');
+     var lrSlider = document.getElementById('optLr');
+     var lrVal = document.getElementById('optLrVal');
+     var playBtn = document.getElementById('optPlay');
+     var resetBtn = document.getElementById('optReset');
+
+     function f(x, y) { return x * x + 25 * y * y; }
+     function lrFromSlider(v) { return 0.005 * Math.pow(40, v / 100); }
+     function clamp30(v) { return Math.max(-30, Math.min(30, v)); }
+
+     var R, stepCount, timer, playing, ended;
+
+     function freshRunners() {
+       return [
+         { key: 'sgd', color: '#e74c3c', x: X0, y: Y0,
+           trail: [[X0, Y0]], hist: [f(X0, Y0)], status: 'racing', doneAt: 0,
+           el: document.getElementById('optStatusSgd') },
+         { key: 'mom', color: '#e67e22', x: X0, y: Y0, vx: 0, vy: 0,
+           trail: [[X0, Y0]], hist: [f(X0, Y0)], status: 'racing', doneAt: 0,
+           el: document.getElementById('optStatusMom') },
+         { key: 'adam', color: '#2980b9', x: X0, y: Y0, m1: 0, m2: 0, v1: 0, v2: 0, t: 0,
+           trail: [[X0, Y0]], hist: [f(X0, Y0)], status: 'racing', doneAt: 0,
+           el: document.getElementById('optStatusAdam') }
+       ];
+     }
+
+     function stepRunner(r, lr) {
+       var gx = 2 * r.x, gy = 50 * r.y;
+       if (r.key === 'sgd') { r.x -= lr * gx; r.y -= lr * gy; }
+       else if (r.key === 'mom') {
+         r.vx = MU * r.vx + gx; r.vy = MU * r.vy + gy;
+         r.x -= lr * r.vx; r.y -= lr * r.vy;
+       } else {
+         r.t += 1;
+         r.m1 = B1 * r.m1 + (1 - B1) * gx;
+         r.m2 = B1 * r.m2 + (1 - B1) * gy;
+         r.v1 = B2 * r.v1 + (1 - B2) * gx * gx;
+         r.v2 = B2 * r.v2 + (1 - B2) * gy * gy;
+         var mh1 = r.m1 / (1 - Math.pow(B1, r.t));
+         var mh2 = r.m2 / (1 - Math.pow(B1, r.t));
+         var vh1 = r.v1 / (1 - Math.pow(B2, r.t));
+         var vh2 = r.v2 / (1 - Math.pow(B2, r.t));
+         r.x -= lr * mh1 / (Math.sqrt(vh1) + EPS);
+         r.y -= lr * mh2 / (Math.sqrt(vh2) + EPS);
+       }
+       var loss = f(r.x, r.y);
+       if (!isFinite(r.x) || !isFinite(r.y) || !isFinite(loss) ||
+           Math.abs(r.x) > 8 || Math.abs(r.y) > 8 || loss > 1e4) {
+         r.trail.push([clamp30(r.x), clamp30(r.y)]);
+         r.status = 'off';
+       } else {
+         r.trail.push([r.x, r.y]);
+         r.hist.push(loss);
+         if (loss < SETTLE) r.status = 'settled';
+       }
+     }
+
+     function sizeCanvas(c, g) {
+       var dpr = window.devicePixelRatio || 1;
+       var W = c.clientWidth, H = c.clientHeight;
+       if (!W || !H) return null;
+       c.width = Math.round(W * dpr);
+       c.height = Math.round(H * dpr);
+       g.setTransform(dpr, 0, 0, dpr, 0, 0);
+       return { W: W, H: H };
+     }
+
+     var LEVELS = [0.5, 2, 8, 18, 32, 50, 80, 128, 200];
+     function draw() {
+       var sz = sizeCanvas(cv, ctx); if (!sz) return;
+       var W = sz.W, H = sz.H;
+       var s = Math.min(W, H) / 8, ox = W / 2, oy = H / 2;
+       function px(x) { return ox + x * s; }
+       function py(y) { return oy - y * s; }
+       ctx.clearRect(0, 0, W, H);
+       ctx.strokeStyle = '#d5dbdb'; ctx.lineWidth = 1;
+       for (var i = 0; i < LEVELS.length; i++) {
+         var L = LEVELS[i], a = Math.sqrt(L), b = Math.sqrt(L) / 5;
+         ctx.beginPath();
+         ctx.ellipse(px(0), py(0), a * s, b * s, 0, 0, Math.PI * 2);
+         ctx.stroke();
+       }
+       ctx.strokeStyle = '#95a5a6'; ctx.lineWidth = 1.5;
+       ctx.beginPath(); ctx.arc(px(X0), py(Y0), 7, 0, Math.PI * 2); ctx.stroke();
+       ctx.fillStyle = '#7f8c8d'; ctx.font = '12px sans-serif'; ctx.textAlign = 'left';
+       ctx.fillText('start', px(X0) + 10, py(Y0) + 4);
+       for (var k = 0; k < R.length; k++) {
+         var r = R[k];
+         ctx.strokeStyle = r.color; ctx.lineWidth = 2.5;
+         ctx.beginPath();
+         for (var j = 0; j < r.trail.length; j++) {
+           var X = px(r.trail[j][0]), Y = py(r.trail[j][1]);
+           if (j === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
+         }
+         ctx.stroke();
+         var last = r.trail[r.trail.length - 1];
+         ctx.fillStyle = r.color;
+         ctx.beginPath(); ctx.arc(px(last[0]), py(last[1]), 6, 0, Math.PI * 2); ctx.fill();
+         ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.stroke();
+       }
+     }
+
+     function drawLoss() {
+       var sz = sizeCanvas(lc, lctx); if (!sz) return;
+       var g = lctx, W = sz.W, H = sz.H;
+       var lo = -2.5, hi = 4.5;
+       function X(t) { return 40 + (W - 50) * t / MAX_STEPS; }
+       function Y(v) {
+         var l = Math.log10(Math.max(v, 1e-3));
+         l = Math.max(lo, Math.min(hi, l));
+         return H - 16 - (H - 30) * (l - lo) / (hi - lo);
+       }
+       g.clearRect(0, 0, W, H);
+       g.font = '12px sans-serif'; g.textAlign = 'left';
+       var marks = [[-2, '0.01'], [0, '1'], [2, '100'], [4, '10000']];
+       for (var mI = 0; mI < marks.length; mI++) {
+         var yy = Y(Math.pow(10, marks[mI][0]));
+         g.strokeStyle = '#ecf0f1'; g.lineWidth = 1;
+         g.beginPath(); g.moveTo(40, yy); g.lineTo(W - 10, yy); g.stroke();
+         g.fillStyle = '#7f8c8d';
+         g.fillText(marks[mI][1], 4, yy + 4);
+       }
+       g.fillStyle = '#7f8c8d'; g.fillText('step', W - 34, H - 4);
+       for (var k = 0; k < R.length; k++) {
+         var r = R[k];
+         g.strokeStyle = r.color; g.lineWidth = 2;
+         g.beginPath();
+         for (var j = 0; j < r.hist.length; j++) {
+           var xx = X(j), yy2 = Y(r.hist[j]);
+           if (j === 0) g.moveTo(xx, yy2); else g.lineTo(xx, yy2);
+         }
+         g.stroke();
+       }
+     }
+
+     function statusText(r) {
+       if (r.status === 'racing') return stepCount === 0 ? 'ready' : 'racing';
+       if (r.status === 'settled') return 'settled in ' + r.doneAt + ' steps';
+       if (r.status === 'off') return 'off the hill';
+       return 'still walking';
+     }
+     function refreshLegend() {
+       for (var k = 0; k < R.length; k++) R[k].el.textContent = statusText(R[k]);
+     }
+     function allDone() {
+       for (var k = 0; k < R.length; k++) if (R[k].status === 'racing') return false;
+       return true;
+     }
+     function tick() {
+       var lr = lrFromSlider(parseInt(lrSlider.value, 10));
+       stepCount++;
+       for (var k = 0; k < R.length; k++) {
+         var r = R[k];
+         if (r.status !== 'racing') continue;
+         stepRunner(r, lr);
+         if (r.status !== 'racing') r.doneAt = stepCount;
+       }
+       draw(); drawLoss(); refreshLegend();
+       if (allDone() || stepCount >= MAX_STEPS) { endRace(); return; }
+       timer = setTimeout(tick, STEP_MS);
+     }
+     function endRace() {
+       playing = false; ended = true;
+       if (timer) { clearTimeout(timer); timer = null; }
+       for (var k = 0; k < R.length; k++) if (R[k].status === 'racing') R[k].status = 'unfinished';
+       refreshLegend();
+       playBtn.textContent = 'Play again';
+     }
+     function resetRace() {
+       if (timer) { clearTimeout(timer); timer = null; }
+       playing = false; ended = false; stepCount = 0;
+       R = freshRunners();
+       playBtn.textContent = 'Play';
+       draw(); drawLoss(); refreshLegend();
+     }
+     playBtn.addEventListener('click', function () {
+       if (playing) {
+         playing = false;
+         if (timer) { clearTimeout(timer); timer = null; }
+         playBtn.textContent = 'Resume';
+         return;
+       }
+       if (ended) resetRace();
+       playing = true;
+       playBtn.textContent = 'Pause';
+       playScrollEnsure(document.getElementById('optRace'));
+       timer = setTimeout(tick, STEP_MS);
+     });
+     resetBtn.addEventListener('click', resetRace);
+     lrSlider.addEventListener('input', function () {
+       lrVal.textContent = lrFromSlider(parseInt(lrSlider.value, 10)).toFixed(3);
+     });
+     window.addEventListener('resize', function () { draw(); drawLoss(); });
+     R = freshRunners(); stepCount = 0; timer = null; playing = false; ended = false;
+     lrVal.textContent = lrFromSlider(parseInt(lrSlider.value, 10)).toFixed(3);
+     draw(); drawLoss(); refreshLegend();
+   })();
+   </script>
+
+
+
+   <h2 id="alignment">5. The Alignment Problem</h2>
 
    <p>If we had a sequence of input frames, and we knew the label for each frame (we don’t here) then we could just apply CE at each frame and average.</p>
 
@@ -1402,7 +1659,7 @@
 
    <p>We need a loss that doesn’t require explicit alignment and can collapse variable length frame prediction into a shorter token length. This is where <strong>“Connectionist Temporal Classification” (CTC)</strong> loss comes to play.</p>
 
-   <h2 id="ctc">5. Connectionist Temporal Classification (CTC)</h2>
+   <h2 id="ctc">6. Connectionist Temporal Classification (CTC)</h2>
 
    <p>CTC augments the vocabulary with a <strong>blank token</strong>, no label. This allows the frames to correspond to no output symbols. So, now you have $T$ frames and each frame gets a probability distribution over $V+1$ (tokens + blank).</p>
 
@@ -2130,7 +2387,7 @@ def ctc_forward(probs, target):
    </div>
    <p class="stat-note"><strong>Model:</strong> BLSTM + CTC, 100 blocks per direction. <strong>Dataset:</strong> TIMIT (26 MFCC coeffs per frame, 61 phonemes + blank). <strong>Source:</strong> Graves et al., "Connectionist Temporal Classification", ICML 2006, Table 1 (literature reference, not run here).</p>
 
-   <h2 id="forward-backward">6. Training with Forward-Backward</h2>
+   <h2 id="forward-backward">7. Training with Forward-Backward</h2>
    
    <p>But, we also need gradients w.r.t. to the model’s softmax outputs at each frame during training. We need to know at frame 1 how much probability was aligned “A” vs blank. This is the <strong>posterior probability</strong>.</p>
    
@@ -2434,7 +2691,7 @@ def ctc_forward_backward(probs, target):
    })();
    </script>
 
-   <h2 id="beam-search">7. Inference: Beam Search</h2>
+   <h2 id="beam-search">8. Inference: Beam Search</h2>
    
    <p>At inference, we need to figure out which output sequence to return. If the model is confident and the output space is small or constrained then a greedy decoding is okay. But, that would throw away a lot of probability mass. <strong>Beam search</strong> recovers some of it by merging multiple paths that collapse to the same candidate sequence.</p>
 

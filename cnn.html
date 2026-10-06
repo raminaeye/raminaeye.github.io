@@ -1391,7 +1391,7 @@ def conv2d(input, kernel, stride=1, padding=0):
             <ul>
                 <li><strong>The point:</strong> a neuron's theoretical window is big, but its real influence is a bell curve, so only the center pixels do real work and the edges barely count.</li>
                 <li><strong>What you'll see:</strong> the red threshold line climbs from 5% to 60% in 5% steps while the lit effective window shrinks toward the peak of the blue bell curve; if the threshold is already at 60%, it restarts from 5%.</li>
-                <li><strong>Architecture:</strong> LeNet-style (16), VGG-16 (212), or ResNet-50 (427) pixels. Try switching from ResNet-50 to LeNet-style and watch the same bell drawn on a tiny 16-pixel window.</li>
+                <li><strong>Architecture:</strong> LeNet-style (16), VGG-16 (212), or ResNet-50 (427) pixels, all drawn on one true pixel scale. Try switching from ResNet-50 to LeNet-style and watch the full-width bar collapse to a 16-pixel sliver with the same bell curve squeezed inside it.</li>
                 <li><strong>Threshold:</strong> 5% to 60%, whole percent steps. Try dragging it up and watch the lit window shrink; the readout gives the effective width in pixels and percent.</li>
             </ul>
         </div>
@@ -1424,8 +1424,12 @@ def conv2d(input, kernel, stride=1, padding=0):
             var ctx = cv.getContext('2d');
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
             ctx.clearRect(0, 0, w, H);
-            var sc = w / rf;
+            // One true pixel scale for every architecture, keyed to the largest
+            // window (427): the 427-px bar fills the canvas and the 16-px bar
+            // is a sliver, so the architecture choice reads at a glance.
+            var sc = w / 427;
             var barY = 70, barH = 48;
+            var barW = rf * sc, barX = (w - barW) / 2;
             var yBase = barY, yTop = 14;
             function valAt(xpx) {
                 var c = w / 2, sig = (rf / 5) * sc;
@@ -1434,30 +1438,34 @@ def conv2d(input, kernel, stride=1, padding=0):
             }
             function yOf(v) { return yBase - v * (yBase - yTop); }
             var hw = effWidth(rf, t) / 2 * sc, c = w / 2;
-            // heat bar, per-column from the Gaussian, clipped to the bar rect
+            // heat bar at true scale, clipped to the bar rect
             ctx.save();
             ctx.beginPath();
-            ctx.rect(0, barY, w, barH);
+            ctx.rect(barX, barY, barW, barH);
             ctx.clip();
-            for (var x = 0; x < w; x += 2) {
+            for (var x = barX; x < barX + barW; x += 2) {
                 ctx.fillStyle = heatColor(valAt(x + 1));
                 ctx.fillRect(x, barY, 2, barH);
             }
             ctx.restore();
+            // frame the window so the tiny ones still read as windows
+            ctx.strokeStyle = '#95a5a6';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(barX + 0.5, barY + 0.5, Math.max(1, barW - 1), barH - 1);
             ctx.fillStyle = 'rgba(133,193,233,0.9)';
-            ctx.fillRect(Math.max(0, c - hw), barY, Math.min(w, c + hw) - Math.max(0, c - hw), barH);
+            ctx.fillRect(Math.max(barX, c - hw), barY, Math.min(barX + barW, c + hw) - Math.max(barX, c - hw), barH);
             ctx.strokeStyle = '#3498db';
             ctx.lineWidth = 2;
             ctx.beginPath();
-            for (var x2 = 0; x2 <= w; x2 += 2) {
+            for (var x2 = barX; x2 <= barX + barW; x2 += 2) {
                 var y = yOf(valAt(x2));
-                if (x2 === 0) ctx.moveTo(x2, y); else ctx.lineTo(x2, y);
+                if (x2 === barX) ctx.moveTo(x2, y); else ctx.lineTo(x2, y);
             }
             ctx.stroke();
             ctx.strokeStyle = '#e74c3c';
             ctx.setLineDash([5, 4]);
             ctx.beginPath();
-            ctx.moveTo(0, yOf(t)); ctx.lineTo(w, yOf(t));
+            ctx.moveTo(barX, yOf(t)); ctx.lineTo(barX + barW, yOf(t));
             ctx.stroke();
             ctx.setLineDash([]);
             // labels after the marks they annotate
@@ -1955,6 +1963,12 @@ self.block = nn.Sequential(
                 <img src="figures/papers/bn-fig2.png" alt="Figure 2 from Ioffe and Szegedy (2015): single crop validation accuracy of Inception and its batch-normalized variants versus the number of training steps." style="width:100%;height:auto;display:block;">
                 <svg class="bn-overlay" viewBox="0 0 800 612" preserveAspectRatio="none" aria-hidden="true">
                     <g id="bnDots"></g>
+                    <g id="bnStress" visibility="hidden">
+                        <path id="bnFallTrail" d="" fill="none" stroke="#c0392b" stroke-width="3" stroke-dasharray="7 5" opacity="0.85"/>
+                        <rect id="bnFallDot" x="-12" y="-12" width="24" height="24" rx="5" fill="#c0392b" stroke="#7b241c" stroke-width="2"/>
+                        <text id="bnFallLabel" x="0" y="0" font-size="13" fill="#922b21" font-family="sans-serif">diverged</text>
+                        <circle id="bnHalo" r="17" fill="none" stroke="#f39c12" stroke-width="3" visibility="hidden"/>
+                    </g>
                 </svg>
             </div>
             <figcaption>Figure 2: Single crop validation accuracy of Inception and its batch-normalized variants, vs. the number of training steps. This is the paper's real figure. The traveling dots follow paths traced from the paper's vector figure file. Rebuilt from Figure 2 of Ioffe and Szegedy (ICML 2015). <a href="https://arxiv.org/abs/1502.03167">arXiv:1502.03167</a></figcaption>
@@ -1995,7 +2009,7 @@ self.block = nn.Sequential(
                 <li><strong>Play:</strong> advances the clock 0.5M steps at a time, twice a second, until the last runner's data runs out.</li>
                 <li><strong>Step:</strong> try clicking it and watch the race move exactly one 0.5M-step tick, so you can freeze the moment a badge flips.</li>
                 <li><strong>Reset:</strong> try it after a run and watch the clock jump back to 0.0M steps with the dots cleared.</li>
-                <li><strong>Learning rate:</strong> three stops: 1x, 5x, 30x. Try dragging it to 5x and watch the plain Inception dot fall over while BN-x5 keeps climbing; at 30x only BN survives.</li>
+                <li><strong>Learning rate:</strong> three stops: 1x, 5x, 30x. Try dragging it to 5x and watch the plain Inception dot dive off its curve, leaving a red trail, and tip over below the plot while BN-x5 (gold ring) keeps climbing; at 30x Inception dies on the first tick and only BN-x30 climbs.</li>
             </ul>
         </div>
     </div>
@@ -2058,6 +2072,8 @@ self.block = nn.Sequential(
             dotsG.appendChild(c);
             dots[r.id] = c;
         });
+        var stressG = $('bnStress'), fallTrail = $('bnFallTrail'), fallDot = $('bnFallDot'),
+            fallLabel = $('bnFallLabel'), halo = $('bnHalo');
         function posAt(curve, t) {
             if (t <= curve[0][0]) return { x: curve[0][1], y: curve[0][2], acc: curve[0][0], started: false };
             for (var i = 1; i < curve.length; i++) {
@@ -2070,17 +2086,20 @@ self.block = nn.Sequential(
             var last = curve[curve.length - 1];
             return { x: last[1], y: last[2], acc: last[0], started: true, ended: true };
         }
-        var state = { t: 0, timer: null };
+        var state = { t: 0, timer: null, lr: 0, diveProg: null, fallGeom: null };
         function render() {
             $('bnClock').textContent = state.t.toFixed(1) + 'M steps';
             var box = $('bnRunners');
             box.innerHTML = '';
+            // Learning-rate stress test: plain Inception has fallen off the chart.
+            var fallActive = (state.lr > 0 && state.fallGeom);
             RUNNERS.forEach(function (r) {
                 var curve = CURVES[r.id];
                 var p = posAt(curve, state.t);
                 var dot = dots[r.id];
-                if (!p.started && state.t > 0) { dot.setAttribute('visibility', 'hidden'); }
-                else if (state.t === 0 && !p.started) { dot.setAttribute('visibility', 'hidden'); }
+                var isFallen = fallActive && r.id === 'inception';
+                if (isFallen) { dot.setAttribute('visibility', 'hidden'); }
+                else if (!p.started) { dot.setAttribute('visibility', 'hidden'); }
                 else { dot.setAttribute('visibility', 'visible'); dot.setAttribute('cx', p.x.toFixed(1)); dot.setAttribute('cy', p.y.toFixed(1)); }
                 var row = document.createElement('div');
                 row.className = 'bn-runner';
@@ -2104,10 +2123,44 @@ self.block = nn.Sequential(
                 var txt = 'racing';
                 if (r.finishM !== null && state.t >= r.finishM) { txt = '72.2% at ' + r.finishM.toFixed(1) + 'M'; badge.classList.add('done'); }
                 else if (r.finishM === null && p.ended) { txt = 'tops out at 69.8%: never reaches 72.2%'; badge.classList.add('dead'); }
+                if (isFallen) {
+                    txt = state.lr === 1 ? 'diverged at 5x LR' : 'dies at 30x LR';
+                    badge.classList.add('dead');
+                    steps.textContent = 'fell off the chart';
+                    acc.textContent = '';
+                }
                 badge.textContent = txt;
                 row.appendChild(chip); row.appendChild(name); row.appendChild(steps); row.appendChild(acc); row.appendChild(badge);
                 box.appendChild(row);
             });
+            // Stress overlay on the chart: the red dive trail, the tipped-over
+            // dot resting below the plot, and a gold ring on the BN survivor.
+            if (fallActive) {
+                stressG.setAttribute('visibility', 'visible');
+                var g = state.fallGeom;
+                var prog = (state.diveProg === null) ? 1 : state.diveProg;
+                var e = prog * prog;
+                var mx = g.x0 + (g.x1 - g.x0) * prog;
+                var my = g.y0 + (g.y1 - g.y0) * e;
+                var midY = (g.y0 + g.y1) / 2;
+                fallTrail.setAttribute('d', 'M ' + g.x0.toFixed(1) + ' ' + g.y0.toFixed(1) +
+                    ' C ' + g.x0.toFixed(1) + ' ' + midY.toFixed(1) + ', ' + g.x1.toFixed(1) + ' ' + midY.toFixed(1) +
+                    ', ' + g.x1.toFixed(1) + ' ' + g.y1.toFixed(1));
+                fallDot.setAttribute('x', (mx - 12).toFixed(1));
+                fallDot.setAttribute('y', (my - 12).toFixed(1));
+                fallDot.setAttribute('transform', 'rotate(' + Math.round(prog * 45) + ' ' + mx.toFixed(1) + ' ' + my.toFixed(1) + ')');
+                fallLabel.setAttribute('x', (g.x1 + 16).toFixed(1));
+                fallLabel.setAttribute('y', (g.y1 + 5).toFixed(1));
+                var hid = state.lr === 1 ? 'bnx5' : 'bnx30';
+                var hp = posAt(CURVES[hid], state.t);
+                if (hp.started) {
+                    halo.setAttribute('visibility', 'visible');
+                    halo.setAttribute('cx', hp.x.toFixed(1));
+                    halo.setAttribute('cy', hp.y.toFixed(1));
+                } else { halo.setAttribute('visibility', 'hidden'); }
+            } else {
+                stressG.setAttribute('visibility', 'hidden');
+            }
         }
         function stop() {
             if (state.timer) { clearTimeout(state.timer); state.timer = null; }
@@ -2133,7 +2186,7 @@ self.block = nn.Sequential(
             bnSchedule();
         });
         $('bnStep').addEventListener('click', function () { stop(600); step(); });
-        $('bnReset').addEventListener('click', function () { stop(600); state.t = 0; render(); });
+        $('bnReset').addEventListener('click', function () { stop(600); stopStress(); state.t = 0; state.diveProg = null; if (state.lr > 0) { state.fallGeom = computeFallGeom(); } render(); });
         var LRS = [
             { label: '1x (0.0015)', rows: [
                 { name: 'Plain Inception', note: 'trains at LR 0.0015. Slow and steady: 72.2% after 31.0M steps.', fallen: false },
@@ -2168,7 +2221,38 @@ self.block = nn.Sequential(
                 box.appendChild(row);
             });
         }
-        $('bnLr').addEventListener('input', function () { renderLr(); });
+        var stressTimer = null;
+        function stopStress() { if (stressTimer) { clearTimeout(stressTimer); stressTimer = null; } }
+        function computeFallGeom() {
+            var ic = CURVES.inception;
+            var p = posAt(ic, state.t);
+            var sx = p.x, sy = p.y;
+            if (!p.started) { var q = posAt(ic, 0.727); sx = q.x; sy = q.y; }
+            return { x0: sx, y0: sy, x1: sx + 44, y1: 455 };
+        }
+        function playDive() {
+            stopStress();
+            state.diveProg = 0;
+            render();
+            var diveSteps = [0.3, 0.55, 0.8, 1], di = 0;
+            (function tick() {
+                stressTimer = setTimeout(function () {
+                    state.diveProg = diveSteps[di];
+                    render();
+                    di++;
+                    if (di < diveSteps.length) { tick(); }
+                    else { stressTimer = null; state.diveProg = null; render(); }
+                }, 160);
+            })();
+        }
+        $('bnLr').addEventListener('input', function () {
+            stop(600); stopStress();
+            state.lr = parseInt(this.value, 10);
+            state.diveProg = null;
+            renderLr();
+            if (state.lr > 0) { state.fallGeom = computeFallGeom(); playDive(); }
+            else { state.fallGeom = null; render(); }
+        });
         renderLr();
         render();
     })();

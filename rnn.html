@@ -287,7 +287,17 @@
         @media (max-width: 480px) {
         }
         .canvas-wrap { position: relative; }
-        .mjx-chtml.MJXc-display { overflow-x: auto; max-width: 100%; }
+        .mjx-chtml.MJXc-display { overflow-x: auto; overflow-y: hidden; max-width: 100%; }
+        /* Paper-figure hotspots: numbered markers over the real GRU/LSTM figures */
+        .rnn-hotspot {
+            width: 30px; height: 30px; border-radius: 50%;
+            background: #2c3e50; color: #fff; border: 2px solid #fff;
+            font-size: 14px; font-weight: bold; cursor: pointer; padding: 0;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+        }
+        .rnn-hotspot.active { background: #e67e22; }
+        .diag-label { font-size: 0.9em; color: #555; margin: 0.4rem 0; }
+        .hotspot-text { min-height: 3.2em; }
         /* MathJax 2.7 preview spans during typesetting: contain them so the
            document never exceeds the viewport while equations render */
         .MJXp-math { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
@@ -579,8 +589,8 @@
         The trouble comes from the recurrent connection. Since $h_t$ depends on $h_{t-1}$, this expands into a long chain rule across time.
     </p>
     <ul>
-        <li><strong>Vanishing Gradients</strong>: If you keep multiplying derivatives of <code>tanh</code>, which are $\le 1$, they shrink exponentially. The model forgets long-term dependencies.</li>
-        <li><strong>Exploding Gradients</strong>: If the recurrent weights in $W_{hh}$ are large, the gradients can grow exponentially, causing instability.</li>
+        <li><strong>Vanishing gradients.</strong> The gradient from the loss has to travel back through every timestep, and each step multiplies it by a <code>tanh</code> derivative, which is at most 1. Multiply a number below 1 by itself $T$ times and it collapses: after a few dozen steps the signal arriving from step $T$ back at step 1 is a whisper. I think of it as shouting down a long hallway where every door eats half the sound. The model simply never learns dependencies longer than that hallway.</li>
+        <li><strong>Exploding gradients.</strong> The same chain can run in reverse. If the recurrent weights in $W_{hh}$ are large, each timestep multiplies the gradient instead of shrinking it, and the updates blow up to garbage. Same mechanism, opposite disease. This one is at least loud about it: you see NaNs, not silence.</li>
     </ul>
 
     <div class="demo" id="gradDemo">
@@ -968,18 +978,19 @@ class GRUCell(nn.Module):
             ctx.textAlign = L.capZ[2];
             ctx.fillText('update gate z', L.capZ[0], L.capZ[1]);
             ctx.textAlign = 'center';
+            // keep pipe (blue) into mixer: drawn before the old-memory box so the
+            // pipe's round cap hides behind the box instead of covering its label
+            pipe(L.keepX0, L.keepY, L.keepElb[0], L.keepElb[1], shown.keep, '#2980b9');
+            pipe(L.keepElb[0], L.keepElb[1], L.keepElb[2], L.keepElb[3], shown.keep, '#2980b9');
+            // r pipe down into candidate mixer (same: cap hides behind the box edge)
+            pipe(L.rX, L.rTop, L.rX, L.rBot, shown.r, '#e67e22');
             // old memory box
             box(L.oldBox[0], L.oldBox[1], L.oldBox[2], L.oldBox[3], '#ebf5fb', '#2980b9',
                 'old memory', 'h(t-1) = ' + fmt(s.hPrev), FS13, FS, FS);
-            // keep pipe (blue) into mixer
-            pipe(L.keepX0, L.keepY, L.keepElb[0], L.keepElb[1], shown.keep, '#2980b9');
-            pipe(L.keepElb[0], L.keepElb[1], L.keepElb[2], L.keepElb[3], shown.keep, '#2980b9');
             if (L.keepLab) {
                 ctx.fillStyle = '#2471a3'; ctx.font = FS13 + 'px sans-serif';
                 ctx.fillText('keep (1-z) x h = ' + fmt(s.keep), L.keepLab[0], L.keepLab[1]);
             }
-            // r pipe down into candidate mixer
-            pipe(L.rX, L.rTop, L.rX, L.rBot, shown.r, '#e67e22');
             if (L.rLab) {
                 ctx.fillStyle = '#a65d00'; ctx.font = FS + 'px sans-serif';
                 ctx.fillText('r x h = ' + fmt(s.gated), L.rLab[0], L.rLab[1]);
@@ -1136,23 +1147,56 @@ class GRUCell(nn.Module):
     })();
     </script>
 
+    <h3>From the paper: Cho et al., EMNLP 2014</h3>
+    <p>
+        K. Cho, B. van Merrienboer, C. Gulcehre, D. Bahdanau, F. Bougares, H. Schwenk, and Y. Bengio, "Learning Phrase Representations using RNN Encoder-Decoder for Statistical Machine Translation," <em>Proceedings of the 2014 Conference on Empirical Methods in Natural Language Processing (EMNLP)</em>, 2014. <a href="https://arxiv.org/abs/1406.1078">arXiv:1406.1078</a>. This is the paper that introduced the GRU: the two gates you just played with, built to help a translation model remember long sentences. Below is its real Figure 2, the hidden-unit diagram, with its original caption.
+    </p>
+
+    <div class="demo" id="gruPaperDemo">
+        <figure class="diagram" id="gruFig">
+            <div style="position:relative;max-width:640px;margin:0 auto;">
+                <img src="figures/papers/gru-fig1.png" alt="Figure 2 from Cho et al. (2014): the GRU hidden unit drawn with a circle for the hidden state h, a square for the candidate, an input x, and two switches labeled z and r." style="width:100%;height:auto;display:block;">
+                <button type="button" class="rnn-hotspot" data-h="0" style="position:absolute;left:30%;top:28%;transform:translate(-50%,-50%);" aria-label="Marker 1: update gate z">1</button>
+                <button type="button" class="rnn-hotspot" data-h="1" style="position:absolute;left:41%;top:78%;transform:translate(-50%,-50%);" aria-label="Marker 2: reset gate r">2</button>
+                <button type="button" class="rnn-hotspot" data-h="2" style="position:absolute;left:23%;top:80%;transform:translate(-50%,-50%);" aria-label="Marker 3: hidden state h">3</button>
+                <button type="button" class="rnn-hotspot" data-h="3" style="position:absolute;left:77%;top:74%;transform:translate(-50%,-50%);" aria-label="Marker 4: candidate memory">4</button>
+                <button type="button" class="rnn-hotspot" data-h="4" style="position:absolute;left:93%;top:82%;transform:translate(-50%,-50%);" aria-label="Marker 5: input x">5</button>
+            </div>
+            <figcaption><strong>Figure 2.</strong> An illustration of the proposed hidden activation function. The update gate $z$ selects whether the hidden state is to be updated with a new hidden state $\tilde{h}$. The reset gate $r$ decides whether the previous hidden state is ignored. See Eqs. (5)-(8) for the detailed equations of $r$, $z$, $h$ and $\tilde{h}$. Rebuilt from Figure 2 of Cho et al., "Learning Phrase Representations using RNN Encoder-Decoder for Statistical Machine Translation," <em>EMNLP</em> 2014. <a href="https://arxiv.org/abs/1406.1078">arXiv:1406.1078</a></figcaption>
+            <p class="diag-label hotspot-text" id="gruHotspotText">Tap a numbered marker on the figure.</p>
+        </figure>
+        <div class="demo-controls">
+            <button type="button" class="btn sec" id="gruPaperPlay">Play</button>
+        </div>
+        <div class="caption-card" id="gruFigCap">
+            <p class="cc-head">How to play</p>
+            <ul>
+                <li><strong>The point:</strong> This is the actual diagram from the 2014 paper that introduced the GRU, and it is almost insultingly simple: two switches and a blend. The whole gated-recurrent idea is right there in the authors' own drawing.</li>
+                <li><strong>What you'll see:</strong> Press Play and the five markers light up in order, about half a second apart, each with a one-line explanation of the part it sits on. Tapping any marker jumps straight to its explanation.</li>
+                <li><strong>The markers:</strong> Try tapping 1 and 2 back to back: both gates are drawn as literal switches, which is the entire mental model. Then tap 4 and re-read the caption: the candidate is a proposal, and the z switch is the only thing that decides.</li>
+            </ul>
+        </div>
+    </div>
+    <p>
+        One quirk worth knowing: the paper writes the blend as $h_j^t = z_j h_j^{t-1} + (1 - z_j) \tilde{h}_j^t$, with $z$ weighting the <em>old</em> state. The field later flipped the convention to the one this page uses ($z = 1$ replaces). Same idea, mirrored knob. If you read the original and $z$ feels backwards, that is why.
+    </p>
+
     <hr>
 
     <h2 id="lstm">Long Short-Term Memory (LSTM)</h2>
     <p>
         LSTM (Long Short-Term Memory) separates memory into two parts and uses three gates to carefully control what flows into, out of, and stays within these memories.
     </p>
-    <ul>
-        <li><strong>Cell State ($c_t$)</strong>: The <strong>long-term memory</strong>. It carries information across many time steps and can pass info almost unchanged to help gradients flow, fixing the vanishing gradient problem.</li>
-        <li><strong>Hidden State ($h_t$)</strong>: The <strong>short-term memory</strong>. This is what the network is "thinking" right now and is used for immediate predictions.</li>
-    </ul>
     <p>
-        The three gates are:
+        The LSTM keeps two books instead of one. $c_t$ is the long ledger: it runs straight through the cell with no nonlinearity squashing it, so information (and, during backprop, gradients) can ride it across hundreds of steps almost untouched. That unbroken line is the entire trick; everything else on this page is plumbing around it. $h_t$ is the note I hand you right now: the short-term read, what the network is thinking at this step, built from the ledger but filtered for immediate use.
+    </p>
+    <p>
+        Three gates guard the ledger, and each one is a question the network asks every step:
     </p>
     <ol>
-        <li><strong>Forget Gate</strong>: Decides what old info to erase from long-term memory.</li>
-        <li><strong>Input Gate</strong>: Decides what new info to store in long-term memory.</li>
-        <li><strong>Output Gate</strong>: Decides what part of the memory to use right now.</li>
+        <li><strong>Forget gate</strong>: <em>Do I still need this?</em> It looks at the old ledger and erases the entries that stopped mattering. Ruthless, but somebody has to take out the trash.</li>
+        <li><strong>Input gate</strong>: <em>Is this worth writing down?</em> It decides how much of the new candidate actually gets added to the ledger. Not every thought deserves ink.</li>
+        <li><strong>Output gate</strong>: <em>What do I show right now?</em> It filters the ledger down into $h_t$, the short-term read the rest of the network gets to see.</li>
     </ol>
 
     <figure>
@@ -1992,9 +2036,90 @@ class GRUCell(nn.Module):
     })();
     </script>
 
+    <h3>From the paper: Hochreiter and Schmidhuber, 1997</h3>
+    <p>
+        S. Hochreiter and J. Schmidhuber, "Long Short-Term Memory," <em>Neural Computation</em> 9(8):1735-1780, 1997. <a href="https://www.bioinf.jku.at/publications/older/2604.pdf">Author PDF</a>. The paper that started all of this: a memory cell with a self-loop of weight exactly 1.0, so the error can cycle forever without shrinking, plus gates that open and close access to it. Below is its real Figure 1, the memory-cell architecture, with its original caption.
+    </p>
+
+    <div class="demo" id="lstmPaperDemo">
+        <figure class="diagram" id="lstmFig">
+            <div style="position:relative;max-width:640px;margin:0 auto;">
+                <img src="figures/papers/lstm-fig1.png" alt="Figure 1 from Hochreiter and Schmidhuber (1997): the LSTM memory cell, a box containing the input squashing g, the cell state with a 1.0 self-recurrent loop, and the output squashing h, with input and output gate units below." style="width:100%;height:auto;display:block;">
+                <button type="button" class="rnn-hotspot" data-h="0" style="position:absolute;left:42%;top:22%;transform:translate(-50%,-50%);" aria-label="Marker 1: the 1.0 self-loop">1</button>
+                <button type="button" class="rnn-hotspot" data-h="1" style="position:absolute;left:30%;top:68%;transform:translate(-50%,-50%);" aria-label="Marker 2: input gate">2</button>
+                <button type="button" class="rnn-hotspot" data-h="2" style="position:absolute;left:72%;top:68%;transform:translate(-50%,-50%);" aria-label="Marker 3: output gate">3</button>
+                <button type="button" class="rnn-hotspot" data-h="3" style="position:absolute;left:22%;top:32%;transform:translate(-50%,-50%);" aria-label="Marker 4: input squashing g">4</button>
+                <button type="button" class="rnn-hotspot" data-h="4" style="position:absolute;left:58%;top:32%;transform:translate(-50%,-50%);" aria-label="Marker 5: output squashing h">5</button>
+            </div>
+            <figcaption><strong>Figure 1.</strong> Architecture of memory cell $c_j$ (the box) and its gate units $in_j$, $out_j$. The self-recurrent connection (with weight 1.0) indicates feedback with a delay of 1 time step. It builds the basis of the "constant error carrousel" CEC. The gate units open and close access to CEC. See text and appendix A.1 for details. Rebuilt from Figure 1 of Hochreiter and Schmidhuber, "Long Short-Term Memory," <em>Neural Computation</em> 9(8), 1997.</figcaption>
+            <p class="diag-label hotspot-text" id="lstmHotspotText">Tap a numbered marker on the figure.</p>
+        </figure>
+        <div class="demo-controls">
+            <button type="button" class="btn sec" id="lstmPaperPlay">Play</button>
+        </div>
+        <div class="caption-card" id="lstmFigCap">
+            <p class="cc-head">How to play</p>
+            <ul>
+                <li><strong>The point:</strong> This is the actual diagram from the 1997 paper. The green highway you saw in the LSTM figure above is right here in the authors' drawing: the little loop labeled 1.0. Everything else in the figure is gate plumbing around that one arrow.</li>
+                <li><strong>What you'll see:</strong> Press Play and the five markers light up in order, about half a second apart, each with a one-line explanation of the part it sits on. Tapping any marker jumps straight to its explanation.</li>
+                <li><strong>The markers:</strong> Try tapping 1 first and sitting with it: a weight of exactly 1.0 is the whole paper. Then tap 2 and 3 and notice the gate units live <em>outside</em> the box, deciding who gets in and out.</li>
+            </ul>
+        </div>
+    </div>
+    <p>
+        Spot what is missing: there is no forget gate in this figure. The 1997 LSTM had only input and output gates; the forget gate arrived three years later, from Gers, Schmidhuber and Cummins ("Learning to Forget," 2000). The LSTM on this page is the post-2000 version.
+    </p>
+
+    <script>
+    (function () {
+        function wire(figId, textId, playId, texts) {
+            var fig = document.getElementById(figId);
+            var box = document.getElementById(textId);
+            var playBtn = document.getElementById(playId);
+            if (!fig || !box) return;
+            var btns = fig.querySelectorAll('.rnn-hotspot');
+            if (!btns.length) return;
+            var timer = null, k = 0;
+            function clear() { for (var i = 0; i < btns.length; i++) btns[i].classList.remove('active'); }
+            function show(idx) { clear(); btns[idx].classList.add('active'); box.textContent = texts[idx]; }
+            function stop() {
+                if (timer) { clearInterval(timer); timer = null; }
+                if (playBtn) playBtn.textContent = 'Play';
+            }
+            for (var j = 0; j < btns.length; j++) {
+                (function (idx) {
+                    btns[idx].addEventListener('click', function () { stop(); show(idx); });
+                })(j);
+            }
+            if (playBtn) playBtn.addEventListener('click', function () {
+                if (timer) { stop(); return; }
+                var demo = playBtn.closest ? playBtn.closest('.demo') : null;
+                if (demo) playScrollEnsure(demo);
+                k = 0; show(k); k = 1;
+                playBtn.textContent = 'Stop';
+                timer = setInterval(function () { show(k); k = (k + 1) % btns.length; }, 600);
+            });
+        }
+        wire('gruFig', 'gruHotspotText', 'gruPaperPlay', [
+            '1. The update gate, drawn as a literal switch. It asks: do I keep the old h or take the new candidate? Near 0 the past survives untouched, near 1 the new memory moves in. This switch is the whole memory trick.',
+            '2. The reset gate, another switch. It asks: when I build the candidate, do I let the old h into the room? Near 0 the door slams shut and the candidate is built from the input alone.',
+            '3. The hidden state h. The memory carried forward, one number per neuron. Every later step reads this.',
+            '4. The candidate memory. A proposal built from the input and the (possibly gated) past. Nothing is decided until the z switch picks.',
+            '5. The input x at this step. It feeds the candidate and both gates. In the paper this was a word in a sentence being translated.'
+        ]);
+        wire('lstmFig', 'lstmHotspotText', 'lstmPaperPlay', [
+            '1. The self-loop with weight exactly 1.0. This is the constant error carousel: the memory feeds back into itself unchanged, so the gradient rides it backward across hundreds of steps without shrinking. The whole paper in one arrow.',
+            '2. The input gate. It asks: is this new input worth writing into the memory? The little sigmoid unit below computes the answer from net_in.',
+            '3. The output gate. It asks: should anyone get to read this memory right now? Same machinery, a sigmoid over net_out.',
+            '4. The input squashing g. The raw input is tamed through a nonlinearity before it is allowed near the memory.',
+            '5. The output squashing h. Same idea on the way out: the memory is squashed before the output gate decides who sees it.'
+        ]);
+    })();
+    </script>
+
     <hr>
 
-    <h2 id="results">What Happens: Vanilla RNN vs GRU vs LSTM</h2>
+    <h2 id="results">Long sequences expose the vanilla RNN</h2>
 
     <div class="demo" id="tripleToy">
         <h4>Toy: same spike, three memories</h4>
@@ -2232,7 +2357,7 @@ output, (hn, cn) = lstm(x)  # output: every step of the last layer; hn, cn: fina
 
     <hr>
 
-    <h2 id="caveats">Caveats and Gotchas</h2>
+    <h2 id="caveats">What goes wrong when you actually train one</h2>
     <ul>
         <li><strong>Vanishing gradients are real.</strong> A vanilla RNN on long sequences is a bad default. If your sequence is longer than a few dozen steps, reach for a GRU or LSTM first.</li>
         <li><strong>Exploding gradients need clipping.</strong> Even gated models can blow up. Gradient clipping (above) is cheap insurance; a threshold around 1.0 is a common starting point.</li>
@@ -2243,7 +2368,7 @@ output, (hn, cn) = lstm(x)  # output: every step of the last layer; hn, cn: fina
 
     <hr>
 
-    <h2 id="next">What's Next</h2>
+    <h2 id="next">The price of reading one step at a time</h2>
     <p>
         Gating fixed the memory problem, but RNNs still read one step at a time, which makes training slow on long sequences. The next idea drops recurrence entirely: let every position look directly at every other position. That's <a href="transformers.html">Transformers</a>.
     </p>

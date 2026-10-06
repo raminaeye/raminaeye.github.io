@@ -724,8 +724,8 @@
     <div class="howto" id="micro-howto"><strong>How to play</strong>
 <ul>
 <li><strong>The point:</strong> Rounding error is a sawtooth that ramps up and resets at every step boundary. It lands on every value equally often, which is why quantization error gets treated as uniform noise, with standard deviation LSB over the square root of 12.</li>
-<li><strong>What you'll see:</strong> The blue ramp climbs the orange steps while the zoom window tracks it upward. The red error trace ramps and snaps back to zero at every step crossing, and the histogram below, recomputed live from the error in the window, stays flat.</li>
-<li><strong>Bits N (4 to 12):</strong> Try dragging it mid-animation and watch the zoom window rescale while the histogram stays stubbornly flat. Max error is always half an LSB, no matter the depth.</li>
+<li><strong>What you'll see:</strong> The blue ramp climbs the orange steps while the zoom window tracks it upward. Drag the Bits slider and the window refills with more, finer steps. The red error trace ramps and snaps back to zero at every step crossing, and the histogram below, recomputed live from the error in the window, stays flat.</li>
+<li><strong>Bits N (4 to 12):</strong> Try dragging it from 4 to 12 and watch the zoomed window pack in more, finer orange steps: 2 coarse steps at 4 bits, 32 fine ones at 12 bits (the count is compressed for display; a true 12-bit window would hold thousands). The red sawtooth stays pinned at ±0.5 LSB and the histogram stays flat at every depth: finer steps, same uniform error.</li>
 <li><strong>Play:</strong> starts the endless climb; the button becomes Stop. The bits slider stays live during the climb: try dragging it mid-ramp and watch the flat histogram hold at every depth, and that flatness is the whole point.</li>
 </ul>
 </div>
@@ -737,7 +737,12 @@
         var ctx = canvas.getContext('2d');
         var phase = 0; /* animated ramp offset in LSB units */
         var timer = null;
-        var STEPS_SHOWN = 4;
+        function stepsFor(n) {
+            /* Fixed-voltage zoom window: a smaller LSB packs more steps into
+               the same span. True scaling is 2x per bit (256x over 4→12);
+               compressed to 2→32 so every depth stays drawable. */
+            return Math.round(2 * Math.pow(2, (n - 4) / 2));
+        }
         function errOf(x) { /* x in LSB units, mid-tread quantizer */
             return x - Math.round(x);
         }
@@ -763,16 +768,20 @@
             /* titles sit in their own band above each plot and are drawn AFTER
                the traces, so no mark can cover a label */
             var p1y = 24, p1h = 100;
+            var STEPS_SHOWN = stepsFor(n);
             var vMin = phase - 0.5, vMax = phase + STEPS_SHOWN - 0.5;
             function xPix(u) { return padL + (u / STEPS_SHOWN) * pw; }
             function yPix(v) { return p1y + p1h - ((v - vMin) / (vMax - vMin)) * p1h; }
             var baseCode = Math.round(phase);
             var qLo = Math.ceil(vMin + 0.5), qHi = Math.floor(vMax + 0.5);
+            var labEvery = Math.max(1, Math.ceil(STEPS_SHOWN / 6));
             for (var g = qLo; g <= qHi; g++) {
                 ctx.strokeStyle = '#eee';
                 ctx.beginPath(); ctx.moveTo(padL, yPix(g - 0.5)); ctx.lineTo(cssW - padR, yPix(g - 0.5)); ctx.stroke();
-                ctx.fillStyle = '#aaa';
-                ctx.fillText('code ' + g, 4, yPix(g - 0.5) + 12);
+                if (((g - qLo) % labEvery) === 0) {
+                    ctx.fillStyle = '#aaa';
+                    ctx.fillText('code ' + g, 4, yPix(g - 0.5) + 12);
+                }
             }
             /* clip the data traces to the plot rect */
             ctx.save();
@@ -790,11 +799,12 @@
                 if (i === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
             }
             ctx.stroke();
-            /* quantized steps (orange): flat per code, risers at boundaries */
+            /* quantized steps (orange): flat per code, risers at boundaries.
+               Drawn across the whole window so the bit depth sets the count. */
             ctx.strokeStyle = '#e67e22';
             ctx.lineWidth = 2;
             ctx.beginPath();
-            for (var q = baseCode - 2; q <= baseCode + 2; q++) {
+            for (var q = Math.floor(vMin) - 1; q <= Math.ceil(vMax) + 1; q++) {
                 var uStart = Math.max(0, q - 0.5 - vMin);
                 var uEnd = Math.min(STEPS_SHOWN, q + 0.5 - vMin);
                 if (uEnd <= uStart) continue;
@@ -810,7 +820,7 @@
             ctx.restore();
             ctx.lineWidth = 1;
             ctx.fillStyle = '#888';
-            ctx.fillText('zoom: 4 LSB steps', padL, 16);
+            ctx.fillText('zoom: ' + STEPS_SHOWN + ' LSB steps at ' + n + ' bits', padL, 16);
             /* ---- panel 2: error sawtooth ---- */
             /* its own title lane: clear of panel 1's code labels above */
             var p2y = 162, p2h = 64;

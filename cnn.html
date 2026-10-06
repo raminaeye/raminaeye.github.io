@@ -483,7 +483,7 @@ def conv2d(input, kernel, stride=1, padding=0):
         That's it. Multiply, add, move on. Nothing in this loop mixes channels or looks at distant pixels, which is exactly why conv layers are cheap and why they need stacking to see the big picture.
     </p>
     <p>
-        Okay, enough code. That loop is nine multiplies and an add, repeated until your eyes glaze over. Here is what it is actually doing. Pick a kernel, press play, and watch the right panel. The bright column that appears is the kernel shouting "I found my pattern" at every position along the bar. Move to the blur kernel and watch the bar smear. That is the whole idea: one small pattern detector, stamped everywhere.
+        Okay, enough code. That loop is nine multiplies and an add, repeated until your eyes glaze over. Here is what it is actually doing. Pick a kernel. As it plays, the bright column that appears on the right panel is the kernel shouting "I found my pattern" at every position along the bar. Move to the blur kernel and watch the bar smear. That is the whole idea: one small pattern detector, stamped everywhere.
     </p>
     <div class="demo" id="ksToy">
         <div class="demo-controls">
@@ -931,7 +931,7 @@ def conv2d(input, kernel, stride=1, padding=0):
         <canvas class="toy-canvas" id="toyOutput" style="margin-top: 0.9rem;"></canvas>
         </div>
         <div class="demo-stats" id="toyStats"></div>
-        <p class="caption">Play with it: add layers and raise the dilation, and watch the shaded window grow until one neuron covers the whole 300 ms event. Flip a stride to 2 and watch the output trace get coarser while the output rate drops. Press Play to sweep the inspected neuron across the outputs and watch the window glide along the signal. The output trace is honest: each point is the input value at the center of that neuron's window, no learned weights involved.</p>
+        <p class="caption">Play with it: add layers and raise the dilation, and watch the shaded window grow until one neuron covers the whole 300 ms event. Flip a stride to 2 and watch the output trace get coarser while the output rate drops. As it plays, the inspected neuron sweeps across the outputs and the window glides along the signal. The output trace is honest: each point is the input value at the center of that neuron's window, no learned weights involved.</p>
         <div class="howto">
             <p class="howto-head">How to play</p>
             <ul>
@@ -1335,7 +1335,7 @@ def conv2d(input, kernel, stride=1, padding=0):
 
     <h3>Designing a stack that sees 300ms</h3>
     <p>
-        Let us put the formula to work. Say sensory data comes in at <strong>1kHz</strong>, and the activity you want to catch is about <strong>300ms</strong> long. The model needs a receptive field of at least 300 samples. The toy above computes this live: stack layers, stretch the dilation, and watch the shaded window grow. Here is the design in words: a plain $k=7$ conv first to lock in fine local detail, one stride-2 downsample early to halve the compute, then the dilation doubles every layer.
+        Let us put the formula to work. Say sensory data comes in at <strong>1kHz</strong>, and the activity you want to catch is about <strong>300ms</strong> long. The model needs a receptive field of at least 300 samples. The toy above computes this live: stack layers, stretch the dilation, and watch the shaded window grow. Here is the design in words: a plain $k=7$ conv first to lock in fine local detail, one stride-2 downsample early to halve the compute, then the dilation doubles each layer up to 16 and holds there for the last one. That final hold is what lands the total at exactly 379 samples; doubling once more to 32 would have pushed it to 507.
     </p>
     <svg viewBox="0 0 660 280" style="max-width: 660px; width: 100%; height: auto; margin: 1em 0;" role="img" aria-label="Receptive field growth across the 7 layers">
         <line x1="50" y1="240" x2="620" y2="240" stroke="#7f8c8d" stroke-width="1"/>
@@ -1625,13 +1625,13 @@ def conv2d(input, kernel, stride=1, padding=0):
 
     <h2 id="downsampling">Downsampling: Pooling and Strided Convolutions</h2>
     <p>
-        <strong>Pooling</strong> is a form of downsampling achieved by sliding a window over the input and taking a statistic of that window. It doesn't learn; it's hard-coded.
+        <strong>Pooling</strong> is downsampling with training wheels off. Slide a window over the input, keep one statistic per window, throw away the rest. It learns nothing; it is hard-coded.
     </p>
     <ul>
-        <li><strong>Max-Pooling</strong>: Keeps only the maximum value in the window. It is translationally invariant, keeps strong activations, ignores noise, and highlights dominant signals. However, max-pooling can lose spatial detail.</li>
-        <li><strong>Average Pooling</strong>: Takes the average of the values. It smooths features, reduces noise, preserves low-frequency info, and keeps more information from the input. For audio and time-series signals where signal energy is more meaningful, average pooling may be more useful.</li>
-        <li><strong>Global Pooling</strong>: Reduces the entire spatial or temporal dimension to one value per channel. You get one average or max per channel. Global pooling removes dimensions, reduces parameters, can replace fully-connected layers, and helps reduce overfitting.</li>
-        <li><strong>Adaptive Pooling</strong>: Adjusts the window size and stride automatically so that the output has a target shape, no matter the input size.</li>
+        <li><strong>Max-Pooling</strong>: keeps only the biggest value in each window. Strong activations survive, noise dies. The price: everything except the winner is gone, so fine spatial detail goes with it.</li>
+        <li><strong>Average Pooling</strong>: takes the mean instead. Smoother, keeps more of the input's energy. For audio and time-series, where energy matters more than peaks, this is often the better call.</li>
+        <li><strong>Global Pooling</strong>: squashes the whole map to one number per channel. No parameters, no fully-connected layer to train, less overfitting. Cheap, and it works.</li>
+        <li><strong>Adaptive Pooling</strong>: you name the output shape and it picks the window and stride itself, whatever the input size. Handy when inputs arrive in different sizes.</li>
     </ul>
     <p>
         A regular convolution with a <strong>stride &gt; 1</strong> also causes downsampling, just like pooling. It's a learnable kernel versus the hardcoded pooling, although it is not as translation-invariant. Strided convolution may lose spatial sharpness and can cause <strong>aliasing</strong> if not tuned carefully. Aliasing happens when you downsample a signal without removing high-frequency components first, causing those components to be misrepresented as incorrect lower-frequency artifacts.
@@ -1694,18 +1694,7 @@ class SeparableConv2D(nn.Module):
         x = self.pointwise(x)
         return x
     </code></pre>
-    <p>The total number of parameters for <code>C_in=32</code>, <code>C_out=64</code>, and <code>kernel_size=3x3</code>:</p>
-    <div class="stat-grid">
-        <div class="stat-card">
-            <div class="stat-num">18,432</div>
-            <div class="stat-label">Standard convolution params (32 x 64 x 3 x 3)</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-num">2,336</div>
-            <div class="stat-label">Depthwise separable params: (32 x 3 x 3) + (32 x 64 x 1 x 1) = 288 + 2,048</div>
-            <div class="stat-note">About 8x fewer parameters</div>
-        </div>
-    </div>
+    <p>Count the parameters for <code>C_in=32</code>, <code>C_out=64</code>, and <code>kernel_size=3x3</code>: a standard conv needs 32 x 64 x 9 = <strong>18,432</strong>, while the separable version needs 32 x 9 + 32 x 64 = 288 + 2,048 = <strong>2,336</strong>. Same spatial reach, about 8x fewer parameters. The toy below opens on exactly these numbers.</p>
     <h3>The parameter duel</h3>
     <p>
         Same spatial reach, fewer parameters, but where do they actually go? Drag the output channels up. The standard bar explodes because every new output channel needs a full k by k kernel for every input channel. The separable bar shrugs: its depthwise part does not know C_out exists. Now set the kernel to 1 and watch separable lose. The trick only pays when the kernel has spatial extent.
@@ -1952,7 +1941,7 @@ self.block = nn.Sequential(
 
     <h3>Watch batch norm outrun plain training</h3>
     <p>
-        BatchNorm's pitch was speed. The paper's Figure 2 puts five training curves on one plot: plain Inception and four batch-normalized variants, accuracy versus training steps. I turned it into a race. The dots ride the paper's real curves (the overlay paths are traced from the paper's vector figure file, not eyeballed from the image). Press Play and watch BN-x5 cross the 72.2% line in 2.1M steps while plain Inception is still crawling toward 31.0M. The paper's claim: 14 times fewer steps.
+        BatchNorm's pitch was speed. The paper's Figure 2 puts five training curves on one plot: plain Inception and four batch-normalized variants, accuracy versus training steps. I turned it into a race. The dots ride the paper's real curves (the overlay paths are traced from the paper's vector figure file, not eyeballed from the image). As it plays, BN-x5 crosses the 72.2% line in 2.1M steps while plain Inception is still crawling toward 31.0M. The paper's claim: 14 times fewer steps.
     </p>
     <blockquote class="paper-cite">
         Ioffe, S. and Szegedy, C. <em>Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift.</em> ICML 2015. arXiv:1502.03167. <a href="https://arxiv.org/abs/1502.03167">arxiv.org/abs/1502.03167</a>
@@ -2580,12 +2569,12 @@ class SEBlock(nn.Module):
         The channels from all branches are then concatenated. The <code>1x1</code> convolutions before the expensive <code>3x3</code> and <code>5x5</code> branches squeeze the channels down first, so the big kernels stay affordable. Inception also uses <strong>factorized convolutions</strong> (e.g., using two <code>3x3</code>s instead of one <code>5x5</code>). Newer versions combine Inception blocks with residual connections.
     </p>
     <p>
-        We have learned about the basics of CNNs: kernels, dilation, and more. We learned about the receptive field and how to calculate it. We learned about depthwise, pointwise, and separable convolutions. We learned about pooling and strided convolution. We learned about batch normalization and temporal/causal convolution blocks. And we looked at a number of popular CNN architectures and how they employ these techniques.
+        Here is the whole toolbox in one breath. Kernels stamp one small pattern detector everywhere. Dilation stretches the window without stretching the parameter bill. The receptive-field recurrence tells you exactly how much of the input each neuron sees. Separable convolutions split the spatial work from the channel mixing and cut the parameter count to roughly an eighth. Pooling and strided convs downsample, one hard-coded and one learned. Batch norm steadies the training. Causal blocks keep the future out of the past. The famous architectures are these same parts, rearranged.
     </p>
 
     <h3>Famous architectures, layer by layer</h3>
     <p>
-        212 and 427 are not magic numbers. They are what you get when you run the recurrence from the receptive field section over the actual layer lists. Pick an architecture below and press Play. Watch the window crawl through the 3x3s and then leap every time a pool doubles the jump. That leap is the whole story: stride is what makes receptive fields explode. The 3x3s are just along for the ride.
+        212 and 427 are not magic numbers. They are what you get when you run the recurrence from the receptive field section over the actual layer lists. Pick an architecture below. As it plays, the window crawls through the 3x3s and then leaps every time a pool doubles the jump. That leap is the whole story: stride is what makes receptive fields explode. The 3x3s are just along for the ride.
     </p>
     <div class="demo" id="archToy">
         <div class="demo-controls">
@@ -2836,7 +2825,7 @@ class SEBlock(nn.Module):
         The VGG paper asked the bluntest question in deep learning: what happens if we just keep stacking layers? Same 3x3 convolutions, same max-pooling, just more of them. Config A has 11 weight layers. Config E has 19. Everything else is held fixed, so any change in error is the depth talking.
     </p>
     <p>
-        Below is the paper's actual Table 3, single-test-scale results. I turned its S=256/Q=256 column into a race. Press Play and watch the top-5 error bar as the configs step from A to E. It falls, and falls, and then at E it ticks back up. That tick-up is the whole lesson, and it is the paper's own conclusion, not my commentary: "The error rate of our architecture saturates when the depth reaches 19 layers."
+        Below is the paper's actual Table 3, single-test-scale results. I turned its S=256/Q=256 column into a race. As the configs step from A to E, the top-5 error bar falls, and falls, and then at E it ticks back up. That tick-up is the whole lesson, and it is the paper's own conclusion, not my commentary: "The error rate of our architecture saturates when the depth reaches 19 layers."
     </p>
     <blockquote class="paper-cite">
         Simonyan, K. and Zisserman, A. <em>Very Deep Convolutional Networks for Large-Scale Image Recognition.</em> ICLR 2015. arXiv:1409.1556. <a href="https://arxiv.org/abs/1409.1556">arxiv.org/abs/1409.1556</a>
@@ -2958,9 +2947,9 @@ class SEBlock(nn.Module):
             { name: 'B', layers: 13, top5: 9.9, top1: 28.7, params: 133,
               blocks: [['c',64],['c',64],['p'],['c',128],['c',128],['p'],['c',256],['c',256],['p'],['c',512],['c',512],['p'],['c',512],['c',512],['p'],['f']],
               note: 'B, 13 layers: 9.9%. Deeper is better, so far. The paper also notes B beats a shallow net of five 5x5 layers (same receptive fields) by 7 percentage points top-1.' },
-            { name: 'C', layers: 16, top5: 9.4, top1: 28.1, params: 134,
+            { name: 'C', layers: 16, top5: 9.3, top1: 28.1, params: 134,
               blocks: [['c',64],['c',64],['p'],['c',128],['c',128],['p'],['c',256],['c',256],['c1',256],['p'],['c',512],['c',512],['c1',512],['p'],['c',512],['c',512],['c1',512],['p'],['f']],
-              note: 'C, 16 layers: 9.4%. Still falling. C mixes in 1x1 layers; D will show that all-3x3 is better at the same depth.' },
+              note: 'C, 16 layers: 9.3%. Still falling. C mixes in 1x1 layers; D will show that all-3x3 is better at the same depth.' },
             { name: 'D', layers: 16, top5: 8.8, top1: 27.0, params: 138,
               blocks: [['c',64],['c',64],['p'],['c',128],['c',128],['p'],['c',256],['c',256],['c',256],['p'],['c',512],['c',512],['c',512],['p'],['c',512],['c',512],['c',512],['p'],['f']],
               note: 'D, 16 layers: 8.8%. Same depth as C, but pure 3x3 beats C\u2019s 1x1 layers. Depth plus the right filter size.' },
@@ -3088,21 +3077,6 @@ class SEBlock(nn.Module):
             <div class="stat-num">~99.2%</div>
             <div class="stat-label">Tiny LeNet-style CNN test accuracy on MNIST</div>
             <div class="stat-note">Reference result, LeCun et al. 1998</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-num">212 <span class="stat-unit">pixels</span></div>
-            <div class="stat-label">Theoretical receptive field, VGG-16</div>
-            <div class="stat-note">Computed from architecture</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-num">427 <span class="stat-unit">pixels</span></div>
-            <div class="stat-label">Theoretical receptive field, ResNet-50</div>
-            <div class="stat-note">Luo et al. 2016</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-num">18,432 <span class="stat-vs">vs</span> 2,336</div>
-            <div class="stat-label">Depthwise separable vs standard conv params (32 in, 64 out, 3x3)</div>
-            <div class="stat-note">~8x fewer parameters</div>
         </div>
     </div>
     <p>

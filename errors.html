@@ -842,11 +842,11 @@
         step = 0; finished = false;
         playBtn.textContent = 'Play';
         draw(); updateStats();
-        raceHideNarr(true);
+        raceHideNarr(600);
       }
 
       function stop() {
-        if (timer) { clearInterval(timer); timer = null; }
+        if (timer) { clearTimeout(timer); timer = null; }
       }
 
       var raceNarr = document.getElementById('optRace-narr');
@@ -865,11 +865,10 @@
         raceNarr.textContent = RACE_PHASES[i];
         raceNarr.classList.add('on');
       }
-      function raceHideNarr(now) {
+      function raceHideNarr(ms) {
         if (!raceNarr) return;
         if (raceNarrHide) { clearTimeout(raceNarrHide); raceNarrHide = null; }
-        if (now) { raceNarr.classList.remove('on'); return; }
-        raceNarrHide = setTimeout(function () { raceNarr.classList.remove('on'); raceNarrHide = null; }, 600);
+        raceNarrHide = setTimeout(function () { raceNarr.classList.remove('on'); raceNarrHide = null; }, ms == null ? 600 : ms);
       }
 
       function tick() {
@@ -886,7 +885,7 @@
           });
         }
         var done = step >= STEPS || activeOpts().every(function (w) { return states[w].diverged; });
-        if (done) { stop(); finished = true; playBtn.textContent = 'Play'; raceHideNarr(false); }
+        if (done) { stop(); finished = true; playBtn.textContent = 'Play'; raceHideNarr(2000); }
         else { raceShowNarr(Math.ceil(step / PER_TICK)); }
         draw(); updateStats();
       }
@@ -1113,17 +1112,23 @@
       lrSlider.addEventListener('input', function () {
         lr = Math.pow(10, parseFloat(lrSlider.value));
         lrVal.textContent = lr < 0.1 ? lr.toFixed(3) : lr.toFixed(2);
-        raceHideNarr(true);
+        raceHideNarr(600);
         reset();
       });
-      cv.addEventListener('pointerdown', function () { raceHideNarr(true); });
-      inset.addEventListener('pointerdown', function () { raceHideNarr(true); });
+      cv.addEventListener('pointerdown', function () { raceHideNarr(600); });
+      inset.addEventListener('pointerdown', function () { raceHideNarr(600); });
       playBtn.addEventListener('click', function () {
         if (finished) reset();
-        if (timer) { stop(); playBtn.textContent = 'Play'; raceHideNarr(false); return; }
+        if (timer) { stop(); playBtn.textContent = 'Play'; raceHideNarr(2000); return; }
         playBtn.textContent = 'Pause';
         playScrollEnsure(document.getElementById('optRace'));
-        timer = setInterval(tick, 500);
+        function raceSchedule() {
+          timer = setTimeout(function () {
+            tick();
+            if (timer) raceSchedule();
+          }, narrStepMs(raceNarr, 500));
+        }
+        raceSchedule();
       });
       resetBtn.addEventListener('click', reset);
 
@@ -1366,10 +1371,10 @@
         workedEl.innerHTML = 'L(' + fmtC(C) + ') = 1.5 + 2.0 x ' + Math.pow(C, -ALPHA).toFixed(4) + ' = <strong>' + L.toFixed(4) + '</strong>';
       }
 
-      function stopPlay() {
+      function stopPlay(hideMs) {
         playing = false; playBtn.textContent = 'Play';
-        if (playTimer) { clearInterval(playTimer); playTimer = null; }
-        slbHideNarr(false);
+        if (playTimer) { clearTimeout(playTimer); playTimer = null; }
+        slbHideNarr(hideMs == null ? 2000 : hideMs);
       }
       var slbNarr = document.getElementById('slBudget-narr');
       var slbNarrHide = null;
@@ -1399,27 +1404,30 @@
         slbNarr.textContent = SLB_NARR[idx];
         slbNarr.classList.add('on');
       }
-      function slbHideNarr(now) {
+      function slbHideNarr(ms) {
         if (!slbNarr) return;
         if (slbNarrHide) { clearTimeout(slbNarrHide); slbNarrHide = null; }
-        if (now) { slbNarr.classList.remove('on'); return; }
-        slbNarrHide = setTimeout(function () { slbNarr.classList.remove('on'); slbNarrHide = null; }, 600);
+        slbNarrHide = setTimeout(function () { slbNarr.classList.remove('on'); slbNarrHide = null; }, ms == null ? 600 : ms);
       }
       playBtn.addEventListener('click', function () {
-        if (playing) { stopPlay(); return; }
+        if (playing) { stopPlay(2000); return; }
         playing = true; playBtn.textContent = 'Pause';
         if (parseFloat(slider.value) >= 23.99) { slider.value = '18'; }
         playScrollEnsure(document.getElementById('slBudget'));
         /* Play: sweep the budget in 0.3-dex steps, 400ms per stop (20 stops, about 8s). */
-        playTimer = setInterval(function () {
-          var v = Math.round((parseFloat(slider.value) + 0.3) * 10) / 10;
-          var done = v >= 24;
-          if (done) { v = 24; }
-          slider.value = String(v);
-          draw();
-          slbShowNarr(v);
-          if (done) { stopPlay(); }
-        }, 400);
+        function slbSchedule() {
+          playTimer = setTimeout(function () {
+            var v = Math.round((parseFloat(slider.value) + 0.3) * 10) / 10;
+            var done = v >= 24;
+            if (done) { v = 24; }
+            slider.value = String(v);
+            draw();
+            slbShowNarr(v);
+            if (done) { stopPlay(2000); return; }
+            slbSchedule();
+          }, narrStepMs(slbNarr, 400));
+        }
+        slbSchedule();
       });
       function setFromEvent(ev) {
         var r = cv.getBoundingClientRect();
@@ -1434,8 +1442,8 @@
       cv.addEventListener('pointermove', function (ev) { if (dragging) { setFromEvent(ev); } });
       cv.addEventListener('pointerup', function () { dragging = false; });
       cv.addEventListener('pointercancel', function () { dragging = false; });
-      slider.addEventListener('input', function () { stopPlay(); slbHideNarr(true); draw(); });
-      cv.addEventListener('pointerdown', function () { slbHideNarr(true); });
+      slider.addEventListener('input', function () { stopPlay(600); slbHideNarr(600); draw(); });
+      cv.addEventListener('pointerdown', function () { slbHideNarr(600); });
       axesBtn.addEventListener('click', function () {
         logMode = !logMode;
         axesBtn.textContent = logMode ? 'linear axes' : 'log-log axes';
@@ -1591,10 +1599,10 @@
           ar.toFixed(4) + '</strong> over ' + n + ' usable runs.';
       }
 
-      function stopPlay() {
+      function stopPlay(hideMs) {
         playing = false; playBtn.textContent = 'Play';
-        if (playTimer) { clearInterval(playTimer); playTimer = null; }
-        sllHideNarr(false);
+        if (playTimer) { clearTimeout(playTimer); playTimer = null; }
+        sllHideNarr(hideMs == null ? 2000 : hideMs);
       }
       var sllNarr = document.getElementById('slLinf-narr');
       var sllNarrHide = null;
@@ -1618,31 +1626,34 @@
           }
         }
       }
-      function sllHideNarr(now) {
+      function sllHideNarr(ms) {
         if (!sllNarr) return;
         if (sllNarrHide) { clearTimeout(sllNarrHide); sllNarrHide = null; }
-        if (now) { sllNarr.classList.remove('on'); return; }
-        sllNarrHide = setTimeout(function () { sllNarr.classList.remove('on'); sllNarrHide = null; }, 600);
+        sllNarrHide = setTimeout(function () { sllNarr.classList.remove('on'); sllNarrHide = null; }, ms == null ? 600 : ms);
       }
       playBtn.addEventListener('click', function () {
-        if (playing) { stopPlay(); return; }
+        if (playing) { stopPlay(2000); return; }
         playing = true; playBtn.textContent = 'Pause';
         if (parseFloat(slider.value) >= 1.619) { slider.value = '1.30'; }
         playScrollEnsure(document.getElementById('slLinf'));
         /* Play: sweep the guessed floor, 400ms per stop (0.01 steps, about 13s). */
-        playTimer = setInterval(function () {
-          var v = Math.round((parseFloat(slider.value) + 0.01) * 100) / 100;
-          var done = v >= 1.62;
-          if (done) { v = 1.62; }
-          slider.value = v.toFixed(2);
-          draw();
-          sllShowNarr(v);
-          if (done) { stopPlay(); }
-        }, 400);
+        function sllSchedule() {
+          playTimer = setTimeout(function () {
+            var v = Math.round((parseFloat(slider.value) + 0.01) * 100) / 100;
+            var done = v >= 1.62;
+            if (done) { v = 1.62; }
+            slider.value = v.toFixed(2);
+            draw();
+            sllShowNarr(v);
+            if (done) { stopPlay(2000); return; }
+            sllSchedule();
+          }, narrStepMs(sllNarr, 400));
+        }
+        sllSchedule();
       });
-      slider.addEventListener('input', function () { stopPlay(); sllHideNarr(true); draw(); });
+      slider.addEventListener('input', function () { stopPlay(600); sllHideNarr(600); draw(); });
       var sllCv = document.getElementById('slLinfCanvas');
-      sllCv.addEventListener('pointerdown', function () { sllHideNarr(true); });
+      sllCv.addEventListener('pointerdown', function () { sllHideNarr(600); });
       window.addEventListener('resize', draw);
       draw();
     })();
@@ -1825,10 +1836,10 @@
           '<strong>+' + pen.toFixed(4) + ' (+' + penPct.toFixed(1) + '%)</strong> over the optimum (N/D = ' + fmtR(Math.pow(10, bestLogr)) + ').';
       }
 
-      function stopPlay() {
+      function stopPlay(hideMs) {
         playing = false; playBtn.textContent = 'Play';
-        if (playTimer) { clearInterval(playTimer); playTimer = null; }
-        slcHideNarr(false);
+        if (playTimer) { clearTimeout(playTimer); playTimer = null; }
+        slcHideNarr(hideMs == null ? 2000 : hideMs);
       }
       var slcNarr = document.getElementById('slChin-narr');
       var slcNarrHide = null;
@@ -1854,27 +1865,30 @@
         slcNarr.textContent = SLC_NARR[idx];
         slcNarr.classList.add('on');
       }
-      function slcHideNarr(now) {
+      function slcHideNarr(ms) {
         if (!slcNarr) return;
         if (slcNarrHide) { clearTimeout(slcNarrHide); slcNarrHide = null; }
-        if (now) { slcNarr.classList.remove('on'); return; }
-        slcNarrHide = setTimeout(function () { slcNarr.classList.remove('on'); slcNarrHide = null; }, 600);
+        slcNarrHide = setTimeout(function () { slcNarr.classList.remove('on'); slcNarrHide = null; }, ms == null ? 600 : ms);
       }
       playBtn.addEventListener('click', function () {
-        if (playing) { stopPlay(); return; }
+        if (playing) { stopPlay(2000); return; }
         playing = true; playBtn.textContent = 'Pause';
         sSlider.value = '0';
         playScrollEnsure(document.getElementById('slChin'));
         /* Play: sweep the N/D split from 0 to 2 in 0.2-dex steps, 400ms per stop (10 stops, about 4s). */
-        playTimer = setInterval(function () {
-          var v = Math.round((parseFloat(sSlider.value) + 0.2) * 100) / 100;
-          var done = v >= 2;
-          if (done) { v = 2; }
-          sSlider.value = v.toFixed(2);
-          draw();
-          slcShowNarr(v);
-          if (done) { stopPlay(); }
-        }, 400);
+        function slcSchedule() {
+          playTimer = setTimeout(function () {
+            var v = Math.round((parseFloat(sSlider.value) + 0.2) * 100) / 100;
+            var done = v >= 2;
+            if (done) { v = 2; }
+            sSlider.value = v.toFixed(2);
+            draw();
+            slcShowNarr(v);
+            if (done) { stopPlay(2000); return; }
+            slcSchedule();
+          }, narrStepMs(slcNarr, 400));
+        }
+        slcSchedule();
       });
       function setActive(btn) {
         for (var i = 0; i < presetBtns.length; i++) { presetBtns[i].classList.remove('active'); }
@@ -1882,8 +1896,8 @@
       }
       for (var pi = 0; pi < presetBtns.length; pi++) {
         presetBtns[pi].addEventListener('click', function () {
-          stopPlay();
-          slcHideNarr(true);
+          stopPlay(600);
+          slcHideNarr(600);
           var C = CHIN_C;
           var bestL = 1e9, bestLogr = 0, k;
           for (k = 0; k <= 400; k++) {
@@ -1899,8 +1913,8 @@
           draw();
         });
       }
-      sSlider.addEventListener('input', function () { stopPlay(); slcHideNarr(true); setActive(null); draw(); });
-      cv.addEventListener('pointerdown', function () { slcHideNarr(true); });
+      sSlider.addEventListener('input', function () { stopPlay(600); slcHideNarr(600); setActive(null); draw(); });
+      cv.addEventListener('pointerdown', function () { slcHideNarr(600); });
       window.addEventListener('resize', draw);
       draw();
     })();
@@ -2045,10 +2059,10 @@
            'Both bars match: spend on either, or both.');
       }
 
-      function stopPlay() {
+      function stopPlay(hideMs) {
         playing = false; playBtn.textContent = 'Play';
-        if (playTimer) { clearInterval(playTimer); playTimer = null; }
-        slboHideNarr(false);
+        if (playTimer) { clearTimeout(playTimer); playTimer = null; }
+        slboHideNarr(hideMs == null ? 2000 : hideMs);
       }
       var slboNarr = document.getElementById('slBottle-narr');
       var slboNarrHide = null;
@@ -2080,31 +2094,34 @@
         slboNarr.textContent = SLBO_NARR[idx];
         slboNarr.classList.add('on');
       }
-      function slboHideNarr(now) {
+      function slboHideNarr(ms) {
         if (!slboNarr) return;
         if (slboNarrHide) { clearTimeout(slboNarrHide); slboNarrHide = null; }
-        if (now) { slboNarr.classList.remove('on'); return; }
-        slboNarrHide = setTimeout(function () { slboNarr.classList.remove('on'); slboNarrHide = null; }, 600);
+        slboNarrHide = setTimeout(function () { slboNarr.classList.remove('on'); slboNarrHide = null; }, ms == null ? 600 : ms);
       }
       playBtn.addEventListener('click', function () {
-        if (playing) { stopPlay(); return; }
+        if (playing) { stopPlay(2000); return; }
         playing = true; playBtn.textContent = 'Pause';
         if (parseFloat(nSlider.value) >= 8.99) { nSlider.value = '4'; }
         playScrollEnsure(document.getElementById('slBottle'));
         /* Play: sweep the data size in 0.3-dex steps, 400ms per stop. */
-        playTimer = setInterval(function () {
-          var v = Math.round((parseFloat(nSlider.value) + 0.3) * 100) / 100;
-          var done = v >= 9;
-          if (done) { v = 9; }
-          nSlider.value = v.toFixed(2);
-          draw();
-          slboShowNarr(v);
-          if (done) { stopPlay(); }
-        }, 400);
+        function slboSchedule() {
+          playTimer = setTimeout(function () {
+            var v = Math.round((parseFloat(nSlider.value) + 0.3) * 100) / 100;
+            var done = v >= 9;
+            if (done) { v = 9; }
+            nSlider.value = v.toFixed(2);
+            draw();
+            slboShowNarr(v);
+            if (done) { stopPlay(2000); return; }
+            slboSchedule();
+          }, narrStepMs(slboNarr, 400));
+        }
+        slboSchedule();
       });
-      nSlider.addEventListener('input', function () { stopPlay(); slboHideNarr(true); draw(); });
-      pSlider.addEventListener('input', function () { stopPlay(); slboHideNarr(true); draw(); });
-      cv.addEventListener('pointerdown', function () { slboHideNarr(true); });
+      nSlider.addEventListener('input', function () { stopPlay(600); slboHideNarr(600); draw(); });
+      pSlider.addEventListener('input', function () { stopPlay(600); slboHideNarr(600); draw(); });
+      cv.addEventListener('pointerdown', function () { slboHideNarr(600); });
       window.addEventListener('resize', draw);
       draw();
     })();
@@ -2316,11 +2333,11 @@
       }
 
       var doneTimer = null;
-      function stopPlay() {
+      function stopPlay(hideMs) {
         playing = false; playBtn.textContent = 'Play';
-        if (playTimer) { clearInterval(playTimer); playTimer = null; }
+        if (playTimer) { clearTimeout(playTimer); playTimer = null; }
         if (doneTimer) { clearTimeout(doneTimer); doneTimer = null; }
-        slpHideNarr(false);
+        slpHideNarr(hideMs == null ? 2000 : hideMs);
       }
       var slpNarr = document.getElementById('slPredict-narr');
       var slpNarrHide = null;
@@ -2348,39 +2365,42 @@
         slpNarr.textContent = SLP_MILESTONES[4][1];
         slpNarr.classList.add('on');
       }
-      function slpHideNarr(now) {
+      function slpHideNarr(ms) {
         if (!slpNarr) return;
         if (slpNarrHide) { clearTimeout(slpNarrHide); slpNarrHide = null; }
-        if (now) { slpNarr.classList.remove('on'); return; }
-        slpNarrHide = setTimeout(function () { slpNarr.classList.remove('on'); slpNarrHide = null; }, 600);
+        slpNarrHide = setTimeout(function () { slpNarr.classList.remove('on'); slpNarrHide = null; }, ms == null ? 600 : ms);
       }
       playBtn.addEventListener('click', function () {
-        if (playing) { stopPlay(); return; }
+        if (playing) { stopPlay(2000); return; }
         playing = true; playBtn.textContent = 'Pause';
         if (parseFloat(slider.value) >= 23.99) { slider.value = '21'; revealed = false; slpShowNarr(21.0); }
         playScrollEnsure(document.getElementById('slPredict'));
         /* Play: sweep the target budget, 400ms per stop (0.1-dex steps, about 12s). */
-        playTimer = setInterval(function () {
-          var v = Math.round((parseFloat(slider.value) + 0.1) * 100) / 100;
-          if (v >= 22 && !revealed) { revealed = true; }
-          if (v >= 24) {
-            v = 24; slider.value = '24'; draw();
-            slpShowNarr(24.0);
-            clearInterval(playTimer); playTimer = null;
-            doneTimer = setTimeout(function () {
-              doneTimer = null;
-              slpShowDone();
-              stopPlay();
-            }, 400);
-            return;
-          }
-          slider.value = v.toFixed(1);
-          draw();
-          slpShowNarr(v);
-        }, 400);
+        function slpSchedule() {
+          playTimer = setTimeout(function () {
+            var v = Math.round((parseFloat(slider.value) + 0.1) * 100) / 100;
+            if (v >= 22 && !revealed) { revealed = true; }
+            if (v >= 24) {
+              v = 24; slider.value = '24'; draw();
+              slpShowNarr(24.0);
+              clearTimeout(playTimer); playTimer = null;
+              doneTimer = setTimeout(function () {
+                doneTimer = null;
+                slpShowDone();
+                stopPlay(2000);
+              }, 400);
+              return;
+            }
+            slider.value = v.toFixed(1);
+            draw();
+            slpShowNarr(v);
+            slpSchedule();
+          }, narrStepMs(slpNarr, 400));
+        }
+        slpSchedule();
       });
-      slider.addEventListener('input', function () { stopPlay(); slpHideNarr(true); draw(); });
-      cv.addEventListener('pointerdown', function () { slpHideNarr(true); });
+      slider.addEventListener('input', function () { stopPlay(600); slpHideNarr(600); draw(); });
+      cv.addEventListener('pointerdown', function () { slpHideNarr(600); });
       window.addEventListener('resize', draw);
       draw();
     })();
@@ -2597,18 +2617,18 @@
         bvNarr.textContent = BV_NARR[i];
         bvNarr.classList.add('on');
       }
-      function bvHideNarr() {
+      function bvHideNarr(ms) {
         if (!bvNarr) return;
-        if (bvNarrHide) { clearTimeout(bvNarrHide); }
-        bvNarrHide = setTimeout(function () { bvNarr.classList.remove('on'); bvNarrHide = null; }, 600);
+        if (bvNarrHide) { clearTimeout(bvNarrHide); bvNarrHide = null; }
+        bvNarrHide = setTimeout(function () { bvNarr.classList.remove('on'); bvNarrHide = null; }, ms == null ? 600 : ms);
       }
 
-      function bvStop() {
-        if (bvTimer) { clearInterval(bvTimer); bvTimer = null; }
+      function bvStop(hideMs) {
+        if (bvTimer) { clearTimeout(bvTimer); bvTimer = null; }
         bvPlaying = false;
         playBtn.textContent = 'Play';
         playBtn.classList.remove('active');
-        bvHideNarr();
+        bvHideNarr(hideMs == null ? 2000 : hideMs);
       }
 
       function bvTick() {
@@ -2618,22 +2638,28 @@
         draw();
         var idx = Math.round((data - 35) / 5);
         if (idx >= 0 && idx < BV_NARR.length) { bvShowNarr(idx); }
-        if (data >= 100) { bvStop(); }
+        if (data >= 100) { bvStop(2000); }
       }
 
       playBtn.addEventListener('click', function () {
-        if (bvPlaying) { bvStop(); return; }
+        if (bvPlaying) { bvStop(2000); return; }
         if (parseFloat(dataSlider.value) >= 100) { dataSlider.value = String(BV_DATA_START); }
         bvPlaying = true;
         playBtn.textContent = 'Pause';
         playBtn.classList.add('active');
         playScrollEnsure(document.getElementById('bvToy'));
-        bvTimer = setInterval(bvTick, BV_TICK_MS);
+        function bvSchedule() {
+          bvTimer = setTimeout(function () {
+            bvTick();
+            if (bvTimer) bvSchedule();
+          }, narrStepMs(bvNarr, BV_TICK_MS));
+        }
+        bvSchedule();
       });
 
-      capSlider.addEventListener('input', function () { bvStop(); bvHideNarr(); draw(); });
-      dataSlider.addEventListener('input', function () { bvStop(); bvHideNarr(); draw(); });
-      document.getElementById('bvCanvas').addEventListener('pointerdown', bvHideNarr);
+      capSlider.addEventListener('input', function () { bvStop(600); bvHideNarr(600); draw(); });
+      dataSlider.addEventListener('input', function () { bvStop(600); bvHideNarr(600); draw(); });
+      document.getElementById('bvCanvas').addEventListener('pointerdown', function () { bvHideNarr(600); });
       var rt = null;
       window.addEventListener('resize', function () {
         if (rt) { clearTimeout(rt); }

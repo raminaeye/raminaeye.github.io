@@ -525,7 +525,7 @@
        <span><span class="sw" style="background:#2ca02c"></span>Cluster C</span>
        <span><span class="sw" style="background:#d62728"></span>Cluster D</span>
      </div>
-     <div class="demo-stats" id="tsneStats">Computing neighbor probabilities...</div>
+     <div class="demo-stats" id="tsneStats">Scroll the tool into view to start the live computation.</div>
      <div class="caption-card" id="tsneCaption">
        <p class="cc-head">How to play</p>
        <ul>
@@ -624,7 +624,7 @@
      /* ---- data: 4 clusters in 24-D, each with 3 sub-clusters (fixed seed) ---- */
      var X = new Float64Array(N * D);
      var lab = new Uint8Array(N);
-     (function buildData() {
+     function buildData() {
        var rng = mulberry32(2026);
        var g = makeNormal(rng);
        var b, s, k, d, i;
@@ -645,58 +645,72 @@
            }
          }
        }
-     })();
+     }
 
      var dist2 = new Float64Array(N * N);
-     (function buildDist() {
+     function buildDist() {
        for (var i = 0; i < N; i++) for (var j = 0; j < N; j++) {
          var s = 0;
          for (var d = 0; d < D; d++) { var t = X[i * D + d] - X[j * D + d]; s += t * t; }
          dist2[i * N + j] = s;
        }
-     })();
+     }
 
-     /* ---- P matrix: binary search on sigma_i per point ---- */
+     /* ---- P matrix: binary search on sigma_i per point.
+        Runs in small row chunks via setTimeout so the page stays responsive.
+        A token cancels a stale run when a newer one starts. ---- */
      var S = null;
-     function computeP(perp) {
-       var P = new Float64Array(N * N);
-       var row = new Float64Array(N);
-       var logPerp = Math.log(perp) / Math.LN2;
-       var i, j, it;
-       for (i = 0; i < N; i++) {
-         var lo = 1e-10, hi = 1e10, sigma = 1;
-         for (it = 0; it < 50; it++) {
-           sigma = Math.sqrt(lo * hi);
-           var sum = 0;
-           for (j = 0; j < N; j++) {
-             if (j === i) continue;
-             var v = Math.exp(-dist2[i * N + j] / (2 * sigma * sigma));
-             row[j] = v; sum += v;
-           }
-           if (!(sum > 0)) sum = 1;
-           var H = 0;
-           for (j = 0; j < N; j++) {
-             if (j === i) continue;
-             var p = row[j] / sum;
-             if (p > 0) H -= p * Math.log(p) / Math.LN2;
-           }
-           if (H > logPerp) hi = sigma; else lo = sigma;
-         }
+     var pJobToken = 0;
+     var P_ROWS_PER_CHUNK = 10;
+     function computePRow(P, i, logPerp, row) {
+       var lo = 1e-10, hi = 1e10, sigma = 1, it, j;
+       for (it = 0; it < 50; it++) {
          sigma = Math.sqrt(lo * hi);
-         var sum2 = 0;
+         var sum = 0;
          for (j = 0; j < N; j++) {
            if (j === i) continue;
-           var v2 = Math.exp(-dist2[i * N + j] / (2 * sigma * sigma));
-           row[j] = v2; sum2 += v2;
+           var v = Math.exp(-dist2[i * N + j] / (2 * sigma * sigma));
+           row[j] = v; sum += v;
          }
-         if (!(sum2 > 0)) sum2 = 1;
-         for (j = 0; j < N; j++) { if (j === i) continue; P[i * N + j] = row[j] / sum2; }
+         if (!(sum > 0)) sum = 1;
+         var H = 0;
+         for (j = 0; j < N; j++) {
+           if (j === i) continue;
+           var p = row[j] / sum;
+           if (p > 0) H -= p * Math.log(p) / Math.LN2;
+         }
+         if (H > logPerp) hi = sigma; else lo = sigma;
        }
-       var SJ = new Float64Array(N * N);
-       for (i = 0; i < N; i++) for (j = 0; j < N; j++) {
-         if (i !== j) SJ[i * N + j] = (P[i * N + j] + P[j * N + i]) / (2 * N);
+       sigma = Math.sqrt(lo * hi);
+       var sum2 = 0;
+       for (j = 0; j < N; j++) {
+         if (j === i) continue;
+         var v2 = Math.exp(-dist2[i * N + j] / (2 * sigma * sigma));
+         row[j] = v2; sum2 += v2;
        }
-       return SJ;
+       if (!(sum2 > 0)) sum2 = 1;
+       for (j = 0; j < N; j++) { if (j === i) continue; P[i * N + j] = row[j] / sum2; }
+     }
+     function computePChunked(perpV, onProgress, onDone) {
+       var token = ++pJobToken;
+       var P = new Float64Array(N * N);
+       var row = new Float64Array(N);
+       var logPerp = Math.log(perpV) / Math.LN2;
+       var i = 0;
+       function chunk() {
+         if (token !== pJobToken) return; /* superseded by a newer run */
+         var end = Math.min(i + P_ROWS_PER_CHUNK, N);
+         for (; i < end; i++) computePRow(P, i, logPerp, row);
+         if (onProgress) onProgress(i / N);
+         if (i < N) { setTimeout(chunk, 0); return; }
+         var SJ = new Float64Array(N * N);
+         for (var a = 0; a < N; a++) for (var b = 0; b < N; b++) {
+           if (a !== b) SJ[a * N + b] = (P[a * N + b] + P[b * N + a]) / (2 * N);
+         }
+         S = SJ;
+         onDone();
+       }
+       chunk();
      }
 
      /* ---- optimizer state ---- */
@@ -793,7 +807,24 @@
      }
 
      /* ---- drawing: fixed scale, no auto-zoom ---- */
+     function drawPlaceholder() {
+       ctx.fillStyle = '#ffffff';
+       ctx.fillRect(0, 0, W, H);
+       ctx.strokeStyle = '#e3e8ee';
+       ctx.lineWidth = 1;
+       ctx.beginPath();
+       ctx.moveTo(W / 2, 16); ctx.lineTo(W / 2, H - 16);
+       ctx.moveTo(16, H / 2); ctx.lineTo(W - 16, H / 2);
+       ctx.stroke();
+       ctx.fillStyle = '#7f8c9b';
+       ctx.textAlign = 'center';
+       ctx.font = '600 18px sans-serif';
+       ctx.fillText('Live t-SNE tool', W / 2, H / 2 - 14);
+       ctx.font = '14px sans-serif';
+       ctx.fillText('Scroll into view to start the computation.', W / 2, H / 2 + 14);
+     }
      function draw() {
+       if (!initialized) { drawPlaceholder(); return; }
        ctx.fillStyle = '#ffffff';
        ctx.fillRect(0, 0, W, H);
        var i, cx, cy;
@@ -816,7 +847,9 @@
 
      function updateStats() {
        var s;
-       if (mode === 'pca') {
+       if (!initialized) {
+         s = 'Scroll the tool into view to start the live computation.';
+       } else if (mode === 'pca') {
          s = 'PCA projection of the same 300 points: deterministic and linear. Back to t-SNE to play again.';
        } else if (!S) {
          s = 'Computing neighbor probabilities...';
@@ -851,6 +884,7 @@
      }
 
      playBtn.addEventListener('click', function () {
+       tsneEnsureInit();
        if (timer) { stop(); return; }
        if (iter >= MAX_ITER && mode === 'tsne' && S) resetY();
        start();
@@ -859,12 +893,15 @@
      playBtn.disabled = true;
 
      resetBtn.addEventListener('click', function () {
+       tsneEnsureInit();
        if (mode !== 'tsne' || !S) return;
        resetY(); draw(); updateStats();
      });
 
      pcaBtn.addEventListener('click', function () {
+       tsneEnsureInit();
        if (mode === 'tsne') {
+         ensureData();
          if (!pcaXY) computePCA();
          mode = 'pca'; stop();
          pcaBtn.textContent = 'Back to t-SNE';
@@ -880,6 +917,7 @@
      lrSlider.addEventListener('input', function () {
        lr = parseInt(lrSlider.value, 10) || 200;
        lrVal.textContent = lr;
+       tsneEnsureInit();
        /* visible immediately: nudge the map even while paused */
        if (!timer && mode === 'tsne' && S && iter < MAX_ITER) { stepTsne(2); draw(); updateStats(); }
      });
@@ -891,33 +929,87 @@
        var deb = (which === 'perp') ? perpDeb : exDeb;
        if (deb) clearTimeout(deb);
        deb = setTimeout(function () {
-         if (which === 'perp') { perpDeb = null; S = computeP(perp); }
-         else { exDeb = null; }
-         resetY(); draw(); updateStats();
-         start(); /* star knob lands in one gesture */
+         if (which === 'perp') {
+           perpDeb = null;
+           if (!initialized) return; /* init in flight picks up the new value */
+           playBtn.disabled = true;
+           computePChunked(perp,
+             function (frac) {
+               statsEl.textContent = 'Computing neighbor probabilities... ' + Math.round(frac * 100) + '%';
+             },
+             function () {
+               resetY(); draw(); updateStats();
+               playBtn.disabled = false;
+               start(); /* star knob lands in one gesture */
+             });
+         } else {
+           exDeb = null;
+           if (!initialized) return;
+           resetY(); draw(); updateStats();
+           start(); /* star knob lands in one gesture */
+         }
        }, 150);
        if (which === 'perp') perpDeb = deb; else exDeb = deb;
      }
      perpSlider.addEventListener('input', function () {
        perp = parseInt(perpSlider.value, 10) || 30;
        perpVal.textContent = perp;
+       tsneEnsureInit();
+       if (!initialized) return;
        scheduleRecompute('perp');
      });
      exSlider.addEventListener('input', function () {
        exagg = parseInt(exSlider.value, 10) || 4;
        exVal.textContent = exagg;
+       tsneEnsureInit();
+       if (!initialized) return;
        scheduleRecompute('ex');
      });
 
-     /* ---- init: build P, then enable and autoplay (no scroll on load) ---- */
-     resetY();
-     draw();
-     setTimeout(function () {
-       S = computeP(perp);
-       resetY(); draw(); updateStats();
-       playBtn.disabled = false;
-       start(false);
-     }, 30);
+     /* ---- lazy init: everything heavy waits for scroll-into-view or first
+        touch. First paint draws only the placeholder: no data build, no P
+        matrix, no autoplay. ---- */
+     var initialized = false, initRequested = false, dataBuilt = false;
+     function ensureData() {
+       if (dataBuilt) return;
+       dataBuilt = true;
+       buildData(); buildDist();
+     }
+     function tsneEnsureInit() {
+       if (initialized || initRequested) return;
+       initRequested = true;
+       statsEl.textContent = 'Computing neighbor probabilities...';
+       setTimeout(function () {
+         ensureData(); resetY();
+         computePChunked(perp,
+           function (frac) {
+             statsEl.textContent = 'Computing neighbor probabilities... ' + Math.round(frac * 100) + '%';
+           },
+           function () {
+             initialized = true;
+             resetY(); draw(); updateStats();
+             playBtn.disabled = false;
+             start(false); /* autoplay, no scroll */
+           });
+       }, 30);
+     }
+     var demoEl = document.getElementById('tsneDemo');
+     if (demoEl) {
+       demoEl.addEventListener('pointerdown', function () { tsneEnsureInit(); });
+       if ('IntersectionObserver' in window) {
+         var tsneIO = new IntersectionObserver(function (entries) {
+           for (var k = 0; k < entries.length; k++) {
+             if (entries[k].isIntersecting) {
+               tsneEnsureInit();
+               tsneIO.disconnect();
+               break;
+             }
+           }
+         }, { rootMargin: '240px 0px' });
+         tsneIO.observe(demoEl);
+       }
+     }
+     drawPlaceholder();
    })();
    </script>
 

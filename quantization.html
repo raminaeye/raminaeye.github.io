@@ -560,9 +560,9 @@ model.qconfig = qconfig_hist
          <strong>How to play</strong>
          <ul>
            <li><strong>The point:</strong> One loud weight sets the quantization scale for all 288 weights, so the quiet ones get crushed into a handful of bins. Watch what happens when that one weight is removed from the scale.</li>
-           <li><strong>What you'll see:</strong> The 0.427 weight blinks at the far edge of the histogram, then drops out of the scale: the faint bin grid relayouts finer, the orange quantized outline hugs the blue bars tighter, and the MSE readout falls. Then the weight comes back and the verdict line names the culprit.</li>
+           <li><strong>What you'll see:</strong> The 0.427 weight blinks at the far edge of the histogram, then drops out of the scale: the x-axis trims to the outlier-free range and the histogram visibly re-bins into twice as many narrower bars across the same width, the orange quantized outline redraws around them, the scale readout shrinks, and the MSE readout falls. Then the weight comes back and the verdict line names the culprit.</li>
            <li><strong>Filter (0 to 31):</strong> Picks which filter's weights get red triangles on the histogram. Try filter 15, the ticked one, and watch the red dashed line sit on the 0.427 weight at the far edge that sets the scale.</li>
-           <li><strong>Play:</strong> runs the three-beat outlier experiment in 800ms steps: blink, exclude, verdict; the filter slider locks while it runs, the scale readout shrinks on the exclude beat, and the MSE falls with it.</li>
+           <li><strong>Play:</strong> runs the three-beat outlier experiment in 800ms steps: blink, exclude, verdict. On the exclude beat the x-axis trims and the histogram re-bins into 48 narrower bars; the filter slider locks while it runs, the scale readout shrinks on the exclude beat, and the MSE falls with it.</li>
          </ul>
        </div>
        <p class="caption">Quantization error is visible as histogram coarsening. And watch the outlier: filter 15's 0.427 weight stretches the bins for all 287 of its friends.</p>
@@ -979,7 +979,10 @@ model.qconfig = qconfig_hist
      /* Second-largest |w|: the scale when the 0.427 outlier is excluded. */
      var secondMaxAbs = 0;
      for (var si = 0; si < W.length; si++) { var sav = Math.abs(W[si]); if (sav > secondMaxAbs && sav < maxAbs) secondMaxAbs = sav; }
-     var edge = maxAbs; // fixed x-range [-maxAbs, maxAbs] on every beat
+     /* Beat-dependent x-range: the full data range normally, the trimmed range
+        (outlier excluded) on the exclude beat, so the axis, histogram bins and
+        quantization grid all relayout together. */
+     function curEdge() { return excludeOutlier ? secondMaxAbs : maxAbs; }
      var BITS4 = 4, LEVELS4 = 7; // fixed 4-bit symmetric: the unique width where excluding the outlier lowers MSE
 
      function quantize4(excludeOutlier) {
@@ -996,9 +999,11 @@ model.qconfig = qconfig_hist
        return { scale: scale, q: q, xhat: xhat };
      }
      function binOf(w) {
-       var b = Math.floor((w + edge) / (2 * edge) * NBINS);
+       var edge = curEdge();
+       var nbins = excludeOutlier ? NBINS * 2 : NBINS;
+       var b = Math.floor((w + edge) / (2 * edge) * nbins);
        if (b < 0) b = 0;
-       if (b >= NBINS) b = NBINS - 1;
+       if (b >= nbins) b = nbins - 1;
        return b;
      }
      function stats4(excludeOutlier) {
@@ -1045,12 +1050,15 @@ model.qconfig = qconfig_hist
        var FS = 12;
        ctx.font = FS + 'px sans-serif';
 
-       var counts = new Array(NBINS).fill(0);
-       var qcounts = new Array(NBINS).fill(0);
+       /* Exclude beat: twice the histogram bins across the trimmed range, so
+          the distribution itself is drawn with more, narrower bins. */
+       var NBO = excludeOutlier ? NBINS * 2 : NBINS;
+       var counts = new Array(NBO).fill(0);
+       var qcounts = new Array(NBO).fill(0);
        for (var i = 0; i < W.length; i++) counts[binOf(W[i])]++;
        for (var j = 0; j < curStats.xhat.length; j++) qcounts[binOf(curStats.xhat[j])]++;
        var ymax = 0;
-       for (var k = 0; k < NBINS; k++) { if (counts[k] > ymax) ymax = counts[k]; if (qcounts[k] > ymax) ymax = qcounts[k]; }
+       for (var k = 0; k < NBO; k++) { if (counts[k] > ymax) ymax = counts[k]; if (qcounts[k] > ymax) ymax = qcounts[k]; }
        var step = niceStep(ymax / 4);
        var yTop = Math.ceil(ymax / step) * step;
 
@@ -1063,6 +1071,7 @@ model.qconfig = qconfig_hist
        var padL = Math.ceil(maxTickW + FS * 2.6);
        var m = { l: padL, r: 14, t: 26, b: 42 };
        var pw = cssW - m.l - m.r, ph = cssH - m.t - m.b;
+       var edge = curEdge();
        function X(v) { return m.l + (v + edge) / (2 * edge) * pw; }
        function Y(c) { return m.t + ph - c / yTop * ph; }
 
@@ -1083,8 +1092,8 @@ model.qconfig = qconfig_hist
          ctx.beginPath(); ctx.moveTo(bx, m.t); ctx.lineTo(bx, m.t + ph); ctx.stroke();
        }
 
-       var binw = pw / NBINS;
-       for (var b = 0; b < NBINS; b++) {
+       var binw = pw / NBO;
+       for (var b = 0; b < NBO; b++) {
          var x0 = m.l + b * binw;
          if (counts[b] > 0) {
            ctx.fillStyle = 'rgba(52, 152, 219, 0.75)';
@@ -1097,7 +1106,7 @@ model.qconfig = qconfig_hist
        ctx.lineWidth = 2;
        ctx.shadowColor = 'rgba(230, 126, 34, 0.85)';
        ctx.shadowBlur = 3;
-       for (var b2 = 0; b2 < NBINS; b2++) {
+       for (var b2 = 0; b2 < NBO; b2++) {
          if (qcounts[b2] > 0) {
            var qx0 = m.l + b2 * binw;
            ctx.strokeRect(qx0 + 0.5, Y(qcounts[b2]) - 1.5, binw - 1, m.t + ph - Y(qcounts[b2]) + 2);

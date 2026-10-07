@@ -20,6 +20,9 @@
         }
         h1 { font-size: 2.5em; border-bottom: 2px solid #3498db; padding-bottom: 0.3em;}
         .dek { font-size: 1.15em; color: #555; margin-top: 0.2em; }
+        .crumb { margin: 0 0 0.6em; font-size: 1em; }
+        .crumb a { color: #3498db; text-decoration: none; font-weight: 600; }
+        .crumb a:hover { text-decoration: underline; }
         h2 { font-size: 2em; border-bottom: 1px solid #bdc3c7; padding-bottom: 0.2em;}
         h3 { font-size: 1.5em; }
         h4 { font-size: 1.2em; color: #555;}
@@ -452,6 +455,7 @@
         </div>
     </nav>
 
+    <p class="crumb"><a href="tutorial.html">&larr; All tutorials</a></p>
     <h1>Deep Deterministic Policy Gradient (DDPG)</h1>
     <p class="dek">DQN picks buttons. DDPG turns dials.</p>
 
@@ -459,17 +463,15 @@
 
     <p>But here is the question that breaks it: how hard do you twist the shoulder joint? Not which button. How much. A torque is any real number between -1 and 1, and there are infinitely many of them. You cannot argmax over infinity. I hit this exact wall in my RF-DDPG repo, where a double-jointed arm has to hold its hand on a floating target in a Unity ML-Agents task. So this page is the fix: an actor that outputs the move directly, and a critic that judges it.</p>
 
-    <p>This is the third page in the RL series. The first page built the loop: state, action, reward, repeat. The second gave DQN its due: score every button, pick the max. This page is where the buttons run out. You can read it standalone, but the argmax trick lands harder if you have watched it work.</p>
+    <p>A quick note on what is toy and what is real, before we start: the interactive toys on this page are from-scratch JavaScript re-enactments at toy scale, labeled as toys where it matters. The environment facts, the network sizes, the hyperparameters, and the training curve come straight from my RF-DDPG repo. I will tell you which is which every time.</p>
 
-    <p>Roadmap, since this page is long: first you meet the arm and its impossible job, then the exact move DQN cannot make, then the two networks that replace it. After that comes the critic's bill walked line by line, one full update with real numbers, the trick by which the actor climbs the critic, and the three stabilizers that keep the whole thing from exploding. Then the toys, then the real run from my repo.</p>
 
-    <p>One honesty note before we start: the interactive toys on this page are from-scratch JavaScript re-enactments at toy scale, labeled as toys where it matters. The environment facts, the network sizes, the hyperparameters, and the training curve are repo-real, straight from my RF-DDPG repo. I will tell you which is which every time.</p>
 
     <h2>The arm and its impossible job</h2>
 
     <p>Before any algorithm, meet the patient. The Reacher environment is a double-jointed arm bolted to a table: one segment driven by the shoulder, one by the elbow. Floating somewhere in reach is the target, a small glowing ball. The job is dead simple to state and vicious to execute: keep your hand on the ball. Not touch it once and celebrate. Hold it there, trembling as little as possible, for a whole episode.</p>
 
-    <p>What does the arm know about itself? Thirty-three numbers, fresh every step. Some are joint angles: how bent is the shoulder, how bent is the elbow. Some are angular velocities: how fast each joint is swinging right now. And some are positions: where the hand is, where the target is. That is the arm's proprioception, its sense of its own body. Close your eyes and touch your nose. You just ran the same computation on your own private 33 numbers.</p>
+    <p>What does the arm know about itself? Thirty-three numbers, fresh every step. The README describes them as position, rotation, velocity, and angular velocities of the arm. In plain terms: how bent each joint is, how fast it is swinging, where the segments are, and where the target sits. That is the arm's proprioception, its sense of its own body. Close your eyes and touch your nose. You just ran the same computation on your own private 33 numbers.</p>
 
     <p>Here is the strange part: the agent never sees the arm. No camera, no picture, no 3D view. It sees 33 numbers, emits 4 numbers, and gets a number back. The arm you are picturing, the glowing ball, the table, all of that exists only in the physics simulation and in your head. The agent lives in a world made of vectors. Everything it ever learns about "holding the ball" is encoded as patterns across those 33 inputs. When the toy arm on this page flails and then steadies, what you are watching is a vector-world policy getting its patterns right.</p>
 
@@ -501,9 +503,9 @@
 
     <p>DDPG splits the job in two. The <strong>actor</strong> is a policy network: it looks at the state and emits the torques directly, $a = \mu(s)$. No argmax anywhere, no menu, just four numbers out. The <strong>critic</strong> is a Q-network: it looks at a state-action pair and scores it, one number out. The actor proposes, the critic judges, and the actor listens.</p>
 
-    <p>The wiring is repo-real. My actor takes the 33 observation numbers in, runs them through layers of 256, 128, and 64 units, and outputs 4 torques through a tanh. The tanh is doing real work: it squashes every output into [-1, 1], exactly the dials' range, so the network physically cannot ask for an impossible torque. My critic takes the state and the action together, 33 + 4 = 37 numbers in, through 256, 128, 64, and out comes a single Q value. State alone feeds the actor. State plus action feeds the critic. That asymmetry is the whole architecture: one network moves, the other evaluates the move.</p>
+    <p>The wiring comes straight from the repo. My actor takes the 33 observation numbers in, runs them through layers of 256, 128, and 64 units, and outputs 4 torques through a tanh. The tanh is doing real work: it squashes every output into [-1, 1], exactly the dials' range, so the network physically cannot ask for an impossible torque. My critic wires the action in late: the 33 state numbers go through a 256-unit layer first, and only then do the 4 torques join in, 256 + 4 = 260 numbers into the next layer, through 128, 64, and out comes a single Q value. State alone feeds the actor. State first, action after, feeds the critic. That asymmetry is the whole architecture: one network moves, the other evaluates the move.</p>
 
-    <p>One forward pass, toy numbers. The state comes in: shoulder angle 0.3 radians, elbow spinning at -1.2 radians per second, hand at (0.41, 0.18), target at (0.44, 0.20), and 29 more numbers in the same spirit. Through 256, 128, 64, the tanh squeezes the four outputs into [-1, 1]: say [0.62, -0.31, 0.15, -0.44]. Those four numbers go straight to the arm. Then the critic takes the same 33 numbers plus those 4 torques, 37 in total, and returns a single number: 12.4. That is the critic's honest opinion of the move. The actor's entire education is learning to emit torques that make that number bigger.</p>
+    <p>One forward pass, toy numbers. The state comes in: shoulder angle 0.3 radians, elbow spinning at -1.2 radians per second, hand at (0.41, 0.18), target at (0.44, 0.20), and 29 more numbers in the same spirit. Through 256, 128, 64, the tanh squeezes the four outputs into [-1, 1]: say [0.62, -0.31, 0.15, -0.44]. Those four numbers go straight to the arm. Then the critic runs those same 33 numbers through its first 256-unit layer, adds the 4 torques to the 256 outputs, and returns a single number: 12.4. That is the critic's honest opinion of the move. The actor's entire education is learning to emit torques that make that number bigger.</p>
 
     <p>One word in the name deserves attention: deterministic. The actor outputs one action per state, the same torques every time, no dice involved. The alternative is a stochastic policy, which outputs a distribution over actions and samples from it. Stochastic policies explore for free, but they are jittery: sample twice, get two different torques. For a physical arm that should hold still, jitter is the enemy. DDPG chose determinism and bought its exploration separately, with noise added on top. That is a design decision, not a law of nature, and later algorithms made different trades.</p>
 
@@ -518,7 +520,7 @@
     <div class="math-display">$$L = (r + \gamma Q'(s', \mu'(s')) - Q(s,a))^2$$</div>
 
     <ol class="walkthrough-steps">
-      <li>$r$ is the reward you just got: <strong>+0.1</strong> if the hand is on the target, 0 otherwise. The repo-real reward from the Reacher task.</li>
+      <li>$r$ is the reward you just got: <strong>+0.1</strong> if the hand is on the target, 0 otherwise, straight from the repo's Reacher task.</li>
       <li>$\gamma$ is the discount, <strong>0.99</strong> in my repo. Future rewards count, just slightly less than present ones, so the critic prefers control now over control later.</li>
       <li>$Q'(s', \mu'(s'))$ is the <strong>target networks'</strong> guess of future value: the target actor $\mu'$ picks next-step torques, the target critic $Q'$ scores them. The primes mean slow copies, and they get their own section below.</li>
       <li>$Q(s,a)$ is what the critic currently believes about the move you just made.</li>
@@ -561,7 +563,7 @@
 
     <p>Concretely: if a target weight is 0.5000 and the live network's weight is 0.6000, one update sets the target to 0.999 × 0.5000 + 0.001 × 0.6000 = 0.5001. The target barely flinches. Ten thousand updates later it has caught up. That is the pace you want for a bullseye.</p>
 
-    <p><strong>Ornstein-Uhlenbeck noise.</strong> The actor is deterministic: same state in, same torques out, every time. Left alone it never tries anything new, so it repeats its first guess forever and learns nothing. During training I add OU noise to the torques. This is not white-noise jitter. OU noise drifts: each step remembers the last, wandering smoothly like a hand exploring in the dark instead of twitching. That smoothness matters for a physical arm, where torque commands should flow, not stutter. Noise on during training, off at test time. That is the whole deal.</p>
+    <p><strong>Ornstein-Uhlenbeck noise.</strong> The actor is deterministic: same state in, same torques out, every time. Left alone it never tries anything new, so it repeats its first guess forever and learns nothing. During training I add OU noise to the torques. This is not white-noise jitter. OU noise drifts: each step remembers the last, wandering smoothly like a hand exploring in the dark instead of twitching. That smoothness matters for a physical arm, where torque commands should flow, not stutter. Noise on during training; typically off at test time, so the arm can hold still. That is the whole deal.</p>
 
     <p>Why Ornstein-Uhlenbeck specifically, and not plain Gaussian noise? Gaussian noise is amnesiac: each step's jitter is independent, so the torques stutter. OU noise has momentum: each step's noise remembers the last one, so the exploration wanders smoothly. For a physical system with inertia, smooth exploration tries coherent strategies ("push left for a while, see what happens") instead of vibrating in place. The original DDPG paper used OU noise for exactly this reason, and my repo kept it.</p>
 
@@ -660,11 +662,11 @@
       </div>
     </div>
 
-    <h2>Watch it learn to reach</h2>
+    <h2>From flailing to holding the ball</h2>
 
     <p>Enough theory. Here is a two-joint arm, drawn from scratch, learning the Reacher task at toy scale. The slider is training progress. Drag it and watch the arm go from flailing to holding the target, while the critic's value estimate climbs alongside. The fading trail is the hand's recent path: a cloud means flailing, a dot means control.</p>
 
-    <p>What the toy hides, honestly labeled: the real arm moves in 3D with more joints than this flat two-segment sketch, the real state is 33 numbers instead of a cartoon, and the real training took far longer than dragging a slider. What the toy keeps: the shape of learning. Noise shrinking, the trail collapsing from a cloud into a dot, the critic's estimate converging on the real return. If the toy teaches you the shape, the repo numbers below fill in the weight.</p>
+    <p>Where the toy cheats: the real arm moves in 3D, the real state is 33 numbers instead of a cartoon, and the real training took far longer than dragging a slider. What the toy keeps: the shape of learning. Noise shrinking, the trail collapsing from a cloud into a dot, the critic's estimate converging on the real return. If the toy teaches you the shape, the repo numbers below fill in the weight.</p>
 
     <div class="demo" id="armDemo">
       <div class="demo-controls">
@@ -681,7 +683,7 @@
         <span class="critic-num" id="armReward">reward: 0.0</span>
       </div>
       <p class="demo-stats" id="armStats" aria-live="polite"></p>
-      <div class="demo-note">Toy arm, toy scale. The 30 on the critic bar is the repo-real solve score: average 30 over 100 episodes.</div>
+      <div class="demo-note">Toy arm, toy scale. The 30 on the critic bar is the solve score from the repo: average 30 over 100 episodes.</div>
       <div class="cap-card">
         <strong>How to play</strong>
         <ul>
@@ -696,11 +698,11 @@
 
     <p>That was the toy. Here is what actually happened in my RF-DDPG repo, on the real Unity ML-Agents Reacher task.</p>
 
-    <p>The setup was exactly what you read above: a 33-number observation (joint angles, angular velocities, hand and target positions), four torque dials in [-1, 1], +0.1 per step with the hand on the target, and twenty identical arms training in parallel with their scores averaged. The discount was 0.99, the target networks crept at $\tau = 0.001$, and Ornstein-Uhlenbeck noise kept the actors exploring.</p>
+    <p>The setup was exactly what you read above: a 33-number observation (position, rotation, velocity, and angular velocities of the arm), four torque dials in [-1, 1], +0.1 per step with the hand on the target, and twenty identical arms training in parallel with their scores averaged. The discount was 0.99, the target networks crept at $\tau = 0.001$, and Ornstein-Uhlenbeck noise kept the actors exploring.</p>
 
     <p>Those three numbers are choices, not accidents. Gamma 0.99 says the future matters but the present matters more: with 0.99, a reward 100 steps out is worth about a third of a reward now, so the agent plans ahead without obsessing over the far future. Tau 0.001 is the creep rate from the original DDPG paper, the standard slow-copy pace the field converged on. And OU noise, as you read above, is the smooth explorer. Hyperparameters are opinions about the world, written as numbers.</p>
 
-    <p>The actor was 33 -&gt; 256 -&gt; 128 -&gt; 64 -&gt; 4 with a tanh on the output; the critic took state plus action, 37 numbers in, through 256, 128, 64, to one Q value out.</p>
+    <p>The networks were the two described above: the 33 -&gt; 256 -&gt; 128 -&gt; 64 -&gt; 4 actor with a tanh on the output, and the critic that wires the action in after the first 256-unit layer.</p>
 
     <p>The curve below is the average score across all twenty agents. It starts near zero, twenty arms flailing, and climbs as the actors learn to hold the target. The solve line is 30, averaged over 100 episodes: about 300 on-target steps per episode, held, not stumbled into. My run crossed it and kept climbing.</p>
 
@@ -727,7 +729,7 @@
     <h2>Caveats</h2>
 
     <ul>
-      <li>Deterministic policies are brittle without noise. Ornstein-Uhlenbeck noise during training, none at test time. Skip the noise and the arm learns exactly one pose: its first guess.</li>
+      <li>Deterministic policies are brittle without noise. Ornstein-Uhlenbeck noise during training, typically none at test time. Skip the noise and the arm learns exactly one pose: its first guess.</li>
       <li>The target networks are load-bearing. With $\tau = 0.001$ the targets creep; hard-copy them every step and the critic chases its own tail.</li>
       <li>Continuous is not always better. On a discrete problem DQN is simpler, faster, and often wins. Match the algorithm to the action space, not to the hype.</li>
       <li>Twenty parallel arms do a lot of heavy lifting. One arm alone takes far longer to solve this. Parallelism is a compute cheat code, and this repo uses it.</li>
@@ -735,7 +737,7 @@
 
     <h2>Now make the world fight back</h2>
 
-    <p>One arm holding a ball is impressive. Two rackets learning against each other are weirder, because your opponent is training at the same time you are, and the world never sits still. That is the multi-agent page, and MADDPG is DDPG's answer to it: one actor-critic pair per agent, with a critic that watches everybody's moves instead of just its own. The loop you just learned does not change. The world it runs in does. <a href="maddpg.html">See you there</a>.</p>
+    <p>One arm holding a ball is impressive. Two rackets learning against each other are weirder, because your opponent is training at the same time you are, and the world never sits still. That is the multi-agent page. Tennis runs one shared DDPG pair in self-play: one actor-critic brain driving both rackets, each side's opponent getting smarter because the brain does. The famous MADDPG paper gives each agent its own actor and a critic that watches everybody's moves; my repo is the simpler cousin and still solved tennis. The loop you just learned does not change. The world it runs in does. <a href="maddpg.html">See you there</a>.</p>
 
   <script>
   /* Tool A: discrete argmax vs continuous actor output. Toy numbers. */
@@ -967,7 +969,7 @@
     var stats = document.getElementById('loopStats');
     var STAGES = [
       { name: 'state arrives', nodes: ['nState'], edges: [], labels: [],
-        text: 'A state arrives: 33 numbers. Joint angles, joint speeds, where the hand is, where the target is. That is everything the arm knows.' },
+        text: 'A state arrives: 33 numbers. Position, rotation, velocity, and angular velocities of the arm. That is everything the arm knows.' },
       { name: 'actor emits torques', nodes: ['nActor'], edges: ['e0'], labels: ['l0'],
         text: 'The actor reads the state and emits the move directly: four torques, [+0.62, -0.31, +0.15, -0.44]. No menu, no argmax, just dials.' },
       { name: 'environment steps', nodes: ['nEnv'], edges: ['e1'], labels: ['l1'],

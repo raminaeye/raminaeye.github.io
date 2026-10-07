@@ -692,6 +692,7 @@
         <span><span class="sw" style="background:#7f8c8d"></span>ground truth y (x)</span>
         <span><span class="sw" style="background:#3498db"></span>prediction z (.)</span>
         <span><span class="ln" style="border-color:#e74c3c"></span>fitted line</span>
+        <span><span class="ln" style="border-color:#e74c3c;border-top-style:dashed"></span>projected end of walk</span>
       </div>
       <div class="btn-row" style="justify-content:center">
         <button type="button" id="fitPlay">Play</button>
@@ -716,9 +717,9 @@
         <ul>
           <li><strong>The point:</strong> Gradient descent walks the line onto the data one small step at a time, while the closed form teleports to the exact answer. Two routes, same destination.</li>
           <li><strong>What you'll see:</strong> The blue prediction dots slide onto the gray ground-truth crosses in both panels while the cost curve dives; at the end the red line reads y = 5x1 + 2x2 + 2, with the weights sitting at [5, 2] and the bias at 2.</li>
-          <li class="tryit"><strong>Learning rate:</strong> Sets the step size. Try 0.01 and watch the dots crawl; try 1.0 and watch them sprint; try past 1.9 and watch them bounce off the rails while the diverged badge lights up.</li>
-          <li class="tryit"><strong>Iterations:</strong> How many gradient steps each run takes. Try 50 at learning rate 0.01 and watch it stall halfway; try 400 and watch it finish the job.</li>
-          <li class="tryit"><strong>Snap to closed form:</strong> Skips the walk and solves (X^T X)^-1 X^T y directly. Try it and watch the weights land on exactly [5.0000, 2.0000] with bias 2.0000 while the cost collapses to about 1.7e-30.</li>
+          <li class="tryit"><strong>Learning rate:</strong> Sets the step size. Try 0.01 and watch the dots crawl; try 1.0 and watch them sprint; try past 1.9 and watch them bounce off the rails while the diverged badge lights up. Drag the slider and the dashed line previews where the walk ends before anything moves; push it to 2.0 and the would-diverge badge lights up at rest.</li>
+          <li class="tryit"><strong>Iterations:</strong> How many gradient steps each run takes. Try 50 at learning rate 0.01 and watch it stall halfway; try 400 and watch it finish the job. Drag it and watch the dashed end-of-walk line slide: at 50 it stops short of the data, at 400 it sits on it.</li>
+          <li class="tryit"><strong>Snap to closed form:</strong> Skips the walk and solves (X^T X)^-1 X^T y directly. Try it and watch the weights land on exactly [5.0000, 2.0000] with bias 2.0000 while the cost collapses to about 1e-30.</li>
           <li class="tryit"><strong>Reset:</strong> Throws the weights back to a random start. Try it after a run and watch the dots scatter so you can walk them home again.</li>
         </ul>
       </div>
@@ -810,9 +811,10 @@
         var rng = mulberry32(777);
         S = { w1: randn(rng) * 2, w2: randn(rng) * 2, b: randn(rng),
               step: 0, iters: parseInt(itSlider.value, 10) || 200,
-              costs: [], diverged: false, timer: null, z: new Array(M), closed: false };
+              costs: [], diverged: false, timer: null, z: new Array(M), closed: false, prev: null };
         updateZ();
         S.costs.push(cost());
+        refreshPreview();
         draw(); updateStats();
       }
       function updateZ() {
@@ -849,11 +851,40 @@
         return lr.toExponential(1);
       }
 
-      /* ---- Play: 24 ticks, 550ms each, live GD per tick ---- */
-      var TICKS = 24, TICK_MS = 2200;
+      /* Pure preview simulation: run `steps` GD steps from (w1,w2,b) without
+         touching the live state. Used for the at-rest preview. */
+      function simPreview(w1, w2, b, lr, steps) {
+        var i, t, e;
+        for (t = 0; t < steps; t++) {
+          var g1 = 0, g2 = 0, gb = 0;
+          for (i = 0; i < M; i++) {
+            e = (w1 * X1[i] + w2 * X2[i] + b) - Y[i];
+            g1 += e * X1[i]; g2 += e * X2[i]; gb += e;
+          }
+          w1 -= lr * g1 / M; w2 -= lr * g2 / M; b -= lr * gb / M;
+          if (!isFinite(w1 + w2 + b) ||
+              Math.abs(w1) > 1e7 || Math.abs(w2) > 1e7 || Math.abs(b) > 1e7) {
+            return { w1: w1, w2: w2, b: b, cost: Infinity, diverged: true };
+          }
+        }
+        var s = 0;
+        for (i = 0; i < M; i++) {
+          e = (w1 * X1[i] + w2 * X2[i] + b) - Y[i];
+          s += e * e;
+        }
+        return { w1: w1, w2: w2, b: b, cost: s / (2 * M), diverged: false };
+      }
+      function refreshPreview() {
+        if (!S || S.diverged) { if (S) S.prev = null; return; }
+        S.prev = simPreview(S.w1, S.w2, S.b, lrFromSlider(), S.iters);
+      }
+
+      /* ---- Play: 24 ticks, 2250ms each, live GD per tick ---- */
+      var TICKS = 24, TICK_MS = 2250;
       function stop() {
         if (S && S.timer) { clearTimeout(S.timer); S.timer = null; }
         if (playBtn) playBtn.textContent = 'Play';
+        if (S && !S.diverged) { refreshPreview(); draw(); updateStats(); }
       }
       function tick() {
         if (!S || S.diverged || S.step >= S.iters) { stop(); draw(); updateStats(); return; }
@@ -881,7 +912,7 @@
         return { x0: x0, pw: pw,
                  padL: 46 * SC, padR: 10 * SC, padT: 24 * SC, padB: 26 * SC };
       }
-      function drawPanel(px, xs, wj, bEff, title) {
+      function drawPanel(px, xs, wj, bEff, title, pv) {
         var g = panelGeom(px);
         var x0 = g.x0, pw = g.pw;
         var ix0 = x0 + g.padL, ix1 = x0 + pw - g.padR;
@@ -929,6 +960,17 @@
         ctx.beginPath();
         ctx.moveTo(X(-XR), Yp(ya)); ctx.lineTo(X(XR), Yp(yb));
         ctx.stroke();
+        /* at-rest preview: dashed line where the walk would end */
+        if (pv && !pv.diverged) {
+          var pya = Math.min(ymax, Math.max(ymin, pv.wj * (-XR) + pv.bEff));
+          var pyb = Math.min(ymax, Math.max(ymin, pv.wj * XR + pv.bEff));
+          ctx.strokeStyle = '#e74c3c'; ctx.lineWidth = Math.max(1.5, 2 * SC);
+          ctx.setLineDash([Math.round(7 * SC), Math.round(5 * SC)]);
+          ctx.beginPath();
+          ctx.moveTo(X(-XR), Yp(pya)); ctx.lineTo(X(XR), Yp(pyb));
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
         /* axes */
         ctx.strokeStyle = '#bdc3c7'; ctx.lineWidth = Math.max(1, SC);
         ctx.beginPath();
@@ -951,11 +993,14 @@
       function draw() {
         measure(panels);
         ctx.clearRect(0, 0, W, H);
-        drawPanel(0, X1, S.w1, S.b + S.w2 * x2bar, 'feature x1 vs y');
-        drawPanel(1, X2, S.w2, S.b + S.w1 * x1bar, 'feature x2 vs y');
-        drawCost();
+        var showPrev = !S.timer && S.prev && !S.diverged && !S.prev.diverged;
+        var pv0 = showPrev ? { wj: S.prev.w1, bEff: S.prev.b + S.prev.w2 * x2bar } : null;
+        var pv1 = showPrev ? { wj: S.prev.w2, bEff: S.prev.b + S.prev.w1 * x1bar } : null;
+        drawPanel(0, X1, S.w1, S.b + S.w2 * x2bar, 'feature x1 vs y', pv0);
+        drawPanel(1, X2, S.w2, S.b + S.w1 * x1bar, 'feature x2 vs y', pv1);
+        drawCost(showPrev);
       }
-      function drawCost() {
+      function drawCost(showPrev) {
         measure(costC);
         var padL = 46 * SC, padR = 10 * SC, padT = 12 * SC, padB = 22 * SC;
         cctx.clearRect(0, 0, CW, CH);
@@ -964,6 +1009,8 @@
         var n = S.costs.length;
         var i, c0 = S.costs[0] || 1, cmin = c0;
         for (i = 0; i < n; i++) if (S.costs[i] < cmin) cmin = S.costs[i];
+        var prevCost = (showPrev && S.prev && !S.prev.diverged) ? S.prev.cost : null;
+        if (prevCost !== null && prevCost < cmin) cmin = prevCost;
         var hi = Math.log10(Math.max(c0, 1e-9));
         var lo = Math.log10(Math.max(cmin, 1e-12));
         if (hi - lo < 1) hi = lo + 1;
@@ -1006,6 +1053,16 @@
         cctx.fillText('cost J (log scale)', (padL + CW - padR) / 2, 14 * SC);
         cctx.font = FS + 'px sans-serif'; cctx.fillStyle = '#777';
         cctx.fillText('step', (padL + CW - padR) / 2, CH - 6 * SC);
+        /* at-rest preview: dashed level the cost would settle at */
+        if (prevCost !== null && isFinite(prevCost)) {
+          var py = CY(prevCost);
+          cctx.strokeStyle = '#e74c3c'; cctx.lineWidth = Math.max(1.5, 2 * SC);
+          cctx.setLineDash([Math.round(7 * SC), Math.round(5 * SC)]);
+          cctx.beginPath();
+          cctx.moveTo(CX(n - 1), py); cctx.lineTo(CW - padR, py);
+          cctx.stroke();
+          cctx.setLineDash([]);
+        }
         if (S.diverged) {
           cctx.fillStyle = 'rgba(231,76,60,0.92)';
           var bw = 150 * SC, bh = 30 * SC;
@@ -1013,6 +1070,14 @@
           cctx.fillStyle = '#fff'; cctx.textAlign = 'center';
           cctx.font = 'bold ' + Math.ceil(13 * SC) + 'px sans-serif';
           cctx.fillText('DIVERGED', CW / 2, CH / 2 + 5 * SC);
+        } else if (!S.timer && S.prev && S.prev.diverged && !S.diverged) {
+          /* the current slider settings would diverge: say so at rest */
+          cctx.fillStyle = 'rgba(231,76,60,0.92)';
+          var bw2 = 200 * SC, bh2 = 30 * SC;
+          cctx.fillRect(CW / 2 - bw2 / 2, CH / 2 - bh2 / 2, bw2, bh2);
+          cctx.fillStyle = '#fff'; cctx.textAlign = 'center';
+          cctx.font = 'bold ' + Math.ceil(13 * SC) + 'px sans-serif';
+          cctx.fillText('WOULD DIVERGE', CW / 2, CH / 2 + 5 * SC);
         }
       }
       function fmtJ(v) {
@@ -1029,6 +1094,15 @@
           h = tag + ' &nbsp; J = <strong>' + fmtJ(S.costs[S.costs.length - 1]) + '</strong>' +
               ' &nbsp; w = [<strong>' + S.w1.toFixed(4) + '</strong>, <strong>' + S.w2.toFixed(4) + '</strong>]' +
               ' &nbsp; b = <strong>' + S.b.toFixed(4) + '</strong>';
+          if (S.prev && !S.timer) {
+            if (S.prev.diverged) {
+              h += ' &nbsp;|&nbsp; walk preview: <strong style="color:#c0392b">would diverge</strong>';
+            } else {
+              h += ' &nbsp;|&nbsp; walk preview: J = <strong>' + fmtJ(S.prev.cost) + '</strong>' +
+                   ' w = [<strong>' + S.prev.w1.toFixed(4) + '</strong>, <strong>' + S.prev.w2.toFixed(4) + '</strong>]' +
+                   ' b = <strong>' + S.prev.b.toFixed(4) + '</strong>';
+            }
+          }
         }
         stats.innerHTML = h;
       }
@@ -1052,18 +1126,20 @@
           S.w1 = CF[0]; S.w2 = CF[1]; S.b = CF[2];
           S.closed = true; S.step = S.iters;
           updateZ(); S.costs.push(cost());
+          refreshPreview();
           draw(); updateStats();
         });
       }
       lrSlider.addEventListener('input', function () {
         var lr = lrFromSlider();
         lrVal.textContent = fmtLr(lr);
+        if (S && !S.timer) { refreshPreview(); draw(); updateStats(); }
       });
       itSlider.addEventListener('input', function () {
         var v = parseInt(itSlider.value, 10);
         if (!isFinite(v)) v = 200;
         itVal.textContent = v;
-        if (S && !S.timer) { S.iters = v; updateStats(); }
+        if (S && !S.timer) { S.iters = v; refreshPreview(); draw(); updateStats(); }
       });
       lrVal.textContent = fmtLr(lrFromSlider());
       reset();

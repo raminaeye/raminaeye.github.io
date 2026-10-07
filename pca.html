@@ -370,11 +370,22 @@
     .fig-wrap { position: relative; max-width: 480px; margin: 0 auto; }
     .fig-wrap img { display: block; width: 100%; height: auto; }
     .hotgrid { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); }
-    .hotcell { background: transparent; border: 2px solid transparent; cursor: pointer; padding: 0; }
+    .hotcell { background: transparent; border: 2px solid transparent; cursor: pointer; padding: 0; position: relative; }
     .hotcell:hover { border-color: #3498db; background: rgba(52,152,219,0.10); }
     .hotcell.sel { border-color: #c0392b; background: rgba(192,57,43,0.08); }
     .hotcell.empty { cursor: default; }
     .hotcell.empty:hover { border-color: transparent; background: transparent; }
+    .hotcell.dimmed::after { content: ''; position: absolute; inset: 0; background: rgba(255,255,255,0.68); pointer-events: none; }
+    #eigFigDemo .eig-bars { max-width: 560px; margin: 0.8rem auto 0; }
+    #eigFigDemo .eig-bars-label { font-size: 0.85em; color: #555; margin-bottom: 0.4rem; }
+    #eigFigDemo .eig-bar-row { display: flex; align-items: flex-end; gap: 6px; height: 120px; }
+    #eigFigDemo .eig-bar-btn { flex: 1 1 0; min-width: 0; background: none; border: none; padding: 0; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+    #eigFigDemo .eig-bar-pct { font-size: 12px; color: #2c3e50; margin-bottom: 2px; white-space: nowrap; }
+    #eigFigDemo .eig-bar { width: 100%; max-width: 44px; background: #3498db; border-radius: 3px 3px 0 0; }
+    #eigFigDemo .eig-bar-btn.dimmed .eig-bar { background: #bdc3c7; }
+    #eigFigDemo .eig-bar-btn.dimmed .eig-bar-pct { color: #999; }
+    #eigFigDemo .eig-bar-btn.sel .eig-bar { background: #c0392b; }
+    #eigFigDemo .eig-bar-num { font-size: 12px; color: #555; margin-top: 2px; }
     #eigFigInfo { text-align: center; font-size: 0.92em; color: #2c3e50; min-height: 1.6em; margin-top: 0.5rem; }
     figure.figure { margin: 1.5em 0; }
     figcaption { font-size: 0.9em; color: #555; margin-top: 0.8rem; border-left: 3px solid #3498db; padding-left: 0.8em; }
@@ -783,48 +794,134 @@ const PCA_PAYLOAD = {"meta":{"grid":32,"n_faces":400,"n_features":1024,"face_sam
        </div>
        <figcaption>Figure 2. Seven of the eigenfaces calculated from the input images of Figure 1.</figcaption>
      </figure>
-     <div id="eigFigInfo">Click an eigenface to see its rank.</div>
+     <div class="eig-bars">
+       <div class="eig-bars-label">Eigenvalue share per eigenface, from this page's embedded notebook precompute (32 by 32 faces), in the paper's decreasing display order. The paper's own 16-image run would give different numbers.</div>
+       <div class="eig-bar-row" id="eigBarRow" role="group" aria-label="Eigenvalue shares, eigenfaces 1 to 7"></div>
+     </div>
+     <div class="demo-controls">
+       <label>Keep top k eigenfaces <input type="range" id="eigK" min="1" max="7" step="1" value="7"> <span id="eigKVal">7</span></label>
+       <button type="button" class="play-btn" id="eigPlay">Play</button>
+     </div>
+     <p class="statline" id="eigKept"></p>
+     <div id="eigFigInfo">Click an eigenface or a bar to see its share.</div>
      <p class="dimline">Rebuilt from Figure 2 of Turk, M., and Pentland, A. "Eigenfaces for Recognition." <em>Journal of Cognitive Neuroscience</em> 3(1), 71-86, 1991. <a href="https://doi.org/10.1162/jocn.1991.3.1.71">doi:10.1162/jocn.1991.3.1.71</a></p>
      <div class="caption-card">
        <p class="cc-head">How to play</p>
        <ul>
-         <li><strong>The point:</strong> This is the figure that started it all: real eigenfaces computed from real faces in 1991. They are shown in decreasing-eigenvalue order, the same ordering the faceToy uses.</li>
-         <li><strong>What you will see:</strong> seven ghostly faces in a three by three grid. Two cells are black because the paper shows seven eigenfaces, not nine. Each one is a direction of variation across the training faces.</li>
-         <li class="tryit"><strong>Hotspot cells:</strong> click any eigenface to see its rank by eigenvalue. Compare with the faceToy strip above: same idea, 35 years apart. The paper's own test used 7 eigenfaces computed from 16 face images.</li>
+         <li><strong>The point:</strong> rank is a quantity, not a label. The notebook's eigenface 1 explains 25.39% of the variance and eigenface 7 only 2.49%, a ten-to-one drop. That steep fall is why Turk and Pentland's recognizer kept just the top 7 eigenfaces from its 16 training images.</li>
+         <li><strong>What you will see:</strong> seven bars under the 1991 figure, in the paper's display order, each bar's height the eigenface's share of variance. The slider fades every face past the top k; Play walks k from 7 down to 1, 2.2 seconds per step, with the kept-variance readout.</li>
+         <li class="tryit"><strong>Bars:</strong> try clicking bar 1, then bar 7, and compare 25.39% against 2.49%. The readout always names the notebook's eigenface, not the paper's.</li>
+         <li class="tryit"><strong>Keep top k slider (1 to 7):</strong> try dragging it to 1 and watch six faces fade while the kept variance falls to 25.39%. The two black cells never fade; the paper left them empty.</li>
        </ul>
      </div>
    </div>
    <script>
    (function () {
+     /* Eigenvalue shares: eigvals[k]/sum(eigvals) from the page's embedded PCA
+        payload (1024 values, 32x32 precompute of the notebook's Olivetti run;
+        sum = 18.5005). Top-7 shares below, cumulative kept variance after. */
+     var SHARES = [25.39, 14.88, 8.39, 5.23, 3.77, 3.23, 2.49];
+     var CUM = [25.39, 40.28, 48.67, 53.90, 57.67, 60.89, 63.38];
      var grid = document.getElementById('eigHotgrid');
      var info = document.getElementById('eigFigInfo');
-     if (!grid || !info) return;
-     var notes = [
-       'Eigenface 1 of 7: rank 1 by eigenvalue, the single direction of largest face variation.',
-       'Eigenface 2 of 7: rank 2 by eigenvalue, in the paper\'s display order.',
-       'Eigenface 3 of 7: rank 3 by eigenvalue, in the paper\'s display order.',
-       'Eigenface 4 of 7: rank 4 by eigenvalue, in the paper\'s display order.',
-       'Eigenface 5 of 7: rank 5 by eigenvalue, in the paper\'s display order.',
-       'Eigenface 6 of 7: rank 6 by eigenvalue, in the paper\'s display order.',
-       'Empty cell: the paper shows seven eigenfaces, so two cells stay black.',
-       'Eigenface 7 of 7: rank 7 by eigenvalue, in the paper\'s display order.',
-       'Empty cell: the paper shows seven eigenfaces, so two cells stay black.'
-     ];
+     var barRow = document.getElementById('eigBarRow');
+     var kEl = document.getElementById('eigK');
+     var kVal = document.getElementById('eigKVal');
+     var keptEl = document.getElementById('eigKept');
+     var playBtn = document.getElementById('eigPlay');
+     if (!grid || !info || !barRow) return;
+     /* Cell index -> eigenface number: cells 0-5 are faces 1-6, cell 7 is face 7;
+        cells 6 and 8 are the paper's empty black cells. */
+     function faceOf(cell) { return cell < 6 ? cell + 1 : 7; }
+     var barBtns = [];
+     for (var f = 1; f <= 7; f++) {
+       (function (face) {
+         var b = document.createElement('button');
+         b.type = 'button';
+         b.className = 'eig-bar-btn';
+         b.setAttribute('aria-label', 'Eigenface ' + face + ', ' + SHARES[face - 1].toFixed(2) + ' percent of variance');
+         var pct = document.createElement('span');
+         pct.className = 'eig-bar-pct';
+         pct.textContent = SHARES[face - 1].toFixed(2) + '%';
+         var bar = document.createElement('span');
+         bar.className = 'eig-bar';
+         bar.style.height = (SHARES[face - 1] / SHARES[0] * 100).toFixed(1) + '%';
+         var num = document.createElement('span');
+         num.className = 'eig-bar-num';
+         num.textContent = face;
+         b.appendChild(pct); b.appendChild(bar); b.appendChild(num);
+         b.addEventListener('click', function () { stopPlay(); selectFace(face); });
+         barRow.appendChild(b);
+         barBtns.push(b);
+       })(f);
+     }
+     var cells = [];
      for (var c = 0; c < 9; c++) {
        (function (idx) {
          var b = document.createElement('button');
          b.type = 'button';
-         b.className = 'hotcell' + ((idx === 6 || idx === 8) ? ' empty' : '');
-         b.setAttribute('aria-label', notes[idx]);
-         b.addEventListener('click', function () {
-           var cells = grid.querySelectorAll('.hotcell');
-           for (var q = 0; q < cells.length; q++) cells[q].classList.remove('sel');
-           b.classList.add('sel');
-           info.textContent = notes[idx];
-         });
+         var empty = (idx === 6 || idx === 8);
+         b.className = 'hotcell' + (empty ? ' empty' : '');
+         if (!empty) {
+           b.setAttribute('aria-label', 'Eigenface ' + faceOf(idx));
+           b.addEventListener('click', function () { stopPlay(); selectFace(faceOf(idx)); });
+         } else {
+           b.setAttribute('aria-label', 'Empty cell: the paper shows seven eigenfaces');
+           b.tabIndex = -1;
+         }
          grid.appendChild(b);
+         cells.push(b);
        })(c);
      }
+     function selectFace(face) {
+       for (var q = 0; q < cells.length; q++) cells[q].classList.remove('sel');
+       for (var r = 0; r < barBtns.length; r++) barBtns[r].classList.remove('sel');
+       var cellIdx = face <= 6 ? face - 1 : 7;
+       cells[cellIdx].classList.add('sel');
+       barBtns[face - 1].classList.add('sel');
+       info.textContent = 'The notebook\u2019s eigenface ' + face + ' explains ' +
+         SHARES[face - 1].toFixed(2) + '% of the variance; its top ' + face +
+         ' explain ' + CUM[face - 1].toFixed(2) + '%.';
+     }
+     function setK(k) {
+       k = Math.max(1, Math.min(7, k));
+       kEl.value = k;
+       kVal.textContent = k;
+       for (var q = 0; q < cells.length; q++) {
+         var empty = (q === 6 || q === 8);
+         cells[q].classList.toggle('dimmed', !empty && faceOf(q) > k);
+       }
+       for (var r = 0; r < barBtns.length; r++) {
+         barBtns[r].classList.toggle('dimmed', r + 1 > k);
+       }
+       keptEl.innerHTML = 'Top ' + k + ' keep <strong>' + CUM[k - 1].toFixed(2) +
+         '%</strong> of the total variance.';
+     }
+     var timers = [];
+     var playing = false;
+     function stopPlay() {
+       timers.forEach(function (t) { clearTimeout(t); });
+       timers = [];
+       playing = false;
+       playBtn.textContent = 'Play';
+     }
+     playBtn.addEventListener('click', function () {
+       if (playing) { stopPlay(); return; }
+       playing = true;
+       playBtn.textContent = 'Stop';
+       if (typeof playScrollEnsure === 'function') { try { playScrollEnsure(document.getElementById('eigFigDemo')); } catch (e) {} }
+       var STEP_MS = 2200;
+       var seq = [7, 6, 5, 4, 3, 2, 1];
+       for (var i = 0; i < seq.length; i++) {
+         (function (k, at) {
+           timers.push(setTimeout(function () { if (playing) setK(k); }, at));
+         })(seq[i], i * STEP_MS);
+       }
+       timers.push(setTimeout(function () { stopPlay(); }, seq.length * STEP_MS));
+     });
+     kEl.addEventListener('input', function () { stopPlay(); setK(parseInt(kEl.value, 10)); });
+     setK(7);
+     selectFace(1);
    })();
    </script>
 

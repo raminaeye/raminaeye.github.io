@@ -630,9 +630,30 @@
 
     <h2 id="how-it-learns">How it learns: remembering what worked</h2>
 
-    <p>Here is the whole trick, and there is no math in it. Every step, the agent writes one line in a diary only it can read: "in this kind of situation, I tried forward, and it led to +1." Then it nudges its opinion of forward up a hair. Next time a similar situation shows up, forward looks a little better. Do that a million times and the opinions stop being guesses. The agent has built a memory of what worked, situation by situation, move by move.</p>
+    <p>Here is the whole trick, starting with no math at all. Every step, the agent writes one line in a diary only it can read: "in this kind of situation, I tried forward, and it led to +1." Then it nudges its opinion of forward up a hair. Next time a similar situation shows up, forward looks a little better. Do that a million times and the opinions stop being guesses. The agent has built a memory of what worked, situation by situation, move by move.</p>
 
-    <p>That is it. That is the engine. No teacher, no answer key. Just try, score, remember, repeat. The opinions start as noise and end as a strategy, and the tool below walks one step of it live. If you want the actual arithmetic behind the nudge, worked term by term with real numbers, that lives on the <a href="dqn.html">DQN page</a>. Here you only need the shape: the agent keeps score of its own past, and the past slowly becomes a policy.</p>
+    <p>That is it. That is the engine. No teacher, no answer key. Just try, score, remember, repeat. The opinions start as noise and end as a strategy.</p>
+
+    <p>That remembered score has a name: a <strong>Q-value</strong>, Q for quality. One number for every situation-move pair. "Forward" in "something yellowish ahead" might be worth 0.82; "forward" in "blue dead ahead" might be worth -0.40. Picture the whole memory as a scoreboard: rows for situations, four columns for the moves, one Q-value in each cell. The agent's entire strategy is then one line: always play the biggest number in the current row.</p>
+
+    <p>Now the update idea, in plain words before any symbols. Every step, the agent takes its old guess for the move it just tried and nudges it toward two things added together: what just happened, plus what the future looks like from the new situation. Old guess moves a little toward "what happened + what is coming". That is the whole learning rule, in one sentence. Here it is as an equation, and we will walk it term by term, slowly:</p>
+
+    <div class="math-display">
+    $$Q \leftarrow Q + \alpha \, (r + \gamma \max Q' - Q)$$
+    </div>
+
+    <ol class="walkthrough-steps">
+      <li>$Q$ on the right is the old guess, where we started. Say 0.50: the agent thought "forward" here was worth half a banana.</li>
+      <li>$r$ is the reward that just arrived: +1, -1, or 0. The only ground truth the agent ever gets. Here the agent ate a yellow, so $r = +1$.</li>
+      <li>$\max Q'$ is the best guess about the next situation: the biggest Q-value available from where the agent landed. Say 0.80. The agent learns from its own future estimates, which is the wild part.</li>
+      <li>$\gamma$ is the discount: how much tomorrow matters versus today. My repo uses 0.99. A banana 100 steps away is worth $0.99^{100}$, about 0.37 of a banana right now: still worth walking for. At 0.9 it would be worth about 0.00003, basically zero, and the agent would never bother crossing the room. So 0.99 is the patience knob.</li>
+      <li>$\alpha$ is the step size: how much of the surprise to believe. Here 0.10, exaggerated so you can watch the bar move; my real network used 5e-4, far gentler.</li>
+      <li>The bracket $(r + \gamma \max Q' - Q)$ is the surprise: reality minus expectation. $\alpha$ times the surprise is the nudge, and the left-hand $Q$ is the new guess, what the Q-value becomes.</li>
+    </ol>
+
+    <p>Read it aloud with real numbers, one computation per line. Old guess $Q = 0.50$. Reward $r = +1$. Best next guess $\max Q' = 0.80$, discounted: $0.99 \times 0.80 = 0.792$. The target, reality: $1 + 0.792 = 1.792$. The surprise: $1.792 - 0.50 = 1.292$. The nudge: $0.10 \times 1.292 = 0.129$. The new Q-value: $0.50 + 0.129 = 0.629$. One banana, one nudge: 0.50 became 0.629. Run that arithmetic a million times and the scoreboard stops being guesses.</p>
+
+    <p>The tool below walks one step of it live, running this exact substitution with its own toy numbers in the learn stage. The bars are the Q-values you just met, drawn as opinion bars.</p>
 
     <h2 id="epsilon">Roll the dice, then stop</h2>
 
@@ -644,7 +665,7 @@
 
     <p>Quick detour, because the memory has to live somewhere. The obvious home is a lookup table: one row per situation, one column per move, and the agent just reads off what worked. That works for tic-tac-toe. It does not work here, because the situation is 37 continuous numbers, which means there are infinitely many situations and the table would need infinitely many rows. The agent will never see the same exact situation twice.</p>
 
-    <p>So the memory lives inside a neural net. Thirty-seven numbers in, four opinions out, and the net generalizes: situations it has never seen get answers borrowed from situations it has. That generalization is the whole reason the hunter can handle a banana spawning somewhere awkward. The price is that neural nets forget. Teach it the left side of the arena for a thousand episodes and it may unlearn the right side, which is exactly the wound the DQN page's two tricks are designed to close. For now, just hold the picture: the "brain" is a function approximator doing its best, and the loop is its teacher.</p>
+    <p>A table with infinitely many rows is not a table. So where can the scoreboard live when no situation ever repeats? Hold that question. It is the entire next page.</p>
 
     <h2 id="flailing-to-hunter">From flailing to banana hunter</h2>
 
@@ -677,7 +698,7 @@
 
     <h2 id="loop-tool">One step of the loop</h2>
 
-    <p>This is a toy, and it says so everywhere it matters. A 5 by 5 field, four made-up opinions, one banana step. The mechanics are the real ones: epsilon-greedy picking, and a memory update exaggerated on purpose so you can watch the bar move.</p>
+    <p>This is a toy, and it says so everywhere it matters. A 5 by 5 field, four made-up Q-values drawn as opinion bars, one banana step. The mechanics are the real ones: epsilon-greedy picking, and the Q-update from above, exaggerated on purpose so you can watch the bar move.</p>
 
     <div class="demo" id="rlLoopDemo">
       <div class="demo-controls">
@@ -700,7 +721,7 @@
       <div class="cap-card">
         <strong>How to play</strong>
         <ul>
-          <li><strong>The point:</strong> Reinforcement learning is a loop, not a dataset. This tool runs one full turn of it: look, form opinions, pick, get paid, remember. The insight is the last step, where the agent's opinion of the move visibly nudges.</li>
+          <li><strong>The point:</strong> Reinforcement learning is a loop, not a dataset. This tool runs one full turn of it: look, check the Q-values, pick, get paid, update. The insight is the last step, where the Q-update from the page runs with this run's numbers and the picked bar visibly nudges.</li>
           <li><strong>What you'll see:</strong> The agent's starting square is marked START with a pulsing ring, so the beginning is unmistakable. Play walks one banana step in five stages, about 2.2 seconds each, and each stage names what to watch in its title: the agent, then the opinion bars below the grid (outlined in amber), then the red arrow, then the reward badge popping at the landing square's corner, then the picked bar flashing as the memory lands.</li>
           <li class="try-it"><strong>Try this:</strong> try epsilon at 0.00: it always exploits, marching forward to the yellow banana for +1 while the forward bar grows. Then try epsilon at 1.00: every pick is a dice roll, and you will catch it wandering into the blue banana for -1, the red badge popping at the blue square's corner while the picked bar shrinks. The line under the slider previews what the next pick will do.</li>
         </ul>
@@ -772,7 +793,7 @@
 
     <p>This page was the loop every RL method shares: state, action, reward, next state, policy, the remember-what-worked update, the epsilon compromise. Now the three brains I actually built on it. Each one exists because the previous one hit a wall, so read them as one story, not three topics.</p>
 
-    <p><strong>DQN, the menu judge.</strong> The banana brain works because the choice is a menu: four moves, one score each, pick the biggest number. Deep Q-Networks is that idea with a neural net doing the scoring: 37 numbers in, four scores out, pick the biggest, done. Simple, honest, and hard-capped: the menu has to exist, and it has to be short. Four moves, fine. Four thousand moves, and the scoreboard becomes a joke. The moment the action is not a short discrete list, the judge has nothing to score.</p>
+    <p><strong>DQN, the menu judge.</strong> The banana brain works because the choice is a menu: four moves, one score each, pick the biggest number. Deep Q-Networks takes that scoreboard idea into the real arena, where the situations never repeat and a table cannot exist. Simple, honest, and hard-capped: the menu has to exist, and it has to be short. Four moves, fine. Four thousand moves, and the scoreboard becomes a joke. The moment the action is not a short discrete list, the judge has nothing to score.</p>
 
     <p><strong>DDPG, the actor and the critic.</strong> My robot arm does not have four moves. It has joints, and each joint takes a continuous torque. Not "push left or right" but "push exactly this hard". You cannot argmax over infinity, so DDPG splits the brain in two. The actor network looks at the state and outputs the move directly, a vector of torques. The critic network looks at the state and the move together and says how good that pair was. Same loop, no menu: the actor proposes, the critic grades, the actor climbs the critic's grades. If DQN is a judge picking from a menu, DDPG is a chef inventing the dish while a critic tastes.</p>
 
@@ -780,7 +801,7 @@
 
     <p>So why three pages instead of one long one? Because each brain is the answer to the previous brain's wall. DQN hits the wall of discrete menus. DDPG climbs over it with an actor and a critic, then hits the wall of a world that fights back. Tennis climbs over that one with self-play: one shared brain, both rackets, every rally training both sides of the net. Same loop all the way down, stranger brain each time. That is the series: one loop, three brains, each earning its page.</p>
 
-    <p>One question is still open: how does the agent actually keep score of a million past steps? Saying "it remembers" is easy; building the memory is the trick. That is what the next page is for. Details on the next three pages: <a href="dqn.html">Deep Q-Networks</a>, <a href="ddpg.html">DDPG</a>, <a href="maddpg.html">multi-agent tennis</a>. Start with DQN.</p>
+    <p>This scoreboard works beautifully, until the situations become infinite. Thirty-seven continuous numbers means the agent never sees the same situation twice, and a table with infinitely many rows is not a table. So how do you keep score when no situation ever repeats? That is what the next page is for. Details on the next three pages: <a href="dqn.html">Deep Q-Networks</a>, <a href="ddpg.html">DDPG</a>, <a href="maddpg.html">multi-agent tennis</a>. Start with DQN.</p>
 
     <script>
     (function () {
@@ -1011,7 +1032,8 @@
                     if (window.__rlLoopTest) { window.__rlLoopTest.rewardEvents++; window.__rlLoopTest.popupsShown++; }
                 }, 520));
             } else if (k === 4) {
-                stageDesc.textContent = 'Now watch the picked bar below, inside the amber outline: the opinion nudges. The move paid off, so the bar grows a little. The agent just wrote one line in its diary: ' + run.pick + ' worked here. No teacher, no answer key, just a memory getting sharper. The picked bar ' + (run.qNew >= run.qOld ? 'grows' : 'shrinks') + ' as the memory lands.';
+                var tgt = run.target, sur = run.target - run.qOld, ndg = LR * sur;
+                stageDesc.textContent = 'Now watch the picked bar below, inside the amber outline: the exact substitution from the page, with this run\'s numbers. Old guess ' + f2(run.qOld) + '. Target: ' + (run.rew > 0 ? '+' : '') + run.rew + ' + 0.99 \u00d7 ' + f2(NEXT_Q) + ' = ' + f3(tgt) + '. Surprise: ' + f3(tgt) + ' - ' + f2(run.qOld) + ' = ' + f3(sur) + '. Nudge: 0.10 \u00d7 ' + f3(sur) + ' = ' + f3(ndg) + '. New Q-value: ' + f2(run.qNew) + '. The bar ' + (run.qNew >= run.qOld ? 'grows' : 'shrinks') + ' as the memory lands.';
                 setQ(run.pick, run.qNew);
                 fills[run.pick].classList.add('flash');
                 timers.push(setTimeout(function () { fills[run.pick].classList.remove('flash'); }, 950));

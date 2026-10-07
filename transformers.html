@@ -206,6 +206,9 @@
     .attn-mini th { background: #ecf0f1; color: #2c3e50; }
     .attn-mini tr.hl td { background: #d6eafb; }
     .attn-mini tr.hl th.rowhead { background: #3498db; color: #fff; }
+    .attn-mini td.blocked { background: rgba(231,76,60,0.45); color: #7b241c; font-weight: bold; }
+    #causalDemo .kchip.masked rect, #causalDemo .qchip.masked rect { fill: #f2f4f4; stroke: #d5dbdb; }
+    #causalDemo .kchip.masked text, #causalDemo .qchip.masked text { fill: #aab7b8; }
     .attn-bars { max-width: 560px; margin: 0 auto; }
     .attn-bar-row { display: flex; align-items: center; gap: 0.6em; margin: 0.45em 0; }
     .attn-bar-row .lbl { width: 4.2em; text-align: right; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; color: #2c3e50; flex: none; font-size: 0.9em; }
@@ -1579,6 +1582,226 @@ pe = positional_encoding(seq_len=8, d_model=16)
       }
     });
     render('causal');
+  })();
+  </script>
+
+  <div class="demo" id="causalDemo">
+    <p style="margin-top:0;"><strong>Causal attention on real words.</strong> The same sentence,
+    written left to right the way a decoder writes it. At each step the newest word can only
+    look back at the words already written:</p>
+    <div class="play-row"><button type="button" class="play-btn" id="causalPlay">Play</button></div>
+    <div class="attn-toggle" role="group" aria-label="Position being written" id="causalSteps"></div>
+    <div class="canvas-wrap">
+      <div class="attn-flow table-scroll" aria-label="Causal attention flow visualization">
+        <svg id="causalFlow" viewBox="0 0 640 150" role="img" aria-label="Causal attention arcs"></svg>
+      </div>
+      <div class="table-scroll"><table class="attn-mini" id="causalMini"></table></div>
+    </div>
+    <div class="demo-stats" id="causalStats"></div>
+    <div class="howto capcard" id="causalHowto"><strong class="cap-title">How to play</strong>
+      <ul>
+        <li><strong>The point:</strong> A decoder writes one token at a time, so each new word may only listen to the words already on the page. This is the causal mask with real words on it: the upper triangle of the attention grid stays dark because those keys do not exist yet.</li>
+        <li><strong>What you'll see:</strong> The sentence fills in left to right. The word being written glows while arcs fan back to the words it can see; future words sit greyed out and masked. On the heatmap, every cell above the diagonal reads 0.00 in red: the mask turned those scores into nothing.</li>
+        <li><strong>Play button:</strong> Walks the six positions in writing order, 2.2 seconds each, with the stats line narrating what each word can see. Watch "sat" get built from "cat" (0.52) and itself (0.40) while "on" is still masked, then "mat" looking all the way back to "sat" (0.30).</li>
+        <li><strong>Word buttons:</strong> Jump to any position. Try "mat" and count how many words it can see versus how many are masked, then try "the&#8321;" and see what a first word has to work with: only itself.</li>
+      </ul>
+    </div>
+    <p class="caption">This is why a generator cannot cheat: at the moment "sat" is written,
+    "on the mat" does not exist yet, so there is nothing to attend to. The mask is not hiding
+    information. The information is not there.</p>
+  </div>
+  <script>
+  (function() {
+    // Causal (lower-triangular) illustrative weights. Row i = what token i
+    // listened to when it was written. Rows sum to 1. Future cells are 0.
+    var TOK = ["the\u2081", "cat", "sat", "on", "the\u2082", "mat"];
+    var W = [
+      [1.00, 0.00, 0.00, 0.00, 0.00, 0.00],
+      [0.42, 0.58, 0.00, 0.00, 0.00, 0.00],
+      [0.08, 0.52, 0.40, 0.00, 0.00, 0.00],
+      [0.05, 0.12, 0.48, 0.35, 0.00, 0.00],
+      [0.08, 0.10, 0.22, 0.28, 0.32, 0.00],
+      [0.04, 0.14, 0.30, 0.26, 0.06, 0.20]
+    ];
+    var current = 2;
+
+    var mini = document.getElementById("causalMini");
+    var sbox = document.getElementById("causalSteps");
+    var stats = document.getElementById("causalStats");
+
+    TOK.forEach(function(t, i) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("data-s", i);
+      b.textContent = '"' + t + '"';
+      if (i === current) { b.classList.add("active"); }
+      b.addEventListener("click", function() { userSelect(i); });
+      sbox.appendChild(b);
+    });
+    var sBtns = sbox.querySelectorAll("button");
+
+    function buildTable() {
+      var html = "<tr><th></th>";
+      TOK.forEach(function(t) { html += "<th>" + t + "</th>"; });
+      html += "</tr>";
+      TOK.forEach(function(r, ri) {
+        html += '<tr data-row="' + ri + '"><th class="rowhead">' + r + "</th>";
+        W[ri].forEach(function(v, ci) {
+          if (ci > ri) {
+            html += '<td class="blocked">0.00</td>';
+          } else {
+            var a = Math.min(1, v * 1.6);
+            var col = v > 0.4 ? "#fff" : "#333";
+            html += '<td style="background: rgba(52,152,219,' + a.toFixed(2) + "); color:" + col + ';">' + v.toFixed(2) + "</td>";
+          }
+        });
+        html += "</tr>";
+      });
+      mini.innerHTML = html;
+    }
+
+    function renderStats() {
+      var seen = [], masked = [];
+      for (var k = 0; k < TOK.length; k++) {
+        (k <= current ? seen : masked).push('"' + TOK[k] + '"');
+      }
+      stats.textContent = 'writing "' + TOK[current] + '" \u00b7 can see: ' + seen.join(", ") +
+        (masked.length ? ' \u00b7 masked: ' + masked.join(", ") : ' \u00b7 nothing masked, the sentence is complete');
+    }
+
+    function select(i) {
+      current = i;
+      for (var k = 0; k < sBtns.length; k++) {
+        sBtns[k].classList.toggle("active", +sBtns[k].getAttribute("data-s") === i);
+      }
+      var rows = mini.querySelectorAll("tr[data-row]");
+      for (var j = 0; j < rows.length; j++) {
+        rows[j].classList.toggle("hl", +rows[j].getAttribute("data-row") === i);
+      }
+      renderStats();
+      drawFlow();
+    }
+
+    // Arcs: query chips up top, key chips below. Future tokens greyed out.
+    var NS = "http://www.w3.org/2000/svg";
+    var flowSvg = document.getElementById("causalFlow");
+    var QY = 12, KY = 96, CHW = 88, CHH = 30, PITCH = 102, X0 = 20;
+    function chipX(i) { return X0 + i * PITCH + (PITCH - CHW) / 2; }
+    function chipCx(i) { return chipX(i) + CHW / 2; }
+    var qChips = [], kChipGs = [], arcPaths = [];
+    function layoutFlow() {
+      var wrapW = (flowSvg.parentNode && flowSvg.parentNode.clientWidth) || 640;
+      var Wd = Math.max(300, Math.min(640, wrapW));
+      PITCH = Wd / 6; X0 = 0; CHW = Math.max(40, PITCH - 10);
+      flowSvg.setAttribute("viewBox", "0 0 " + Wd + " 150");
+      for (var i = 0; i < TOK.length; i++) {
+        var qr = qChips[i].childNodes[0], qt = qChips[i].childNodes[1];
+        qr.setAttribute("x", chipX(i)); qr.setAttribute("width", CHW);
+        qt.setAttribute("x", chipCx(i));
+        var kr = kChipGs[i].childNodes[0], kt = kChipGs[i].childNodes[1];
+        kr.setAttribute("x", chipX(i)); kr.setAttribute("width", CHW);
+        kt.setAttribute("x", chipCx(i));
+      }
+      drawFlow();
+    }
+    TOK.forEach(function(t, i) {
+      var g = document.createElementNS(NS, "g");
+      g.setAttribute("class", "qchip");
+      var r = document.createElementNS(NS, "rect");
+      r.setAttribute("x", chipX(i)); r.setAttribute("y", QY);
+      r.setAttribute("width", CHW); r.setAttribute("height", CHH); r.setAttribute("rx", 6);
+      var tx = document.createElementNS(NS, "text");
+      tx.setAttribute("x", chipCx(i)); tx.setAttribute("y", QY + 20);
+      tx.setAttribute("text-anchor", "middle");
+      tx.textContent = t;
+      g.appendChild(r); g.appendChild(tx);
+      g.addEventListener("click", function() { userSelect(i); });
+      flowSvg.appendChild(g);
+      qChips.push(g);
+    });
+    TOK.forEach(function(t, i) {
+      var g = document.createElementNS(NS, "g");
+      g.setAttribute("class", "kchip");
+      var r = document.createElementNS(NS, "rect");
+      r.setAttribute("x", chipX(i)); r.setAttribute("y", KY);
+      r.setAttribute("width", CHW); r.setAttribute("height", CHH); r.setAttribute("rx", 6);
+      r.style.fill = "#ffffff"; r.style.stroke = "#bdc3c7";
+      var tx = document.createElementNS(NS, "text");
+      tx.setAttribute("x", chipCx(i)); tx.setAttribute("y", KY + 20);
+      tx.setAttribute("text-anchor", "middle");
+      tx.textContent = t;
+      g.appendChild(r); g.appendChild(tx);
+      flowSvg.appendChild(g);
+      kChipGs.push(g);
+    });
+    for (var ai = 0; ai < TOK.length; ai++) {
+      var ap = document.createElementNS(NS, "path");
+      ap.setAttribute("class", "arc");
+      flowSvg.insertBefore(ap, flowSvg.firstChild);
+      arcPaths.push(ap);
+    }
+    function drawFlow() {
+      var row = W[current];
+      var y0 = QY + CHH, y1 = KY, mid = (y0 + y1) / 2;
+      var qx = chipCx(current);
+      for (var k = 0; k < TOK.length; k++) {
+        var v = row[k], p = arcPaths[k], kx = chipCx(k);
+        if (k > current) {
+          p.style.display = "none";
+        } else {
+          p.style.display = "";
+          p.setAttribute("d", "M " + qx + "," + y0 + " C " + qx + "," + mid +
+            " " + kx + "," + mid + " " + kx + "," + y1);
+          p.style.stroke = "#8e44ad";
+          p.style.strokeWidth = (0.5 + v * 9).toFixed(1) + "px";
+          p.style.strokeOpacity = (0.06 + v * 0.94).toFixed(2);
+        }
+      }
+      for (var q = 0; q < TOK.length; q++) {
+        var qc = qChips[q];
+        qc.setAttribute("class", "qchip" + (q === current ? " active" : "") + (q > current ? " masked" : ""));
+        var kg = kChipGs[q];
+        kg.setAttribute("class", "kchip" + (q > current ? " masked" : ""));
+        if (q <= current) {
+          var a = Math.min(1, row[q] * 1.6);
+          kg.childNodes[0].style.fill = "rgba(142,68,173," + a.toFixed(2) + ")";
+        } else {
+          kg.childNodes[0].style.fill = "";
+        }
+      }
+    }
+
+    // Play: write the sentence left to right, 2200ms per word (stats line changes).
+    var playBtn = document.getElementById("causalPlay");
+    var playTimer = null;
+    function stopPlay(hideMs) {
+      if (playTimer) { clearTimeout(playTimer); playTimer = null; }
+      playBtn.textContent = "Play";
+      playBtn.classList.remove("stop");
+    }
+    function userSelect(i) { stopPlay(600); select(i); }
+    playBtn.addEventListener("click", function() {
+      if (playTimer) { stopPlay(2000); return; }
+      playBtn.textContent = "Stop";
+      playBtn.classList.add("stop");
+      playScrollEnsure(document.getElementById("causalDemo"));
+      var i = 0;
+      select(i);
+      causalSchedule();
+      function causalSchedule() {
+        playTimer = setTimeout(function() {
+          i++;
+          if (i >= TOK.length) { stopPlay(2000); return; }
+          select(i);
+          causalSchedule();
+        }, 2200);
+      }
+    });
+
+    buildTable();
+    select(current);
+    layoutFlow();
+    window.addEventListener("resize", function() { layoutFlow(); });
   })();
   </script>
 

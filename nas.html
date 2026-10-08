@@ -600,6 +600,7 @@
        <label for="nasBudget">GPU-hours budget: <span id="nasBudgetVal">100</span></label>
        <input type="range" id="nasBudget" min="20" max="200" step="10" value="100">
        <button class="race-btn primary" id="nasPlay" type="button">Play</button>
+       <button class="race-btn" id="nasReset" type="button">Reset</button>
        <button class="race-btn" id="nasOverlay" type="button">Overlay all three</button>
        <label id="nasSpeedLabel">Speed:</label>
        <div class="race-seg" role="group" aria-labelledby="nasSpeedLabel">
@@ -623,6 +624,7 @@
          <li><strong>GPU-hours budget (20 to 200):</strong> Sets how long the race runs. Try a small budget and watch hill climbing look respectable, then raise it and watch evolution pull away.</li>
          <li><strong>Overlay all three:</strong> Jumps straight to the final answer at the current budget, no animation. Try it after changing the budget for the instant comparison.</li>
          <li><strong>Speed (1x, 2x, 4x):</strong> Sets how many GPU-hours each 2.2-second tick covers. The shaded band at the left of the race chart marks one tick, so try 4x and watch the band widen: each animation step now jumps 4 GPU-hours and green reaches the top peak in a quarter of the ticks; at 1x the strategies unfold step by step.</li>
+         <li><strong>Reset:</strong> Stops Play and puts the race back to the unstarted state: budget back to 100, speed back to 1x, the curves and dots cleared.</li>
        </ul>
      </div>
      <p class="race-note">Toy simulation with a fixed seed, so every run is reproducible. It is not real NAS results, but the ordering matches what the papers report: the strategy does the work.</p>
@@ -728,8 +730,10 @@
      var PLAY_PER_TICK = 1;
 
      function draw(curves, budget, upto) {
-       lastCurves = { curves: curves, budget: budget };
        var uptoN = (typeof upto === 'number') ? upto : Infinity;
+       /* lastCurves carries the visible-progress position too, so resize and
+          speed changes never redraw a finished race over an unstarted one. */
+       lastCurves = { curves: curves, budget: budget, upto: uptoN };
        var dpr = window.devicePixelRatio || 1;
        var w = canvas.clientWidth;
        var h = 320;
@@ -1035,6 +1039,44 @@
        statsEl.innerHTML = statsHtml(curves, budget);
      }
 
+     /* The rest state is the true start: no strategy has spent a GPU-hour yet.
+        The race chart shows only the axes and the at-rest stride band, the
+        landscape strip shows the peaks with no evaluated dots, and the stat
+        line says so. Play unfolds from here; Overlay still jumps to the end. */
+     function startStatsHtml(curves, budget) {
+       var parts = [];
+       for (var k = 0; k < curves.length; k++) {
+         var c = curves[k];
+         parts.push('<span class="race-dot" style="background:' + c.color + '"></span>' +
+           c.name + ': <strong>not yet evaluated</strong>');
+       }
+       return parts.join('<br>');
+     }
+
+     function renderStart(budget) {
+       stopPlay();
+       playCurves = buildRaceCurves(budget);
+       playBudget = budget;
+       playTick = 0;
+       draw(playCurves, budget, 0);
+       drawSpace(playCurves, 0);
+       legendEl.innerHTML = legendHtml(playCurves);
+       statsEl.innerHTML = '<strong>GPU-hour 0 of ' + budget + '</strong><br>' +
+         startStatsHtml(playCurves, budget);
+     }
+
+     function resetRace() {
+       budgetEl.value = 100;
+       budgetVal.textContent = '100';
+       PLAY_PER_TICK = 1;
+       var sb2;
+       for (sb2 = 0; sb2 < speedBtns.length; sb2++) {
+         speedBtns[sb2].setAttribute('aria-pressed',
+           speedBtns[sb2].getAttribute('data-per-tick') === '1' ? 'true' : 'false');
+       }
+       renderStart(100);
+     }
+
      document.getElementById('nasPlay').addEventListener('click', togglePlay);
      document.getElementById('nasOverlay').addEventListener('click', function() {
        renderAll(readBudget());
@@ -1050,11 +1092,12 @@
          /* At-rest preview: redraw so the stride band visibly widens the
             moment the button is pressed, not just on the next Play. */
          if (playTimer === null && lastCurves) {
-           draw(lastCurves.curves, lastCurves.budget);
-           drawSpace(lastCurves.curves);
+           draw(lastCurves.curves, lastCurves.budget, lastCurves.upto);
+           drawSpace(lastCurves.curves, lastCurves.upto);
          }
        });
      }
+     document.getElementById('nasReset').addEventListener('click', resetRace);
      budgetEl.addEventListener('input', function() {
        var budget = readBudget();
        budgetVal.textContent = String(budget);
@@ -1062,9 +1105,9 @@
      });
      window.addEventListener('resize', function() {
        if (playTimer !== null) { renderTick(); return; }
-       if (lastCurves) { draw(lastCurves.curves, lastCurves.budget); drawSpace(lastCurves.curves); }
+       if (lastCurves) { draw(lastCurves.curves, lastCurves.budget, lastCurves.upto); drawSpace(lastCurves.curves, lastCurves.upto); }
      });
-     renderAll(readBudget());
+     renderStart(readBudget());
    })();
    </script>
 
@@ -1095,6 +1138,7 @@
      </figure>
      <div class="demo-controls" style="margin-top:1rem;">
        <button type="button" class="race-btn primary" id="nasnetPaperPlay">Play</button>
+       <button type="button" class="race-btn" id="nasnetPaperReset">Reset</button>
      </div>
      <div class="cap-card" id="nasnetFigCap">
        <strong>How to play</strong>
@@ -1102,6 +1146,7 @@
          <li><strong>The point:</strong> This is the authors' own picture of neural architecture search as reinforcement learning. The whole method is one loop: the controller proposes an architecture, the child network trains and gets scored, and the score teaches the controller to propose better architectures next time.</li>
          <li><strong>What you'll see:</strong> The orange dot travels the loop, one box every 2.2 seconds, while each visited marker lights up and gets a one-line explanation. It keeps lapping, because the loop is the point.</li>
          <li><strong>Play button:</strong> Starts and stops the dot's lap around the four boxes. Try watching two full laps: the path is the same each time, because the method is the same four steps applied to an ever smarter controller.</li>
+         <li><strong>Reset button:</strong> Stops the dot and clears the lit markers, back to the unrun figure.</li>
          <li class="try-it"><strong>The markers (1 to 4):</strong> Jump straight to a box and show its one-line explanation. Try marker 2 first: it is the only box that spends compute, which is exactly why the full search cost thousands of GPU-days.</li>
        </ul>
      </div>
@@ -1154,6 +1199,14 @@
        k = 0; show(k); k = 1;
        playBtn.textContent = 'Stop';
        timer = setInterval(function () { show(k); k = (k + 1) % btns.length; }, 2200);
+     });
+     /* Reset: stop the lap, hide the dot, clear the lit markers, and restore
+        the unrun caption text. */
+     var nasnetDefaultText = box.textContent;
+     var nasnetResetBtn = document.getElementById('nasnetPaperReset');
+     if (nasnetResetBtn) nasnetResetBtn.addEventListener('click', function () {
+       stop();
+       box.textContent = nasnetDefaultText;
      });
    })();
    </script>
@@ -1245,6 +1298,7 @@ for step in range(50):
      </figure>
      <div class="demo-controls" style="margin-top:1rem;">
        <button type="button" class="race-btn primary" id="dartsPaperPlay">Play</button>
+       <button type="button" class="race-btn" id="dartsPaperReset">Reset</button>
      </div>
      <div class="cap-card" id="dartsFigCap">
        <strong>How to play</strong>
@@ -1252,6 +1306,7 @@ for step in range(50):
          <li><strong>The point:</strong> This is the authors' own drawing of the DARTS trick. Four panels, one message: never pick an operation until the very end. Soften every choice into a blend, learn the blend weights with gradients alongside the network weights, then keep only the strongest op on each edge.</li>
          <li><strong>What you'll see:</strong> The tour steps through the panels left to right, one every 2.2 seconds, dimming the other three so the active panel stands out. Each lit marker brings a one-line explanation of the panel it sits on.</li>
          <li><strong>Play button:</strong> Walks panels 1 through 4 in order, then stops on the final cell. Try replaying it and watching the edges thin between panels 2, 3, and 4: that thinning is gradient descent doing the choosing.</li>
+         <li><strong>Reset button:</strong> Stops the tour and un-dims all four panels, back to the starting figure.</li>
          <li class="try-it"><strong>The markers (1 to 4):</strong> Jump straight to a panel and show its one-line explanation. Try tapping 2 then 4 back to back: every op running on every edge versus one op kept per edge. That contrast is the whole paper in two panels.</li>
        </ul>
      </div>
@@ -1305,6 +1360,14 @@ for step in range(50):
          k++;
          if (k >= btns.length) { stop(); }
        }, 2200);
+     });
+     /* Reset: stop the tour, un-dim all four panels, and restore the
+        unrun caption text. */
+     var dartsDefaultText = box.textContent;
+     var dartsResetBtn = document.getElementById('dartsPaperReset');
+     if (dartsResetBtn) dartsResetBtn.addEventListener('click', function () {
+       stop();
+       box.textContent = dartsDefaultText;
      });
    })();
    </script>

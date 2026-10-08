@@ -677,7 +677,7 @@
 
    <p>One honest note first: the source notebook for this page, <span style="font-family: monospace;">dim-reduce/tsne.ipynb</span>, is an empty shell. One empty code cell, no outputs. So this tool does not replay notebook output. It runs the canonical t-SNE example live, in your browser: 300 points in 24 dimensions, grouped into 4 clusters, each hiding 3 sub-clusters.</p>
 
-   <p>The tool computes real t-SNE: the exact $P$ matrix by binary search on each point's $\sigma_i$, symmetrized joint probabilities, a random start, and momentum gradient descent on the KL cost. No libraries, all vanilla JS. The canvas uses a fixed scale, so a map that collapses looks collapsed and a map that explodes looks exploded. Nothing is auto-zoomed to flatter the result.</p>
+   <p>The tool computes real t-SNE: the exact $P$ matrix by binary search on each point's $\sigma_i$, symmetrized joint probabilities, a random start, and momentum gradient descent on the KL cost. No libraries, all vanilla JS. The camera follows the map: it zooms to keep the cloud filling the frame so the crawl from noise to clusters is actually visible, easing smoothly instead of jumping. Absolute size still matters, so the readout shows the current view scale: a map that explodes reads as a growing view number.</p>
 
    <div class="demo" id="tsneDemo">
      <div class="demo-controls">
@@ -700,9 +700,9 @@
        <p class="cc-head">How to play</p>
        <ul>
          <li><strong>The point:</strong> t-SNE turns "who is near whom" in 24 dimensions into a 2D map. Perplexity decides what counts as a neighborhood, and the map you get depends on that choice more than on anything else.</li>
-         <li><strong>What you'll see:</strong> 300 colored points start as random noise, then crawl into clusters while the KL number drops. The axes mean nothing: only the neighborhoods are real.</li>
+         <li><strong>What you'll see:</strong> 300 colored points start as random noise, then crawl into clusters while the KL number drops. The camera follows the cloud, zooming to keep it filling the frame so the crawl is actually visible; the view number in the readout is the current zoom scale. The axes mean nothing: only the neighborhoods are real.</li>
          <li class="tryit">Try perplexity 5 and watch each cluster shatter into a spray of tiny islands; then try 90 and watch them collapse into crowded dots.</li>
-         <li class="tryit">Try learning rate 20 and watch the points barely crawl; then try 500 and watch the map blow up wide.</li>
+         <li class="tryit">Try learning rate 20 and watch the points barely crawl; then try 500 and watch the view number in the readout climb as the map blows up wide.</li>
          <li class="tryit">Try exaggeration 12 and watch the clusters pull into tight, separated islands. It only applies to the first 250 steps, the paper's early-exaggeration trick.</li>
          <li class="tryit">Try Show PCA and watch the same data drawn by a straight linear projection: PCA also finds the clusters, but the pretty separation is gone.</li>
          <li class="tryit"><strong>Reset:</strong> restores the whole start frame: perplexity 30, learning rate 200, exaggeration 4, back to t-SNE mode, and a fresh random start so a new map forms. The random start means it is never identical twice.</li>
@@ -774,7 +774,7 @@
 
      var N = 300, D = 24, NB = 4, PER = 75;
      var COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'];
-     var SCALE = 60; /* fixed Y-to-canvas scale: nothing auto-zooms */
+     var SCALE = 60; /* hard clamp on embedding coords; the camera auto-fits separately */
 
      var canvas = document.getElementById('tsneCanvas');
      var statsEl = document.getElementById('tsneStats');
@@ -790,6 +790,24 @@
      if (!canvas || !canvas.getContext) return;
      var ctx = canvas.getContext('2d');
      var W = canvas.width, H = canvas.height;
+
+     /* ---- camera: eased zoom-to-fit so the cloud fills the frame.
+        Refit every draw; the ease keeps it smooth, never jumpy. ---- */
+     var view = { cx: 0, cy: 0, half: 12 };
+     var prevX = new Float64Array(N), prevY = new Float64Array(N);
+     var trailsOn = false;
+     function fitTarget(getX, getY) {
+       var mnx = Infinity, mxx = -Infinity, mny = Infinity, mxy = -Infinity, i, x, y;
+       for (i = 0; i < N; i++) {
+         x = getX(i); y = getY(i);
+         if (x < mnx) mnx = x; if (x > mxx) mxx = x;
+         if (y < mny) mny = y; if (y > mxy) mxy = y;
+       }
+       var half = Math.max(mxx - mnx, mxy - mny) / 2 * 1.30;
+       if (!(half >= 8)) half = 8;
+       if (half > 85) half = 85;
+       return { cx: (mnx + mxx) / 2, cy: (mny + mxy) / 2, half: half };
+     }
 
      /* ---- data: 4 clusters in 24-D, each with 3 sub-clusters (fixed seed) ---- */
      var X = new Float64Array(N * D);
@@ -898,6 +916,9 @@
        var g = makeNormal(rng);
        for (var k = 0; k < 2 * N; k++) { Y[k] = g() * 1e-4; V[k] = 0; }
        iter = 0; restartedNote = false;
+       /* camera back to the full-frame random-scatter start; no streaks from the jump */
+       view.cx = 0; view.cy = 0; view.half = 12;
+       trailsOn = false;
      }
 
      function stepTsne(steps) {
@@ -993,26 +1014,44 @@
        ctx.font = '14px sans-serif';
        ctx.fillText('Scroll into view to start the computation.', W / 2, H / 2 + 14);
      }
+     /* ---- drawing: eased zoom-to-fit camera + subtle motion streaks ---- */
      function draw() {
        if (!initialized) { drawPlaceholder(); return; }
        ctx.fillStyle = '#ffffff';
        ctx.fillRect(0, 0, W, H);
-       var i, cx, cy;
-       if (mode === 'pca' && pcaXY) {
+       var i, px, py;
+       var usePca = (mode === 'pca' && pcaXY);
+       function gx(i) { return usePca ? pcaXY.x[i] : Y[2 * i]; }
+       function gy(i) { return usePca ? pcaXY.y[i] : Y[2 * i + 1]; }
+       /* ease the camera toward the cloud's bounds: smooth, never jumpy */
+       var t = fitTarget(gx, gy);
+       view.cx += (t.cx - view.cx) * 0.18;
+       view.cy += (t.cy - view.cy) * 0.18;
+       view.half += (t.half - view.half) * 0.18;
+       var sc = (Math.min(W, H) / 2 * 0.94) / view.half;
+       function X_(x) { return W / 2 + (x - view.cx) * sc; }
+       function Y_(y) { return H / 2 - (y - view.cy) * sc; }
+       if (usePca) trailsOn = false;
+       /* motion streaks in data space: immune to camera moves, show true drift */
+       if (trailsOn && !usePca) {
+         ctx.lineWidth = 1.5;
          for (i = 0; i < N; i++) {
-           cx = (pcaXY.x[i] * pcaXY.s + SCALE) / (2 * SCALE) * W;
-           cy = H - (pcaXY.y[i] * pcaXY.s + SCALE) / (2 * SCALE) * H;
-           ctx.fillStyle = COLORS[lab[i]];
-           ctx.beginPath(); ctx.arc(cx, cy, 4, 0, 6.2832); ctx.fill();
+           ctx.strokeStyle = COLORS[lab[i]];
+           ctx.globalAlpha = 0.20;
+           ctx.beginPath();
+           ctx.moveTo(X_(prevX[i]), Y_(prevY[i]));
+           ctx.lineTo(X_(gx(i)), Y_(gy(i)));
+           ctx.stroke();
          }
-       } else {
-         for (i = 0; i < N; i++) {
-           cx = (Y[2 * i] + SCALE) / (2 * SCALE) * W;
-           cy = H - (Y[2 * i + 1] + SCALE) / (2 * SCALE) * H;
-           ctx.fillStyle = COLORS[lab[i]];
-           ctx.beginPath(); ctx.arc(cx, cy, 4, 0, 6.2832); ctx.fill();
-         }
+         ctx.globalAlpha = 1;
        }
+       for (i = 0; i < N; i++) {
+         px = X_(gx(i)); py = Y_(gy(i));
+         ctx.fillStyle = COLORS[lab[i]];
+         ctx.beginPath(); ctx.arc(px, py, 4.5, 0, 6.2832); ctx.fill();
+         prevX[i] = gx(i); prevY[i] = gy(i);
+       }
+       if (!usePca) trailsOn = true;
      }
 
      function updateStats() {
@@ -1024,7 +1063,7 @@
        } else if (!S) {
          s = 'Computing neighbor probabilities...';
        } else {
-         s = 'Iteration ' + iter + ' of ' + MAX_ITER + '  ·  KL divergence ' + lastKL.toFixed(3);
+         s = 'Iteration ' + iter + ' of ' + MAX_ITER + '  ·  KL divergence ' + lastKL.toFixed(3) + '  ·  view ±' + view.half.toFixed(1);
          if (restartedNote) s += '  ·  learning rate too high, map restarted';
        }
        statsEl.textContent = s;

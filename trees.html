@@ -659,12 +659,13 @@
    <div class="demo" id="forestDemo">
      <div class="demo-controls">
        <label for="rfTrees">Trees:</label>
-       <input type="range" id="rfTrees" min="1" max="20" step="1" value="1">
-       <span class="pval" id="rfTreesVal">1</span>
+       <input type="range" id="rfTrees" min="0" max="20" step="1" value="0">
+       <span class="pval" id="rfTreesVal">0</span>
        <label for="rfDepth">Max depth:</label>
        <input type="range" id="rfDepth" min="1" max="12" step="1" value="10">
        <span class="pval" id="rfDepthVal">10</span>
        <button type="button" id="rfPlay">Play</button>
+       <button type="button" id="rfReset" class="ghost">Reset</button>
      </div>
      <div class="canvas-wrap">
        <canvas id="rfCanvas" width="680" height="520" style="display:block;margin:0 auto;width:100%;max-width:680px;height:auto;"></canvas>
@@ -680,9 +681,10 @@
        <p class="cc-head">How to play</p>
        <ul>
          <li><strong>The point:</strong> One tree memorizes, many trees vote. Growing the forest smooths the jagged boundary and the test accuracy climbs while training accuracy stays high.</li>
-         <li><strong>What you'll see:</strong> Trees grow from 1 to 20; each new tree retrains live on its own bootstrap sample, the wiggly boundary relaxes into smooth curves, and the test-accuracy readout climbs.</li>
-         <li><strong>Trees:</strong> Sets the forest size by hand; try 1 against 20 at full depth and watch the boundary go from jagged memorization to a calm vote.</li>
+         <li><strong>What you'll see:</strong> The plot opens ungrown: bare points, no boundary. Press Play and trees grow from 1 to 20; each new tree retrains live on its own bootstrap sample, the wiggly boundary relaxes into smooth curves, and the test-accuracy readout climbs.</li>
+         <li><strong>Trees:</strong> Sets the forest size by hand; 0 is the ungrown start. Try 1 against 20 at full depth and watch the boundary go from jagged memorization to a calm vote.</li>
          <li><strong>Max depth:</strong> Deepens every tree; try 12 with a single tree and watch it tiptoe around individual points, then grow the forest and watch voting undo the damage. Try 2 and watch the boundary turn into big confident blocks.</li>
+         <li><strong>Reset:</strong> Clears the forest back to the ungrown start: bare points, no boundary, sliders back to 0 trees and depth 10. Try it after a run and watch the boundary vanish so you can grow it again.</li>
        </ul>
      </div>
    </div>
@@ -777,6 +779,7 @@
      var stats = document.getElementById('rfStats');
      var canvas = document.getElementById('rfCanvas');
      var playBtn = document.getElementById('rfPlay');
+     var resetBtn = document.getElementById('rfReset');
      if (!tSlider || !canvas || !canvas.getContext) return;
      var ctx = canvas.getContext('2d');
      var W = canvas.width, H = canvas.height;
@@ -792,7 +795,7 @@
      var x0 = -4.2, x1 = 4.2, y0 = -4.2, y1 = 4.2;
      var GN = 60;
      var trees = [];   /* {grid} per tree, trained incrementally */
-     var nTrees = 1, maxDepth = 10;
+     var nTrees = 0, maxDepth = 10;   /* rest state: ungrown, the plot shows bare points */
      function gridOf(tree) {
        var g = new Float32Array(GN * GN);
        for (var pr = 0; pr < GN; pr++) {
@@ -884,16 +887,45 @@
        for (var i = 0; i < X.length; i++) if (vote(X[i]) === y[i]) c++;
        return c / X.length;
      }
+     /* START badge for the ungrown rest state: legible at 390px, parked in the
+        top-left corner of the plot so it never covers the legend or stats. */
+     function drawStartBadge() {
+       var label = 'START: press Play';
+       var fs = Math.round(15 * SC);
+       ctx.save();
+       ctx.font = 'bold ' + fs + 'px sans-serif';
+       var tw = ctx.measureText(label).width;
+       var bx = padL + Math.round(10 * SC), by = padT + Math.round(10 * SC);
+       var bw = tw + Math.round(24 * SC), bh = fs + Math.round(16 * SC);
+       ctx.fillStyle = 'rgba(255,255,255,0.94)';
+       ctx.strokeStyle = '#2c3e50';
+       ctx.lineWidth = Math.max(1.5, Math.round(2 * SC));
+       if (ctx.roundRect) {
+         ctx.beginPath();
+         ctx.roundRect(bx, by, bw, bh, Math.round(8 * SC));
+         ctx.fill(); ctx.stroke();
+       } else {
+         ctx.fillRect(bx, by, bw, bh);
+         ctx.strokeRect(bx, by, bw, bh);
+       }
+       ctx.fillStyle = '#2c3e50';
+       ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+       ctx.fillText(label, bx + Math.round(12 * SC), by + bh / 2);
+       ctx.restore();
+     }
      function draw() {
        measure();
-       ensureTrees(nTrees);
-       var g = meanGrid();
-       drawTint(g);
        var pw = W - padL - padR, ph = H - padT - padB;
        function xPix(x) { return padL + (x - x0) / (x1 - x0) * pw; }
        function yPix(y) { return H - padB - (y - y0) / (y1 - y0) * ph; }
        ctx.clearRect(0, 0, W, H);
-       ctx.drawImage(tint, padL, padT, pw, ph);
+       var g = null;
+       if (nTrees > 0) {
+         ensureTrees(nTrees);
+         g = meanGrid();
+         drawTint(g);
+         ctx.drawImage(tint, padL, padT, pw, ph);
+       }
        var r = Math.max(2, Math.round(4.2 * SC)), i;
        for (i = 0; i < S.Xtr.length; i++) {
          ctx.fillStyle = S.ytr[i] === 1 ? '#2a7fbf' : '#f08c1a';
@@ -913,18 +945,28 @@
          ctx.lineWidth = Math.max(1.5, Math.round(2 * SC));
          ctx.stroke();
        }
-       var segs = contourSegs(g);
-       ctx.strokeStyle = '#2c3e50';
-       ctx.lineWidth = Math.max(2, Math.round(2.5 * SC));
-       ctx.beginPath();
-       for (var s = 0; s < segs.length; s += 4) {
-         ctx.moveTo(xPix(segs[s]), yPix(segs[s + 1]));
-         ctx.lineTo(xPix(segs[s + 2]), yPix(segs[s + 3]));
+       if (nTrees > 0) {
+         var segs = contourSegs(g);
+         ctx.strokeStyle = '#2c3e50';
+         ctx.lineWidth = Math.max(2, Math.round(2.5 * SC));
+         ctx.beginPath();
+         for (var s = 0; s < segs.length; s += 4) {
+           ctx.moveTo(xPix(segs[s]), yPix(segs[s + 1]));
+           ctx.lineTo(xPix(segs[s + 2]), yPix(segs[s + 3]));
+         }
+         ctx.stroke();
+       } else {
+         drawStartBadge();
        }
-       ctx.stroke();
      }
      function update() {
        draw();
+       if (nTrees === 0) {
+         stats.innerHTML = 'trees: <strong>0</strong> (not yet grown)' +
+           ' &nbsp;&nbsp;|&nbsp;&nbsp; depth: <strong>' + maxDepth + '</strong>' +
+           ' &nbsp;&nbsp;|&nbsp;&nbsp; press Play';
+         return;
+       }
        var tra = accOn(S.Xtr, S.ytr), tea = accOn(S.Xte, S.yte);
        stats.innerHTML = 'trees: <strong>' + nTrees + '</strong> &nbsp; depth: <strong>' + maxDepth +
          '</strong> &nbsp;&nbsp;|&nbsp;&nbsp; train acc: <strong>' + (tra * 100).toFixed(1) +
@@ -947,7 +989,9 @@
      var depthTimer = null;
      tSlider.addEventListener('input', function () {
        stop(); playK = 1;
-       nTrees = parseInt(tSlider.value, 10) || 1;
+       nTrees = parseInt(tSlider.value, 10);
+       if (!isFinite(nTrees)) nTrees = 0;
+       nTrees = Math.min(20, Math.max(0, nTrees));
        tVal.textContent = String(nTrees);
        update();
      });
@@ -965,6 +1009,15 @@
        playK = 1;
        playBtn.textContent = 'Pause';
        tick();
+     });
+     if (resetBtn) resetBtn.addEventListener('click', function () {
+       stop(); playK = 1;
+       nTrees = 0;
+       trees = [];
+       maxDepth = 10;
+       tSlider.value = '0'; tVal.textContent = '0';
+       dSlider.value = '10'; dVal.textContent = '10';
+       update();
      });
      update();
    })();
@@ -988,6 +1041,7 @@
        <input type="range" id="gbRounds" min="1" max="100" step="1" value="10">
        <span class="pval" id="gbRoundsVal">10</span>
        <button type="button" id="gbPlay">Play</button>
+       <button type="button" id="gbReset" class="ghost">Reset</button>
      </div>
      <div class="canvas-wrap">
        <canvas id="gbCanvas" width="680" height="520" style="display:block;margin:0 auto;width:100%;max-width:680px;height:auto;"></canvas>
@@ -1006,6 +1060,7 @@
          <li><strong>The point:</strong> Each boosting round fits the last round's mistakes, so the boundary corrects itself where it is still wrong.</li>
          <li><strong>What you'll see:</strong> Play adds 5 rounds per step; every step retrains live, the red and blue residual halos shrink and fade, the boundary straightens out where the errors were, and the mean residual readout falls.</li>
          <li><strong>Rounds:</strong> Scrubs the boosting history by hand; try dragging back to 1 and watch the boundary collapse to nearly nothing with fat halos everywhere, then drag forward and watch each correction land exactly on the remaining mistakes.</li>
+         <li><strong>Reset:</strong> Puts the rounds back at 10, the early stage with fat halos and a barely-formed boundary. Try it after a full run and watch the mistakes come back so you can correct them again.</li>
        </ul>
      </div>
    </div>
@@ -1272,6 +1327,14 @@
        playBtn.textContent = 'Pause';
        tick();
      });
+     var gbResetBtn = document.getElementById('gbReset');
+     if (gbResetBtn) gbResetBtn.addEventListener('click', function () {
+       stop();
+       setRounds(10);
+       rSlider.value = '10';
+       rVal.textContent = '10';
+       update();
+     });
      resetF();      /* F starts at F0, not zero: first residuals must be y - F0 */
      setRounds(10);
      update();
@@ -1291,13 +1354,15 @@
      </div>
      <figcaption><strong>FIGURE 1.</strong> EFFECT OF NUMBER OF INPUTS ON SONAR DATA</figcaption>
      <p class="diag-label" style="max-width:640px;margin:6px auto 0;">Rebuilt from Figure 1 of Breiman, L. "Random Forests." <em>Machine Learning</em> 45(1), 5-32, 2001. <a href="https://www.stat.berkeley.edu/~breiman/randomforest2001.pdf">PDF</a></p>
-     <div><button type="button" class="pf-play" id="obPlay">Play: trace the OB error curve</button></div>
+     <div><button type="button" class="pf-play" id="obPlay">Play: trace the OB error curve</button>
+     <button type="button" class="pf-play" id="obReset" style="margin-left:8px;">Reset</button></div>
      <div class="caption-card" id="breimanCap" style="max-width:640px;margin-left:auto;margin-right:auto;text-align:left;">
        <p class="cc-head">How to play</p>
        <ul>
          <li><strong>The point:</strong> The forest votes, and the votes each tree sat out on become its test set. This is Breiman's real Figure 1 from the 2001 paper: strength, correlation, and the honest out-of-bag error on sonar data as the input set F grows.</li>
          <li><strong>What you'll see:</strong> Tap a numbered marker to tour a panel. A cursor walks the blue out-of-bag curve across the bottom panel, tracking the green test-set curve at every value of F.</li>
          <li class="tryit"><strong>Try it:</strong> tap 2 and watch the trace start on its own: the blue squares hug the green circles all the way across. Then check the top panel: strength flattens while correlation keeps rising, which is why more inputs stop buying accuracy.</li>
+         <li><strong>Reset:</strong> Wipes the trace off the figure and puts the tour text back at its start. Try it after a trace and watch the orange line vanish so you can walk it again.</li>
        </ul>
      </div>
    </figure>
@@ -1368,6 +1433,15 @@
        if (timer) { stop(); return; }
        start();
      });
+     var obResetBtn = document.getElementById('obReset');
+     function resetTrace() {
+       stop();
+       step = 0;
+       clearActive();
+       ctx.clearRect(0, 0, canvas.width, canvas.height);
+       if (box) box.textContent = 'Tap a numbered marker on the figure to tour it.';
+     }
+     if (obResetBtn) obResetBtn.addEventListener('click', resetTrace);
 
      function clearActive() {
        for (var i = 0; i < btns.length; i++) btns[i].classList.remove('active');

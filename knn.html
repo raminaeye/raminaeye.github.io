@@ -625,6 +625,7 @@
         <input type="range" id="kSlider" min="1" max="25" step="1" value="17">
         <span class="pval" id="kVal">17</span>
         <button type="button" id="kPlay">Play</button>
+        <button type="button" id="kReset" class="ghost">Reset</button>
       </div>
       <p class="land-explore">Click anywhere on the plot to move the query diamond.</p>
       <div class="canvas-wrap">
@@ -643,9 +644,10 @@
       <p class="cc-head">How to play</p>
       <ul>
         <li><strong>The point:</strong> One slider, k, morphs the boundary from jagged overfit to smooth. Bias and variance you can see.</li>
-        <li><strong>What you'll see:</strong> k sweeps 1 to 25 in 25 steps with the boundary re-contouring live at every step: spiky islands wrapped around individual points melt into big smooth regions, and the query diamond's vote readout flips and settles as its electorate grows.</li>
+        <li><strong>What you'll see:</strong> The plot opens uncomputed: bare points and the query diamond, no boundary. Press Play and k sweeps 1 to 25 in 25 steps with the boundary contouring live at every step: spiky islands wrapped around individual points melt into big smooth regions, and the query diamond's vote readout flips and settles as its electorate grows.</li>
         <li><strong>k (neighbors who vote):</strong> Drag it by hand and watch the boundary re-contour a beat later. Try parking at 3 and counting the jagged inlets around single points, then drag to 25 and watch them melt into smooth blobs.</li>
         <li><strong>Click to move the query:</strong> Click anywhere on the plot and the diamond jumps there; its k nearest neighbors light up with lines and the readout shows the vote split. Try the contested ground between two clusters and watch a small k and a large k disagree.</li>
+        <li><strong>Reset:</strong> Clears the boundary back to the uncomputed start: bare points, the query diamond back on its contested ground, k back at 17. Try it after a sweep and watch the regions vanish so you can classify again.</li>
       </ul>
     </div>
 
@@ -670,6 +672,7 @@
      var slider = document.getElementById('kSlider');
      var kVal = document.getElementById('kVal');
      var playBtn = document.getElementById('kPlay');
+     var resetBtn = document.getElementById('kReset');
      var stats = document.getElementById('kStats');
      if (!canvas || !canvas.getContext) return;
      var ctx = canvas.getContext('2d');
@@ -711,6 +714,7 @@
      var G = 50, XMIN = -4.2, XMAX = 4.2, YMIN = -4.2, YMAX = 4.2;
      var labels = new Uint8Array(G * G);
      var curK = 17;
+     var computed = false;   /* rest state: bare points, no boundary wash yet */
 
      /* Majority vote on a 50x50 grid. k-smallest linear scan per cell. */
      function computeBoundary(k) {
@@ -778,6 +782,32 @@
      function xPix(x) { return padL + (x - XMIN) / (XMAX - XMIN) * (W - padL - padR); }
      function yPix(y) { return H - padB - (y - YMIN) / (YMAX - YMIN) * (H - padT - padB); }
 
+     /* START badge for the uncomputed rest state: legible at 390px. */
+     function drawStartBadge() {
+       var label = 'START: press Play';
+       var fs = Math.round(15 * SC);
+       ctx.save();
+       ctx.font = 'bold ' + fs + 'px sans-serif';
+       var tw = ctx.measureText(label).width;
+       var bx = padL + Math.round(10 * SC), by = padT + Math.round(10 * SC);
+       var bw = tw + Math.round(24 * SC), bh = fs + Math.round(16 * SC);
+       ctx.fillStyle = 'rgba(255,255,255,0.94)';
+       ctx.strokeStyle = '#2c3e50';
+       ctx.lineWidth = Math.max(1.5, Math.round(2 * SC));
+       if (ctx.roundRect) {
+         ctx.beginPath();
+         ctx.roundRect(bx, by, bw, bh, Math.round(8 * SC));
+         ctx.fill(); ctx.stroke();
+       } else {
+         ctx.fillRect(bx, by, bw, bh);
+         ctx.strokeRect(bx, by, bw, bh);
+       }
+       ctx.fillStyle = '#2c3e50';
+       ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+       ctx.fillText(label, bx + Math.round(12 * SC), by + bh / 2);
+       ctx.restore();
+     }
+
      function draw() {
        measure();
        ctx.clearRect(0, 0, W, H);
@@ -797,13 +827,16 @@
          ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
          ctx.fillText(String(t), padL - Math.round(8 * SC), y + Math.round(4 * SC));
        }
-       /* boundary wash, flipped so grid row 0 (YMIN) lands at the bottom */
-       renderBoundary();
-       ctx.save();
-       ctx.translate(padL, padT + ph); ctx.scale(1, -1);
-       ctx.imageSmoothingEnabled = true;
-       ctx.drawImage(off, 0, 0, pw, ph);
-       ctx.restore();
+       /* boundary wash, flipped so grid row 0 (YMIN) lands at the bottom.
+          Skipped until the first computation: the rest state is bare points. */
+       if (computed) {
+         renderBoundary();
+         ctx.save();
+         ctx.translate(padL, padT + ph); ctx.scale(1, -1);
+         ctx.imageSmoothingEnabled = true;
+         ctx.drawImage(off, 0, 0, pw, ph);
+         ctx.restore();
+       }
        /* points: bigger dots with a crisp white outline so they read even
           where the blob centers get dense. Clipped to the plot rect so no
           point bleeds over the y-axis tick labels. */
@@ -819,27 +852,31 @@
          ctx.stroke();
        }
        /* query overlay: faint lines to the k nearest, each neighbor drawn big
-          with a dark outline so every voter is countable, diamond on top */
-       var nb = queryNeighbors(curK), n;
+          with a dark outline so every voter is countable, diamond on top.
+          The neighbor highlighting only exists after the first computation;
+          the diamond itself is always drawn: it is the click affordance. */
        var qpx = xPix(qx), qpy = yPix(qy);
-       ctx.strokeStyle = 'rgba(44,62,80,0.38)'; ctx.lineWidth = Math.max(1, Math.round(1.5 * SC));
-       for (n = 0; n < nb.length; n++) {
-         j = nb[n][1];
-         ctx.beginPath();
-         ctx.moveTo(qpx, qpy);
-         ctx.lineTo(xPix(X[j][0]), yPix(X[j][1]));
-         ctx.stroke();
-       }
-       var nr = Math.max(4, Math.round(7.5 * SC));
-       for (n = 0; n < nb.length; n++) {
-         j = nb[n][1];
-         ctx.fillStyle = Y[j] === 0 ? '#2a7fbf' : '#f08c1a';
-         ctx.beginPath();
-         ctx.arc(xPix(X[j][0]), yPix(X[j][1]), nr, 0, 2 * Math.PI);
-         ctx.fill();
-         ctx.strokeStyle = '#2c3e50';
-         ctx.lineWidth = Math.max(2, Math.round(2.5 * SC));
-         ctx.stroke();
+       if (computed) {
+         var nb = queryNeighbors(curK), n;
+         ctx.strokeStyle = 'rgba(44,62,80,0.38)'; ctx.lineWidth = Math.max(1, Math.round(1.5 * SC));
+         for (n = 0; n < nb.length; n++) {
+           j = nb[n][1];
+           ctx.beginPath();
+           ctx.moveTo(qpx, qpy);
+           ctx.lineTo(xPix(X[j][0]), yPix(X[j][1]));
+           ctx.stroke();
+         }
+         var nr = Math.max(4, Math.round(7.5 * SC));
+         for (n = 0; n < nb.length; n++) {
+           j = nb[n][1];
+           ctx.fillStyle = Y[j] === 0 ? '#2a7fbf' : '#f08c1a';
+           ctx.beginPath();
+           ctx.arc(xPix(X[j][0]), yPix(X[j][1]), nr, 0, 2 * Math.PI);
+           ctx.fill();
+           ctx.strokeStyle = '#2c3e50';
+           ctx.lineWidth = Math.max(2, Math.round(2.5 * SC));
+           ctx.stroke();
+         }
        }
        var ds = Math.round(12 * SC);
        ctx.fillStyle = '#ffffff'; ctx.strokeStyle = '#2c3e50';
@@ -851,14 +888,20 @@
        ctx.restore(); /* end plot-area clip */
        ctx.fillStyle = '#555'; ctx.textAlign = 'center';
        ctx.fillText('feature 1', (padL + W - padR) / 2, H - Math.round(6 * SC));
+       if (!computed) drawStartBadge();
      }
 
      function updateStats() {
+       kVal.textContent = String(curK);
+       if (!computed) {
+         stats.innerHTML = 'k = <strong>' + curK + '</strong> (not yet run)' +
+           ' &nbsp;|&nbsp; press Play or drag k';
+         return;
+       }
        var nb = queryNeighbors(curK), n, c0 = 0;
        for (n = 0; n < nb.length; n++) if (Y[nb[n][1]] === 0) c0++;
        var c1 = curK - c0;
        var winner = c0 >= c1 ? 'blue' : 'orange';
-       kVal.textContent = String(curK);
        stats.innerHTML = 'k = <strong>' + curK + '</strong>' +
          ' &nbsp;|&nbsp; query vote: <strong>' + c0 + ' blue vs ' + c1 + ' orange &rarr; ' + winner + '</strong>';
      }
@@ -876,6 +919,7 @@
        if (playK > 25) { playStop(); return; }
        curK = playK;
        slider.value = String(playK);
+       computed = true;
        computeBoundary(playK);
        refresh();
        playK++;
@@ -893,6 +937,7 @@
        if (debTimer) clearTimeout(debTimer);
        debTimer = setTimeout(function () {
          curK = v;
+         computed = true;
          computeBoundary(v);
          refresh();
        }, 120);
@@ -908,6 +953,7 @@
        qy = YMIN + (H - padB - py) / (H - padT - padB) * (YMAX - YMIN);
        qx = Math.min(XMAX, Math.max(XMIN, qx));
        qy = Math.min(YMAX, Math.max(YMIN, qy));
+       if (!computed) { computed = true; computeBoundary(curK); }
        refresh();
      });
 
@@ -918,6 +964,15 @@
        playK = 1;
        playBtn.textContent = 'Pause';
        playTick();
+     });
+
+     if (resetBtn) resetBtn.addEventListener('click', function () {
+       playStop(); playK = 1;
+       computed = false;
+       curK = 17;
+       slider.value = '17';
+       qx = 0; qy = 2;
+       refresh();
      });
 
      /* Init at k = 17, the notebook's smooth-boundary value. */

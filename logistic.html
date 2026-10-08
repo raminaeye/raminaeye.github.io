@@ -684,10 +684,10 @@
         <p class="cc-head">How to play</p>
         <ul>
           <li><strong>The point:</strong> The sigmoid turns the line's raw score into a probability, and the threshold draws the boundary: every point whose probability clears t lands on the yes side. Move t and the boundary slides.</li>
-          <li><strong>What you'll see:</strong> The threshold sweeps from 0.1 to 0.9 in 9 steps; the dark boundary line for the selected class slides across the scatter while points flip between filled (yes) and hollow (no), and the marker on the sigmoid curve rides along with it.</li>
+          <li><strong>What you'll see:</strong> The scatter opens undecided: the selected class's points sit as gray dots with no boundary drawn. Press Play and the threshold sweeps from 0.1 to 0.9 in 9 steps; the dark boundary drops in for the selected class and slides across the scatter while points flip between filled (yes) and hollow (no), and the marker on the sigmoid curve rides along with it.</li>
           <li class="tryit"><strong>Threshold t:</strong> Sets the yes/no cutoff. Try 0.1 and watch the boundary slide deep into the other classes' territory so nearly everything counts as yes; try 0.9 and watch it retreat until only the surest points stay filled.</li>
           <li class="tryit"><strong>setosa / versicolor / virginica:</strong> Picks which class's boundary you are moving. Try setosa and watch its boundary sit far from everyone else (easy class); try versicolor and watch it squeeze between its two neighbors (the hard one).</li>
-          <li class="tryit"><strong>Reset:</strong> Puts the threshold back at 0.5 and the class back at versicolor, where the boundary is exactly w.x + b = 0. Try it after a sweep and watch the fence snap back to the textbook position.</li>
+          <li class="tryit"><strong>Reset:</strong> Puts the threshold back at 0.5, the class back at versicolor, and clears the classification back to the undecided start. Try it after a sweep and watch the fence vanish so you can draw it again.</li>
         </ul>
       </div>
     </div>
@@ -778,7 +778,11 @@
         return ok / M;
       }
 
-      var S = { cls: 1, t: 0.5, timer: null };
+      var S = { cls: 1, t: 0.5, timer: null, ran: false };
+      /* ran = false is the rest state: the threshold has not been applied
+         yet, so the selected class's points sit undecided (gray) and no
+         boundary is drawn. Fills and boundaries arrive via Play or the
+         threshold/class controls, never at rest. */
       var classBtns = [document.getElementById('sqC0'), document.getElementById('sqC1'), document.getElementById('sqC2')];
 
       function thr() {
@@ -816,6 +820,32 @@
         return pts.length >= 2 ? [pts[0], pts[pts.length - 1]] : null;
       }
 
+      /* START badge: marks the unrun rest state, same pattern as knn. */
+      function drawStartBadge(padL, padT) {
+        var label = 'START: press Play';
+        var fs = Math.round(15 * SC);
+        ctx.save();
+        ctx.font = 'bold ' + fs + 'px sans-serif';
+        var tw = ctx.measureText(label).width;
+        var bx = padL + Math.round(10 * SC), by = padT + Math.round(10 * SC);
+        var bw = tw + Math.round(24 * SC), bh = fs + Math.round(16 * SC);
+        ctx.fillStyle = 'rgba(255,255,255,0.94)';
+        ctx.strokeStyle = '#2c3e50';
+        ctx.lineWidth = Math.max(1.5, Math.round(2 * SC));
+        if (ctx.roundRect) {
+          ctx.beginPath();
+          ctx.roundRect(bx, by, bw, bh, Math.round(8 * SC));
+          ctx.fill(); ctx.stroke();
+        } else {
+          ctx.fillRect(bx, by, bw, bh);
+          ctx.strokeRect(bx, by, bw, bh);
+        }
+        ctx.fillStyle = '#2c3e50';
+        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.fillText(label, bx + Math.round(12 * SC), by + bh / 2);
+        ctx.restore();
+      }
+
       function draw() {
         measure(scatter);
         var padL = 46 * SC, padR = 12 * SC, padT = 12 * SC, padB = 48 * SC;
@@ -833,18 +863,25 @@
           ctx.beginPath(); ctx.moveTo(padL, Yp(gy)); ctx.lineTo(W - padR, Yp(gy)); ctx.stroke();
         }
         var t = S.t, cc;
-        /* points: selected class shows yes/no vs threshold; others context dots */
+        /* points: at rest the selected class is undecided (gray dots); the
+           other classes stay in their true colors as context. Once run,
+           the selected class shows yes/no vs the threshold. */
         var k, px2, py2, p;
         for (k = 0; k < M; k++) {
           px2 = X(PX[k]); py2 = Yp(PY[k]);
           if (PC[k] === S.cls) {
-            p = sigmoid(WB[S.cls][0] * PX[k] + WB[S.cls][1] * PY[k] + WB[S.cls][2]);
-            if (p >= t) {
-              ctx.fillStyle = COLORS[S.cls];
-              ctx.beginPath(); ctx.arc(px2, py2, 3.4 * SC, 0, 2 * Math.PI); ctx.fill();
+            if (!S.ran) {
+              ctx.fillStyle = '#bdc3c7';
+              ctx.beginPath(); ctx.arc(px2, py2, 3.2 * SC, 0, 2 * Math.PI); ctx.fill();
             } else {
-              ctx.strokeStyle = '#95a5a6'; ctx.lineWidth = Math.max(1, 1.4 * SC);
-              ctx.beginPath(); ctx.arc(px2, py2, 3.2 * SC, 0, 2 * Math.PI); ctx.stroke();
+              p = sigmoid(WB[S.cls][0] * PX[k] + WB[S.cls][1] * PY[k] + WB[S.cls][2]);
+              if (p >= t) {
+                ctx.fillStyle = COLORS[S.cls];
+                ctx.beginPath(); ctx.arc(px2, py2, 3.4 * SC, 0, 2 * Math.PI); ctx.fill();
+              } else {
+                ctx.strokeStyle = '#95a5a6'; ctx.lineWidth = Math.max(1, 1.4 * SC);
+                ctx.beginPath(); ctx.arc(px2, py2, 3.2 * SC, 0, 2 * Math.PI); ctx.stroke();
+              }
             }
           } else {
             ctx.fillStyle = COLORS[PC[k]];
@@ -853,23 +890,27 @@
             ctx.globalAlpha = 1;
           }
         }
-        /* boundary lines: others faint dashed, selected solid */
-        for (cc = 0; cc < 3; cc++) {
-          var seg = boundarySeg(cc, cc === S.cls ? t : 0.5);
-          if (!seg) continue;
-          if (cc === S.cls) {
-            ctx.strokeStyle = '#2c3e50'; ctx.lineWidth = Math.max(2, 2.8 * SC);
+        /* boundary lines: drawn only once the threshold has been applied.
+           At rest no fence exists yet. */
+        if (S.ran) {
+          for (cc = 0; cc < 3; cc++) {
+            var seg = boundarySeg(cc, cc === S.cls ? t : 0.5);
+            if (!seg) continue;
+            if (cc === S.cls) {
+              ctx.strokeStyle = '#2c3e50'; ctx.lineWidth = Math.max(2, 2.8 * SC);
+              ctx.setLineDash([]);
+            } else {
+              ctx.strokeStyle = '#95a5a6'; ctx.lineWidth = Math.max(1, 1.6 * SC);
+              ctx.setLineDash([Math.round(6 * SC), Math.round(5 * SC)]);
+            }
+            ctx.beginPath();
+            ctx.moveTo(X(seg[0][0]), Yp(seg[0][1]));
+            ctx.lineTo(X(seg[1][0]), Yp(seg[1][1]));
+            ctx.stroke();
             ctx.setLineDash([]);
-          } else {
-            ctx.strokeStyle = '#95a5a6'; ctx.lineWidth = Math.max(1, 1.6 * SC);
-            ctx.setLineDash([Math.round(6 * SC), Math.round(5 * SC)]);
           }
-          ctx.beginPath();
-          ctx.moveTo(X(seg[0][0]), Yp(seg[0][1]));
-          ctx.lineTo(X(seg[1][0]), Yp(seg[1][1]));
-          ctx.stroke();
-          ctx.setLineDash([]);
         }
+        if (!S.ran) drawStartBadge(padL, padT);
         /* axes */
         ctx.strokeStyle = '#bdc3c7'; ctx.lineWidth = Math.max(1, SC);
         ctx.beginPath();
@@ -942,7 +983,14 @@
       }
 
       function updateStats() {
-        var t = S.t, lt = logit(t), yes = 0, k;
+        var t = S.t, lt = logit(t);
+        if (!S.ran) {
+          stats.innerHTML = 'threshold t = <strong>' + t.toFixed(2) + '</strong>' +
+            ' &nbsp; ' + NAMES[S.cls] + ' <strong>not yet run</strong>' +
+            ' &nbsp;&middot;&nbsp; press Play or drag the threshold';
+          return;
+        }
+        var yes = 0, k;
         for (k = 0; k < M; k++) {
           if (PC[k] !== S.cls) continue;
           var p = sigmoid(WB[S.cls][0] * PX[k] + WB[S.cls][1] * PY[k] + WB[S.cls][2]);
@@ -962,6 +1010,7 @@
       var SWEEP_MS = 2200, swIdx = 0;
       function swTick() {
         if (swIdx >= SWEEP.length) { stop(); swIdx = 0; return; }
+        S.ran = true;
         thrSlider.value = SWEEP[swIdx].toFixed(2);
         S.t = SWEEP[swIdx];
         thrVal.textContent = S.t.toFixed(2);
@@ -991,14 +1040,16 @@
           stop(); swIdx = 0;
           thrSlider.value = '0.5'; S.t = 0.5;
           thrVal.textContent = '0.50';
+          S.ran = false;   /* full initial state: back to the undecided start */
           setClass(1);   /* full initial state: versicolor, not just the threshold */
         });
       }
       classBtns.forEach(function (btn, j) {
-        if (btn) btn.addEventListener('click', function () { stop(); setClass(j); });
+        if (btn) btn.addEventListener('click', function () { stop(); S.ran = true; setClass(j); });
       });
       thrSlider.addEventListener('input', function () {
         stop(); swIdx = 0;
+        S.ran = true;   /* dragging the threshold applies it: the fence arrives */
         S.t = thr();
         thrVal.textContent = S.t.toFixed(2);
         draw(); updateStats();

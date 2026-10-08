@@ -1021,7 +1021,18 @@ class GRUCell(nn.Module):
         var ctx = cv.getContext('2d');
         var tS = $('gruT'), rS = $('gruR'), zS = $('gruZ');
         var shown = { keep: 20, take: 20, r: 12 };
-        var dash = 0, visible = true, running = false;
+        var visible = true, running = false;
+        // The RAF loop is gated: it runs only while the tool is playing,
+        // the z valve is being dragged, or the pipe widths are still easing
+        // toward a new target. At rest the tool sits dead still: no ambient
+        // marching dashes, no motion until the reader acts.
+        function gruTargets() {
+            var r = parseFloat(rS.value), z = parseFloat(zS.value);
+            return { keep: 6 + 36 * (1 - z), take: 6 + 36 * z, r: 3 + 16 * r };
+        }
+        function gruKick() {
+            if (visible && !running) { running = true; requestAnimationFrame(frame); }
+        }
         var gruPlaying = false, gruPlayT0 = 0, gruStepDelay = 2250;
         var geom = { cw: 640, dpr: 1 };
 
@@ -1109,7 +1120,7 @@ class GRUCell(nn.Module):
             ctx.strokeStyle = color; ctx.lineWidth = w; ctx.lineCap = 'round';
             ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
             ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = Math.max(2, w * 0.3);
-            ctx.setLineDash([10, 14]); ctx.lineDashOffset = dash;
+            ctx.setLineDash([10, 14]); ctx.lineDashOffset = 0;
             ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
             ctx.setLineDash([]);
         }
@@ -1145,7 +1156,6 @@ class GRUCell(nn.Module):
             shown.keep += (tKeep - shown.keep) * 0.15;
             shown.take += (tTake - shown.take) * 0.15;
             shown.r += (tR - shown.r) * 0.15;
-            dash -= 1.6;
             var L = gruLayout();
             var sc = geom.cw / W, dpr = geom.dpr;
             ctx.setTransform(dpr * sc, 0, 0, dpr * sc, 0, 0);
@@ -1238,16 +1248,22 @@ class GRUCell(nn.Module):
                     else { tS.value = String(tt + 1); update(); }
                 }
             }
-            requestAnimationFrame(frame);
+            // Gated loop: keep animating only while playing, while the z valve
+            // is being dragged, or while the pipe widths are still easing.
+            var gruSettled = Math.abs(tKeep - shown.keep) < 0.05 &&
+                Math.abs(tTake - shown.take) < 0.05 &&
+                Math.abs(tR - shown.r) < 0.05;
+            if (gruPlaying || dragging || !gruSettled) requestAnimationFrame(frame);
+            else running = false;
         }
         function gruStopPlay() {
             gruPlaying = false; $('gruPlay').textContent = 'Play';
         }
-        tS.addEventListener('input', function() { gruStopPlay(600); update(); });
-        rS.addEventListener('input', function() { gruStopPlay(600); update(); });
-        zS.addEventListener('input', function() { gruStopPlay(600); update(); });
-        $('gruPrev').addEventListener('click', function() { gruStopPlay(600); tS.value = Math.max(1, parseInt(tS.value, 10) - 1); update(); });
-        $('gruNext').addEventListener('click', function() { gruStopPlay(600); tS.value = Math.min(5, parseInt(tS.value, 10) + 1); update(); });
+        tS.addEventListener('input', function() { gruStopPlay(600); update(); gruKick(); });
+        rS.addEventListener('input', function() { gruStopPlay(600); update(); gruKick(); });
+        zS.addEventListener('input', function() { gruStopPlay(600); update(); gruKick(); });
+        $('gruPrev').addEventListener('click', function() { gruStopPlay(600); tS.value = Math.max(1, parseInt(tS.value, 10) - 1); update(); gruKick(); });
+        $('gruNext').addEventListener('click', function() { gruStopPlay(600); tS.value = Math.min(5, parseInt(tS.value, 10) + 1); update(); gruKick(); });
         $('gruPlay').addEventListener('click', function() {
             if (gruPlaying) { gruStopPlay(2000); return; }
             var demo = $('gruToy');
@@ -1255,11 +1271,13 @@ class GRUCell(nn.Module):
             if (parseInt(tS.value, 10) >= 5) { tS.value = '1'; update(); }
             gruPlaying = true; this.textContent = 'Pause';
             gruPlayT0 = performance.now();
+            gruKick();
         });
         $('gruReset').addEventListener('click', function() {
             gruStopPlay(600);
             tS.value = '2'; rS.value = '0.90'; zS.value = '0.30';
             update();
+            gruKick();
         });
         // Drag the z valve directly on its track (the walkthrough promises this).
         function gruValveGeom() {
@@ -1292,6 +1310,7 @@ class GRUCell(nn.Module):
             if (!gruNearValve(gruToLogical(e))) return;
             dragging = true;
             gruStopPlay(600);
+            gruKick();
             try { cv.setPointerCapture(e.pointerId); } catch (err) {}
             cv.style.touchAction = 'none';
             cv.style.cursor = 'grabbing';
@@ -1307,6 +1326,7 @@ class GRUCell(nn.Module):
                 zN = Math.round(zN * 100) / 100;
                 zS.value = zN.toFixed(2);
                 update();
+                gruKick();
                 e.preventDefault();
             } else {
                 cv.style.cursor = gruNearValve(gruToLogical(e)) ? 'grab' : '';
@@ -1321,7 +1341,7 @@ class GRUCell(nn.Module):
         }
         cv.addEventListener('pointerup', gruEndDrag);
         cv.addEventListener('pointercancel', gruEndDrag);
-        window.addEventListener('resize', sizeCanvas);
+        window.addEventListener('resize', function() { sizeCanvas(); gruKick(); });
         if ('IntersectionObserver' in window) {
             new IntersectionObserver(function(es) {
                 visible = es[0].isIntersecting;
@@ -1329,7 +1349,11 @@ class GRUCell(nn.Module):
             }).observe(cv);
         }
         sizeCanvas(); update();
-        running = true; requestAnimationFrame(frame);
+        // Settle the pipe widths at their targets before the first draw so the
+        // tool opens in its exact rest state; the loop below draws one settled
+        // frame and stops itself.
+        (function() { var tg = gruTargets(); shown.keep = tg.keep; shown.take = tg.take; shown.r = tg.r; })();
+        running = true; frame();
     })();
     </script>
 
@@ -1549,7 +1573,7 @@ class GRUCell(nn.Module):
             <p class="cc-head">How to play</p>
             <ul>
                 <li><strong>The point:</strong> The LSTM stores memory in a tank that only leaks through the forget gate, so the 7 survives exactly as long as the forget gate stays open.</li>
-                <li><strong>What you'll see:</strong> The 7 pours into the tank and rides five timesteps while gray drops drain out, blue rain pours in, and the green shutter reveals the hidden state below. The strip of mini tanks at the bottom tells the whole story at once, and the takeaway line delivers the verdict: Vault, Fading, or Gone.</li>
+                <li><strong>What you'll see:</strong> The 7 pours into the tank and rides five timesteps while gray drops drain out, blue rain pours in, and the green shutter reveals the hidden state below. The strip of mini tanks at the bottom fills in one step at a time as you walk: each visited step locks in its value under a red frame, unvisited steps stay gray with a question mark. The takeaway line delivers the verdict: Vault, Fading, or Gone.</li>
                 <li><strong>Prev step / Next step:</strong> Move one timestep back or forward. Try stepping manually to watch drain, pour, and reveal happen in order.</li>
                 <li><strong>Play button:</strong> Walks all five steps, animating drain, pour, and reveal at each one. At forget 1.00 the 7 sits untouched through all five steps.</li>
                 <li><strong>Timestep t slider:</strong> Jumps straight to any of the five steps. Try jumping to the last step to see what survived your gate settings.</li>
@@ -1583,6 +1607,14 @@ class GRUCell(nn.Module):
         var drops = [];
         var anim = null;
         var shownLevel = 0, shownH = 0;
+        // Gated RAF loop: it runs only while the tool is playing, while a
+        // drain/pour/reveal animation is in flight, while drops are falling,
+        // or while the tank level is still easing. At rest the tool sits dead
+        // still: no animation on page load, ever.
+        var lstmSettle = { c: 0, h: 0 };
+        function lstmKick() {
+            if (visible && !running) { running = true; requestAnimationFrame(frame); }
+        }
         var lstmPlaying = false, lstmPlayT0 = 0, lstmStepDelay = 2250;
 
         function fmt(x) {
@@ -1799,6 +1831,7 @@ class GRUCell(nn.Module):
                 shownLevel += (s0.c - shownLevel) * 0.2;
                 shownH += (s0.h - shownH) * 0.2;
                 level = shownLevel; hShown = shownH;
+                lstmSettle.c = s0.c; lstmSettle.h = s0.h;
                 phaseLabel = 'c_' + t + ' = ' + fmt(s0.c) + ', h_' + t + ' = ' + fmt(s0.h);
             }
 
@@ -1862,9 +1895,13 @@ class GRUCell(nn.Module):
             ctx.fillText('memory at every step, same gates:', 24, L.headY);
             var nSlots = van.checked ? 6 : 5;
             var sw = (W - 48) / nSlots;
+            // strip of mini tanks: only steps already visited (k < t) show
+            // their value; unvisited steps stay gray until Play or stepping
+            // reaches them, so the walk's outcome is never pre-drawn at rest
             for (var k = 0; k < 5; k++) {
                 var sx = 24 + k * sw + 6, sv = steps5[k].c;
                 var cur = (k === t - 1);
+                var seen = (k < t);
                 ctx.lineWidth = cur ? 3 : 1.5;
                 ctx.strokeStyle = cur ? '#e74c3c' : '#2c3e50';
                 var sh = 46, sy = L.sy;
@@ -1873,14 +1910,21 @@ class GRUCell(nn.Module):
                 ctx.beginPath();
                 if (ctx.roundRect) ctx.roundRect(sx, sy, sw - 12, sh, 4); else ctx.rect(sx, sy, sw - 12, sh);
                 ctx.fill(); ctx.stroke();
-                var syv = sy + (HI - sv) / (HI - LO) * sh;
-                ctx.fillStyle = sv >= 0 ? 'rgba(52,152,219,0.75)' : 'rgba(231,76,60,0.75)';
-                if (sv >= 0) ctx.fillRect(sx + 2, syv, sw - 16, sy0 - syv);
-                else ctx.fillRect(sx + 2, sy0, sw - 16, syv - sy0);
+                if (seen) {
+                    var syv = sy + (HI - sv) / (HI - LO) * sh;
+                    ctx.fillStyle = sv >= 0 ? 'rgba(52,152,219,0.75)' : 'rgba(231,76,60,0.75)';
+                    if (sv >= 0) ctx.fillRect(sx + 2, syv, sw - 16, sy0 - syv);
+                    else ctx.fillRect(sx + 2, sy0, sw - 16, syv - sy0);
+                }
                 ctx.fillStyle = '#2c3e50'; ctx.font = L.FS + 'px sans-serif'; ctx.textAlign = 'center';
                 ctx.fillText('t=' + (k + 1), sx + (sw - 12) / 2, L.tLabY);
-                ctx.fillStyle = '#2471a3'; ctx.font = L.FS + 'px sans-serif';
-                ctx.fillText(fmt(sv), sx + (sw - 12) / 2, L.svalY);
+                if (seen) {
+                    ctx.fillStyle = '#2471a3'; ctx.font = L.FS + 'px sans-serif';
+                    ctx.fillText(fmt(sv), sx + (sw - 12) / 2, L.svalY);
+                } else {
+                    ctx.fillStyle = '#bdc3c7'; ctx.font = L.FS + 'px sans-serif';
+                    ctx.fillText('?', sx + (sw - 12) / 2, L.svalY);
+                }
             }
             if (van.checked) {
                 var sx6 = 24 + 5 * sw + 6;
@@ -1899,15 +1943,22 @@ class GRUCell(nn.Module):
                 ctx.fillStyle = '#7f8c8d'; ctx.font = L.FS + 'px sans-serif';
                 ctx.fillText(fmt(v6), sx6 + (sw - 12) / 2, L.svalY);
             }
-            requestAnimationFrame(frame);
+            // Gated loop: keep animating only while playing, while a
+            // drain/pour/reveal animation is in flight, while drops are still
+            // falling, or while the tank level is still easing toward target.
+            var lstmBusy = lstmPlaying || anim !== null || drops.length > 0 ||
+                Math.abs(shownLevel - lstmSettle.c) > 0.003 ||
+                Math.abs(shownH - lstmSettle.h) > 0.003;
+            if (lstmBusy) requestAnimationFrame(frame);
+            else running = false;
         }
-        tS.addEventListener('input', function() { lstmStopPlay(600); update(); });
-        fS.addEventListener('input', function() { lstmStopPlay(600); update(); });
-        iS.addEventListener('input', function() { lstmStopPlay(600); update(); });
-        oS.addEventListener('input', function() { lstmStopPlay(600); update(); });
-        van.addEventListener('change', function() { lstmStopPlay(600); update(); });
-        $('lstmPrev').addEventListener('click', function() { lstmStopPlay(600); tS.value = Math.max(1, parseInt(tS.value, 10) - 1); update(); });
-        $('lstmNext').addEventListener('click', function() { lstmStopPlay(600); tS.value = Math.min(5, parseInt(tS.value, 10) + 1); update(); });
+        tS.addEventListener('input', function() { lstmStopPlay(600); update(); lstmKick(); });
+        fS.addEventListener('input', function() { lstmStopPlay(600); update(); lstmKick(); });
+        iS.addEventListener('input', function() { lstmStopPlay(600); update(); lstmKick(); });
+        oS.addEventListener('input', function() { lstmStopPlay(600); update(); lstmKick(); });
+        van.addEventListener('change', function() { lstmStopPlay(600); update(); lstmKick(); });
+        $('lstmPrev').addEventListener('click', function() { lstmStopPlay(600); tS.value = Math.max(1, parseInt(tS.value, 10) - 1); update(); lstmKick(); });
+        $('lstmNext').addEventListener('click', function() { lstmStopPlay(600); tS.value = Math.min(5, parseInt(tS.value, 10) + 1); update(); lstmKick(); });
         $('lstmPlay').addEventListener('click', function() {
             if (lstmPlaying) { lstmStopPlay(2000); return; }
             var demo = $('lstmToy');
@@ -1915,22 +1966,33 @@ class GRUCell(nn.Module):
             if (parseInt(tS.value, 10) >= 5) { tS.value = '1'; refresh(); }
             lstmPlaying = true; this.textContent = 'Pause';
             lstmPlayT0 = performance.now();
+            lstmKick();
         });
         $('lstmReset').addEventListener('click', function() {
             lstmStopPlay(600);
             tS.value = '1'; fS.value = '1'; iS.value = '1'; oS.value = '1';
             van.checked = false;
             update();
+            lstmKick();
         });
-        window.addEventListener('resize', sizeCanvas);
+        window.addEventListener('resize', function() { sizeCanvas(); lstmKick(); });
         if ('IntersectionObserver' in window) {
             new IntersectionObserver(function(es) {
                 visible = es[0].isIntersecting;
                 if (visible && !running) { running = true; requestAnimationFrame(frame); }
             }).observe(cv);
         }
-        sizeCanvas(); update();
-        running = true; requestAnimationFrame(frame);
+        sizeCanvas(); refresh();
+        // Open in the exact rest state: no drain/pour/reveal animation on
+        // load. The tank level is pre-settled, so the first draw below is
+        // already final and the gated loop stops itself immediately.
+        (function() {
+            var s00 = trajectory(1, 1, 1, 1)[0];
+            shownLevel = s00.c; shownH = s00.h;
+            lstmSettle.c = s00.c; lstmSettle.h = s00.h;
+            anim = null; drops.length = 0;
+        })();
+        running = true; frame(performance.now());
     })();
     </script>
 
@@ -1957,6 +2019,7 @@ class GRUCell(nn.Module):
             <ul>
                 <li><strong>The point:</strong> Gating is a routing policy you choose. Open the valve on the important 7, close it on the loud 9.9 distractor, and the tank remembers exactly what you let in.</li>
                 <li><strong>What you'll see:</strong> Six colored pipes pour into the tank one step at a time, each pipe's width set by your own valve sliders. The bar under the tank grows one segment per step, sized by what each gate let through, and the verdict line names what the network remembers: the 7.0, the distractor, or nothing.</li>
+                <li><strong>At rest:</strong> the tank starts empty with the verdict pending. Nothing pours until you press Play the sequence, pick a preset, or drag a valve slider; each of those fills the tank, and Reset drains it back to empty.</li>
                 <li><strong>Play the sequence:</strong> Pours all six steps in turn, one beat each. With all gates open the loudest input, not the most important one, wins the tank.</li>
                 <li><strong>Remember everything:</strong> Opens all six valves. Try it and watch the verdict read "remembers the distractor 9.9".</li>
                 <li><strong>Block the distractor:</strong> Opens every valve except the 9.9's. Try it and watch the verdict flip to the important 7.0.</li>
@@ -1985,10 +2048,20 @@ class GRUCell(nn.Module):
         var geom = { cw: 640, dpr: 1 };
         var visible = true, running = false;
         var box = $('sfSliders'), sliders = [], vals = [];
-        var dash = 0;
         var tankShown = 0, tankTarget = 0;
         var playing = false, playK = -1, playBase = 0, sfStepDur = 800, sfStepStart = 0;
         var contribs = [], total = 0, domColor = '#95a5a6', domName = 'nothing';
+        // live: whether the tank, the bar, and the verdict show the computed
+        // result. Fresh load and Reset leave the tank empty and the verdict
+        // pending; a pour (Play), a preset, or a valve drag is what fills them.
+        var live = false;
+        // Gated RAF loop: it runs only while pouring, while the tank level is
+        // still easing toward its target, or right after an interaction that
+        // changed the canvas. At rest the tool sits dead still: no ambient
+        // marching dashes on the pipes, no motion until the reader acts.
+        function sfKick() {
+            if (visible && !running) { running = true; requestAnimationFrame(frame); }
+        }
 
         function fmt(x) {
             if (!isFinite(x)) return String(x);
@@ -2030,7 +2103,12 @@ class GRUCell(nn.Module):
         function draw() {
             for (var k = 0; k < N; k++) vals[k].textContent = parseFloat(sliders[k].value).toFixed(2);
             var info = compute();
-            if (!playing) tankTarget = total;
+            if (!playing) tankTarget = live ? total : 0;
+            if (!live) {
+                $('sfReadout').innerHTML = 'final cell state c_6 = <strong>not poured yet</strong>';
+                $('sfTake').innerHTML = '<strong>Nothing poured yet.</strong> Press Play the sequence to pour all six steps, one beat each, and see who the tank remembers. Or pick a preset, or drag a valve slider, and the tank fills at once.';
+                return;
+            }
             $('sfReadout').innerHTML = 'final cell state c_6 = <strong>' + fmt(total) + '</strong>';
             var take;
             if (info.m < 0.5) take = '<strong>Verdict: the network remembers nothing.</strong> Every write was blocked or trivial (c = ' + fmt(total) + ').';
@@ -2042,7 +2120,6 @@ class GRUCell(nn.Module):
         }
         function frame(now) {
             if (!visible) { running = false; return; }
-            dash += 1.4;
             if (playing) {
                 if (now - sfStepStart >= sfStepDur) {
                     var nk = playK + 1;
@@ -2083,11 +2160,11 @@ class GRUCell(nn.Module):
                 ctx.globalAlpha = 1;
                 ctx.strokeStyle = hot ? '#2c3e50' : '#bdc3c7'; ctx.lineWidth = hot ? 2.5 : 1.5;
                 ctx.strokeRect(cx - pw / 2, 66, pw, 190);
-                // flow dashes
+                // flow dashes (static: no ambient marching)
                 if (g >= 0.05) {
                     ctx.strokeStyle = 'rgba(255,255,255,0.65)';
                     ctx.lineWidth = Math.max(2, pw * 0.3);
-                    ctx.setLineDash([8, 12]); ctx.lineDashOffset = -dash;
+                    ctx.setLineDash([8, 12]); ctx.lineDashOffset = 0;
                     ctx.beginPath(); ctx.moveTo(cx, 72); ctx.lineTo(cx, 250); ctx.stroke();
                     ctx.setLineDash([]);
                 } else {
@@ -2128,9 +2205,9 @@ class GRUCell(nn.Module):
             ctx.fillStyle = '#2c3e50'; ctx.font = FS13 + 'px sans-serif'; ctx.textAlign = 'left';
             ctx.fillText('memory tank', tx + 10, ty + 22);
             ctx.textAlign = 'right'; ctx.fillStyle = '#2471a3';
-            ctx.fillText('c_6 = ' + fmt(tankShown), tx + tw - 10, ty + 22);
+            ctx.fillText(live ? 'c_6 = ' + fmt(tankShown) : 'c_6 = empty', tx + tw - 10, ty + 22);
             ctx.textAlign = 'center'; ctx.fillStyle = '#555'; ctx.font = FS + 'px sans-serif';
-            var domTxt = 'dominated by ' + domName;
+            var domTxt = live ? 'dominated by ' + domName : 'tank is empty';
             if (compact && playing && playK >= 0) domTxt = 'pouring t=' + (playK + 1) + ': ' + fmt(contribs[playK]);
             ctx.fillText(domTxt, tx + tw / 2, ty + th - 10);
             // segmented contribution bar: one segment per timestep, width ~ |i_k * x_k|,
@@ -2151,19 +2228,19 @@ class GRUCell(nn.Module):
             ctx.fillStyle = '#eef1f4';
             ctx.fillRect(bX0, barY, bW, barH);
             for (var sk2 = 0; sk2 < N; sk2++) {
-                if (segs[sk2].w > 0.5) {
+                if (live && segs[sk2].w > 0.5) {
                     ctx.fillStyle = colColor(sk2);
                     ctx.fillRect(segs[sk2].x, barY, segs[sk2].w, barH);
                 }
             }
             ctx.fillStyle = '#ffffff';
             for (var sk3 = 1; sk3 < N; sk3++) {
-                if (segs[sk3].w > 0.5) ctx.fillRect(segs[sk3].x - 1, barY, 2, barH);
+                if (live && segs[sk3].w > 0.5) ctx.fillRect(segs[sk3].x - 1, barY, 2, barH);
             }
             ctx.strokeStyle = '#bdc3c7'; ctx.lineWidth = 1;
             ctx.strokeRect(bX0, barY, bW, barH);
             ctx.textAlign = 'center';
-            if (totAbs < 1e-9) {
+            if (!live || totAbs < 1e-9) {
                 ctx.fillStyle = '#7f8c8d'; ctx.font = FS + 'px sans-serif';
                 for (var zk = 0; zk < N; zk++) ctx.fillText('t=' + (zk + 1), bX0 + (zk + 0.5) / N * bW, tickY);
             } else {
@@ -2190,7 +2267,10 @@ class GRUCell(nn.Module):
                 ctx.strokeStyle = '#2c3e50'; ctx.lineWidth = 2.5;
                 ctx.strokeRect(segs[playK].x, barY, Math.max(segs[playK].w, 4), barH);
             }
-            requestAnimationFrame(frame);
+            // Gated loop: keep animating only while pouring or while the tank
+            // level is still easing toward its target.
+            if (playing || Math.abs(tankTarget - tankShown) > 0.002) requestAnimationFrame(frame);
+            else running = false;
         }
         for (var k = 0; k < N; k++) {
             (function(k) {
@@ -2204,30 +2284,37 @@ class GRUCell(nn.Module):
                 s.min = '0'; s.max = '1'; s.step = '0.05'; s.value = '1';
                 var v = document.createElement('span');
                 v.className = 'sf-val'; v.textContent = '1.00';
-                s.addEventListener('input', draw);
+                s.addEventListener('input', function() {
+                    if (playing) { playing = false; playK = -1; }
+                    live = true; draw(); sfKick();
+                });
                 row.appendChild(lab); row.appendChild(s); row.appendChild(v);
                 box.appendChild(row);
                 sliders.push(s); vals.push(v);
             })(k);
         }
-        function preset(arr) { for (var k = 0; k < N; k++) sliders[k].value = String(arr[k]); playing = false; draw(); }
+        function preset(arr) { for (var k = 0; k < N; k++) sliders[k].value = String(arr[k]); playing = false; playK = -1; live = true; draw(); sfKick(); }
         $('sfP1').addEventListener('click', function() { preset([1, 1, 1, 1, 1, 1]); });
         $('sfP2').addEventListener('click', function() { preset([1, 1, 1, 0, 1, 1]); });
         $('sfP3').addEventListener('click', function() { preset([0, 0, 0, 0, 0, 0]); });
         $('sfPlay').addEventListener('click', function() {
             var demo = $('sfToy');
             if (demo) playScrollEnsure(demo);
+            live = true;
             draw();
             playing = true; playK = 0; playBase = 0;
             sfStepStart = performance.now(); tankShown = 0;
             sfStepDur = 800;
+            sfKick();
         });
         $('sfReset').addEventListener('click', function() {
-            playing = false; playK = -1; tankShown = 0; tankTarget = 0;
+            playing = false; playK = -1; live = false;
+            tankTarget = 0;
             for (var k = 0; k < N; k++) sliders[k].value = '1';
             draw();
+            sfKick();
         });
-        window.addEventListener('resize', sizeCanvas);
+        window.addEventListener('resize', function() { sizeCanvas(); sfKick(); });
         if ('IntersectionObserver' in window) {
             new IntersectionObserver(function(es) {
                 visible = es[0].isIntersecting;
@@ -2235,7 +2322,10 @@ class GRUCell(nn.Module):
             }).observe(cv);
         }
         sizeCanvas(); draw();
-        running = true; requestAnimationFrame(frame);
+        // Open in the exact rest state: empty tank, empty bar, pending
+        // verdict. The single draw above settles immediately (tankShown and
+        // tankTarget are both 0), so the gated loop stops itself.
+        running = true; frame(performance.now());
     })();
     </script>
 

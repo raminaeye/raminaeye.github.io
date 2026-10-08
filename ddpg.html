@@ -524,9 +524,11 @@
         @media (max-width: 640px) { .ddpg-cols { grid-template-columns: 1fr; } }
         .ddpanel { border: 1px solid #dee2e6; border-radius: 10px; padding: 0.8rem 0.9rem; background: #fff; }
         .ddpanel-title { font-weight: 700; color: #2c3e50; margin-bottom: 0.5rem; font-size: 0.95em; }
-        /* START marker: the eye lands on the familiar DQN panel first. Pulsing
-           amber outline on the panel plus a START pill in its title. */
-        #argmaxDemo .ddpanel.first { animation: ddPanelPulse 2.4s ease-in-out infinite; }
+        /* START marker: the eye lands on the familiar DQN panel first. Amber
+           outline on the panel plus a START pill in its title. The outline
+           pulses only while the walk plays; at rest it sits still. */
+        #argmaxDemo .ddpanel.first { animation: ddPanelPulse 2.4s ease-in-out infinite; animation-play-state: paused; }
+        #argmaxDemo.playing .ddpanel.first { animation-play-state: running; }
         @keyframes ddPanelPulse {
             0%, 100% { box-shadow: 0 0 0 2px rgba(243,156,18,0.85); }
             50% { box-shadow: 0 0 0 2px rgba(243,156,18,0.2); }
@@ -777,9 +779,9 @@
         <strong>How to play</strong>
         <ul>
           <li><strong>The point:</strong> DQN's argmax needs a finite menu of moves. Continuous torques have no menu, so the actor must output the move directly.</li>
-          <li><strong>What you will see:</strong> start at the left panel, marked START: it scores 4 buttons and argmax picks one. The right panel's actor emits exact torques with nothing to pick. Play walks 3 situations, 2.2 seconds each, and the caption names what to watch each time.</li>
+          <li><strong>What you will see:</strong> start at the left panel, marked START: it scores the 4 buttons, no pick yet. Play walks 3 situations, 2.2 seconds each, and the caption names what to watch each time: argmax picks a button on the left, the actor on the right just emits torques, never picking.</li>
           <li class="try-it"><strong>Try this:</strong> drag the situation slider and watch the left panel jump between buttons while the right panel's torques slide smoothly. The right panel never picks a winner: it outputs one.</li>
-          <li><strong>Reset:</strong> the Reset button next to Play stops the walk and restores the start: situation 1, both panels back to their initial scores.</li>
+          <li><strong>Reset:</strong> the Reset button next to Play stops the walk and restores the start: situation 1 selected, both panels back to neutral with the pick un-picked.</li>
         </ul>
       </div>
     </div>
@@ -880,8 +882,8 @@
         <strong>How to play</strong>
         <ul>
           <li><strong>The point:</strong> this is what DDPG training looks like from the outside: noise shrinking, control emerging, the critic's estimate converging on the real return.</li>
-          <li><strong>What you will see:</strong> the arm's home pose is marked START with a pulsing amber ring, so you always know where it begins. The arm flails at 0% and holds the target at 100%, with the reward counter ticking +0.1 only while the hand is on the target. Play steps through 5 training stages, 2.2 seconds each, and each stage names what to watch.</li>
-          <li class="try-it"><strong>Try this:</strong> drag the slider slowly from 0 to 100 and watch the hand's trail collapse from a cloud into a dot. Then drag it back to 20 and notice the critic's estimate fall with it.</li>
+          <li><strong>What you will see:</strong> the arm's home pose is marked START with an amber ring, so you always know where it begins (the ring pulses while the run plays). The arm starts at its home pose at 0% and holds the target at 100%, with the reward counter ticking +0.1 only while the hand is on the target. Play steps through 5 training stages, 2.2 seconds each, and each stage names what to watch.</li>
+          <li class="try-it"><strong>Try this:</strong> press Play and watch the hand's trail collapse from a cloud into a dot across the five stages. Then drag the slider to 20 and notice the critic's estimate fall with it.</li>
           <li><strong>Reset:</strong> the Reset button next to Play stops the run and restores the start: the arm back at its home pose, training progress 0%, critic's estimate 0.0 / 30, reward 0.0.</li>
         </ul>
       </div>
@@ -935,6 +937,7 @@
   <script>
   /* Tool A: discrete argmax vs continuous actor output. Toy numbers. */
   (function () {
+    var demo = document.getElementById('argmaxDemo');
     var playBtn = document.getElementById('argPlay');
     var sit = document.getElementById('argSit');
     var sitName = document.getElementById('argSitName');
@@ -968,14 +971,32 @@
     function fmtT(t) {
       return '[' + t.map(function (v) { return (v >= 0 ? '+' : '') + v.toFixed(2); }).join(', ') + ']';
     }
-    function setTorque(fi, vi, v) {
+    function setTorque(fi, vi, v, neutral) {
       var pct = Math.abs(v) * 50;
       fi.style.left = (v < 0 ? 50 - pct : 50) + '%';
       fi.style.width = pct + '%';
-      fi.style.background = v >= 0 ? '#e67e22' : '#3498db';
+      fi.style.background = neutral ? '#95a5a6' : (v >= 0 ? '#e67e22' : '#3498db');
       vi.textContent = (v >= 0 ? '+' : '') + v.toFixed(2);
     }
     var timers = [], playing = false, STEP = 2250;
+    /* Rest state: situation 1 is selected but nothing has been judged yet.
+       The Q bars are scored in neutral blue with no pick highlight, the
+       torque bars in neutral gray, the pick badge a placeholder. The pick
+       colors arrive when Play walks the situations or the slider is dragged. */
+    function restState() {
+      var s = SIT[0], k;
+      sit.value = 1;
+      sitName.textContent = s.name;
+      for (k = 0; k < 4; k++) {
+        qFills[k].style.width = (s.q[k] * 100).toFixed(1) + '%';
+        qVals[k].textContent = s.q[k].toFixed(2);
+        qRows[k].classList.remove('picked');
+        setTorque(tFills[k], tVals[k], s.t[k], true);
+      }
+      pick.textContent = 'press Play or drag the slider: the pick appears here';
+      tvec.textContent = 'press Play or drag the slider';
+      stats.innerHTML = 'Situation: <strong>' + s.name + '</strong>. The left panel scores the 4 buttons; the right panel\'s actor emits torques directly. Press Play to walk the three situations, or drag the slider.';
+    }
     function show(i) {
       var s = SIT[i], bi = 0, k;
       sit.value = i + 1;
@@ -996,11 +1017,13 @@
       timers.forEach(function (t) { clearTimeout(t); });
       timers = []; playing = false;
       playBtn.textContent = 'Play'; playBtn.classList.remove('playing');
+      demo.classList.remove('playing');
     }
     playBtn.addEventListener('click', function () {
       if (playing) { stop(); return; }
       playing = true;
       playBtn.textContent = 'Pause'; playBtn.classList.add('playing');
+      demo.classList.add('playing');
       try { playScrollEnsure(document.getElementById('argmaxDemo')); } catch (e) {}
       show(0);
       for (var j = 1; j < 3; j++) {
@@ -1010,11 +1033,11 @@
       }
       timers.push(setTimeout(stop, 3 * STEP));
     });
-    /* Reset: stop the run and restore the full start state (situation 1,
-       panels and stats as the page loads). */
-    document.getElementById('argReset').addEventListener('click', function () { stop(); show(0); });
+    /* Reset: stop the run and restore the full start state (situation 1
+       selected, panels unscored, neutral colors). */
+    document.getElementById('argReset').addEventListener('click', function () { stop(); restState(); });
     sit.addEventListener('input', function () { stop(); show(parseInt(sit.value, 10) - 1); });
-    show(0);
+    restState();
   })();
   </script>
 
@@ -1039,7 +1062,6 @@
       canvas.height = Math.round(cw * dpr * H / W);
       scale = canvas.width / W;
     }
-    window.addEventListener('resize', fit);
     fit();
     function ik(tx, ty) {
       var dx = tx - BX, dy = ty - BY;
@@ -1077,11 +1099,16 @@
       var jx = BX + L1 * Math.cos(sh), jy = BY + L1 * Math.sin(sh);
       var hx = jx + L2 * Math.cos(sh + el), hy = jy + L2 * Math.sin(sh + el);
       var d = Math.hypot(hx - TX, hy - TY);
-      if (d < 18 && now - lastTick > 500) { reward += 0.1; lastTick = now; }
+      /* The reward counter ticks only while the run plays, never at rest. */
+      if (playing && d < 18 && now - lastTick > 500) { reward += 0.1; lastTick = now; }
       var shown = Math.round(reward * 10);
       if (shown !== lastShown) { lastShown = shown; rewardEl.textContent = 'reward: ' + (shown / 10).toFixed(1); }
-      trail.push([hx, hy]);
-      if (trail.length > 40) trail.shift();
+      /* The hand trail is a record of motion, so it exists only while playing.
+         At rest the canvas is a single static frame: home pose, no trail. */
+      if (playing) {
+        trail.push([hx, hy]);
+        if (trail.length > 40) trail.shift();
+      }
       ctx.strokeStyle = '#27ae60'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(TX, TY, 14, 0, Math.PI * 2); ctx.stroke();
       ctx.fillStyle = '#27ae60';
@@ -1114,7 +1141,7 @@
       ctx.beginPath(); ctx.arc(jx, jy, 7, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = '#c0392b';
       ctx.beginPath(); ctx.arc(hx, hy, 6, 0, Math.PI * 2); ctx.fill();
-      requestAnimationFrame(draw);
+      /* No self-scheduling here: the frame loop runs only while playing. */
     }
     function setP(v) {
       p = v;
@@ -1125,10 +1152,18 @@
       reward = 0; lastShown = -1; trail = [];
       rewardEl.textContent = 'reward: 0.0';
     }
-    var timers = [], playing = false, STEP = 2250;
+    var timers = [], playing = false, STEP = 2250, rafId = 0;
+    /* The canvas animates only while the run plays. At rest the tool is one
+       static frame (t = 0): home pose, empty trail, reward frozen. */
+    function frame(now) {
+      if (!playing) return;
+      draw(now);
+      rafId = requestAnimationFrame(frame);
+    }
     function stop() {
       timers.forEach(function (x) { clearTimeout(x); });
       timers = []; playing = false;
+      if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
       playBtn.textContent = 'Play'; playBtn.classList.remove('playing');
     }
     playBtn.addEventListener('click', function () {
@@ -1138,6 +1173,7 @@
       try { playScrollEnsure(document.getElementById('armDemo')); } catch (e) {}
       setP(STAGES[0].p);
       stats.textContent = STAGES[0].t;
+      rafId = requestAnimationFrame(frame);
       for (var j = 1; j < STAGES.length; j++) {
         (function (kk, tt) {
           timers.push(setTimeout(function () {
@@ -1152,15 +1188,17 @@
     /* Reset: stop the run and restore the start of the loop (step 0, the state
        box lit, slider back to "state arrives"). */
     document.getElementById('armReset').addEventListener('click', function () {
-      stop(); setP(0); stats.textContent = '';
+      stop(); setP(0); stats.textContent = ''; draw(0);
     });
     prog.addEventListener('input', function () {
       stop();
       setP(parseInt(prog.value, 10));
       stats.textContent = '';
+      draw(0);
     });
+    window.addEventListener('resize', function () { fit(); draw(0); });
     setP(0);
-    requestAnimationFrame(draw);
+    draw(0);
   })();
   </script>
 

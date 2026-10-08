@@ -1054,29 +1054,27 @@
    <div class="demo" id="boostDemo">
      <div class="demo-controls">
        <label for="gbRounds">Rounds:</label>
-       <input type="range" id="gbRounds" min="1" max="100" step="1" value="10">
-       <span class="pval" id="gbRoundsVal">10</span>
+       <input type="range" id="gbRounds" min="0" max="100" step="1" value="0">
+       <span class="pval" id="gbRoundsVal">0</span>
        <button type="button" id="gbPlay">Play</button>
        <button type="button" id="gbReset" class="ghost">Reset</button>
      </div>
      <div class="canvas-wrap">
        <canvas id="gbCanvas" width="680" height="520" style="display:block;margin:0 auto;width:100%;max-width:680px;height:auto;"></canvas>
      </div>
-     <div class="demo-legend">
+     <div class="demo-legend" id="gbLegend">
+       <span><span class="sw" style="background:#9aa0a6"></span>not yet run: no rounds yet</span>
        <span><span class="sw" style="background:#f08c1a"></span>class 0</span>
        <span><span class="sw" style="background:#2a7fbf"></span>class 1</span>
-       <span><span class="sw" style="background:#e74c3c"></span>residual halo: under-predicted</span>
-       <span><span class="sw" style="background:#2471a3"></span>residual halo: over-predicted</span>
-       <span><span class="ln" style="border-color:#2c3e50"></span>boundary ($F = 0.5$)</span>
      </div>
      <div class="demo-stats" id="gbStats"></div>
      <div class="caption-card" id="gbCap">
        <p class="cc-head">How to play</p>
        <ul>
          <li><strong>The point:</strong> Each boosting round fits the last round's mistakes, so the boundary corrects itself where it is still wrong.</li>
-         <li><strong>What you'll see:</strong> Play adds 5 rounds per step; every step retrains live, the red and blue residual halos shrink and fade, the boundary straightens out where the errors were, and the mean residual readout falls.</li>
-         <li><strong>Rounds:</strong> Scrubs the boosting history by hand; try dragging back to 1 and watch the boundary collapse to nearly nothing with fat halos everywhere, then drag forward and watch each correction land exactly on the remaining mistakes.</li>
-         <li><strong>Reset:</strong> Puts the rounds back at 10, the early stage with fat halos and a barely-formed boundary. Try it after a full run and watch the mistakes come back so you can correct them again.</li>
+         <li><strong>What you'll see:</strong> The plot opens with just the labeled points, no rounds yet. Press Play and rounds pile on 5 per step; every step retrains live, the red and blue residual halos bloom then shrink and fade, the boundary draws itself and straightens out where the errors were, and the mean residual readout falls.</li>
+         <li><strong>Rounds:</strong> Scrubs the boosting history by hand; 0 is the unrun start. Try dragging from 1 upward and watch each correction land exactly on the remaining mistakes, then drag back to 1 and watch the boundary collapse to nearly nothing with fat halos everywhere.</li>
+         <li><strong>Reset:</strong> Puts the rounds back at 0, the unrun start: bare points, no halos, no boundary. Try it after a full run and watch the corrections wash away so you can grow them again.</li>
        </ul>
      </div>
    </div>
@@ -1213,7 +1211,8 @@
        rounds.push({ tpred: tpred, grid: grid });
      }
      function setRounds(k) {
-       k = Math.min(MAXR, Math.max(1, k));
+       /* 0 is the unrun start: no rounds, no halos, no boundary. */
+       k = Math.min(MAXR, Math.max(0, k));
        if (k > rounds.length) { while (rounds.length < k) addRound(); }
        else if (k < rounds.length) { rounds.length = k; resetF(); }
      }
@@ -1266,15 +1265,54 @@
        }
        return segs;
      }
+     /* START badge for the unrun rest state. */
+     function drawStartBadge() {
+       var label = 'START: press Play';
+       var fs = Math.round(15 * SC);
+       ctx.save();
+       ctx.font = 'bold ' + fs + 'px sans-serif';
+       var tw = ctx.measureText(label).width;
+       var bx = padL + Math.round(10 * SC), by = padT + Math.round(10 * SC);
+       var bw = tw + Math.round(24 * SC), bh = fs + Math.round(16 * SC);
+       ctx.fillStyle = 'rgba(255,255,255,0.94)';
+       ctx.strokeStyle = '#2c3e50';
+       ctx.lineWidth = Math.max(1.5, Math.round(2 * SC));
+       if (ctx.roundRect) {
+         ctx.beginPath();
+         ctx.roundRect(bx, by, bw, bh, Math.round(8 * SC));
+         ctx.fill(); ctx.stroke();
+       } else {
+         ctx.fillRect(bx, by, bw, bh);
+         ctx.strokeRect(bx, by, bw, bh);
+       }
+       ctx.fillStyle = '#2c3e50';
+       ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+       ctx.fillText(label, bx + Math.round(12 * SC), by + bh / 2);
+       ctx.restore();
+     }
      function draw() {
        measure();
-       drawTint();
        var pw = W - padL - padR, ph = H - padT - padB;
        function xPix(x) { return padL + (x - x0) / (x1 - x0) * pw; }
        function yPix(y) { return H - padB - (y - y0) / (y1 - y0) * ph; }
        ctx.clearRect(0, 0, W, H);
-       ctx.drawImage(tint, padL, padT, pw, ph);
        var r = Math.max(2, Math.round(3.4 * SC));
+       if (rounds.length === 0) {
+         /* Rest frame: labeled points only, no tint, no halos, no boundary. */
+         for (var b = 0; b < n; b++) {
+           ctx.fillStyle = S.ytr[b] === 1 ? '#2a7fbf' : '#f08c1a';
+           ctx.beginPath();
+           ctx.arc(xPix(S.Xtr[b][0]), yPix(S.Xtr[b][1]), r, 0, 2 * Math.PI);
+           ctx.fill();
+           ctx.strokeStyle = '#ffffff';
+           ctx.lineWidth = Math.max(1, Math.round(1.4 * SC));
+           ctx.stroke();
+         }
+         drawStartBadge();
+         return;
+       }
+       drawTint();
+       ctx.drawImage(tint, padL, padT, pw, ph);
        for (var i = 0; i < n; i++) {
          var res = S.ytr[i] - F[i], ar = Math.abs(res);
          if (ar > 0.02) {
@@ -1305,6 +1343,24 @@
      }
      function update() {
        draw();
+       var legend = document.getElementById('gbLegend');
+       if (rounds.length === 0) {
+         if (legend) {
+           legend.innerHTML = '<span><span class="sw" style="background:#9aa0a6"></span>not yet run: no rounds yet</span>' +
+             '<span><span class="sw" style="background:#f08c1a"></span>class 0</span>' +
+             '<span><span class="sw" style="background:#2a7fbf"></span>class 1</span>';
+         }
+         stats.innerHTML = 'rounds: <strong>0</strong> (not yet run)' +
+           ' &nbsp;&nbsp;|&nbsp;&nbsp; press Play or drag Rounds';
+         return;
+       }
+       if (legend) {
+         legend.innerHTML = '<span><span class="sw" style="background:#f08c1a"></span>class 0</span>' +
+           '<span><span class="sw" style="background:#2a7fbf"></span>class 1</span>' +
+           '<span><span class="sw" style="background:#e74c3c"></span>residual halo: under-predicted</span>' +
+           '<span><span class="sw" style="background:#2471a3"></span>residual halo: over-predicted</span>' +
+           '<span><span class="ln" style="border-color:#2c3e50"></span>boundary ($F = 0.5$)</span>';
+       }
        var c = 0, mar = 0;
        for (var i = 0; i < n; i++) {
          if ((F[i] > 0.5 ? 1 : 0) === S.ytr[i]) c++;
@@ -1330,7 +1386,9 @@
      }
      rSlider.addEventListener('input', function () {
        stop();
-       var k = parseInt(rSlider.value, 10) || 1;
+       var k = parseInt(rSlider.value, 10);
+       if (!isFinite(k)) k = 0;
+       k = Math.min(100, Math.max(0, k));
        rVal.textContent = String(k);
        setRounds(k);
        update();
@@ -1339,21 +1397,20 @@
        if (playTimer) { stop(); return; }
        var demo = document.getElementById('boostDemo');
        if (demo) playScrollEnsure(demo);
-       if (rounds.length >= MAXR) setRounds(10);
+       if (rounds.length >= MAXR) setRounds(0);
        playBtn.textContent = 'Pause';
        tick();
      });
      var gbResetBtn = document.getElementById('gbReset');
      if (gbResetBtn) gbResetBtn.addEventListener('click', function () {
        stop();
-       setRounds(10);
-       rSlider.value = '10';
-       rVal.textContent = '10';
+       setRounds(0);
+       rSlider.value = '0';
+       rVal.textContent = '0';
        update();
      });
      resetF();      /* F starts at F0, not zero: first residuals must be y - F0 */
-     setRounds(10);
-     update();
+     update();      /* rest state: 0 rounds, bare points, START badge */
    })();
    </script>
 

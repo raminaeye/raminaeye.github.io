@@ -628,9 +628,9 @@
        <p class="cc-head">How to play</p>
        <ul>
          <li><strong>The point:</strong> A curve is just line pieces with bends. Every ReLU is one bend, and stacking more bends lets the fit hug $y = x^2$ tighter.</li>
-         <li><strong>What you'll see:</strong> The hinge count marches from 1 to 8; the blue polyline starts as a shallow V, grows kinks at the red ticks, and settles onto the dashed parabola while the MSE readout collapses.</li>
-         <li><strong>Hinges:</strong> Sets the bend budget by hand; try 1 and watch the best possible fit still miss badly, then drag to 8 and watch the kinks multiply until the blue line and the dashed curve are barely distinguishable.</li>
-         <li><strong>Reset:</strong> Puts the hinge count back at 3, the middle of the march. Try it after a run and watch the fit loosen back to its starting shape.</li>
+         <li><strong>What you'll see:</strong> The plot opens with just the dashed parabola, no fit yet. Press Play and the hinge count marches from 1 to 8; the blue polyline starts as a shallow V, grows kinks at the red ticks, and settles onto the dashed parabola while the MSE readout collapses.</li>
+         <li><strong>Hinges:</strong> Draws the best fit for that bend budget by hand; try 1 and watch the best possible fit still miss badly, then drag to 8 and watch the kinks multiply until the blue line and the dashed curve are barely distinguishable.</li>
+         <li><strong>Reset:</strong> Puts the hinge count back at 3 and clears the fit back to the bare parabola. Try it after a run and watch the blue line vanish so you can grow it again.</li>
        </ul>
      </div>
    </div>
@@ -706,6 +706,37 @@
        return { coef: coef, ts: ts, mse: mse / m };
      }
 
+     /* Rest frame: axes and the true curve only. The fit arrives via Play
+        or the slider, never at rest. */
+     function drawBare() {
+       measure();
+       ctx.clearRect(0, 0, W, H);
+       ctx.font = FS + 'px sans-serif';
+       /* axes */
+       ctx.strokeStyle = '#d5dbdb'; ctx.lineWidth = Math.max(1, Math.round(1 * SC));
+       ctx.beginPath(); ctx.moveTo(padL, yPix(0)); ctx.lineTo(W - padR, yPix(0)); ctx.stroke();
+       ctx.beginPath(); ctx.moveTo(xPix(0), padT); ctx.lineTo(xPix(0), H - padB); ctx.stroke();
+       /* true curve */
+       ctx.strokeStyle = '#95a5a6'; ctx.lineWidth = Math.max(1.5, Math.round(2 * SC));
+       ctx.setLineDash([Math.round(6 * SC), Math.round(5 * SC)]);
+       ctx.beginPath();
+       for (var i = 0; i <= 200; i++) {
+         var x = -2 + 4 * i / 200, y = x * x;
+         if (i === 0) ctx.moveTo(xPix(x), yPix(y)); else ctx.lineTo(xPix(x), yPix(y));
+       }
+       ctx.stroke(); ctx.setLineDash([]);
+       /* labels */
+       ctx.fillStyle = '#777'; ctx.textAlign = 'center';
+       ctx.fillText('-2', xPix(-2), H - padB + Math.round(18 * SC));
+       ctx.fillText('0', xPix(0), H - padB + Math.round(18 * SC));
+       ctx.fillText('2', xPix(2), H - padB + Math.round(18 * SC));
+       ctx.textAlign = 'right';
+       ctx.fillText('4', padL - Math.round(8 * SC), yPix(4) + Math.round(4 * SC));
+       ctx.textAlign = 'center'; ctx.fillStyle = '#555';
+       ctx.fillText('x', (padL + W - padR) / 2, H - Math.round(8 * SC));
+       drawStartBadge();
+     }
+
      function draw(n) {
        measure();
        var fit = solveFit(n);
@@ -753,20 +784,51 @@
      }
 
      var playTimer = null, playN = 1;
+     var shown = false;   /* rest state: the fit has not been drawn yet */
      function stop() {
        if (playTimer) { clearTimeout(playTimer); playTimer = null; }
        if (playBtn) playBtn.textContent = 'Play';
+     }
+     function drawStartBadge() {
+       var label = 'START: press Play';
+       var fs = Math.round(15 * SC);
+       ctx.save();
+       ctx.font = 'bold ' + fs + 'px sans-serif';
+       var tw = ctx.measureText(label).width;
+       var bx = padL + Math.round(10 * SC), by = padT + Math.round(10 * SC);
+       var bw = tw + Math.round(24 * SC), bh = fs + Math.round(16 * SC);
+       ctx.fillStyle = 'rgba(255,255,255,0.94)';
+       ctx.strokeStyle = '#2c3e50';
+       ctx.lineWidth = Math.max(1.5, Math.round(2 * SC));
+       if (ctx.roundRect) {
+         ctx.beginPath();
+         ctx.roundRect(bx, by, bw, bh, Math.round(8 * SC));
+         ctx.fill(); ctx.stroke();
+       } else {
+         ctx.fillRect(bx, by, bw, bh);
+         ctx.strokeRect(bx, by, bw, bh);
+       }
+       ctx.fillStyle = '#2c3e50';
+       ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+       ctx.fillText(label, bx + Math.round(12 * SC), by + bh / 2);
+       ctx.restore();
      }
      function update() {
        var n = parseInt(slider.value, 10);
        if (!isFinite(n)) n = 3;
        n = Math.min(8, Math.max(1, n));
        nVal.textContent = String(n);
+       if (!shown) {
+         drawBare();
+         stats.innerHTML = 'hinges: <strong>' + n + '</strong> &nbsp;&nbsp;|&nbsp;&nbsp; fit <strong>not yet drawn</strong> &nbsp;&nbsp;|&nbsp;&nbsp; press Play or drag the slider';
+         return;
+       }
        var fit = draw(n);
        stats.innerHTML = 'hinges: <strong>' + n + '</strong> &nbsp;&nbsp;|&nbsp;&nbsp; fit MSE: <strong>' + fit.mse.toFixed(4) + '</strong>';
      }
      function tick() {
        if (playN > 8) { stop(); playN = 1; return; }
+       shown = true;
        slider.value = String(playN);
        update();
        playN++;
@@ -780,9 +842,10 @@
        playBtn.textContent = 'Pause';
        tick();
      });
-     slider.addEventListener('input', function () { stop(); playN = 1; update(); });
+     slider.addEventListener('input', function () { stop(); playN = 1; shown = true; update(); });
      if (resetBtn) resetBtn.addEventListener('click', function () {
        stop(); playN = 1;
+       shown = false;
        slider.value = '3';
        update();
      });
@@ -841,9 +904,9 @@
        <p class="cc-head">How to play</p>
        <ul>
          <li><strong>The point:</strong> One dial grows the model from a straight line to a smooth curve to a crazy overfit boundary, and regularization tames it back.</li>
-         <li><strong>What you'll see:</strong> The dial sweeps 13 stops from linear to tamed; the boundary is re-contoured live at every stop, morphing from a straight cut to a clean four-way split to a wiggly mess and back to calm.</li>
-         <li><strong>Capacity:</strong> Scrubs through the four trained models with live interpolation between them; try parking at 3 and studying the crazy wiggles, then nudge to 4 and watch L2 iron them out.</li>
-         <li><strong>Reset:</strong> Puts the dial back at 2, the small net with the clean four-way split. Try it after a sweep and watch the wiggles calm back down.</li>
+         <li><strong>What you'll see:</strong> The plot opens with just the labeled points, no boundary drawn yet. Press Play and the dial sweeps 13 stops from linear to tamed; the boundary is re-contoured live at every stop, morphing from a straight cut to a clean four-way split to a wiggly mess and back to calm.</li>
+         <li><strong>Capacity:</strong> Draws the model for that dial position, scrubbing through the four trained models with live interpolation between them; try parking at 3 and studying the crazy wiggles, then nudge to 4 and watch L2 iron them out.</li>
+         <li><strong>Reset:</strong> Puts the dial back at 2 and clears the model back to the bare points. Try it after a sweep and watch the boundary wash away so you can draw it again.</li>
        </ul>
      </div>
    </div>
@@ -1028,20 +1091,80 @@ window.XOR_CAP = {
      var STOPS = [];
      for (var si = 0; si <= 12; si++) STOPS.push(1 + si * 0.25);
      var stopIdx = 0;
+     var shown = false;   /* rest state: no model drawn yet; tint and boundary arrive via Play or the dial */
      function stop() {
        if (playTimer) { clearTimeout(playTimer); playTimer = null; }
        if (playBtn) playBtn.textContent = 'Play';
+     }
+     /* Rest frame: the labeled points only. Same geometry as draw(t), minus
+        the tint wash and the boundary. */
+     function drawBare() {
+       measure();
+       var x0 = bounds[0], x1 = bounds[1], y0 = bounds[2], y1 = bounds[3];
+       var pw = W - padL - padR, ph = H - padT - padB;
+       function xPix(x) { return padL + (x - x0) / (x1 - x0) * pw; }
+       function yPix(y) { return H - padB - (y - y0) / (y1 - y0) * ph; }
+       ctx.clearRect(0, 0, W, H);
+       var r = Math.max(2, Math.round(4 * SC));
+       for (var k = 0; k < NPTS; k++) {
+         ctx.fillStyle = labs[k] > 0.5 ? '#2a7fbf' : '#f08c1a';
+         ctx.beginPath();
+         ctx.arc(xPix(pts[2 * k]), yPix(pts[2 * k + 1]), r, 0, 2 * Math.PI);
+         ctx.fill();
+         ctx.strokeStyle = '#ffffff';
+         ctx.lineWidth = Math.max(1, Math.round(1.3 * SC));
+         ctx.stroke();
+       }
+       ctx.font = FS + 'px sans-serif';
+       ctx.fillStyle = '#777'; ctx.textAlign = 'center';
+       ctx.fillText('x1', (padL + W - padR) / 2, H - Math.round(6 * SC));
+       ctx.save();
+       ctx.translate(Math.round(12 * SC), (padT + H - padB) / 2);
+       ctx.rotate(-Math.PI / 2);
+       ctx.fillText('x2', 0, 0);
+       ctx.restore();
+       drawStartBadge();
+     }
+     function drawStartBadge() {
+       var label = 'START: press Play';
+       var fs = Math.round(15 * SC);
+       ctx.save();
+       ctx.font = 'bold ' + fs + 'px sans-serif';
+       var tw = ctx.measureText(label).width;
+       var bx = padL + Math.round(10 * SC), by = padT + Math.round(10 * SC);
+       var bw = tw + Math.round(24 * SC), bh = fs + Math.round(16 * SC);
+       ctx.fillStyle = 'rgba(255,255,255,0.94)';
+       ctx.strokeStyle = '#2c3e50';
+       ctx.lineWidth = Math.max(1.5, Math.round(2 * SC));
+       if (ctx.roundRect) {
+         ctx.beginPath();
+         ctx.roundRect(bx, by, bw, bh, Math.round(8 * SC));
+         ctx.fill(); ctx.stroke();
+       } else {
+         ctx.fillRect(bx, by, bw, bh);
+         ctx.strokeRect(bx, by, bw, bh);
+       }
+       ctx.fillStyle = '#2c3e50';
+       ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+       ctx.fillText(label, bx + Math.round(12 * SC), by + bh / 2);
+       ctx.restore();
      }
      function update() {
        var t = parseFloat(slider.value);
        if (!isFinite(t)) t = 2;
        t = Math.min(4, Math.max(1, t));
        capVal.textContent = t.toFixed(2);
+       if (!shown) {
+         drawBare();
+         stats.innerHTML = 'capacity: <strong>' + t.toFixed(2) + '</strong> &nbsp;&nbsp;|&nbsp;&nbsp; model <strong>not yet drawn</strong> &nbsp;&nbsp;|&nbsp;&nbsp; press Play or drag the dial';
+         return;
+       }
        draw(t);
        stats.innerHTML = stageLabel(t) + ' &nbsp;&nbsp;|&nbsp;&nbsp; train: <strong>' + (stageTrain(t) * 100).toFixed(1) + '%</strong> &nbsp; test: <strong>' + (stageAcc(t) * 100).toFixed(1) + '%</strong>';
      }
      function tick() {
        if (stopIdx >= STOPS.length) { stop(); stopIdx = 0; return; }
+       shown = true;
        slider.value = String(STOPS[stopIdx]);
        update();
        stopIdx++;
@@ -1055,9 +1178,10 @@ window.XOR_CAP = {
        playBtn.textContent = 'Pause';
        tick();
      });
-     slider.addEventListener('input', function () { stop(); stopIdx = 0; update(); });
+     slider.addEventListener('input', function () { stop(); stopIdx = 0; shown = true; update(); });
      if (resetBtn) resetBtn.addEventListener('click', function () {
        stop(); stopIdx = 0;
+       shown = false;
        slider.value = '2';
        update();
      });

@@ -838,6 +838,7 @@
       <button type="button" data-head="1">Head 2: semantic</button>
     </div>
     <div class="attn-toggle" role="group" aria-label="Query token" id="attnQueries"></div>
+    <p class="demo-stats" id="attnPrompt">Pick a query word above, or press Play to walk the sentence word by word.</p>
     <div class="canvas-wrap">
       <div class="attn-flow table-scroll" aria-label="Attention flow visualization">
         <svg id="attnFlow" viewBox="0 0 640 150" role="img" aria-label="Animated attention arcs"></svg>
@@ -849,7 +850,7 @@
         <li><strong>The point:</strong> Attention heads can have different listening styles, so the same query word mixes its meaning from different tokens depending on which head is listening.</li>
         <li><strong>What you'll see:</strong> The glowing query chip hops word to word while arcs fan out to the tokens it listens to, and the matching row lights up on the 6x6 heatmap. Head 1 draws a diagonal band of neighbors, Head 2 scatters across meaning.</li>
         <li><strong>Play button:</strong> Walks the query through all six tokens, 0.8 seconds each, with the arcs refanning every beat. On Head 2, "sat" pulls 0.58 from "cat", its subject.</li>
-        <li><strong>Reset button:</strong> Stops the walk and puts Head 1 back on the query "sat", the opening selection.</li>
+        <li><strong>Reset button:</strong> Stops the walk and clears the explorer back to its opening state: Head 1, no query selected, grid empty.</li>
         <li><strong>Head buttons (Head 1: local / Head 2: semantic):</strong> Switch the listening style. Try flipping between them on the same word and watch the arcs redraw themselves completely.</li>
         <li><strong>Query word buttons:</strong> Jump the query to any of the six tokens. Try picking "sat" and comparing what the two heads hear in it.</li>
       </ul>
@@ -887,7 +888,13 @@
           [0.04, 0.10, 0.32, 0.30, 0.04, 0.20]
         ] }
     ];
-    var head = 0, current = 2;
+    var head = 0, current = -1;
+    // Sweep (c): rows stay neutral until their query word is picked or Play
+    // reaches it, so the weight colors arrive during interaction, never at rest.
+    var seen = [
+      [false, false, false, false, false, false],
+      [false, false, false, false, false, false]
+    ];
 
     var mini = document.getElementById("attnMini");
     var qbox = document.getElementById("attnQueries");
@@ -904,6 +911,13 @@
     });
     var qBtns = qbox.querySelectorAll("button");
 
+    function cellFor(v, revealed) {
+      if (!revealed) { return '<td class="pending"></td>'; }
+      var a = Math.min(1, v * 1.6);
+      var col = v > 0.4 ? "#fff" : "#333";
+      return '<td style="background: rgba(52,152,219,' + a.toFixed(2) + "); color:" + col + ';">' + v.toFixed(2) + "</td>";
+    }
+
     function buildTable() {
       var W = HEADS[head].W;
       var html = "<tr><th></th>";
@@ -911,11 +925,8 @@
       html += "</tr>";
       TOK.forEach(function(r, ri) {
         html += '<tr data-row="' + ri + '"><th class="rowhead">' + r + "</th>";
-        W[ri].forEach(function(v) {
-          var a = Math.min(1, v * 1.6);
-          var col = v > 0.4 ? "#fff" : "#333";
-          html += '<td style="background: rgba(52,152,219,' + a.toFixed(2) + "); color:" + col + ';">' + v.toFixed(2) + "</td>";
-        });
+        var rev = seen[head][ri];
+        W[ri].forEach(function(v) { html += cellFor(v, rev); });
         html += "</tr>";
       });
       mini.innerHTML = html;
@@ -923,6 +934,8 @@
 
     function select(i) {
       current = i;
+      if (i >= 0) { seen[head][i] = true; }
+      buildTable();
       for (var k = 0; k < qBtns.length; k++) {
         qBtns[k].classList.toggle("active", +qBtns[k].getAttribute("data-q") === i);
       }
@@ -993,6 +1006,12 @@
       arcPaths.push(ap);
     }
     function drawFlow() {
+      if (current < 0) {
+        for (var k = 0; k < TOK.length; k++) { arcPaths[k].style.display = "none"; }
+        for (var q = 0; q < TOK.length; q++) { qChips[q].setAttribute("class", "qchip"); }
+        for (var k2 = 0; k2 < TOK.length; k2++) { kChips[k2].style.fill = "#ffffff"; }
+        return;
+      }
       var W = HEADS[head].W[current];
       var col = head === 1 ? "#e67e22" : "#3498db";
       var qx = chipCx(current), y0 = QY + CHH, y1 = KY;
@@ -1055,15 +1074,19 @@
       buildTable();
       select(current);
     }
-    // Reset: stop the walk and restore the opening selection (Head 1 on "sat").
+    // Reset: stop the walk and clear the explorer back to its opening state:
+    // Head 1, no query selected, grid empty.
     document.getElementById("attnReset").addEventListener("click", function() {
       stopPlay(2000);
       head = 0;
       for (var k = 0; k < headBtns.length; k++) {
         headBtns[k].classList.toggle("active", +headBtns[k].getAttribute("data-head") === 0);
       }
-      buildTable();
-      select(2);
+      seen = [
+        [false, false, false, false, false, false],
+        [false, false, false, false, false, false]
+      ];
+      select(-1);
     });
 
     for (var k = 0; k < headBtns.length; k++) {
@@ -1251,9 +1274,9 @@ class MultiHeadAttention(nn.Module):
     <div class="howto capcard" id="headRolesHowto"><strong class="cap-title">How to play</strong>
       <ul>
         <li><strong>The point:</strong> One query word ("it") demands two completely different jobs: one head resolves the pronoun to "animal", the other tracks the local clause. That split is the whole argument for multihead attention.</li>
-        <li><strong>What you'll see:</strong> Each head gets 2.2 seconds to make its case while the other dims. Head A slams 0.55 on "animal", Head B spreads over "because", "it", "was", and the stats line names each head's top tokens.</li>
+        <li><strong>What you'll see:</strong> The bars start empty. Each head gets 2.2 seconds to make its case while the other dims: Head A slams 0.55 on "animal", Head B spreads over "because", "it", "was", and the stats line names each head's top tokens.</li>
         <li><strong>Play button:</strong> Steps through the two heads, dimming the other each beat. In step two the orange bars never touch "animal".</li>
-        <li><strong>Reset button:</strong> Stops the tour and shows both heads bright again, with the stats line naming both.</li>
+        <li><strong>Reset button:</strong> Stops the tour and clears the bars back to the neutral opening state: no head highlighted, bars empty.</li>
       </ul>
     </div>
     <p class="caption">Head A puts 0.55 on "animal": it resolved the pronoun. Head B spreads
@@ -1269,9 +1292,12 @@ class MultiHeadAttention(nn.Module):
       { name: "Head B: local syntax",
         W: [0.01, 0.02, 0.02, 0.03, 0.05, 0.10, 0.25, 0.20, 0.15, 0.08, 0.06, 0.03] }
     ];
-    var active = -1; // -1: both heads shown bright; else the head Play is highlighting
+    var active = -1; // -1: neutral opening state, bars empty
     var bars = document.getElementById("headBars");
     var stats = document.getElementById("headStats");
+    var fills = [[], []]; // fills[h][i]: the bar element for head h, token i
+    var valSpans = [[], []]; // valSpans[h][i]: the number label for head h, token i
+    var valSeps = []; // valSeps[i]: the " / " separator, hidden until a value arrives
 
     function top2(h) {
       var W = HEADS[h].W;
@@ -1281,6 +1307,9 @@ class MultiHeadAttention(nn.Module):
 
     function draw() {
       bars.innerHTML = "";
+      fills = [[], []];
+      valSpans = [[], []];
+      valSeps = [];
       TOK.forEach(function(t, i) {
         var row = document.createElement("div");
         row.className = "attn-bar-row";
@@ -1294,13 +1323,25 @@ class MultiHeadAttention(nn.Module):
           track.className = "attn-bar-track";
           var fill = document.createElement("div");
           fill.className = "attn-bar-fill" + (h === 1 ? " alt" : "");
-          fill.style.width = (HEADS[h].W[i] * 100).toFixed(1) + "%";
+          fill.style.width = "0%";
           track.appendChild(fill);
           pair.appendChild(track);
+          fills[h].push(fill);
         }
         var val = document.createElement("span");
         val.className = "val pair";
-        val.textContent = HEADS[0].W[i].toFixed(2) + " / " + HEADS[1].W[i].toFixed(2);
+        for (var h2 = 0; h2 < 2; h2++) {
+          if (h2 > 0) {
+            var sep = document.createElement("span");
+            sep.textContent = " / ";
+            sep.style.display = "none";
+            val.appendChild(sep);
+            valSeps.push(sep);
+          }
+          var vs = document.createElement("span");
+          val.appendChild(vs);
+          valSpans[h2].push(vs);
+        }
         row.appendChild(lbl); row.appendChild(pair); row.appendChild(val);
         bars.appendChild(row);
       });
@@ -1317,52 +1358,69 @@ class MultiHeadAttention(nn.Module):
       }
     }
 
-    function showHead(h) {
-      active = h;
-      stats.innerHTML = "<strong>" + HEADS[h].name + "</strong>: &ldquo;it&rdquo; listens most to " +
-        top2(h).join(" and ") + ".";
+    function setHeadBars(h) {
+      for (var i = 0; i < TOK.length; i++) {
+        fills[h][i].style.width = (HEADS[h].W[i] * 100).toFixed(1) + "%";
+        valSpans[h][i].textContent = HEADS[h].W[i].toFixed(2);
+        valSeps[i].style.display = "";
+      }
+    }
+
+    function neutral() {
+      active = -1;
+      for (var h = 0; h < 2; h++) {
+        for (var i = 0; i < TOK.length; i++) {
+          fills[h][i].style.width = "0%";
+          valSpans[h][i].textContent = "";
+        }
+      }
+      for (var s = 0; s < valSeps.length; s++) { valSeps[s].style.display = "none"; }
+      stats.innerHTML = "Press Play: two heads, one query word &ldquo;it&rdquo;. " +
+        "Watch what each head listens to, one head at a time.";
       applyDim();
     }
 
-    function idle() {
-      active = -1;
-      stats.innerHTML = "Head A: &ldquo;it&rdquo; listens most to " + top2(0).join(" and ") +
-        ". Head B: &ldquo;it&rdquo; listens most to " + top2(1).join(" and ") + ".";
+    function showHead(h) {
+      active = h;
+      setHeadBars(h);
+      stats.innerHTML = "<strong>" + HEADS[h].name + "</strong>: &ldquo;it&rdquo; listens most to " +
+        top2(h).join(" and ") + ".";
       applyDim();
     }
 
     // Play: step through the two heads, 2200ms each.
     var playBtn = document.getElementById("headPlay");
     var playTimer = null;
-    function stopPlay(hideMs) {
+    function stopPlay(toNeutral) {
       if (playTimer) { clearTimeout(playTimer); playTimer = null; }
       playBtn.textContent = "Play";
       playBtn.classList.remove("stop");
-      idle();
+      if (toNeutral) { neutral(); }
     }
-    // Reset: stop the tour and show both heads bright again (the opening state).
+    // Reset: stop the tour and clear the bars back to the neutral opening state.
     document.getElementById("headReset").addEventListener("click", function() {
-      stopPlay(2000);
+      stopPlay(true);
     });
     playBtn.addEventListener("click", function() {
-      if (playTimer) { stopPlay(2000); return; }
+      if (playTimer) { stopPlay(true); return; }
       playBtn.textContent = "Stop";
       playBtn.classList.add("stop");
       playScrollEnsure(document.getElementById("headRoles"));
+      neutral();
       var i = 0;
       showHead(i);
       rolesSchedule();
       function rolesSchedule() {
         playTimer = setTimeout(function() {
           i++;
-          if (i >= HEADS.length) { stopPlay(2000); return; }
+          if (i >= HEADS.length) { stopPlay(false); return; }
           showHead(i);
           rolesSchedule();
         }, 2200);
       }
     });
     draw();
-    idle();
+    neutral();
   })();
   </script>
 
@@ -1873,9 +1931,9 @@ pe = positional_encoding(seq_len=8, d_model=16)
     <div class="howto capcard" id="causalHowto"><strong class="cap-title">How to play</strong>
       <ul>
         <li><strong>The point:</strong> A decoder writes one token at a time, so each new word may only listen to the words already on the page. This is the causal mask with real words on it: the upper triangle of the attention grid stays dark because those keys do not exist yet.</li>
-        <li><strong>What you'll see:</strong> The sentence fills in left to right. The word being written glows while arcs fan back to the words it can see; future words sit greyed out and masked. On the heatmap, every cell above the diagonal reads 0.00 in red: the mask turned those scores into nothing.</li>
+        <li><strong>What you'll see:</strong> The grid starts empty. The sentence fills in left to right: the word being written glows while arcs fan back to the words it can see; future words sit greyed out and masked. On the heatmap, every cell above the diagonal reads 0.00 in red: the mask turned those scores into nothing.</li>
         <li><strong>Play button:</strong> Walks the six positions in writing order, 2.2 seconds each, with the stats line narrating what each word can see. Watch "sat" get built from "cat" (0.52) and itself (0.40) while "on" is still masked, then "mat" looking all the way back to "sat" (0.30).</li>
-        <li><strong>Reset button:</strong> Stops the walk and puts the query back on "sat".</li>
+        <li><strong>Reset button:</strong> Stops the walk and clears the demo back to its opening state: no position selected, grid empty.</li>
         <li><strong>Word buttons:</strong> Jump to any position. Try "mat" and count how many words it can see versus how many are masked, then try "the&#8321;" and see what a first word has to work with: only itself.</li>
       </ul>
     </div>
@@ -1896,7 +1954,11 @@ pe = positional_encoding(seq_len=8, d_model=16)
       [0.08, 0.10, 0.22, 0.28, 0.32, 0.00],
       [0.04, 0.14, 0.30, 0.26, 0.06, 0.20]
     ];
-    var current = 2;
+    var current = -1;
+    // Sweep (c): rows stay neutral until their position is picked or Play
+    // reaches it, so the weights (and the masked cells) arrive during
+    // interaction, never at rest.
+    var seen = [false, false, false, false, false, false];
 
     var mini = document.getElementById("causalMini");
     var sbox = document.getElementById("causalSteps");
@@ -1919,8 +1981,11 @@ pe = positional_encoding(seq_len=8, d_model=16)
       html += "</tr>";
       TOK.forEach(function(r, ri) {
         html += '<tr data-row="' + ri + '"><th class="rowhead">' + r + "</th>";
+        var rev = seen[ri];
         W[ri].forEach(function(v, ci) {
-          if (ci > ri) {
+          if (!rev) {
+            html += '<td class="pending"></td>';
+          } else if (ci > ri) {
             html += '<td class="blocked">0.00</td>';
           } else {
             var a = Math.min(1, v * 1.6);
@@ -1934,16 +1999,22 @@ pe = positional_encoding(seq_len=8, d_model=16)
     }
 
     function renderStats() {
-      var seen = [], masked = [];
-      for (var k = 0; k < TOK.length; k++) {
-        (k <= current ? seen : masked).push('"' + TOK[k] + '"');
+      if (current < 0) {
+        stats.textContent = "Pick a position above, or press Play to write the sentence left to right.";
+        return;
       }
-      stats.textContent = 'writing "' + TOK[current] + '" \u00b7 can see: ' + seen.join(", ") +
+      var seenT = [], masked = [];
+      for (var k = 0; k < TOK.length; k++) {
+        (k <= current ? seenT : masked).push('"' + TOK[k] + '"');
+      }
+      stats.textContent = 'writing "' + TOK[current] + '" \u00b7 can see: ' + seenT.join(", ") +
         (masked.length ? ' \u00b7 masked: ' + masked.join(", ") : ' \u00b7 nothing masked, the sentence is complete');
     }
 
     function select(i) {
       current = i;
+      if (i >= 0) { seen[i] = true; }
+      buildTable();
       for (var k = 0; k < sBtns.length; k++) {
         sBtns[k].classList.toggle("active", +sBtns[k].getAttribute("data-s") === i);
       }
@@ -2014,6 +2085,15 @@ pe = positional_encoding(seq_len=8, d_model=16)
       arcPaths.push(ap);
     }
     function drawFlow() {
+      if (current < 0) {
+        for (var k = 0; k < TOK.length; k++) { arcPaths[k].style.display = "none"; }
+        for (var q = 0; q < TOK.length; q++) {
+          qChips[q].setAttribute("class", "qchip");
+          kChipGs[q].setAttribute("class", "kchip");
+          kChipGs[q].childNodes[0].style.fill = "#ffffff";
+        }
+        return;
+      }
       var row = W[current];
       var y0 = QY + CHH, y1 = KY, mid = (y0 + y1) / 2;
       var qx = chipCx(current);
@@ -2053,10 +2133,12 @@ pe = positional_encoding(seq_len=8, d_model=16)
       playBtn.classList.remove("stop");
     }
     function userSelect(i) { stopPlay(600); select(i); }
-    // Reset: stop the walk and put the query back on "sat".
+    // Reset: stop the walk and clear the demo back to its opening state:
+    // no position selected, grid empty.
     document.getElementById("causalReset").addEventListener("click", function() {
       stopPlay(2000);
-      select(2);
+      seen = [false, false, false, false, false, false];
+      select(-1);
     });
     playBtn.addEventListener("click", function() {
       if (playTimer) { stopPlay(2000); return; }
@@ -3085,10 +3167,10 @@ for i in range(n):
     <div class="howto capcard" id="flopHowto"><strong class="cap-title">How to play</strong>
       <ul>
         <li><strong>The point:</strong> Attention FLOPs grow quadratically with sequence length while the FFN grows linearly, so past n = 4d attention dominates the bill and never looks back.</li>
-        <li><strong>What you'll see:</strong> n sweeps 8 to 2048 while the gray marker climbs both curves on the log-log plot. When the blue attention curve climbs over the orange FFN curve, a crossover line announces it: exactly n = 4d.</li>
-        <li><strong>Play button:</strong> Sweeps n step by step at 2.2 seconds per beat, resetting d to 512 first. The marker approaches the crossover and the line reads: at n = 2048 the two bills are exactly equal.</li>
-        <li><strong>Reset button:</strong> Stops the sweep and puts n back on 512 with d = 512.</li>
-        <li><strong>Sequence length n slider:</strong> Sets n on a power-of-two ladder, 8 to 2048. Try dragging it and watch the gray marker ride both curves, with the stats line reading out both bills.</li>
+        <li><strong>What you'll see:</strong> The axes start empty. Press Play and n sweeps 8 to 2048 while the two curves draw themselves left to right on the log-log plot. When the blue attention curve climbs over the orange FFN curve, a crossover line announces it: exactly n = 4d.</li>
+        <li><strong>Play button:</strong> Sweeps n step by step at 2.2 seconds per beat, resetting d to 512 first. The curves draw up to each n; the marker approaches the crossover and the line reads: at n = 2048 the two bills are exactly equal.</li>
+        <li><strong>Reset button:</strong> Stops the sweep and clears the plot back to its empty opening state, with n on 512 and d on 512.</li>
+        <li><strong>Sequence length n slider:</strong> Sets n on a power-of-two ladder, 8 to 2048. Try dragging it and watch the curves draw themselves up to your n, with the stats line reading out both bills.</li>
         <li><strong>Model dim d select:</strong> Sets the model width: 64, 128, 256, 512, or 1024. Try switching d and watch the crossover move with it: it always lands at n = 4d.</li>
       </ul>
     </div>
@@ -3108,6 +3190,9 @@ for i in range(n):
     var cross = document.getElementById("flopCross");
     var playBtn = document.getElementById("flopPlay");
     var playTimer = null;
+    // Sweep (c): the cost curves are the reveal, so they stay off the canvas
+    // until Play or the slider calls for them. 0 means hidden.
+    var revealN = 0;
 
     function attnF(n, d, L) { return 4 * L * n * n * d; }
     function ffnF(n, d, L) { return 16 * L * n * d * d; }
@@ -3160,20 +3245,22 @@ for i in range(n):
         var y = Y(lv);
         ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
       }
-      // curves
-      function curve(fn, color) {
+      // curves: drawn only up to the revealed n, so they arrive during Play
+      function curve(fn, color, upto) {
         ctx.strokeStyle = color;
         ctx.lineWidth = 2.5;
         ctx.beginPath();
+        var started = false;
         for (var i = 0; i < ns.length; i++) {
+          if (ns[i] > upto) { break; }
           var px = X(Math.log2(ns[i]));
           var py = Y(Math.log10(fn(ns[i], d, L)));
-          if (i === 0) { ctx.moveTo(px, py); } else { ctx.lineTo(px, py); }
+          if (!started) { ctx.moveTo(px, py); started = true; } else { ctx.lineTo(px, py); }
         }
-        ctx.stroke();
+        if (started) { ctx.stroke(); }
       }
-      curve(attnF, "#3498db");
-      curve(ffnF, "#e67e22");
+      curve(attnF, "#3498db", revealN);
+      curve(ffnF, "#e67e22", revealN);
       // current-n marker
       var mx = X(Math.log2(n));
       ctx.strokeStyle = "#95a5a6";
@@ -3181,9 +3268,10 @@ for i in range(n):
       ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(mx, padT); ctx.lineTo(mx, H - padB); ctx.stroke();
       ctx.setLineDash([]);
-      // crossover dot, inset from the plot corner so it never half-clips
+      // crossover dot, inset from the plot corner so it never half-clips;
+      // shown only once the reveal has reached it
       var nc = 4 * d;
-      var hasCross = (nc >= 8 && nc <= 2048);
+      var hasCross = (nc >= 8 && nc <= 2048) && nc <= revealN;
       var cx = 0, cy = 0;
       if (hasCross) {
         cx = Math.min(X(Math.log2(nc)), W - padR - 8);
@@ -3237,12 +3325,17 @@ for i in range(n):
         }
       }
 
-      var a = attnF(n, d, L), f = ffnF(n, d, L);
-      stats.innerHTML = "n = <strong>" + n.toLocaleString("en-US") + "</strong>, d = " + d +
-        ", L = " + L + ": attention <strong>" + fmtF(a) + "</strong>, FFN <strong>" +
-        fmtF(f) + "</strong>. Attention is <strong>" + (a / f).toFixed(1) +
-        "x</strong> the FFN" + (a > f ? "; you are past the crossover."
-          : a < f ? "; the FFN still dominates." : "; dead even: that is the crossover point.");
+      if (revealN < 8) {
+        stats.innerHTML = "Press Play: n sweeps 8 to 2048 while the two cost curves " +
+          "draw themselves and race to the crossover. Or drag the slider to scrub the sweep by hand.";
+      } else {
+        var a = attnF(n, d, L), f = ffnF(n, d, L);
+        stats.innerHTML = "n = <strong>" + n.toLocaleString("en-US") + "</strong>, d = " + d +
+          ", L = " + L + ": attention <strong>" + fmtF(a) + "</strong>, FFN <strong>" +
+          fmtF(f) + "</strong>. Attention is <strong>" + (a / f).toFixed(1) +
+          "x</strong> the FFN" + (a > f ? "; you are past the crossover."
+            : a < f ? "; the FFN still dominates." : "; dead even: that is the crossover point.");
+      }
     }
     function stopPlay(hideMs) {
       if (playTimer) { clearTimeout(playTimer); playTimer = null; }
@@ -3250,8 +3343,16 @@ for i in range(n):
       playBtn.classList.remove("stop");
     }
     function clearCross() { cross.innerHTML = ""; }
-    nSlider.addEventListener("input", function() { stopPlay(600); clearCross(); render(); });
-    dSel.addEventListener("change", function() { stopPlay(600); clearCross(); render(); });
+    nSlider.addEventListener("input", function() {
+      stopPlay(600); clearCross();
+      revealN = Math.pow(2, +nSlider.value);
+      render();
+    });
+    dSel.addEventListener("change", function() {
+      stopPlay(600); clearCross();
+      revealN = Math.pow(2, +nSlider.value);
+      render();
+    });
     playBtn.addEventListener("click", function() {
       if (playTimer) { stopPlay(2000); return; }
       playBtn.textContent = "Stop";
@@ -3262,6 +3363,7 @@ for i in range(n):
       var wasBelow = true;
       function step() {
         nSlider.value = e;
+        revealN = Math.pow(2, e);
         render();
         var n = Math.pow(2, e);
         var d = +dSel.value, L = 12;
@@ -3285,12 +3387,13 @@ for i in range(n):
       step();
       flopSchedule();
     });
-    // Reset: stop the sweep and restore the opening view (n = 512, d = 512).
+    // Reset: stop the sweep and restore the opening view (empty axes, n = 512, d = 512).
     document.getElementById("flopReset").addEventListener("click", function() {
       stopPlay(2000);
       nSlider.value = 9;
       dSel.value = "512";
       clearCross();
+      revealN = 0;
       render();
     });
     render();

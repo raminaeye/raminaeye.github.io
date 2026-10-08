@@ -753,10 +753,10 @@ covariance toy: X = [[1,2],[3,4]] -&gt; C = [[2,2],[2,2]], eigenvalues 4 and 0, 
        <p class="cc-head">How to play</p>
        <ul>
          <li><strong>The point:</strong> A face is a weighted sum of eigenfaces. The k slider chooses how many parts go into the sum, and the reconstruction sharpens from a ghost into a recognizable person as k grows.</li>
-         <li><strong>What you will see:</strong> k sweeps 1 to 24. At k = 1 the rebuild is a blurry ghost with the right outline. By k = 10, the notebook's own setting, the person is recognizable. Past 10, details keep filling in but each new eigenface adds less.</li>
-         <li class="tryit"><strong>Components k:</strong> drag it slowly from 1 to 24 and watch the reconstruction sharpen while the eigenface strip lights up one more part at a time. Park at 10, the red tick, to see exactly what the notebook showed.</li>
+         <li><strong>What you will see:</strong> The canvas opens on the mean face, the ghost every rebuild starts from, with the eigenface strip unlit. Press Play and k sweeps 1 to 24: at k = 1 the rebuild is a blurry ghost with the right outline, by k = 10, the notebook's own setting, the person is recognizable, and past 10 details keep filling in while each new eigenface adds less.</li>
+         <li class="tryit"><strong>Components k:</strong> draws the rebuild for that k by hand; drag it slowly from 1 to 24 and watch the reconstruction sharpen while the eigenface strip lights up one more part at a time. Park at 10, the red tick, to see exactly what the notebook showed.</li>
          <li class="tryit"><strong>Face picker:</strong> switch between the four people and watch the same k rebuild each one. Some faces need more parts than others: compare how ghostly Person 3 still looks at k = 5 versus Person 21.</li>
-         <li class="tryit"><strong>Reset:</strong> Puts k back at 10 and the face back at Person 20, the notebook's own setting. Try it after a sweep and watch the ghost sharpen back to the familiar rebuild.</li>
+         <li class="tryit"><strong>Reset:</strong> Puts k back at 10, the face back at Person 20, and clears the canvas back to the mean-face start. Try it after a sweep and watch the person melt back to the ghost so you can rebuild again.</li>
        </ul>
      </div>
    </div>
@@ -784,6 +784,7 @@ const PCA_PAYLOAD = {"meta":{"grid":32,"n_faces":400,"n_features":1024,"face_sam
 
      var faceIdx = 0, kCur = 10;
      var timer = null;
+     var shown = false;   /* rest state: mean face only, no reconstruction yet */
 
      var off = document.createElement('canvas');
      off.width = N; off.height = N;
@@ -826,7 +827,8 @@ const PCA_PAYLOAD = {"meta":{"grid":32,"n_faces":400,"n_features":1024,"face_sam
        return s / totalVar;
      }
 
-     function draw(fi, k) {
+     function draw(fi, k, badge) {
+      /* badge marks the unrun rest state (k = 0, mean face only). */
        /* attnDemo-style clientWidth-relative fonts: canvas text stays ~12+ CSS px
           at any display size. Positions scale with the same factor. */
        var cssW = canvas.clientWidth || W;
@@ -843,7 +845,10 @@ const PCA_PAYLOAD = {"meta":{"grid":32,"n_faces":400,"n_features":1024,"face_sam
        var noteLines = (SC > 1.3)
          ? ['each eigenface is one direction', 'of face variation, reshaped into an image']
          : ['each eigenface is one direction of face variation, reshaped into an image'];
-       var needH = noteY + (noteLines.length - 1) * Math.round(16 * SC) + Math.round(14 * SC);
+       /* The START badge lives below the note lines at rest; its slot is
+          always reserved so the canvas never jumps between rest and run. */
+       var badgeSlot = Math.round(54 * SC);
+       var needH = noteY + (noteLines.length - 1) * Math.round(16 * SC) + Math.round(14 * SC) + badgeSlot;
        if (needH !== H) { canvas.height = needH; H = needH; }
        ctx.clearRect(0, 0, W, H);
        ctx.fillStyle = '#2c3e50';
@@ -889,6 +894,30 @@ const PCA_PAYLOAD = {"meta":{"grid":32,"n_faces":400,"n_features":1024,"face_sam
        for (var li = 0; li < noteLines.length; li++) {
          ctx.fillText(noteLines[li], W / 2, noteY + li * Math.round(16 * SC));
        }
+       if (badge) {
+         /* START pill centered in its reserved slot, clear of every element. */
+         var blabel = 'START: press Play';
+         ctx.save();
+         ctx.font = 'bold ' + fs(15) + 'px sans-serif';
+         var btw = ctx.measureText(blabel).width;
+         var bbw = btw + Math.round(24 * SC), bbh = fs(15) + Math.round(16 * SC);
+         var slotTop = noteY + (noteLines.length - 1) * Math.round(16 * SC) + Math.round(14 * SC);
+         var bbx = W / 2 - bbw / 2, bby = slotTop + (badgeSlot - bbh) / 2;
+         ctx.fillStyle = 'rgba(255,255,255,0.94)';
+         ctx.strokeStyle = '#2c3e50'; ctx.lineWidth = Math.max(1.5, Math.round(2 * SC));
+         if (ctx.roundRect) {
+           ctx.beginPath();
+           ctx.roundRect(bbx, bby, bbw, bbh, Math.round(8 * SC));
+           ctx.fill(); ctx.stroke();
+         } else {
+           ctx.fillRect(bbx, bby, bbw, bbh);
+           ctx.strokeRect(bbx, bby, bbw, bbh);
+         }
+         ctx.fillStyle = '#2c3e50';
+         ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+         ctx.fillText(blabel, bbx + Math.round(12 * SC), bby + bbh / 2);
+         ctx.restore();
+       }
      }
 
      function update() {
@@ -896,6 +925,15 @@ const PCA_PAYLOAD = {"meta":{"grid":32,"n_faces":400,"n_features":1024,"face_sam
        if (!isFinite(kCur)) kCur = 10;
        kCur = Math.min(24, Math.max(1, kCur));
        kVal.textContent = String(kCur);
+       if (!shown) {
+         /* Rest frame: the mean face (k = 0 ghost), strip unlit, START badge. */
+         draw(faceIdx, 0, true);
+         stats.innerHTML = 'k = <strong>' + kCur + '</strong> (armed)' +
+           ' &nbsp;|&nbsp; reconstruction <strong>not yet drawn</strong>' +
+           ' &nbsp;|&nbsp; press Play or drag k';
+         scopeNote.textContent = 'k up to 10 re-enacts the notebook. Higher k is an extension.';
+         return;
+       }
        var r = recon(faceIdx, kCur);
        var err = rmse(faces[faceIdx], r);
        var cv = cumVar(kCur);
@@ -908,7 +946,7 @@ const PCA_PAYLOAD = {"meta":{"grid":32,"n_faces":400,"n_features":1024,"face_sam
        scopeNote.textContent = kCur <= 10
          ? 'k = ' + kCur + ': re-enacting the notebook (it rebuilt faces from 10).'
          : 'k = ' + kCur + ': extension beyond the notebook, which stopped at 10.';
-       draw(faceIdx, kCur);
+       draw(faceIdx, kCur, false);
      }
 
      function stop() {
@@ -919,6 +957,7 @@ const PCA_PAYLOAD = {"meta":{"grid":32,"n_faces":400,"n_features":1024,"face_sam
      function tick() {
        kCur++;
        if (kCur > 24) { stop(); return; }
+       shown = true;
        slider.value = String(kCur);
        update();
        timer = setTimeout(tick, STEP_MS);
@@ -928,14 +967,16 @@ const PCA_PAYLOAD = {"meta":{"grid":32,"n_faces":400,"n_features":1024,"face_sam
        var demo = document.getElementById('faceToyDemo');
        if (demo) playScrollEnsure(demo);
        kCur = 0;
+       shown = true;
        playBtn.textContent = 'Pause';
        tick();
      });
-     slider.addEventListener('input', function () { stop(); update(); });
+     slider.addEventListener('input', function () { stop(); shown = true; update(); });
 
      var faceResetBtn = document.getElementById('faceReset');
      if (faceResetBtn) faceResetBtn.addEventListener('click', function () {
        stop();
+       shown = false;
        faceIdx = 0;
        slider.value = '10';
        var pk = document.getElementById('facePicker');
@@ -955,6 +996,7 @@ const PCA_PAYLOAD = {"meta":{"grid":32,"n_faces":400,"n_features":1024,"face_sam
            this.classList.add('active');
            faceIdx = parseInt(this.getAttribute('data-face'), 10) || 0;
            stop();
+           shown = true;
            update();
          });
        }
@@ -962,7 +1004,7 @@ const PCA_PAYLOAD = {"meta":{"grid":32,"n_faces":400,"n_features":1024,"face_sam
      var rzT = null;
      window.addEventListener('resize', function () {
        if (rzT) clearTimeout(rzT);
-       rzT = setTimeout(function () { draw(faceIdx, kCur); }, 150);
+       rzT = setTimeout(function () { draw(faceIdx, shown ? kCur : 0, !shown); }, 150);
      });
      update();
    })();

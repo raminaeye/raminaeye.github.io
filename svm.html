@@ -708,10 +708,10 @@
       <p class="cc-head">How to play</p>
       <ul>
         <li><strong>The point:</strong> The C knob trades margin width against violations, and the ringed support vectors are what moves when you turn it.</li>
-        <li><strong>What you'll see:</strong> C sweeps from 0.01 to 1000 in 13 log steps with the model retraining live at each stop: the margin visibly narrows, the margin boundaries pull inward, the support-vector count drops, and the margin width readout shrinks from over a hundred data units to under one.</li>
-        <li><strong>C (margin strictness):</strong> A log slider from 0.01 to 1000. Try the bottom and watch the margin go wide and forgiving with nearly every point ringed; try the top and watch the margin squeeze until only a few dozen points still touch the margin boundaries.</li>
+        <li><strong>What you'll see:</strong> The plot opens with just the labeled points, no fence yet. Press Play and C sweeps from 0.01 to 1000 in 13 log steps with the model retraining live at each stop: the fence drops in, the margin visibly narrows, the margin boundaries pull inward, the support-vector count drops, and the margin width readout shrinks from over a hundred data units to under one.</li>
+        <li><strong>C (margin strictness):</strong> Trains the model live on a log slider from 0.01 to 1000. Try the bottom and watch the margin go wide and forgiving with nearly every point ringed; try the top and watch the margin squeeze until only a few dozen points still touch the margin boundaries.</li>
         <li><strong>Ring the support vectors:</strong> Toggles the rings. Try turning it off and notice you can no longer tell which points are actually deciding the boundary.</li>
-        <li><strong>Reset:</strong> Puts C back at 1 with a freshly trained model and the rings back on. Try it after a sweep and watch the margin snap back to the middle of its range.</li>
+        <li><strong>Reset:</strong> Puts C back at 1, the rings back on, and clears the model back to the bare points. Try it after a sweep and watch the fence vanish so you can draw it again.</li>
       </ul>
     </div>
 
@@ -791,6 +791,7 @@
      })();
 
      var w = [0, 0], b = 0, curC = 1;
+     var trained = false;   /* rest state: no model trained yet; the fence arrives via Play or the C dial */
 
      /* Full-batch subgradient descent on J = 0.5||w||^2 + C * mean(hinge).
         This is the notebook's "SVM as a neural network that minimizes the
@@ -881,6 +882,9 @@
        }
        /* margin band between the margin boundaries, clipped to the plot rectangle so the
           wide margin can't spill into the axis padding */
+       /* margin band, margin boundaries, decision line: model output, drawn
+          only once trained. At rest the plot shows the labeled points alone. */
+       if (trained) {
        var g1 = lineSeg(1), g0 = lineSeg(0), gm1 = lineSeg(-1);
        ctx.save();
        ctx.beginPath();
@@ -915,34 +919,64 @@
          ctx.lineTo(xPix(g0[1][0]), yPix(g0[1][1]));
          ctx.stroke();
        }
-       /* points: misclassified get a red edge, support vectors get rings */
+       }
+       /* points: at rest plain labeled dots; once trained, misclassified get
+          a red edge and support vectors get rings */
        var j, f, m, px, py, r = Math.max(2, Math.round(3.2 * SC));
        var showSV = svToggle.checked, nSV = 0, nWrong = 0;
        for (j = 0; j < N; j++) {
-         f = w[0] * X[j][0] + w[1] * X[j][1] + b;
-         m = Y[j] * f;
          px = xPix(X[j][0]); py = yPix(X[j][1]);
          ctx.fillStyle = Y[j] === 1 ? '#2a7fbf' : '#f08c1a';
          ctx.beginPath(); ctx.arc(px, py, r, 0, 2 * Math.PI); ctx.fill();
          ctx.strokeStyle = '#ffffff';
          ctx.lineWidth = Math.max(1, Math.round(1.2 * SC));
          ctx.stroke();
-         if (m < 0) {
-           nWrong++;
-           ctx.strokeStyle = '#c0392b'; ctx.lineWidth = Math.max(1, Math.round(1.5 * SC));
-           ctx.stroke();
-         }
-         if (m <= 1 + 1e-9) {
-           nSV++;
-           if (showSV) {
-             ctx.strokeStyle = '#2c3e50'; ctx.lineWidth = Math.max(1.5, Math.round(2 * SC));
-             ctx.beginPath(); ctx.arc(px, py, r + Math.round(3.5 * SC), 0, 2 * Math.PI); ctx.stroke();
+         if (trained) {
+           f = w[0] * X[j][0] + w[1] * X[j][1] + b;
+           m = Y[j] * f;
+           if (m < 0) {
+             nWrong++;
+             ctx.strokeStyle = '#c0392b'; ctx.lineWidth = Math.max(1, Math.round(1.5 * SC));
+             ctx.stroke();
+           }
+           if (m <= 1 + 1e-9) {
+             nSV++;
+             if (showSV) {
+               ctx.strokeStyle = '#2c3e50'; ctx.lineWidth = Math.max(1.5, Math.round(2 * SC));
+               ctx.beginPath(); ctx.arc(px, py, r + Math.round(3.5 * SC), 0, 2 * Math.PI); ctx.stroke();
+             }
            }
          }
        }
        ctx.fillStyle = '#555'; ctx.textAlign = 'center';
        ctx.fillText('standardized feature 1', (padL + W - padR) / 2, H - Math.round(6 * SC));
+       if (!trained) drawStartBadge();
        return { nSV: nSV, nWrong: nWrong };
+     }
+
+     function drawStartBadge() {
+       var label = 'START: press Play';
+       var fs = Math.round(15 * SC);
+       ctx.save();
+       ctx.font = 'bold ' + fs + 'px sans-serif';
+       var tw = ctx.measureText(label).width;
+       var bx = padL + Math.round(10 * SC), by = padT + Math.round(10 * SC);
+       var bw = tw + Math.round(24 * SC), bh = fs + Math.round(16 * SC);
+       ctx.fillStyle = 'rgba(255,255,255,0.94)';
+       ctx.strokeStyle = '#2c3e50';
+       ctx.lineWidth = Math.max(1.5, Math.round(2 * SC));
+       if (ctx.roundRect) {
+         ctx.beginPath();
+         ctx.roundRect(bx, by, bw, bh, Math.round(8 * SC));
+         ctx.fill(); ctx.stroke();
+       } else {
+         ctx.fillRect(bx, by, bw, bh);
+         ctx.strokeRect(bx, by, bw, bh);
+       }
+       ctx.fillStyle = '#2c3e50';
+       ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+       ctx.fillText(label, bx + Math.round(12 * SC), by + bh / 2);
+       ctx.restore();
      }
 
      function fmtC(C) {
@@ -955,6 +989,12 @@
      function update() {
        var res = draw();
        cVal.textContent = fmtC(curC);
+       if (!trained) {
+         stats.innerHTML = 'C = <strong>' + fmtC(curC) + '</strong>' +
+           ' &nbsp;|&nbsp; model <strong>not yet trained</strong>' +
+           ' &nbsp;|&nbsp; press Play or drag C';
+         return;
+       }
        var nw = Math.hypot(w[0], w[1]);
        var margin = nw > 1e-9 ? 2 / nw : Infinity;
        var mtxt = isFinite(margin) ? (margin >= 100 ? String(Math.round(margin)) : margin.toFixed(2)) : 'n/a';
@@ -977,6 +1017,7 @@
        var exp = -2 + 5 * playIdx / (PLAY_STEPS - 1);
        var C = Math.pow(10, exp);
        slider.value = String(Math.round(500 * (exp + 2) / 5));
+       trained = true;
        train(C, 200);
        curC = C;
        update();
@@ -991,6 +1032,7 @@
        rafId = null;
        if (pendingC === null) return;
        var C = pendingC; pendingC = null;
+       trained = true;   /* dragging C trains the model: the fence arrives */
        setC(C);
        update();
      }
@@ -1020,13 +1062,12 @@
        slider.value = '200';
        if (svToggle) svToggle.checked = true;
        w = [0, 0]; b = 0; curC = 1;
-       train(1, 600);
+       trained = false;   /* full initial state: back to bare points */
        update();
      });
 
-     /* Init: train from scratch at C = 1. */
+     /* Init: bare points, no model yet. The fence arrives via Play or the dial. */
      w = [0, 0]; b = 0; curC = 1;
-     train(1, 600);
      update();
    })();
    </script>

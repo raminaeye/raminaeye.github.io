@@ -465,7 +465,13 @@
     #effToy { position: relative; }
     .eff-fig-wrap { position: relative; display: inline-block; max-width: 100%; }
     .eff-fig { max-width: 100%; height: auto; display: block; }
-    .eff-hotspot { position: absolute; border: 3px solid #e74c3c; border-radius: 6px; pointer-events: none; display: none; box-shadow: 0 0 0 2px rgba(231,76,60,0.3); }
+    /* Paper-figure section 6 treatment: selection is a white-veil spotlight
+       (four panes with a hole at the panel's rect) plus the panel badge
+       turning red. Nothing is drawn over the figure: no borders, no outlines. */
+    .eff-veil { position: absolute; inset: 0; pointer-events: none; }
+    .eff-veil-pane { position: absolute; background: rgba(255,255,255,0.55); }
+    .eff-mbadge { display: inline-block; min-width: 20px; height: 20px; line-height: 20px; padding: 0 5px; border-radius: 999px; background: #bdc3c7; color: #fff; font-size: 12px; font-weight: 700; text-align: center; margin-right: 2px; }
+    .eff-mbadge.on { background: #e74c3c; }
     .eff-rebuilt { font-size: 0.9em; color: #555; margin: 0.5em 0; }
     .eff-cite { font-size: 0.85em; color: #777; margin: 0.3em 0 1em; }
     .eff-methods { display: inline-flex; gap: 12px; flex-wrap: wrap; margin: 0 12px; }
@@ -2588,7 +2594,12 @@ class SEBlock(nn.Module):
         <figure class="figure">
             <div class="eff-fig-wrap">
                 <img src="figures/papers/efficientnet-fig2.png" alt="Figure 2 from the EfficientNet paper: five network diagrams showing (a) baseline, (b) wider, (c) deeper, (d) higher-resolution, and (e) compound-scaled networks." class="eff-fig">
-                <div class="eff-hotspot" id="effHotspot"></div>
+                <div class="eff-veil" id="effVeil" aria-hidden="true">
+                    <div class="eff-veil-pane" id="effVeilT"></div>
+                    <div class="eff-veil-pane" id="effVeilB"></div>
+                    <div class="eff-veil-pane" id="effVeilL"></div>
+                    <div class="eff-veil-pane" id="effVeilR"></div>
+                </div>
             </div>
             <figcaption>Figure 2. Model Scaling. (a) is a baseline network example; (b)-(d) are conventional scaling that only increases one dimension of network width, depth, or resolution. (e) is our proposed compound scaling method that uniformly scales all three dimensions with a fixed ratio.</figcaption>
         </figure>
@@ -2599,10 +2610,10 @@ class SEBlock(nn.Module):
             <label for="effPhi">&phi; (compound coefficient): <span id="effPhiVal">0</span> <span id="effModelName">B0</span></label>
             <input type="range" id="effPhi" min="0" max="7" step="1" value="0" aria-label="Phi, compound scaling coefficient">
             <span class="eff-methods" role="group" aria-label="Scaling method">
-                <label><input type="radio" name="effMethod" value="compound" checked> Compound</label>
-                <label><input type="radio" name="effMethod" value="width"> Width-only (what-if)</label>
-                <label><input type="radio" name="effMethod" value="depth"> Depth-only (what-if)</label>
-                <label><input type="radio" name="effMethod" value="res"> Resolution-only (what-if)</label>
+                <label><input type="radio" name="effMethod" value="compound" checked> <span class="eff-mbadge on" data-m="compound">(e)</span> Compound</label>
+                <label><input type="radio" name="effMethod" value="width"> <span class="eff-mbadge" data-m="width">(b)</span> Width-only (what-if)</label>
+                <label><input type="radio" name="effMethod" value="depth"> <span class="eff-mbadge" data-m="depth">(c)</span> Depth-only (what-if)</label>
+                <label><input type="radio" name="effMethod" value="res"> <span class="eff-mbadge" data-m="res">(d)</span> Resolution-only (what-if)</label>
             </span>
             <button type="button" class="toy-btn" id="effPlay">Play</button>
             <button type="button" class="toy-btn" id="effReset">Reset</button>
@@ -2635,7 +2646,7 @@ class SEBlock(nn.Module):
                 <li><strong>The point:</strong> one knob, &phi;, grows depth, width, and resolution together in a fixed ratio, so FLOPS roughly doubles each step (1.92x exact) while accuracy climbs; scaling one dimension alone falls behind.</li>
                 <li><strong>What you'll see:</strong> &phi; steps from 0 to 7 on its own, the model name ticks B0 to B7, the input tile grows, the blocks multiply and thicken, and the FLOPS readout climbs about 2x per step in compound mode.</li>
                 <li><strong>&phi; (compound coefficient):</strong> 0 to 7, whole steps, picking the model B0 to B7. Try dragging it to 7 and watch the depth, width, and resolution readouts land on the B7 row of the paper's table below.</li>
-                <li><strong>Scaling method:</strong> Compound, Width-only, Depth-only, or Resolution-only. Try setting &phi; to 7 and flipping between Compound and Width-only, and watch the FLOPS factor collapse; the button also highlights the matching panel on the paper's real Figure 2 above.</li>
+                <li><strong>Scaling method:</strong> Compound, Width-only, Depth-only, or Resolution-only. Try setting &phi; to 7 and flipping between Compound and Width-only, and watch the FLOPS factor collapse; a white veil spotlights the matching panel on the paper's real Figure 2 above while its panel badge turns red below.</li>
                 <li><strong>Play:</strong> steps &phi; from 0 to 7 on its own, 0.8 seconds per stop; if it starts at 7, it resets to B0 first.</li>
                 <li><strong>Reset:</strong> try it after a run and watch &phi; snap back to 0 (B0) with Compound scaling selected.</li>
             </ul>
@@ -2651,12 +2662,11 @@ class SEBlock(nn.Module):
         var statsEl = document.getElementById('effStats');
         var cv = document.getElementById('effCanvas');
         var ctx = cv.getContext('2d');
-        var hotspot = document.getElementById('effHotspot');
         var methodRadios = document.querySelectorAll('input[name="effMethod"]');
         var playing = false, playTimer = null;
 
-        /* Panel highlight positions as percentages of figure size (b)-(e) left to right.
-           Compound box is narrowed to the network blocks so its border never
+        /* Panel spotlight holes as percentages of figure size (b)-(e) left to right.
+           The compound hole is narrowed to the network blocks so it never
            crosses the "deeper" / "higher resolution" side labels. */
         var PANEL_POS = {
             compound: { left: '81%', top: '11%', width: '9%', height: '79%' },
@@ -2681,14 +2691,27 @@ class SEBlock(nn.Module):
             return { d: d, w: w, r: r, flops: flops };
         }
 
-        function updateHotspot() {
+        /* Section 6 selection treatment: white-veil spotlight with a hole at the
+           selected panel's rect, plus the matching panel badge turning red.
+           Nothing is drawn over the figure. */
+        function updateVeil() {
             var m = getMethod();
             var pos = PANEL_POS[m];
-            hotspot.style.left = pos.left;
-            hotspot.style.top = pos.top;
-            hotspot.style.width = pos.width;
-            hotspot.style.height = pos.height;
-            hotspot.style.display = 'block';
+            var l = parseFloat(pos.left), t = parseFloat(pos.top),
+                w = parseFloat(pos.width), h = parseFloat(pos.height);
+            function pane(id, l, t, w, hh) {
+                var el = document.getElementById(id);
+                el.style.left = l + '%'; el.style.top = t + '%';
+                el.style.width = w + '%'; el.style.height = hh + '%';
+            }
+            pane('effVeilT', 0, 0, 100, t);
+            pane('effVeilB', 0, t + h, 100, 100 - t - h);
+            pane('effVeilL', 0, t, l, h);
+            pane('effVeilR', l + w, t, 100 - l - w, h);
+            var badges = document.querySelectorAll('#effToy .eff-mbadge');
+            for (var i = 0; i < badges.length; i++) {
+                badges[i].classList.toggle('on', badges[i].getAttribute('data-m') === m);
+            }
         }
 
         function draw() {
@@ -2772,15 +2795,15 @@ class SEBlock(nn.Module):
             stopPlay(600);
             phiSlider.value = '0';
             methodRadios[0].checked = true;
-            updateHotspot(); draw();
+            updateVeil(); draw();
         });
 
-        phiSlider.addEventListener('input', function () { stopPlay(600); updateHotspot(); draw(); });
+        phiSlider.addEventListener('input', function () { stopPlay(600); updateVeil(); draw(); });
         for (var i = 0; i < methodRadios.length; i++) {
-            methodRadios[i].addEventListener('change', function () { stopPlay(600); updateHotspot(); draw(); });
+            methodRadios[i].addEventListener('change', function () { stopPlay(600); updateVeil(); draw(); });
         }
         window.addEventListener('resize', draw);
-        updateHotspot();
+        updateVeil();
         draw();
     })();
     </script>

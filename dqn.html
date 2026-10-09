@@ -1172,7 +1172,11 @@ Q[s][a] += lr * (reward + gamma * max(Q[s_next]) - Q[s][a])
         playBtn.textContent = 'Pause'; playBtn.classList.add('playing');
         demo.classList.add('playing');
         if (typeof playScrollEnsure === 'function') playScrollEnsure(demo);
-        runStage(0);
+        /* Round 7: resume the stage counter from the true episode (the epsRace
+           pattern). Stages step STAGE_EPS episodes synchronously, so a pause
+           always lands on a stage boundary; restarting at stage 0 rewound the
+           caption to "Episodes 1 to 20" while training was at episode 41+. */
+        runStage(Math.floor(episode / STAGE_EPS));
       });
       document.getElementById('dqnStep').addEventListener('click', function () {
         stopPlay(); stepEpisode();
@@ -1447,6 +1451,19 @@ Q[s][a] += lr * (reward + gamma * max(Q[s_next]) - Q[s][a])
         else t = 'Went ' + res.dir + '. Empty square, nothing earned.';
         evEl.textContent = t;
       }
+      /* Round 7: the 90ms dot animation stays, but these narration lines are
+         caption-directed reading text ("the line under each grid narrates the
+         last step in plain words"). Full sentences rewriting at 11Hz cannot be
+         read, so throttle narration to at most one update per 2000ms per line
+         (Round 3 landDemo precedent: text-bearing steps >= 2000ms). The
+         reserve sampler below calls narrate() directly, so it stays unthrottled. */
+      var narrateLastMs = { L: 0, R: 0 };
+      function narrateThrottled(key, evEl, res) {
+        var now = performance.now();
+        if (now - narrateLastMs[key] < 2000) return;
+        narrateLastMs[key] = now;
+        narrate(evEl, res);
+      }
       function avgUpTo(arr, i, n) {
         var from = Math.max(0, i - n + 1), s = 0, k;
         for (k = from; k <= i; k++) s += arr[k];
@@ -1636,11 +1653,12 @@ Q[s][a] += lr * (reward + gamma * max(Q[s_next]) - Q[s][a])
         countRendered(resL); countRendered(resR);
         renderAgent(L, cellsL); renderAgent(R, cellsR);
         fxForStep(fxL, resL); fxForStep(fxR, resR);
-        narrate(evL, resL); narrate(evR, resR);
+        narrateThrottled('L', evL, resL); narrateThrottled('R', evR, resR);
         timers.push(setTimeout(function () { spotlightStep(s, t + 1); }, STEP_MS));
       }
       function resetAll() {
         L = mkAgent(); R = mkAgent();
+        narrateLastMs.L = 0; narrateLastMs.R = 0;
         if (fxL) fxL.innerHTML = '';
         if (fxR) fxR.innerHTML = '';
         if (evL) evL.textContent = 'The first live episode will step through here, move by move.';

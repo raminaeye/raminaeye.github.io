@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Knowledge Distillation Explained with PyTorch</title>
+  <title>Knowledge Distillation</title>
   <style>
     body {
       font-family: sans-serif;
@@ -517,6 +517,14 @@
       overflow-x: auto;
       max-width: 100%;
     }
+    /* Paper citation card (multitask paper-card pattern) */
+    .paper-card { border: 1px solid #dee2e6; border-radius: 10px; background: #f8f9fa; padding: 14px 18px; margin: 1.1em 0; }
+    .paper-card .pc-label { display: block; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #868e96; margin-bottom: 8px; }
+    .paper-card p { margin: 0 0 6px; }
+    .paper-card p:last-child { margin-bottom: 0; }
+    .paper-card .pc-authors { font-weight: 600; color: #212529; }
+    .paper-card .pc-title { color: #212529; }
+    .paper-card .pc-venue { font-size: 0.92em; color: #495057; }
   </style>
 
   <script type="text/javascript" async
@@ -591,6 +599,15 @@
    <p>
      This is not a toy trick. <code>DistilBERT</code> is <code>BERT-base</code> with 40% of the parameters chopped off, and it still keeps 95% of the performance. Same story with the distilled <code>MobileNet</code> variants taught by <code>ResNet-50</code>. The pattern is always the same: the big model you cannot afford to serve teaches the small model you can.
    </p>
+
+   <div class="paper-card">
+     <span class="pc-label">The paper</span>
+     <p class="pc-authors">Geoffrey Hinton, Oriol Vinyals, Jeff Dean</p>
+     <p class="pc-title"><em>Distilling the Knowledge in a Neural Network.</em></p>
+     <p class="pc-venue">NIPS 2014 Deep Learning and Representation Learning Workshop &middot; <a href="https://arxiv.org/abs/1503.02531">arXiv:1503.02531</a></p>
+   </div>
+   <p>The authors were trying to solve a deployment problem. The most reliable way to squeeze more accuracy out of a model is to train a whole ensemble and average the predictions, but an ensemble is cumbersome: too expensive to serve to a large number of users, especially when the individual models are large neural nets. Caruana and collaborators had shown the knowledge in an ensemble could be compressed into a single model, and Hinton, Vinyals, and Dean developed that approach further with a different compression technique.</p>
+   <p>Their key insight is that the teacher's soft outputs carry information the hard labels never will. A model that says an image is 90% cat, 8% dog, 2% car is telling you which mistakes are reasonable, and that ranking, the "dark knowledge", is what the student should learn. Soften the teacher's softmax with a temperature $T$ and train the small model to match those soft targets, alongside the usual hard-label loss. They report surprising results on MNIST and show the technique significantly improving the acoustic model of a heavily used commercial system. They also introduce specialist models, ensemble members trained on subsets of commonly confused classes, as a fast way to build the teacher in the first place.</p>
 
    <h2 id="soft-predictions-what-the-teacher-really-knows">Soft predictions: what the teacher really knows</h2>
    <p>
@@ -976,13 +993,14 @@
    $$ \mathcal{L} = (1-\alpha) \cdot \mathcal{L}_{CE}(\text{student_logits, true_labels}) + \alpha \cdot \mathcal{L}_{KL}(\text{student_logits}_T, \text{teacher_logits}_T) $$
    </div>
    <p>
-     Reading that in words:
+     Work it on one training example. The true label is class 1 (cat). The teacher says $p = [0.65, 0.19, 0.10, 0.06]$, the student says $q = [0.55, 0.25, 0.12, 0.08]$. Settings from the experiment above: $\alpha = 0.7$, $T = 2.0$.
    </p>
    <ol class="worked-example">
-     <li>The first term is ordinary cross-entropy between the student's predictions and the hard ground-truth labels.</li>
-     <li>The second term is the KL divergence between the student's and the teacher's temperature-softened distributions: this is how the student learns the teacher's "thinking."</li>
-     <li>$\alpha$ decides how much you listen to the teacher versus the labels. With <strong>$\alpha = 0.7$</strong>, the loss is <strong>70% teacher, 30% labels</strong>.</li>
-     <li>The extremes: push $\alpha$ to <strong>0</strong> and you get plain cross-entropy on the true labels; push it to <strong>1</strong> and the student only ever sees the teacher.</li>
+     <li>Hard term: ordinary cross-entropy on the true label.<br>$\mathcal{L}_{CE} = -\log q_1 = -\log(0.55) = 0.598$</li>
+     <li>Soft term: the KL divergence, one class at a time.<br>$0.65 \log\frac{0.65}{0.55} = 0.109$<br>$0.19 \log\frac{0.19}{0.25} = -0.052$<br>$0.10 \log\frac{0.10}{0.12} = -0.018$<br>$0.06 \log\frac{0.06}{0.08} = -0.017$<br>Sum: $\mathcal{L}_{KL} = 0.109 - 0.052 - 0.018 - 0.017 = 0.021$, the "about 0.02" quoted above.</li>
+     <li>Rescale the soft term by $T^2$, the paper's fix for the shrunken gradients.<br>$2.0^2 \times 0.021 = 0.084$</li>
+     <li>Blend with $\alpha = 0.7$.<br>$\mathcal{L} = 0.7 \times 0.084 + 0.3 \times 0.598 = 0.059 + 0.179 = 0.238$</li>
+     <li>The extremes, with numbers: push $\alpha$ to 0 and the loss is just the $0.598$; push it to 1 and the student only ever sees the teacher's $0.084$.</li>
    </ol>
    <p>
      In code it is a few lines:

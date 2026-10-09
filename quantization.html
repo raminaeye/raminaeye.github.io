@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Quantization Explained with PyTorch</title>
+  <title>Quantization</title>
   <style>
     body {
       font-family: sans-serif;
@@ -620,13 +620,13 @@
    </div>
 
 
-   <p>Smaller model means less memory bandwidth. Faster inference because fewer bits and fewer multiplies. Lower power because integer ops are cheaper than float on most hardware. You get the idea.</p>
+   <p>Why would you quantize a model that already works? Because smaller numbers are cheaper, in every way that matters. Smaller model means less memory bandwidth. Fewer bits means fewer multiplies and faster inference. Integer ops burn less power than float on most hardware. Same model, smaller bills.</p>
 
-   <p>There are a couple types of quantization: <strong>Post-Training Quantization (PTQ)</strong> and <strong>Quantization-Aware Training (QAT)</strong>. PTQ comes in two flavors: <strong>Dynamic</strong> and <strong>Static</strong>. Let’s break them down.</p>
+   <p>There are two ways to get there: <strong>Post-Training Quantization (PTQ)</strong>, where you quantize a model after training, and <strong>Quantization-Aware Training (QAT)</strong>, where the model trains with quantization in the loop. PTQ itself comes in two flavors, <strong>Dynamic</strong> and <strong>Static</strong>. I will start with the easy one.</p>
 
    <section>
      <h2 id="dynamic-quantization">Dynamic Quantization</h2>
-     <p>This is the lazy version of quantization, and that's not a bad thing. Super simple. You quantize the weights after training. Activations stay in float32 during inference but get quantized on the fly. No calibration. No fuss.</p>
+     <p>I think of dynamic quantization as the lazy version, and I mean that as a compliment. You quantize the weights after training and leave it at that. Activations stay in float32 during inference but get quantized on the fly, per batch. No calibration, no fuss. It is the fastest win I know on CPUs for Linear-heavy models.</p>
      <pre><code class="language-python">
 import torch.quantization
 model = YourModel()
@@ -661,7 +661,7 @@ quantized_model = torch.quantization.quantize_dynamic(
 
    <section>
      <h2 id="static-quantization">Static Quantization</h2>
-     <p>Now we’re doing it properly. Both weights and activations go to int8. But to quantize activations, you first need to know their range. That’s where <strong>calibration</strong> comes in. You run some input data through the model (no labels needed) to collect min and max values of activations. PyTorch uses that to decide how to quantize.</p>
+     <p>Static quantization is the version I actually deploy. Both weights and activations go to int8. But to quantize activations, you first need to know their range. That is where <strong>calibration</strong> comes in. You run some input data through the model (no labels needed) to collect min and max values of activations. PyTorch uses that to decide how to quantize.</p>
      <p>This works great for CNNs and edge deployment. You get full int8 inference.</p>
      <p>The workflow looks like this:</p>
      <pre><code class="language-python">
@@ -698,7 +698,7 @@ torch.quantization.convert(model, inplace=True)
          <div class="stat-note">static quantization, same MNIST CNN</div>
        </div>
      </div>
-     <p>Let’s talk about what’s going on.</p>
+     <p>So what is actually happening under the hood?</p>
      <h3>Fusion</h3>
      <p>Before quantizing, you fuse Conv + BatchNorm + ReLU into a single op. Why? It reduces memory overhead, speeds things up, and minimizes numerical errors.</p>
      <h3>QConfig</h3>
@@ -779,12 +779,12 @@ qconfig_hist = tq.QConfig(
 model.qconfig = qconfig_hist
      </code></pre>
      <p>They look at the L2 error between the original and the quantized-dequantized tensor and find the best range for preserving accuracy.</p>
-     <p>This is where quantization actually starts acting intelligent. Especially important when your activations have long tails, skew, or multimodal distributions.</p>
+     <p>This is the point where quantization starts earning its keep for me. It matters most when your activations have long tails, skew, or multimodal distributions, the cases where MinMax quietly destroys your accuracy.</p>
    </section>
    <section>
      <h2 id="a-real-histogram-from-a-real-model">A Real Histogram, From a Real Model</h2>
      <p>I keep telling you to look at the histogram. So here, look at a real one. These are actual weights from a small CNN I trained on MNIST for one epoch, the same model as the companion notebook. Pick the filter with the outlier and watch what it does to everyone else: the scale is set by the biggest weight, so one loud weight makes all the quiet ones share a handful of bins.</p>
-     <p>Weights are from SimpleCNN trained 1 epoch on MNIST (see companion notebook). Scheme for this toy: symmetric per-layer, <code>scale = max|w| / (2^(b-1) - 1)</code>, zero-point 0, so the full int range stretches to hug the single biggest weight.</p>
+     <p>Weights are from SimpleCNN trained 1 epoch on MNIST (see companion notebook). Scheme for this toy: symmetric per-layer, $\text{scale} = \max|w| / (2^{b-1} - 1)$, zero-point 0, so the full int range stretches to hug the single biggest weight.</p>
      <div class="bw-demo">
        <div class="bw-controls">
          <label for="rfhFilter">Filter <span id="rfhFilterVal"></span> of 32</label>
@@ -823,8 +823,8 @@ model.qconfig = qconfig_hist
    </section>
    <section>
      <h2 id="where-should-the-range-end">Where should the range end?</h2>
-     <p>Here is the decision that makes or breaks low-bit quantization, and it is embarrassingly simple: where do you cut the range? Every weight outside your [q<sub>min</sub>, q<sub>max</sub>] gets clipped, and every weight inside gets rounded to a 4-bit grid. Cut wide and the outliers are safe but the bins get fat. Cut tight and the bins get fine but the outliers get beheaded.</p>
-     <p>Nagel and co.'s whitepaper frames it as two named strategies. Min-max (Eq. 14-15): q<sub>min</sub> = min V, q<sub>max</sub> = max V, where V is the weight tensor. Zero clipping error by construction, but one loud outlier stretches the bins for everyone. MSE (Eq. 16): search the (q<sub>min</sub>, q<sub>max</sub>) pair that minimizes the Frobenius norm ||V - V&#770;||<sup>2</sup><sub>F</sub> between the weights and their quantized version, outliers be damned. A third trick from Nagel et al. (2019): when a layer has batch norm, set the range from the BN parameters with alpha = 6, so only large outliers get clipped.</p>
+     <p>Here is the decision that makes or breaks low-bit quantization, and it is embarrassingly simple: where do you cut the range? Every weight outside your $[q_{\min}, q_{\max}]$ gets clipped, and every weight inside gets rounded to a 4-bit grid. Cut wide and the outliers are safe but the bins get fat. Cut tight and the bins get fine but the outliers get beheaded.</p>
+     <p>Nagel and co.'s whitepaper frames it as two named strategies. Min-max (Eq. 14-15): $q_{\min} = \min V$, $q_{\max} = \max V$, where $V$ is the weight tensor. Zero clipping error by construction, but one loud outlier stretches the bins for everyone. MSE (Eq. 16): search the $(q_{\min}, q_{\max})$ pair that minimizes the Frobenius norm $\|V - \hat{V}\|_F^2$ between the weights and their quantized version, outliers be damned. A third trick from Nagel et al. (2019): when a layer has batch norm, set the range from the BN parameters with $\alpha = 6$, so only large outliers get clipped.</p>
      <p class="caption">Nagel, M., Fournarakis, M., Amjad, R. A., Bondarenko, Y., van Baalen, M., and Blankevoort, T. <i>A White Paper on Neural Network Quantization.</i> arXiv, 2021. arXiv:2106.08295. <a href="https://arxiv.org/abs/2106.08295">Read the paper</a></p>
      <div class="figure">
        <img src="figures/papers/quant-fig5-channel-ranges.png" alt="Figure 5 from the quantization whitepaper: boxplots of per-channel weight ranges for the first depthwise-separable layer of MobileNetV2 after BN folding. Most channels are tiny, a few span huge ranges." style="max-width:100%;height:auto;">
@@ -856,11 +856,13 @@ model.qconfig = qconfig_hist
          <div><span class="rfh-k">rounding error, illustrative MSE</span><span class="rfh-v" id="crpRound"></span></div>
          <div><span class="rfh-k">total MSE (illustrative)</span><span class="rfh-v" id="crpTotal"></span></div>
        </div>
+       <p>Work it on a real layer. The observer table above says conv.0 saw activations from 0 to 6.478520. Here is exactly how that becomes a scale and a zero-point:</p>
        <ol class="worked-example">
-         <li>Hit <strong>Play</strong>. The range starts tight around the bulk of the weights and widens in 800ms steps. Watch the two error readouts trade: clipping error falls, rounding error rises, and the orange dot rides the dark total-MSE curve down into the valley and lands exactly on the green MSE-optimal marker.</li>
-         <li>Look at the tick strip along the top of the histogram. Those 60 ticks are the outlier weights, one tick each: too few to show up as bars, but they stretch the x-axis for everyone. Now press <strong>Min-max</strong>. The lines snap to the data extremes. Clipping error goes to exactly zero, but rounding error jumps: the bins are fat because the outliers set the scale.</li>
-         <li>The MSE-optimal range is asymmetric (the gray dot marks the best symmetric one), and dragging one red line yourself takes the orange dot off the dark symmetric curve entirely.</li>
-         <li>Read Figure 5 again. Those few giant channels are why min-max fails on real models, and why the paper's Table 1 shows min-max collapsing to 0.59% at 4 bits on MobileNetV2 while MSE holds 13.77%.</li>
+         <li>Read the range: $x_{\min} = 0$, $x_{\max} = 6.478520$. Activations quantize to quint8, so $q_{\min} = 0$ and $q_{\max} = 255$.</li>
+         <li>$\text{scale} = (x_{\max} - x_{\min}) / (q_{\max} - q_{\min}) = 6.478520 / 255 = 0.025406$. That is the table's number, to the digit.</li>
+         <li>$\text{zero_point} = \mathrm{round}(q_{\min} - x_{\min} / \text{scale}) = \mathrm{round}(0 - 0) = 0$. Float 0 lands exactly on int 0, which is why ReLU outputs quantize so cleanly.</li>
+         <li>Quantize a real value, say $x = 3.0$: $q = \mathrm{round}(3.0 / 0.025406 + 0) = \mathrm{round}(118.08) = 118$.</li>
+         <li>Round-trip it to check: $\hat{x} = 0.025406 \times (118 - 0) = 2.9979$. The quantization cost us $3.0 - 2.9979 = 0.0021$, less than half a bin.</li>
        </ol>
        <div class="cap-card" id="crpCaption">
          <strong>How to play</strong>
@@ -868,7 +870,7 @@ model.qconfig = qconfig_hist
            <li><strong>The point:</strong> Picking the clipping range is a trade: too tight and outliers get beheaded (clipping error), too wide and the bins get fat for everyone (rounding error). The MSE-optimal range sits in the valley between and beats min-max at 4 bits.</li>
            <li><strong>What you'll see:</strong> the range widens from tight around the bulk toward the data extremes in 800ms steps, then snaps to the green MSE-optimal marker. The orange dot rides the dark total-error curve down into the valley while clipping error falls and rounding error climbs.</li>
            <li><strong>Reset:</strong> stops the sweep and puts the range back to the tight starting position, with the error readouts and the orange dot back at the start.</li>
-           <li><strong>The numbered tour above</strong> walks the four beats: Play, the outlier tick strip, Min-max, and the MSE-optimal snap.</li>
+           <li><strong>The worked example above</strong> runs the scale and zero-point arithmetic on conv.0's real observer numbers: 0 to 6.478520 becomes scale 0.025406, zero-point 0.</li>
          </ul>
        </div>
      </div>
@@ -1572,15 +1574,15 @@ model.qconfig = qconfig_hist
      <div class="math-display">$$X = \text{scale} \times (Q - \text{zero_point})$$</div>
      <h3>Symmetric</h3>
      <ul>
-        <li><code>zero_point = 0</code></li>
-        <li><code>scale = max(abs(min_val), abs(max_val)) / 127</code> (for int8, typically range [-127, 127] or [-128, 127])</li>
+        <li>$\text{zero_point} = 0$</li>
+        <li>$\text{scale} = \max(|\text{min_val}|, |\text{max_val}|) / 127$ (for int8, typically range [-127, 127] or [-128, 127])</li>
      </ul>
      <p>Used for weights. Assumes distribution is centered around 0 (which is usually true for weights).</p>
      <h3>Asymmetric</h3>
      <ul>
-        <li><code>zero_point ≠ 0</code></li>
-        <li><code>scale = (x_max - x_min) / 255</code> (for quint8, typically range [0, 255])</li>
-        <li><code>zero_point = round(qmin - x_min / scale)</code> (adjusted to be within [qmin, qmax])</li>
+        <li>$\text{zero_point} \neq 0$</li>
+        <li>$\text{scale} = (x_{\max} - x_{\min}) / 255$ (for quint8, typically range [0, 255])</li>
+        <li>$\text{zero_point} = \mathrm{round}(q_{\min} - x_{\min} / \text{scale})$ (adjusted to be within $[q_{\min}, q_{\max}]$)</li>
      </ul>
      <p>Used for activations. Better when data is skewed (e.g., ReLU output).</p>
      <div class="figure">
@@ -1839,9 +1841,9 @@ model.qconfig = qconfig_hist
 
    <section>
      <h2 id="calibration-matters">Calibration Matters</h2>
-     <p>Bad calibration = bad quantization.</p>
-     <p>If your calibration dataset is too small or unrepresentative, the model sees weird ranges and either clips too much or wastes resolution. The more realistic your calibration inputs, the better your scale and zero-point.</p>
-     <p>Also, remember: PTQ is a one-shot deal. Once you calibrate and convert, you don’t get to fine-tune anymore. It’s set in stone.</p>
+     <p>Here is the gotcha that bites everyone once: your quantization is only as good as your calibration data.</p>
+     <p>If the calibration set is too small or does not look like production, the observers learn the wrong ranges. The model either clips real activations or wastes resolution on ranges that never show up. The more your calibration inputs look like the real thing, the better your scale and zero-point.</p>
+     <p>And PTQ is a one-shot deal. Once you calibrate and convert, there is no fine-tuning afterward. The numbers are baked in, so get the calibration right the first time.</p>
    </section>
 
    <section>
@@ -1852,7 +1854,7 @@ model.qconfig = qconfig_hist
 
    <section>
      <h2 id="visualize-with-fx">Visualize with FX</h2>
-     <p>Use FX to trace and manipulate the model graphically.</p>
+     <p>When I need to see what quantization actually did to my model, I reach for FX. It traces the model into a graph you can inspect and manipulate.</p>
      <pre><code class="language-python">
 from torch.fx import symbolic_trace
 graph = symbolic_trace(quantized_model)
@@ -1866,7 +1868,7 @@ graph.print_tabular() # For a more readable table
         <li>Quantize cleanly</li>
         <li>Inspect the graph</li>
      </ul>
-     <p>It’s the modern way to do quantization in PyTorch. Forget the old Eager mode unless you like pain.</p>
+     <p>It is the modern way to quantize in PyTorch. I would not start a new project on the old Eager-mode API: FX handles the qconfig recursion, the observer insertion, and the fusion correctly, and Eager mode will fight you on all three.</p>
      <pre><code class="language-python">
 import torch # Ensure torch is imported for torch.quantization
 qconfig_dict = {"": torch.quantization.get_default_qconfig('fbgemm')}
@@ -1876,7 +1878,7 @@ qconfig_dict = {"": torch.quantization.get_default_qconfig('fbgemm')}
 
     <section>
         <h2 id="ptq-example-cnn-with-manual-observers">PTQ Example: CNN with Manual Observers</h2>
-        <p>Let’s do an example with a CNN model to wrap up PTQ. We manually add <code>PerChannelMinMaxObserver</code> for weights and <code>MinMaxObserver</code> for activation.</p>
+        <p>Let me walk through a concrete PTQ example on a CNN, since this is the part I always had to look up. We manually add <code>PerChannelMinMaxObserver</code> for weights and <code>MinMaxObserver</code> for activation.</p>
         <pre><code class="language-python">
 class ObserverCNN(nn.Module):
     def __init__(self):
@@ -1943,23 +1945,24 @@ with torch.no_grad():
         </table>
         </div>
         <p><code>calculate_qparams()</code> is a method used by observers in PyTorch to compute scale and zero-point. That's the observer's job to begin with.</p>
-        <p>General quantization formula: <code>quantized = round(clamp(x / scale + zero_point, qmin, qmax))</code></p>
+        <p>General quantization formula:</p>
+        <div class="math-display">$$\text{quantized} = \mathrm{round}(\mathrm{clamp}(x / \text{scale} + \text{zero_point}, q_{\min}, q_{\max}))$$</div>
         <h4>For Symmetric Quantization:</h4>
         <ul>
-            <li><code>scale = max(abs(min_val), abs(max_val)) / 127</code> (or 128)</li>
-            <li><code>zero_point = 0</code></li>
+            <li>$\text{scale} = \max(|\text{min_val}|, |\text{max_val}|) / 127$ (or 128)</li>
+            <li>$\text{zero_point} = 0$</li>
         </ul>
         <h4>For Asymmetric Quantization:</h4>
         <ul>
-            <li><code>scale = (max_val - min_val) / (qmax - qmin)</code></li>
-            <li><code>zero_point = round(qmin - min_val / scale)</code></li>
+            <li>$\text{scale} = (\text{max_val} - \text{min_val}) / (q_{\max} - q_{\min})$</li>
+            <li>$\text{zero_point} = \mathrm{round}(q_{\min} - \text{min_val} / \text{scale})$</li>
         </ul>
-        <p>Coming up next: Quantization Aware Training, where we teach the model to embrace the pain and learn to live with it.</p>
+        <p>Next up: Quantization-Aware Training, where instead of quantizing after the fact, you train the model to expect the quantization noise.</p>
     </section>
 
     <section>
         <h2 id="quantization-aware-training-qat">Quantization-Aware Training (QAT)</h2>
-        <p>If PTQ drops too much accuracy, QAT is how you can recover it. QAT requires retraining; it’s slower but more accurate. It learns to suppress outliers and it works well with tuning. You start with inserting observers (which are actually <code>FakeQuantize</code> modules in QAT) just like PTQ. These <code>FakeQuantize</code> modules are differentiable. The model learns to adapt to quantization noise.</p>
+        <p>When PTQ costs me too much accuracy, QAT is how I buy it back. It requires retraining, so it is slower, but it learns to suppress outliers and it works well with tuning. You start with inserting observers (which are actually <code>FakeQuantize</code> modules in QAT) just like PTQ. These <code>FakeQuantize</code> modules are differentiable. The model learns to adapt to quantization noise.</p>
         <pre><code class="language-python">
 from torch.ao.quantization import get_default_qat_qconfig
 from torch.ao.quantization.quantize_fx import prepare_qat_fx, convert_fx
@@ -1986,7 +1989,7 @@ class RoundSTE(torch.autograd.Function):
     def backward(ctx, grad_output):
         return grad_output  # straight-through (acts like identity for the rounding part)
         </code></pre>
-        <p>STE allows the model to learn parameters and "survive" quantization during training.</p>
+        <p>STE is the hack that makes the whole thing trainable. The forward pass quantizes; the backward pass pretends it did not.</p>
         <p>Now let’s go back to <code>MovingAverageMinMaxObserver</code> (often used within <code>FakeQuantize</code> for QAT). It uses an exponential moving average of min/max values observed during training. <code>FakeQuantize</code> modules are inserted during <code>prepare_qat_fx()</code> and are active during the training phase. After training, during <code>convert_fx()</code>, they’re replaced with real quantization operations.</p>
         <p>The moving average update rules are typically:</p>
         <div class="math-display">$$\text{min_val} = (1 - \alpha) \, \text{min_val} + \alpha \, \text{current_batch_min_val}$$</div>

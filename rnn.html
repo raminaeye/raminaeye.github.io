@@ -1091,6 +1091,7 @@ class GRUCell(nn.Module):
                 L.capZ = [262, 28, 'center']; L.cap0 = [282, 60, 'left'];
                 L.cap1 = [282, 322, 'left']; L.capZv = [282, 200, 'left'];
                 L.hy0 = 91; L.hy1 = 275; L.valveR = 13; L.hitR = 22;
+                L.trackX = 258; L.handleX = 262;
                 L.mixX = 410; L.mixY = 165; L.outX1 = 514; L.newBox = [514, 138, 106, 54];
                 L.legendY = null;
             } else {
@@ -1102,6 +1103,10 @@ class GRUCell(nn.Module):
                 L.capZ = [300, 30, 'left']; L.cap0 = [250, 56, 'right'];
                 L.cap1 = [282, 326, 'left']; L.capZv = [200, 200, 'right'];
                 L.hy0 = 106; L.hy1 = 275; L.valveR = 16; L.hitR = 28;
+                // Compact: the old-memory box runs to x=250, so the track and
+                // handle sit at x=270/274 (handle spans 258-290) to keep the
+                // handle's radius clear of the box corner for every z.
+                L.trackX = 270; L.handleX = 274;
                 L.mixX = 410; L.mixY = 165; L.outX1 = 463; L.newBox = [463, 123, 170, 84];
                 L.legendY = [404, 440, 476];
             }
@@ -1171,7 +1176,7 @@ class GRUCell(nn.Module):
             var FS = L.FS, FS13 = L.FS13;
             // z valve track behind pipes
             ctx.fillStyle = '#dfe6e9';
-            ctx.fillRect(258, 36, 8, 296);
+            ctx.fillRect(L.trackX, 36, 8, 296);
             ctx.fillStyle = '#555'; ctx.font = FS + 'px sans-serif';
             ctx.textAlign = L.capZ[2];
             ctx.fillText('update gate z', L.capZ[0], L.capZ[1]);
@@ -1215,9 +1220,9 @@ class GRUCell(nn.Module):
             // z valve handle on the track (draggable)
             var hy = L.hy0 + z * (L.hy1 - L.hy0);
             ctx.fillStyle = dragging ? '#1a252f' : '#2c3e50';
-            ctx.beginPath(); ctx.arc(262, hy, L.valveR, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(L.handleX, hy, L.valveR, 0, Math.PI * 2); ctx.fill();
             ctx.fillStyle = '#fff'; ctx.font = 'bold ' + FS13 + 'px sans-serif';
-            ctx.fillText('z', 262, hy + Math.round(FS13 * 0.38));
+            ctx.fillText('z', L.handleX, hy + Math.round(FS13 * 0.38));
             ctx.fillStyle = '#555'; ctx.font = FS + 'px sans-serif';
             ctx.textAlign = L.capZv[2];
             ctx.fillText('z = ' + z.toFixed(2), L.capZv[0], L.capZv[1]);
@@ -1301,7 +1306,7 @@ class GRUCell(nn.Module):
         }
         function gruNearValve(p) {
             var g = gruValveGeom();
-            var dx = p.x - 262, dy = p.y - g.vy;
+            var dx = p.x - g.L.handleX, dy = p.y - g.vy;
             return dx * dx + dy * dy <= g.L.hitR * g.L.hitR;
         }
         // Touch: prevent page scroll only when the gesture starts on the valve,
@@ -2241,15 +2246,19 @@ class GRUCell(nn.Module):
             }
             ctx.fillStyle = '#eef1f4';
             ctx.fillRect(bX0, barY, bW, barH);
+            // While pouring, segments appear one per step: only steps up to
+            // the current one are drawn. After the pour (or a preset / valve
+            // drag) the full bar shows at once.
+            var pouredK = playing ? playK : N - 1;
             for (var sk2 = 0; sk2 < N; sk2++) {
-                if (live && segs[sk2].w > 0.5) {
+                if (live && sk2 <= pouredK && segs[sk2].w > 0.5) {
                     ctx.fillStyle = colColor(sk2);
                     ctx.fillRect(segs[sk2].x, barY, segs[sk2].w, barH);
                 }
             }
             ctx.fillStyle = '#ffffff';
             for (var sk3 = 1; sk3 < N; sk3++) {
-                if (live && segs[sk3].w > 0.5) ctx.fillRect(segs[sk3].x - 1, barY, 2, barH);
+                if (live && sk3 <= pouredK && segs[sk3].w > 0.5) ctx.fillRect(segs[sk3].x - 1, barY, 2, barH);
             }
             ctx.strokeStyle = '#bdc3c7'; ctx.lineWidth = 1;
             ctx.strokeRect(bX0, barY, bW, barH);
@@ -2261,6 +2270,7 @@ class GRUCell(nn.Module):
                 var placedX = [];
                 for (var lk = 0; lk < N; lk++) {
                     if (segs[lk].w < 0.5) continue;
+                    if (playing && lk > playK) continue;
                     if (segs[lk].w >= 44) {
                         ctx.fillStyle = '#ffffff'; ctx.font = 'bold ' + FS + 'px sans-serif';
                         ctx.fillText('t=' + (lk + 1), segs[lk].x + segs[lk].w / 2, barY + barH / 2 + Math.round(FS * 0.35));
@@ -2533,6 +2543,21 @@ class GRUCell(nn.Module):
         var W = 640, H = 520;
         var STEP_MS = 800;
         var playing = false, curT = 0, playT0 = 0, rafId = null, stepDelay = STEP_MS;
+        /* Responsive canvas like the sibling toys: the design space stays
+           640x520 but the drawing is scaled, and fonts are upsized in compact
+           mode so text renders at 12px+ effective on narrow screens. */
+        var geom = { cw: 640, dpr: 1 };
+        function sizeCanvas() {
+            var cw = cv.parentElement.clientWidth - 4;
+            if (!(cw > 220)) cw = 300;
+            if (cw > 640) cw = 640;
+            var dpr = window.devicePixelRatio || 1;
+            cv.width = Math.round(cw * dpr);
+            cv.height = Math.round(cw * H / W * dpr);
+            cv.style.width = cw + 'px';
+            cv.style.height = Math.round(cw * H / W) + 'px';
+            geom = { cw: cw, dpr: dpr };
+        }
         /* Layout: input strip on top, three lanes below. */
         var IN = { y0: 8, labelY: 22, baseY: 62, x0: 150, x1: 620 };
         var LANES = [
@@ -2555,11 +2580,15 @@ class GRUCell(nn.Module):
         function inX(i) { return IN.x0 + i * (IN.x1 - IN.x0) / (N - 1); }
 
         function draw() {
-            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            var sc = geom.cw / W, dpr = geom.dpr;
+            var compact = geom.cw < 480;
+            var FS = compact ? Math.ceil(12 * W / geom.cw) : 12;
+            var FS13 = compact ? Math.ceil(13 * W / geom.cw) : 13;
+            ctx.setTransform(dpr * sc, 0, 0, dpr * sc, 0, 0);
             ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
             ctx.textAlign = 'center';
             /* shared input strip */
-            ctx.fillStyle = '#2c3e50'; ctx.font = '13px sans-serif'; ctx.textAlign = 'left';
+            ctx.fillStyle = '#2c3e50'; ctx.font = FS13 + 'px sans-serif'; ctx.textAlign = 'left';
             ctx.fillText('shared input x_t: one spike, then silence', 10, IN.labelY);
             ctx.textAlign = 'center';
             for (var i = 0; i < N; i++) {
@@ -2567,7 +2596,7 @@ class GRUCell(nn.Module):
                 var bh = Math.abs(XS[i]) * 30;
                 ctx.fillStyle = lit ? '#2c3e50' : '#d5dbdb';
                 ctx.fillRect(bx - 9, IN.baseY - bh, 18, bh);
-                ctx.fillStyle = '#555'; ctx.font = '12px sans-serif';
+                ctx.fillStyle = '#555'; ctx.font = FS + 'px sans-serif';
                 ctx.fillText('t=' + (i + 1), bx, IN.baseY + 16);
             }
             /* lanes */
@@ -2576,18 +2605,18 @@ class GRUCell(nn.Module):
                 var ty1 = ly + 12, ty0 = ty1 + TRACE.h; /* trace top/bottom */
                 /* lane label + cost */
                 ctx.textAlign = 'left'; ctx.fillStyle = '#2c3e50';
-                ctx.font = 'bold 13px sans-serif';
+                ctx.font = 'bold ' + FS13 + 'px sans-serif';
                 ctx.fillText(lane.name, 10, ly + 26);
                 /* cost sits at the bottom of the lane, clear of the valve
                    labels and bars drawn above */
-                ctx.font = '12px sans-serif'; ctx.fillStyle = '#555';
+                ctx.font = FS + 'px sans-serif'; ctx.fillStyle = '#555';
                 ctx.fillText(lane.cost, 10, ly + 98);
                 /* valves */
                 if (lane.valves) {
                     var vs = lane.valves(Math.max(0, Math.min(N - 1, curT - 1)));
                     for (var v = 0; v < vs.length; v++) {
                         var vy = ly + 8 + v * 26;
-                        ctx.textAlign = 'left'; ctx.fillStyle = '#555'; ctx.font = '12px sans-serif';
+                        ctx.textAlign = 'left'; ctx.fillStyle = '#555'; ctx.font = FS + 'px sans-serif';
                         ctx.fillText(vs[v][0], VALVE.x0, vy + 9);
                         ctx.fillStyle = '#eef1f4';
                         ctx.fillRect(VALVE.x0, vy + 15, VALVE.w, VALVE.h);
@@ -2597,7 +2626,7 @@ class GRUCell(nn.Module):
                         ctx.strokeRect(VALVE.x0 + 0.5, vy + 15.5, VALVE.w, VALVE.h);
                     }
                 } else {
-                    ctx.textAlign = 'left'; ctx.fillStyle = '#999'; ctx.font = '12px sans-serif';
+                    ctx.textAlign = 'left'; ctx.fillStyle = '#999'; ctx.font = FS + 'px sans-serif';
                     ctx.fillText('no gates', VALVE.x0, ly + 30);
                 }
                 /* trace axes */
@@ -2621,7 +2650,7 @@ class GRUCell(nn.Module):
                     /* current value label (kept inside the canvas at the last step) */
                     var cvv = lane.vals[curT - 1];
                     var vyv = ty0 - cvv * TRACE.h + 4;
-                    ctx.fillStyle = '#2c3e50'; ctx.font = 'bold 12px sans-serif';
+                    ctx.fillStyle = '#2c3e50'; ctx.font = 'bold ' + FS + 'px sans-serif';
                     if (curT >= N) {
                         ctx.textAlign = 'right';
                         ctx.fillText(cvv.toFixed(2), xPos(curT - 1) - 10, vyv);
@@ -2635,7 +2664,7 @@ class GRUCell(nn.Module):
                     var fv = lane.vals[N - 1], vd = lane.verdict(fv);
                     if (vd) {
                         ctx.fillStyle = vd === 'forgot' ? '#e74c3c' : '#27ae60';
-                        ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'right';
+                        ctx.font = 'bold ' + FS13 + 'px sans-serif'; ctx.textAlign = 'right';
                         ctx.fillText(vd, TRACE.x1, ty0 + 22);
                     }
                 }
@@ -2674,6 +2703,8 @@ class GRUCell(nn.Module):
         $('tripleReset').addEventListener('click', function() {
             stopPlay(600); curT = 0; draw();
         });
+        window.addEventListener('resize', function() { sizeCanvas(); draw(); });
+        sizeCanvas();
         draw();
     })();
     </script>

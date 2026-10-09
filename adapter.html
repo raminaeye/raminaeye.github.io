@@ -510,6 +510,11 @@
             box-shadow: 0 1px 4px rgba(0,0,0,0.35);
         }
         .lora-hotspot.active { background: #e74c3c; }
+        /* Round 8: this demo's layout is manually stabilized (title, hotspot
+           text, and journey all carry tallest-variant reserves), so suppress
+           Chrome's scroll-anchoring heuristic: it nudged scrollY on the
+           internal beat mutations even though nothing moved in the document. */
+        #loraPaperDemo { overflow-anchor: none; }
         #loraPaperDemo .journey { max-width: 620px; margin: 0.9rem auto; border: 1px solid #dee2e6; border-radius: 10px; padding: 0.7rem 0.9rem; background: #fbfcfd; }
         #loraPaperDemo .journey-title { font-weight: 700; color: #2c3e50; margin-bottom: 0.15rem; }
         #loraPaperDemo .journey-sub { font-size: 0.85em; color: #555; margin-bottom: 0.5rem; }
@@ -753,6 +758,7 @@
           <li><strong>The point:</strong> This is the actual Figure 1 from the LoRA paper, and now one input vector walks its signal path. At init the side path contributes exactly zero, so the output equals the pretrained output; then one fully specified training step moves it. The paper's init story, in numbers.</li>
           <li><strong>Reset button:</strong> Stops the walk and clears the figure back to its opening state: no marker lit, no beat shown.</li>
           <li><strong>What you'll see:</strong> six beats, 2.2 seconds each, bottom to top: the frozen W, A squeezing 4 numbers into 2, the rank bottleneck in the page's real 768-wide counts, B's exact zeros, the plus with the page's times-2 scale, then one SGD step (target [1.00, 0.00, 0.00, 0.50], learning rate 0.1, hand-worked gradient) waking the side path up. Loss falls 0.3563 to 0.1756.</li>
+          <li><strong>Play:</strong> walks the six beats hands-free: beat 1 lights first and the tour steps bottom to top in order, 2.2 seconds per beat, each bringing its one-line explanation of the part it sits on. The button becomes Stop while the walk runs; pressing it mid-walk stops the walk cold.</li>
           <li class="try-it"><strong>Try this:</strong> tap marker 3, then tap it again via beat 6: first four exact zeros, then a non-zero B after one training step. The vector strip uses toy 4 by 4 matrices with r = 2; the rank beat quotes the real 768-wide counts, and every number says which frame it belongs to.</li>
         </ul>
       </div>
@@ -820,7 +826,6 @@
         function renderJourney(bi) {
           var b = BEATS[bi];
           document.getElementById('loraJTitle').textContent = b.title;
-          reserveLoraJTitle();
           var statEl = document.getElementById('loraJStat');
           var vecsEl = document.getElementById('loraJVecs');
           if (b.stat) {
@@ -851,7 +856,12 @@
         /* Scroll-stability (2026-10-09): beat titles wrap to different heights
            at 390px (26<->51px); without a reserve the title div breathed
            mid-Play, moving the page. Reserve the tallest variant's height.
-           Follows the r3scroll reserve pattern. */
+           Follows the r3scroll reserve pattern. Round 8: the rest prompt is
+           taller than any beat title (3 lines at 390px), so it is measured too;
+           the reserve is installed once at init, never per-beat (the per-beat
+           re-measure cycled six title texts with forced layouts, thrashing
+           scroll anchoring). */
+        var LORA_REST_TITLE = 'Press Play to walk one input vector through the figure, bottom to top.';
         function reserveLoraJTitle() {
           var el = document.getElementById('loraJTitle');
           var prev = el.textContent, max = 0, i;
@@ -859,6 +869,8 @@
             el.textContent = BEATS[i].title;
             max = Math.max(max, el.getBoundingClientRect().height);
           }
+          el.textContent = LORA_REST_TITLE;
+          max = Math.max(max, el.getBoundingClientRect().height);
           el.textContent = prev;
           el.style.minHeight = Math.ceil(max) + 'px';
         }
@@ -883,7 +895,7 @@
                tool, so bring it into view when Play starts. */
             if (typeof playScrollEnsure === 'function') playScrollEnsure(demo);
             playing = true;
-            playBtn.textContent = 'Pause';
+            playBtn.textContent = 'Stop';
             playBtn.classList.add('playing');
             showBeat(0);
             for (var i = 1; i < BEATS.length; i++) {
@@ -898,7 +910,7 @@
         function restLora() {
             clear();
             box.textContent = 'Tap a numbered marker on the figure.';
-            document.getElementById('loraJTitle').textContent = 'Press Play to walk one input vector through the figure, bottom to top.';
+            document.getElementById('loraJTitle').textContent = LORA_REST_TITLE;
             document.getElementById('loraJStat').innerHTML = '';
             var vecsEl = document.getElementById('loraJVecs');
             vecsEl.style.display = '';
@@ -915,6 +927,50 @@
             stopPlay();
             restLora();
         });
+        /* Scroll-stability (2026-10-09, Round 8): #loraHotspotText grows
+           46->184px at 390px when beat 1 lands and the journey strip grows
+           261->320px with it, pushing the page (+138px scrollY). Reserve the
+           tallest variant of both at init, covering all six beat texts at any
+           viewport, so rest and mid-Play occupy the same space. Follows the
+           reserveLoraJTitle pattern. */
+        function reserveLoraHotspot() {
+            var samples = beatTexts.slice();
+            samples.push('Tap a numbered marker on the figure.');
+            var prev = box.textContent, max = 0, i;
+            for (i = 0; i < samples.length; i++) {
+                box.textContent = samples[i];
+                max = Math.max(max, box.getBoundingClientRect().height);
+            }
+            box.textContent = prev;
+            box.style.minHeight = Math.ceil(max) + 'px';
+        }
+        function reserveLoraJourney() {
+            var j = document.getElementById('loraJourney');
+            if (!j) return;
+            /* Install the tallest title first (now covering the rest prompt
+               too): beats must be measured at the title's final reserved
+               height, or the tallest-content beat under-measures by a title
+               line. The rest state is measured as well; the journey never
+               changes size across rest, beats, or Reset. */
+            reserveLoraJTitle();
+            var max = 0, i;
+            for (i = 0; i < BEATS.length; i++) {
+                renderJourney(i);
+                max = Math.max(max, j.getBoundingClientRect().height);
+            }
+            restLora();
+            max = Math.max(max, j.getBoundingClientRect().height);
+            /* The journey is content-box: min-height sets the content height,
+               but max was measured border-box. Subtract padding and border or
+               the reserve overshoots by exactly that (21.2px at 390px). */
+            var js = getComputedStyle(j);
+            var padBorder = parseFloat(js.paddingTop) + parseFloat(js.paddingBottom) +
+                            parseFloat(js.borderTopWidth) + parseFloat(js.borderBottomWidth);
+            j.style.minHeight = Math.ceil(max - padBorder) + 'px';
+        }
+        restLora();
+        reserveLoraHotspot();
+        reserveLoraJourney();
         restLora();
     })();
     </script>
@@ -1004,6 +1060,7 @@
         <ul>
           <li><strong>The point:</strong> Rank is a dial, not a magic number. The easy task is done at r = 4 and never looks back, the hard task keeps buying accuracy with every notch of rank, and the param bill for each notch is written right under the hallway.</li>
           <li><strong>What you'll see:</strong> The chart starts empty. The rank sweeps 1, 2, 4, 8, 16, 32, 64 in slow steps, 2.2 seconds per stop: the orange hallway widens from a slit to the full 768 input width while the two accuracy curves draw themselves rank by rank, the orange hard-task curve keeps climbing long after the blue easy-task curve flatlined, and the verdict line names each stop.</li>
+          <li><strong>Play:</strong> sweeps r = 1 to 64 in slow steps, 2.2 seconds per stop, always starting from r = 1. The button becomes Stop while the sweep runs; pressing it mid-sweep stops the sweep cold.</li>
           <li><strong>Rank r (1, 2, 4, 8, 16, 32, 64):</strong> Try parking on r = 4: the easy task is done at 92.0% while the hard task is still underfitting at 79.0%. Try r = 64 and read the verdict: 2,359,296 params, the same as a bottleneck adapter.</li>
           <li><strong>Reset button:</strong> Stops the sweep and clears the chart back to its empty opening state, with the slider back on r = 8.</li>
           <li><strong>Click a rank on the x-axis:</strong> Jumps straight to that rank and draws the curves up to it. Try r = 16 and watch the hallway resize to match.</li>
@@ -1345,7 +1402,7 @@
         revealed = true;
         slider.value = 0;
         update();
-        playBtn.textContent = 'Pause';
+        playBtn.textContent = 'Stop';
         playBtn.classList.add('playing');
         /* Standing widget-layout rule: the How-to caption sits below the
            tool, so bring it into view when Play starts. */

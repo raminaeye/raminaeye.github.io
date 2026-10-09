@@ -1260,6 +1260,20 @@ Attack prompt (\(l = 1\)) scored at \(p = 0.9\): \(L = -\log(0.9) \approx 0.11\)
 Attack prompt (\(l = 1\)) scored at \(p = 0.2\): \(L = -\log(0.2) \approx 1.61\). Large loss, large nudge.<br>
 The optimizer is AdamW, run for 1000 epochs over the precomputed activations.
 </div>
+<div class="diagram">
+<svg viewBox="0 0 560 170" role="img" aria-label="Bar chart comparing binary cross-entropy loss for a confident correct score versus a confident wrong score" style="width:100%;height:auto;display:block;max-width:520px;margin:0 auto">
+<text x="20" y="20" font-size="13" font-weight="700" fill="#2c3e50">Loss for an attack prompt scored at...</text>
+<text x="20" y="62" font-size="12" fill="#555">0.9 (confident, correct)</text>
+<rect x="220" y="48" width="14" height="18" rx="3" fill="#2980b9"/>
+<text x="242" y="62" font-size="12" fill="#2c3e50">0.11</text>
+<text x="20" y="112" font-size="12" fill="#555">0.2 (confident, wrong)</text>
+<rect x="220" y="98" width="205" height="18" rx="3" fill="#c0392b"/>
+<text x="433" y="112" font-size="12" fill="#2c3e50">1.61</text>
+<text x="20" y="150" font-size="12" fill="#777">bar length = loss = size of the nudge to the weights</text>
+</svg>
+<div class="caption"><span class="cap-title" style="display:block;font-weight:700;color:#2c3e50;margin-bottom:4px;">What this shows</span>The wrong answer's bar is about 15 times longer. Confident mistakes get large nudges; confident correct answers get small ones. That is the entire training signal.</div>
+</div>
+
 <p>One deliberate choice shapes everything that follows: the probes are trained <strong>only on short prompts</strong>. Training directly on long-context data costs about <strong>22 times more</strong>, because million-token activation sets do not fit on accelerator memory and have to be shuttled back and forth. That 22x is why the whole paper is about <em>generalizing</em> to long contexts instead of just training on them. Long contexts are reserved as a pure test the probe never studied for.</p>
 <p>The decision threshold is picked on a validation set with false alarms weighted heaviest: overtriggering on benign traffic counts 50 against 5 for a missed attack and 2 for a hard-negative false alarm.</p>
 <div class="voice-note"><span class="vn-label">Voice note needed</span>Your line on the threshold goes here. Draft idea, do not ship as-is: a smoke detector that cries wolf gets ripped off the wall.</div>
@@ -1286,6 +1300,13 @@ The optimizer is AdamW, run for 1000 epochs over the precomputed activations.
 <div class="caption"><span class="cap-title" style="display:block;font-weight:700;color:#2c3e50;margin-bottom:4px;">What this shows</span>The cascade rule: below t0 the probe decides benign, above t1 it decides attack, and the band between them, about 8% of prompts, is deferred to Gemini 2.5 Flash.</div>
 </div>
 <p>The numbers that matter: only about <strong>8% of prompts</strong> land in the unsure band and get deferred, and the combined system scores <strong>lower error than Flash alone at roughly 1/50th the inference cost</strong>. The probe does the bulk work for almost free; the expensive model is spent only where the cheap one is uncertain. That 1/50th is the economic reason probes are worth building at all.</p>
+<p>The paper's headline plot puts every classifier on one chart. Each dot is one classifier. The x-axis is relative inference cost on a log scale: how many times more expensive than the cheapest probe. The y-axis is the weighted test error rate. Good is down and to the left: cheap and accurate. The dashed line is the Pareto frontier, the best error available at each cost.</p>
+<div class="diagram">
+<img src="figures/papers/probes-fig1-scatter.png" alt="Figure 1 from the paper: error rate versus relative inference cost for probes, LLMs, and the cascade" style="width:100%;height:auto;display:block;max-width:760px;margin:0 auto">
+<div class="caption"><span class="cap-title" style="display:block;font-weight:700;color:#2c3e50;margin-bottom:4px;">How to read it</span>The gray dot is the prior best probe: cheap but high error. The three blue dots are the paper's new probes, sitting on the frontier near cost 100 with far lower error. The purple dot is Gemini 2.5 Flash alone, far to the right near cost 5,000,000. The dot labeled "Selected Probe + 8% Flash" is the cascade: the lowest error on the entire plot, at a small fraction of Flash's cost.</div>
+<div class="caption"><span class="cap-title" style="display:block;font-weight:700;color:#2c3e50;margin-bottom:4px;">About this figure</span>Figure 1 of Kram&aacute;r et al., arXiv:2601.11516. Verbatim caption: "We improve over prior activation probing work by improving probe architectures and training to achieve better performance than language models at over 10,000x lower cost. 'Selected Probe' refers to our Max of Rolling Means Attention Probe. Deferring to an LLM such as Gemini 2.5 Flash 8% of the time further decreases error rate to a lower value than what can be achieved by solely using a probe or an LLM, by trusting the probe at extreme scores and delegating to the LLM in between (see the optimal frontier section, though note wide error bars). *As described in the metrics subsection, for each method we select the decision threshold on a validation set by minimizing a weighted combination of FPR and FNR (i.e. error rate), with overtriggering FPR weighted most heavily. We report the same weighted error computed on test data. See the appendix for error bar methodology. The two points not on the Pareto frontier (Selected Probe and AlphaEvolve) have their costs artificially increased by 1.25x for visual separation; the costs of these three probes are in practice almost identical." Extracted from the arXiv e-print source.</div>
+</div>
+
 
 <h2>What the paper found</h2>
 <div class="stat-grid">
@@ -1293,7 +1314,15 @@ The optimizer is AdamW, run for 1000 epochs over the precomputed activations.
 <div class="stat-card"><div class="stat-num">8%</div><div class="stat-label">of prompts deferred to Flash in the cascade. The probe decides the other 92% alone.</div></div>
 <div class="stat-card"><div class="stat-num">1/50</div><div class="stat-label">the inference cost of the probe-plus-Flash cascade versus Flash alone, at lower error.</div></div>
 <div class="stat-card"><div class="stat-num">~50%</div><div class="stat-label">of the gap between the attention baseline and a perfect probe, closed by AlphaEvolve's automatic architecture search.</div></div>
+<div class="stat-card"><div class="stat-num">10,000&times;+</div><div class="stat-label">cheaper the probe alone is than the LLM judge, at better error (Figure 1 above).</div></div>
 </div>
+<p>The central test of the paper is long-context generalization: probes trained only on short prompts, evaluated on long contexts they never saw. Each group below is one probe. The solid bars are FNR, the fraction of real attacks missed (left axis). The hatched bars are FPR, the fraction of benign prompts falsely flagged (right axis). Lower is better on both.</p>
+<div class="diagram">
+<img src="figures/papers/probes-figLC-longcontext.png" alt="Long-context generalization: missed-attack and false-alarm rates for three probes on long contexts" style="width:100%;height:auto;display:block;max-width:640px;margin:0 auto">
+<div class="caption"><span class="cap-title" style="display:block;font-weight:700;color:#2c3e50;margin-bottom:4px;">How to read it</span>The attention probe's missed-attack bar explodes to 87.9%: on long documents it averages the attack signal away and misses almost nine in ten attacks. The selected probe holds 3.0% missed attacks and 1.2% false alarms. That gap is the paper's core claim in one chart: the combine step is what survives the jump to long context.</div>
+<div class="caption"><span class="cap-title" style="display:block;font-weight:700;color:#2c3e50;margin-bottom:4px;">About this figure</span>Panel (c) of the distribution-shift comparison figure in Kram&aacute;r et al., arXiv:2601.11516. Verbatim caption of the full figure: "Comparison of probe architectures across distribution shifts. (a) Test error across methods. (b) Probes achieve comparable performance to LLM classifiers at a fraction of the cost. (c) Long context generalization: AlphaEvolve probes maintain low FPR on long contexts. (d) Adversarial attacks remain challenging for all methods; all methods still leave attack success rate greater than 1%. Note: error bars are omitted from these plots; see the paper's main scatter and cascade figures for visualizations with (relatively wide) uncertainty estimates. *As in the main figure, the threshold selection methodology is described in the metrics subsection." Extracted from the arXiv e-print source.</div>
+</div>
+
 <p>Three more findings round it out. No single probe wins on every distribution shift: the best architecture for long contexts is not the best for multi-turn, so production means choosing per deployment. The automatic search worked: starting from a plain attention probe, AlphaEvolve evaluated about 2,500 architectures and rediscovered max-style combining on its own. And the findings informed real deployment: misuse-mitigation probes built on this work now run in user-facing Gemini.</p>
 
 <h2>Caveats</h2>

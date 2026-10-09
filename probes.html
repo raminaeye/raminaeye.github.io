@@ -881,6 +881,7 @@
 <h2>How they work, and how they do damage</h2>
 <p>A large language model reads your prompt, turns it into numbers, processes those numbers through dozens of layers, and writes back one piece at a time. Its core skill is following instructions in the prompt: answer this, summarize that, write code that does X. That is what makes it useful.</p>
 <p>It is also what makes it dangerous. The model cannot tell which instructions deserve to be followed. An attacker can hide malicious instructions inside an innocent-looking prompt, a <strong>jailbreak</strong>: "help me debug this code" where the code is malware, or a long story that gradually steers the model into explaining how to break into a system. The model follows along because following instructions is what it does. The damage is concrete: phishing campaigns, vulnerability hunting, step-by-step help with attacks, all produced by a helpful assistant doing exactly what it was told.</p>
+<p>This tutorial follows the paper in which Google DeepMind turned the probe idea into something that runs in production: probes that protect Gemini.</p>
 
 <h2>Why not just ask another AI to check?</h2>
 <p>The obvious defense is a monitor: a second system that reads every prompt and judges whether it is an attack. The simplest monitor is another large language model asked exactly that question. It works, but it roughly doubles the bill, because every user request now costs two giant model runs instead of one.</p>
@@ -907,6 +908,11 @@
 <h2>Positions, not words</h2>
 <p>By the middle of the model, those lists are no longer word lists. Every block lets each slice of the prompt look at the other slices and mix their information in, so by block 8 the list sitting where "injection" was has absorbed the whole sentence around it. Call each slice a <strong>position</strong>: a slot in the prompt whose list of numbers sees the entire prompt, not just its own word.</p>
 <p>The probe scores positions, not words. Here is the proof, in the toy numbers below: the word "SQL" appears in both demo prompts, but its list of numbers is different each time, so its score is different too, 2.84 in the attack prompt and 0.75 in the benign one. Same word, different situation, different score. The probe is not detecting the word "SQL." It is detecting the situation the word sits in, as the model understood it. That is the entire reason for tapping the middle of the model instead of scanning the raw text.</p>
+
+<h2>Where in the model?</h2>
+<p>Think of the model's layers as an assembly line. The early layers handle raw word pieces. The middle layers build meaning: this is where each position's list absorbs the whole prompt and the model forms its understanding of what is being asked, including whether something is off. The late layers spend that understanding on planning the next word of the answer.</p>
+<p>The probe taps the middle because that is where thoughts live. Tap too early and the lists are still just words, with no understanding to read. Tap too late and the model is already committed to answering. The middle layer's residual stream, the model's running memory, holds the understanding at its richest, before it gets spent on output.</p>
+<p>This is also why the probe works at all. The probe is not detecting attacks from scratch. By the middle of the model, the model itself has already done the hard work of understanding the prompt. The probe is just a cheap reader of that understanding, trained to report one thing: does this understanding look like an attack?</p>
 
 <h2>The concrete machine</h2>
 <p>The toy model on this page is a GPT-style transformer: 12 blocks, hidden size 768 (8 of the 768 numbers are shown, so the arithmetic stays visible), 12 attention heads. The probe taps block 8 and copies every position's list of numbers. In the paper, the same setup watches Gemini 2.5 Flash; the toy stands in for it, and you will meet Flash properly in the cascade section below.</p>
@@ -1299,11 +1305,10 @@ $$s_i = \max_j (w^T x_{i,j}) \qquad p_i = \sigma(s_i + b)$$
 <p>The weights are learned from labeled prompts. The attack side is cyber attacks curated by security experts, plus multi-turn conversations that start innocent and escalate. The benign side is real user traffic with personal data removed, plus hard negatives: prompts that sound dangerous but are not, like asking how a famous breach worked or asking for a code security review. The hard negatives teach the probe the difference between <em>talking about</em> attacks and <em>asking for help with</em> one.</p>
 <p>The training loss is binary cross-entropy, in plain words: for each training prompt, nudge the weights so attacks score high and benign prompts score low. A confident correct answer gets a small nudge; a confident wrong answer gets a large one.</p>
 <div class="worked-example">
-<b>Binary cross-entropy, one line at a time.</b><br>
-\(L = -[l \log p + (1 - l) \log(1 - p)]\), where \(l\) is the true label (1 for attack, 0 for benign) and \(p\) is the probe's score.<br>
-Attack prompt (\(l = 1\)) scored at \(p = 0.9\): \(L = -\log(0.9) \approx 0.11\). Small loss, small nudge.<br>
-Attack prompt (\(l = 1\)) scored at \(p = 0.2\): \(L = -\log(0.2) \approx 1.61\). Large loss, large nudge.<br>
-The optimizer is AdamW, run for 1000 epochs over the precomputed activations.
+<b>How the nudge sizes work.</b><br>
+An attack prompt the probe scores at 0.9 (confident and correct): loss about 0.11. Small loss, small nudge.<br>
+The same attack scored at 0.2 (confident and wrong): loss about 1.61. Large loss, large nudge.<br>
+The wrong answer gets a nudge roughly 15 times larger. The optimizer (AdamW) repeats this over the prompts' precomputed activations, 1000 passes.
 </div>
 <div class="diagram">
 <svg class="bce-svg" viewBox="0 0 560 170" role="img" aria-label="Bar chart comparing binary cross-entropy loss for a confident correct score versus a confident wrong score">
@@ -1364,7 +1369,8 @@ The optimizer is AdamW, run for 1000 epochs over the precomputed activations.
 </div>
 
 
-<h2>What the paper found</h2>
+<h2>Where do they work?</h2>
+<p>The paper tests the probes where it matters: short prompts, long documents, multi-turn chats, and real jailbreaks. Here is what held up.</p>
 <div class="stat-grid">
 <div class="stat-card"><div class="stat-num">22&times;</div><div class="stat-label">cheaper to train on short context than long. The new architectures match long-trained performance without paying it.</div></div>
 <div class="stat-card"><div class="stat-num">8%</div><div class="stat-label">of prompts deferred to Flash in the cascade. The probe decides the other 92% alone.</div></div>

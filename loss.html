@@ -1366,7 +1366,7 @@
        S.step = 0; S.hist = [landF(s[0], s[1])]; S.trail = [[s[0], s[1]]];
        S.status = 'ready';
        S.maxLoss = Math.max(S.hist[0], 1);
-       draw();
+       draw(true);
      }
      function stop() {
        if (S.timer) { clearTimeout(S.timer); S.timer = null; }
@@ -1398,7 +1398,10 @@
        }
      }
 
-     function draw() {
+     /* lastStatsT: the stats line is a text-bearing step, so draw() stamps
+        every rewrite; Play spaces them >= 2000ms apart. */
+     var lastStatsT = 0;
+     function draw(showStats) {
        measure();
        ctx.clearRect(0, 0, W, H);
        ctx.fillStyle = '#f7f9fc';
@@ -1485,7 +1488,7 @@
        ctx.fillStyle = '#c0392b';
        ctx.beginPath(); ctx.arc(xPix(S.x), yPix(S.y), Math.round(7 * SC), 0, 2 * Math.PI); ctx.fill();
        drawCurve();
-       updateStats();
+       if (showStats) { lastStatsT = performance.now(); updateStats(); }
      }
 
      function drawCurve() {
@@ -1553,7 +1556,7 @@
      }
 
      playBtn.addEventListener('click', function () {
-       if (S.timer) { stop(); draw(); return; }
+       if (S.timer) { stop(); draw(true); return; }
        if (S.status !== 'running') {
          /* Play honors the start and learning rate you picked. */
          S.lr = lrFromSlider(parseInt(lrSlider.value, 10));
@@ -1562,9 +1565,28 @@
        }
        S.status = 'running';
        playBtn.textContent = 'Pause';
+       /* The stats line is a text-bearing step: rewrite it no more often than
+          every 17 ticks (17 x 130ms = 2.21s). When the run ends, the final
+          frame draws at once but the final numbers wait until 2000ms have
+          passed since the previous rewrite. */
+       var tickCount = 0, STATS_EVERY = 17;
        function tick() {
          S.timer = setTimeout(function () {
-           advance(4); draw();
+           advance(4);
+           tickCount++;
+           var ended = !S.timer; /* advance() stopped the run */
+           if (ended) {
+             draw(false);
+             var endStatus = S.status;
+             var wait = Math.max(0, 2000 - (performance.now() - lastStatsT));
+             setTimeout(function () {
+               if (!S.timer && S.status === endStatus) draw(true);
+             }, wait);
+           } else if (tickCount % STATS_EVERY === 0) {
+             draw(true);
+           } else {
+             draw(false);
+           }
            if (S.timer) tick();
          }, 130);
        }
@@ -1586,7 +1608,7 @@
        reset();
        var guard = 0;
        while ((S.status === 'ready' || S.status === 'running') && guard++ < 10000) advance(1);
-       draw();
+       draw(true);
      }
      lrSlider.addEventListener('input', function () {
        S.lr = lrFromSlider(parseInt(lrSlider.value, 10));
@@ -1598,7 +1620,7 @@
      var rszT = null;
      window.addEventListener('resize', function () {
        if (rszT) clearTimeout(rszT);
-       rszT = setTimeout(draw, 150);
+       rszT = setTimeout(function () { draw(true); }, 150);
      });
      S.lr = lrFromSlider(parseInt(lrSlider.value, 10));
      lrVal.textContent = fmtLr(S.lr);

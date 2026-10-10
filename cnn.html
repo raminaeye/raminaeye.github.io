@@ -2580,17 +2580,14 @@ class SEBlock(nn.Module):
         <p class="eff-cite">Tan, M., and Le, Q. V. "EfficientNet: Rethinking Model Scaling for Convolutional Neural Networks." ICML 2019. arXiv:1905.11946.</p>
 
         <div class="demo-controls">
-            <label for="effPhi">&phi; (compound coefficient): <span id="effPhiVal">0</span> <span id="effModelName">B0</span></label>
-            <input type="range" id="effPhi" min="0" max="7" step="1" value="0" aria-label="Phi, compound scaling coefficient">
-            <button type="button" class="toy-btn" id="effPlay">Play</button>
-            <button type="button" class="toy-btn" id="effReset">Reset</button>
             <span class="eff-methods" role="group" aria-label="Scaling method">
                 <label><input type="radio" name="effMethod" value="compound" checked> <span class="eff-mbadge on" data-m="compound">(e)</span> Compound</label>
-                <label><input type="radio" name="effMethod" value="width"> <span class="eff-mbadge" data-m="width">(b)</span> Width-only (what-if)</label>
-                <label><input type="radio" name="effMethod" value="depth"> <span class="eff-mbadge" data-m="depth">(c)</span> Depth-only (what-if)</label>
-                <label><input type="radio" name="effMethod" value="res"> <span class="eff-mbadge" data-m="res">(d)</span> Resolution-only (what-if)</label>
+                <label><input type="radio" name="effMethod" value="width"> <span class="eff-mbadge" data-m="width">(b)</span> Width-only</label>
+                <label><input type="radio" name="effMethod" value="depth"> <span class="eff-mbadge" data-m="depth">(c)</span> Depth-only</label>
+                <label><input type="radio" name="effMethod" value="res"> <span class="eff-mbadge" data-m="res">(d)</span> Resolution-only</label>
             </span>
         </div>
+        <p class="eff-fixed-phi">All four at the same budget (&phi; = 3): pick a method and watch what the network becomes.</p>
         <div class="eff-grid">
         <div class="eff-col">
         <div class="canvas-wrap">
@@ -2623,27 +2620,20 @@ class SEBlock(nn.Module):
         <div class="howto">
             <p class="howto-head">How to play</p>
             <ul>
-                <li><strong>The point:</strong> one knob, &phi;, grows depth, width, and resolution together in a fixed ratio, so FLOPS roughly doubles each step (1.92x exact) while accuracy climbs; scaling one dimension alone falls behind.</li>
-                <li><strong>What you'll see:</strong> &phi; steps 0 to 7 on its own, the model name ticks B0 to B7, the input tile grows, the blocks multiply and thicken, and the FLOPS readout climbs about 2x per step in compound mode.</li>
-                <li><strong>&phi; (compound coefficient):</strong> 0 to 7, whole steps, picking the model B0 to B7. Drag it to 7 and watch the depth, width, and resolution readouts land on the B7 row of the paper's table.</li>
-                <li><strong>Scaling method:</strong> Compound, Width-only, Depth-only, or Resolution-only. Set &phi; to 7, flip between Compound and Width-only, and watch the FLOPS factor collapse; a dark veil spotlights the matching panel on the paper's Figure 2 while its badge turns red.</li>
-                <li><strong>Play:</strong> steps &phi; from 0 to 7 on its own, 0.8 seconds per stop; if it starts at 7, it resets to B0 first.</li>
-                <li><strong>Reset:</strong> &phi; snaps back to 0 (B0) with Compound scaling selected.</li>
+                <li><strong>The point:</strong> compound scaling grows depth, width, and resolution together; scaling one dimension alone starves the other two. Pick a method and compare.</li>
+                <li><strong>What you'll see:</strong> the canvas redraws the network for the selected method at the same budget, and a dark veil spotlights the matching panel on the paper's Figure 2. Compound is the only one where all three dimensions grow.</li>
+                <li><strong>Scaling method:</strong> Compound, Width-only, Depth-only, or Resolution-only. Flip between them and watch two dimensions freeze while the third does all the work.</li>
             </ul>
         </div>
     </div>
     <script>
     (function () {
         var ALPHA = 1.2, BETA = 1.1, GAMMA = 1.15;
-        var phiSlider = document.getElementById('effPhi');
-        var phiVal = document.getElementById('effPhiVal');
-        var modelName = document.getElementById('effModelName');
-        var playBtn = document.getElementById('effPlay');
+        var PHI = 3;
         var statsEl = document.getElementById('effStats');
         var cv = document.getElementById('effCanvas');
         var ctx = cv.getContext('2d');
         var methodRadios = document.querySelectorAll('input[name="effMethod"]');
-        var playing = false, playTimer = null;
 
         /* Panel spotlight holes as percentages of figure size (b)-(e) left to right.
            The compound hole is narrowed to the network blocks so it never
@@ -2704,11 +2694,8 @@ class SEBlock(nn.Module):
             cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
             ctx.clearRect(0, 0, W, H);
-            var phi = parseInt(phiSlider.value, 10);
             var method = getMethod();
-            var v = computeVals(phi, method);
-            phiVal.textContent = phi;
-            modelName.textContent = 'B' + phi;
+            var v = computeVals(PHI, method);
 
             /* Layout: input tile left, blocks middle */
             var tileSize = Math.max(30, Math.min(90, 40 * v.r));
@@ -2748,42 +2735,11 @@ class SEBlock(nn.Module):
             /* Readouts */
             var flopsStr = v.flops < 10 ? v.flops.toFixed(2) : v.flops.toFixed(1);
             statsEl.innerHTML = 'Depth <strong>' + v.d.toFixed(2) + 'x</strong>, width <strong>' + v.w.toFixed(2) +
-                'x</strong>, resolution <strong>' + v.r.toFixed(2) + 'x</strong>. FLOPS <strong>' + flopsStr + 'x</strong>.' +
-                (method === 'compound' ? ' About 2x per step (1.92x exact).' : ' What-if: single dimension only.');
+                'x</strong>, resolution <strong>' + v.r.toFixed(2) + 'x</strong>.';
         }
 
-        function stopPlay() {
-            playing = false; playBtn.textContent = 'Play';
-            if (playTimer) { clearTimeout(playTimer); playTimer = null; }
-        }
-
-        playBtn.addEventListener('click', function () {
-            if (playing) { stopPlay(2000); return; }
-            playing = true; playBtn.textContent = 'Pause';
-            if (parseInt(phiSlider.value, 10) >= 7) { phiSlider.value = '0'; draw(); }
-            playScrollEnsure(document.getElementById('effToy'));
-            function effScheduleSweep() {
-                playTimer = setTimeout(function () {
-                    var phi = parseInt(phiSlider.value, 10) + 1;
-                    if (phi >= 7) { phi = 7; phiSlider.value = '7'; draw(); stopPlay(2000); return; }
-                    phiSlider.value = String(phi);
-                    draw();
-                    if (playTimer) effScheduleSweep();
-                }, 800);
-            }
-            effScheduleSweep();
-        });
-
-        document.getElementById('effReset').addEventListener('click', function () {
-            stopPlay(600);
-            phiSlider.value = '0';
-            methodRadios[0].checked = true;
-            updateVeil(); draw();
-        });
-
-        phiSlider.addEventListener('input', function () { stopPlay(600); updateVeil(); draw(); });
         for (var i = 0; i < methodRadios.length; i++) {
-            methodRadios[i].addEventListener('change', function () { stopPlay(600); updateVeil(); draw(); });
+            methodRadios[i].addEventListener('change', function () { updateVeil(); draw(); });
         }
         window.addEventListener('resize', draw);
         updateVeil();

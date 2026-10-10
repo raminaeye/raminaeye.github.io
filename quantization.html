@@ -856,14 +856,7 @@ model.qconfig = qconfig_hist
          <div><span class="rfh-k">rounding error, illustrative MSE</span><span class="rfh-v" id="crpRound"></span></div>
          <div><span class="rfh-k">total MSE (illustrative)</span><span class="rfh-v" id="crpTotal"></span></div>
        </div>
-       <p>Work it on a real layer. The observer table above says conv.0 saw activations from 0 to 6.478520. Here is exactly how that becomes a scale and a zero-point:</p>
-       <ol class="worked-example">
-         <li>Read the range: $x_{\min} = 0$, $x_{\max} = 6.478520$. Activations quantize to quint8, so $q_{\min} = 0$ and $q_{\max} = 255$.</li>
-         <li>$\text{scale} = \frac{x_{\max} - x_{\min}}{q_{\max} - q_{\min}}$<br>$= 6.478520 / 255$<br>$= 0.025406$. That is the table's number, to the digit.</li>
-         <li>$\text{zero_point} = \mathrm{round}($<br>$q_{\min} - x_{\min} / \text{scale})$<br>$= \mathrm{round}(0 - 0)$<br>$= 0$. Float 0 lands exactly on int 0, which is why ReLU outputs quantize so cleanly.</li>
-         <li>Quantize a real value, say $x = 3.0$:<br>$q = \mathrm{round}(3.0 / 0.025406 + 0)$<br>$= \mathrm{round}(118.08)$<br>$= 118$.</li>
-         <li>Round-trip it to check:<br>$\hat{x} = 0.025406 \times (118 - 0)$<br>$= 2.9979$. The quantization cost us<br>$3.0 - 2.9979 = 0.0021$, less than half a bin.</li>
-       </ol>
+       <p>The same scale and zero-point arithmetic runs on real layers. The observer table below shows conv.0's activations spanning 0 to 6.478520, mapped to scale 0.025406 with zero-point 0: float 0 lands exactly on int 0, which is why ReLU outputs quantize so cleanly.</p>
        <div class="cap-card" id="crpCaption">
          <strong>How to play</strong>
          <ul>
@@ -873,7 +866,6 @@ model.qconfig = qconfig_hist
            <li><strong>Min-max:</strong> snaps the range to the data extremes (widest, most rounding error); <strong>MSE-optimal:</strong> grid-searches the range that minimizes total error (the valley). Try both and watch the orange dot land in different spots on the curve.</li>
            <li><strong>Drag the red lines:</strong> grab the qmin/qmax handles and drag them by hand; the error readouts and the orange dot update live as you trade clipping error against rounding error.</li>
            <li><strong>Reset:</strong> stops the sweep and puts the range back to the tight starting position, with the error readouts and the orange dot back at the start.</li>
-           <li><strong>The worked example above</strong> runs the scale and zero-point arithmetic on conv.0's real observer numbers: 0 to 6.478520 becomes scale 0.025406, zero-point 0.</li>
          </ul>
        </div>
      </div>
@@ -1571,7 +1563,7 @@ model.qconfig = qconfig_hist
 
    <section>
      <h2 id="quick-refresher-scale-and-zero-point">Quick Refresher: Scale and Zero-Point</h2>
-     <p>When you quantize a float:</p>
+     <p>When you quantize a float, the recipe is two steps: squeeze each value onto the integer grid, then map it back. In plain words: dividing by the scale shrinks the float range down to the integer grid, rounding snaps each value to the nearest integer, and the zero-point shifts the grid so float zero lands exactly on an integer:</p>
      <div class="math-display">$$Q = \mathrm{round}(X / \text{scale}) + \text{zero_point}$$</div>
      <p>And to dequantize:</p>
      <div class="math-display">$$X = \text{scale} \times (Q - \text{zero_point})$$</div>
@@ -1977,9 +1969,7 @@ model_for_qat.train() # Set model to training mode for QAT
 # Note: prepare_qat_fx typically requires the model to be in training mode.
 model_prepared_qat = prepare_qat_fx(model_for_qat, qconfig_dict_qat)
         </code></pre>
-        <p>Then you train the <code>model_prepared_qat</code> and convert it to int8 using <code>convert_fx(model_prepared_qat.eval())</code>. Inside the <code>FakeQuantize</code> module, it takes <code>x</code>, computes scale and zero-point, and simulates quantization like:</p>
-        <div class="math-display">$$q = \mathrm{round}(\mathrm{clamp}(x / \text{scale} + \text{zero_point}))$$</div>
-        <div class="math-display">$$\hat{x} = (q - \text{zero_point}) \times \text{scale}$$</div>
+        <p>Then you train the <code>model_prepared_qat</code> and convert it to int8 using <code>convert_fx(model_prepared_qat.eval())</code>. Inside the <code>FakeQuantize</code> module, it takes <code>x</code>, computes scale and zero-point, and simulates the quantize-then-dequantize round trip from the refresher above: round onto the int grid, clamp, then map back to float.</p>
         <p>QAT can learn activation clipping, push small weights out of dead zones, and learn quantization-friendly distributions.</p>
         <p>QAT simulates quantization in the forward pass. Rounding and clamping are, however, both non-differentiable, so you can't directly backpropagate through them. QAT uses a <strong>Straight-Through Estimator (STE)</strong>, which basically means this operation has no gradient for the non-differentiable part. It pretends the output equals the input during backpropagation for that specific part.</p>
         <pre><code class="language-python">
@@ -1994,10 +1984,7 @@ class RoundSTE(torch.autograd.Function):
         </code></pre>
         <p>STE is the hack that makes the whole thing trainable. The forward pass quantizes; the backward pass pretends it did not.</p>
         <p>Now let’s go back to <code>MovingAverageMinMaxObserver</code> (often used within <code>FakeQuantize</code> for QAT). It uses an exponential moving average of min/max values observed during training. <code>FakeQuantize</code> modules are inserted during <code>prepare_qat_fx()</code> and are active during the training phase. After training, during <code>convert_fx()</code>, they’re replaced with real quantization operations.</p>
-        <p>The moving average update rules are typically:</p>
-        <div class="math-display">$$\text{min_val} = (1 - \alpha) \, \text{min_val} + \alpha \, \text{current_batch_min_val}$$</div>
-        <div class="math-display">$$\text{max_val} = (1 - \alpha) \, \text{max_val} + \alpha \, \text{current_batch_max_val}$$</div>
-        <p>Where α (alpha) is a momentum term.</p>
+        <p>The update rule is a running blend: each batch's observed min and max get folded into the running value, with &alpha; (alpha, a momentum term) controlling how much each new batch moves it.</p>
     </section>
 
     <section>

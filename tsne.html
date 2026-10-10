@@ -679,21 +679,15 @@
 
    $$p_{j|i} = \frac{\exp(-||x_i - x_j||^2 / 2\sigma_i^2)}{\sum_{k \ne i} \exp(-||x_i - x_k||^2 / 2\sigma_i^2)}$$
 
-   <p>Read it aloud: "p of j given i equals e to the minus squared distance between $x_i$ and $x_j$, over two sigma-i squared, divided by the same thing summed over every other point $k$." Term by term: $x_i$ and $x_j$ are points in the original high-D space; $\sigma_i$ is point $i$'s private kernel width; the numerator decays exponentially so far points get nearly zero; the denominator just makes the probabilities sum to 1 over $j$. Note this is a conditional distribution: rows sum to 1, columns do not.</p>
+   <p>In plain words: each point spreads its attention over its neighbors, near points getting most of it, far points almost none. The kernel width adapts per point so dense and sparse regions are treated fairly. Note this is a conditional distribution: rows sum to 1, columns do not.</p>
 
-   <p>Real numbers. Three points at distances 1, 2, 3 from $i$, with $\sigma_i = 1$. Numerators: $\exp(-1/2) = 0.6065$, $\exp(-4/2) = 0.1353$, $\exp(-9/2) = 0.0111$. Sum: $0.7530$. Normalized: $p = 0.8055$, $0.1797$, $0.0148$. The nearest point eats 80 percent of the probability. The one at distance 3 gets under 2 percent. Distance is destiny.</p>
+   <p>The numerator decays exponentially with distance, so the nearest point claims almost all of the probability while far points get nearly nothing. Distance is destiny.</p>
 
    <h3>2. Perplexity picks sigma</h3>
 
    $$\mathrm{Perp}(P_i) = 2^{H(P_i)}, \qquad H(P_i) = -\sum_j p_{j|i} \log_2 p_{j|i}$$
 
-   <p>Read it aloud: "perplexity of point $i$'s distribution is two to the power of its Shannon entropy in bits." Term by term: $H$ is the entropy, the effective number of neighbors; $\sigma_i$ is found by binary search until the entropy matches the log of the target perplexity. Perplexity 30 means: tune $\sigma_i$ until each point behaves as if it has about 30 neighbors.</p>
-
-   <p>Real numbers. Take the distribution from step 1: $p = (0.8055, 0.1797, 0.0148)$. Its entropy works out to $0.786$ bits:</p>
-
-   $$H = -(0.8055 \log_2 0.8055 + 0.1797 \log_2 0.1797 + 0.0148 \log_2 0.0148) = 0.786$$
-
-   <p>So its perplexity is $2^{0.786} = 1.72$. It behaves as if it has about 1.7 neighbors. Makes sense: one neighbor ate 80 percent.</p>
+   <p>In plain words: perplexity sets how many neighbors each point pays attention to. Perplexity 30 means each point behaves as if it has about 30 neighbors.</p>
 
    <p>Then symmetrize, because a one-sided friendship is not a neighborhood: $p_{ij} = (p_{j|i} + p_{i|j}) / 2n$. Average both directions and divide by twice $n$, so the whole thing sums to 1.</p>
 
@@ -701,27 +695,23 @@
 
    $$q_{ij} = \frac{(1 + ||y_i - y_j||^2)^{-1}}{\sum_{k \ne l}(1 + ||y_k - y_l||^2)^{-1}}$$
 
-   <p>Read it aloud: "q_ij equals one over one plus the squared 2D distance, normalized over all pairs. That is a Student-t with one degree of freedom, also called a Cauchy." Term by term: $y_i$ are the 2D positions we are optimizing; the numerator is the heavy tail; the denominator normalizes over all ordered pairs.</p>
+   <p>In plain words: the 2D map uses a heavy-tailed similarity so points can spread out without crowding. That is a Student-t with one degree of freedom, also called a Cauchy.</p>
 
-   <p>Real numbers. At 2D distance 1, the unnormalized $q$ is $1/(1+1) = 0.5$. At distance 5, it is $1/26 = 0.0385$. Now compare the Gaussian from step 1 at distance 5 with $\sigma = 1$: $\exp(-25/2) = 0.0000037$. The t-distribution gives that far pair $0.0385$ instead of $0.0000037$: about 10,000 times more probability. Distant points are allowed to be vaguely distant. That forgiveness is what gives clusters room to separate instead of piling up in the middle. This is the fix for the crowding problem.</p>
+   <p>The t-distribution's tail decays far more slowly than the Gaussian's, so a far pair still keeps meaningful probability instead of being crushed to zero. Distant points are allowed to be vaguely distant. That forgiveness is what gives clusters room to separate instead of piling up in the middle. This is the fix for the crowding problem.</p>
 
    <h3>4. The cost: make the maps agree</h3>
 
    $$C = \sum_{i \ne j} p_{ij} \log\frac{p_{ij}}{q_{ij}}$$
 
-   <p>Read it aloud: "the cost is the sum over all pairs of p_ij times log of p_ij over q_ij. That is the KL divergence of the map $Q$ from the high-D truth $P$." Term by term: $p_{ij}$ is the true high-D neighbor probability, fixed; $q_{ij}$ is the map's version, which depends on $y$; the log ratio is zero when they match and positive when they disagree. You pay the most for pairs that were close in high-D, because $p_{ij}$ weights the bill. Far pairs barely matter. That asymmetry is the entire philosophy: preserve neighborhoods, sacrifice the rest.</p>
+   <p>In plain words: the cost is high when pairs that were close in high-D drift apart on the map. You pay the most for broken true neighborhoods; far pairs barely matter. That asymmetry is the entire philosophy: preserve neighborhoods, sacrifice the rest.</p>
 
    <h3>5. The gradient: springs</h3>
 
    $$\frac{dC}{dy_i} = 4 \sum_j (p_{ij} - q_{ij})(y_i - y_j)(1 + ||y_i - y_j||^2)^{-1}$$
 
-   <p>Read it aloud: "the gradient on point $i$ is four times the sum over $j$ of (p_ij minus q_ij) times the vector from $j$ to $i$, times one over one plus squared distance. We run gradient descent, so each point steps DOWN this gradient, which flips every sign into a force." Term by term: $(p_{ij} - q_{ij})$ is the mismatch; where $p_{ij}$ beats $q_{ij}$ the map is underestimating a true neighborhood, and stepping down the gradient pulls point $i$ toward $j$; where $q_{ij}$ wins the map has overcrowded the pair, and they push apart. $(y_i - y_j)$ is the direction; the trailing $(1 + ||.||^2)^{-1}$ softens the force with distance. Springs and anti-springs. True neighbors attract; everyone else mildly repels until the crowding eases. When every spring is balanced, you have your map.</p>
+   <p>In plain words: each point is pulled toward neighbors the map underestimates and pushed from pairs the map overcrowded. Springs and anti-springs. True neighbors attract; everyone else mildly repels until the crowding eases. When every spring is balanced, you have your map.</p>
 
-   <p>Hand-checked on three points, independent of the tool below. Positions $Y = [(0,0), (1,0), (0,2)]$ and joint probabilities</p>
-
-   $$P = [[0, 0.30, 0.15], [0.30, 0, 0.05], [0.15, 0.05, 0]]$$
-
-   <p>The 2D normalizer is $Z = 1.733333$, giving $Q_{01} = 0.288462$, $Q_{02} = 0.115385$, $Q_{12} = 0.096154$. The gradients come out to $g_0 = (-0.023077, -0.055385)$, $g_1 = (-0.007692, 0.061538)$, $g_2 = (0.030769, -0.006154)$. They sum to zero, as they must: shifting every point the same way changes nothing.</p>
+   <p>One invariant worth knowing: the gradients always sum to zero. Shifting every point the same way changes nothing, so there is no net force on the map as a whole.</p>
 
    <h2 id="tsnetoy">The tool: watch t-SNE find clusters it was never told about</h2>
 

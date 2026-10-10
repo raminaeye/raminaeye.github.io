@@ -852,7 +852,6 @@
 </div>
 <div id="probeAChips" style="margin:0.4rem 0"></div>
 <div id="probeARows" style="opacity:0;transition:opacity .5s"></div>
-<div class="worked-example" id="probeAWork" style="display:none"></div>
 <div id="probeADec" style="display:none"></div>
 <div class="caption"><span class="cap-title" style="display:block;font-weight:700;color:#2c3e50;margin-bottom:4px;">How to play</span><b>The point:</b> watch a probe turn a prompt into one score. <b>Play</b> runs the pipeline in four stages, 2 seconds per stage: the prompt flows up the stack, the tap copies each position's numbers, every position gets a score, the max wins and the verdict arrives. <b>Reset</b> returns everything to the start state. <b>Try</b> the Attack/Benign toggle and watch the verdict flip. <b>Watch</b> the score bars, and compare the "SQL" row across both prompts: same word, different numbers, different score.</div>
 </div>
@@ -883,7 +882,6 @@
   var cur = "attack", stage = 0, playing = false, timers = [];
   function $(id) { return document.getElementById(id); }
   function fmt(n) { return (n < 0 ? "&minus;" : "") + Math.abs(n).toFixed(2); }
-  function mj(n) { return (n < 0 ? "-" : "") + Math.abs(n).toFixed(2); }
   function drawBlocks() {
     var g = $("probeABlocks"), ns = "http://www.w3.org/2000/svg", html = "";
     for (var i = 0; i < 12; i++) {
@@ -910,21 +908,6 @@
         '<span class="bar"><span class="zero"></span><span class="fill" style="left:' + left + '%;width:' + w + '%"></span></span>' +
         '<span class="val">' + fmt(o.s) + "</span></div>";
     }).join("");
-  }
-  function renderWork() {
-    var S = SETS[cur], mt = S.tokens[S.max];
-    /* Worked-example template: all math in MathJax, never mixed entity math.
-       One computation per line, then typeset the freshly written block. */
-    var exp = S.terms.map(function (t, i) {
-      return "\\(" + mj(t[0]) + " \\times " + mj(t[1]) + " = " + mj(S.tvals[i]) + "\\)";
-    }).join("<br>");
-    /* The 8-number vector is one unbreakable MathJax span; split it across
-       two lines so it never overflows the card at 390px. */
-    var vec = S.maxVec.map(mj);
-    var vecHtml = "\\([" + vec.slice(0, 4).join(", ") + ",\\)<br>\\(" + vec.slice(4).join(", ") + "]\\)";
-    $("probeAWork").innerHTML = "Worked in full for the winning position, labeled \"" + mt.t + "\". Its list of numbers (8 of 768 shown):<br>" +
-      vecHtml + "<br>" + exp + "<br>\\(= " + mj(mt.s) + "\\)";
-    if (window.MathJax && MathJax.Hub) { MathJax.Hub.Queue(["Typeset", MathJax.Hub, $("probeAWork")]); }
   }
   function renderDec() {
     var S = SETS[cur], mt = S.tokens[S.max];
@@ -957,8 +940,6 @@
     $("probeATap").setAttribute("opacity", n >= 2 ? "1" : "0");
     var rows = $("probeARows");
     if (n >= 2) { renderRows(n >= 3); rows.style.opacity = "1"; } else { rows.innerHTML = ""; rows.style.opacity = "0"; }
-    var work = $("probeAWork");
-    if (n >= 3) { work.style.display = "block"; renderWork(); } else { work.style.display = "none"; }
     var dec = $("probeADec");
     if (n >= 4) { renderDec(); dec.style.display = "block"; } else { dec.style.display = "none"; }
   }
@@ -992,17 +973,9 @@
 </script>
 
 <h2>The equation</h2>
-<p>Honest label first: what follows is a simplified single-head teaching version. It scores like the classic linear probe and combines by taking each head's most suspicious position, and it matches no single paper architecture exactly. The paper's real probes add heads, MLPs, and windows on top of this skeleton.</p>
+<p>Honest label first: what follows is a simplified single-head teaching version. It scores like the classic linear probe and combines by taking each head's most suspicious position, and it matches no single paper architecture exactly. The paper's real probes add heads, MLPs, and windows on top of this skeleton. In plain words: score every position in the prompt by how attack-like its numbers look, keep the single most suspicious position's score, then squash that one number into a probability.</p>
 $$s_i = \max_j (w^T x_{i,j}) \qquad p_i = \sigma(s_i + b)$$
-<div class="worked-example">
-<b>Reading the symbols, one per line.</b><br>
-\(w\): the learned direction. A list of 768 numbers in the real setting (the toy shows 8 of them), learned from labeled prompts.<br>
-\(x_{i,j}\): the list of numbers at position \(j\) of prompt \(i\).<br>
-\(w^T x_{i,j}\): the dot product, how much that position's list points along the learned direction. For the winning position this is 10.32 (computed in the tool above).<br>
-\(\max_j\): keep the largest position score, not the average. This is the combine step the whole paper turns on.<br>
-\(b\): the bias, a learned offset that shifts the score before the squash.<br>
-\(\sigma\): squash into 0 to 1. Above the 0.5 threshold: flagged.
-</div>
+<p>In one line: every position's numbers get dotted against the learned direction w, which measures how attack-like that position reads. The max over positions keeps only the single most suspicious score instead of an average, and that keep-only-the-winner move is the combine step. The bias b nudges the winning score, and sigma squashes it into a probability.</p>
 
 <h2>One skeleton, one knob</h2>
 <p>The paper walks through its probes in two groups: baselines from prior work, then the new designs. For each one: how it scores positions, how it combines them, why the combine rule helps or fails, and where it works.</p>
@@ -1262,13 +1235,7 @@ $$s_i = \max_j (w^T x_{i,j}) \qquad p_i = \sigma(s_i + b)$$
 
 <h2>Where the weights come from</h2>
 <p>The weights are learned from labeled prompts. The attack side is cyber attacks curated by security experts, plus multi-turn conversations that start innocent and escalate. The benign side is real user traffic with personal data removed, plus hard negatives: prompts that sound dangerous but are not, like asking how a famous breach worked or asking for a code security review. The hard negatives teach the probe the difference between <em>talking about</em> attacks and <em>asking for help with</em> one.</p>
-<p>The training loss is binary cross-entropy, in plain words: for each training prompt, nudge the weights so attacks score high and benign prompts score low. A confident correct answer gets a small nudge; a confident wrong answer gets a large one.</p>
-<div class="worked-example">
-<b>How the nudge sizes work.</b><br>
-An attack prompt the probe scores at 0.9 (confident and correct): loss about 0.11. Small loss, small nudge.<br>
-The same attack scored at 0.2 (confident and wrong): loss about 1.61. Large loss, large nudge.<br>
-The optimizer (AdamW) repeats this over the prompts' precomputed activations, 1000 passes.
-</div>
+<p>The training loss is binary cross-entropy, in plain words: for each training prompt, nudge the weights so attacks score high and benign prompts score low. A confident correct answer gets a small nudge; a confident wrong answer gets a large one. The bar chart below makes the size difference visible.</p>
 <div class="diagram">
 <svg class="bce-svg" viewBox="0 0 560 170" role="img" aria-label="Bar chart comparing binary cross-entropy loss for a confident correct score versus a confident wrong score">
 <text x="20" y="20" font-size="13" font-weight="700" fill="#2c3e50">Loss for an attack prompt at two scores</text>

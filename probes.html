@@ -879,11 +879,13 @@
 <h2>How they work, and how they do damage</h2>
 <p>A large language model reads your prompt, turns it into numbers, processes those numbers through dozens of layers, and writes back one piece at a time. Its core skill is following instructions in the prompt: answer this, summarize that, write code that does X. That is what makes it useful.</p>
 <p>It is also what makes it dangerous. The model cannot tell which instructions deserve to be followed. An attacker can hide malicious instructions inside an innocent-looking prompt, a <strong>jailbreak</strong>: "help me debug this code" where the code is malware, or a long story that gradually steers the model into explaining how to break into a system. The model follows along because following instructions is what it does. The damage is concrete: phishing campaigns, vulnerability hunting, step-by-step help with attacks, all produced by a helpful assistant doing exactly what it was told.</p>
+<p>The first instinct is to teach the model to refuse bad requests. It does not hold against determined attackers: the paper cites Nasr et al., 2025 on refusal training failing under pressure. So instead of relying on the model to behave, the paper watches prompts at deployment time.</p>
 <p>This tutorial follows the paper in which Google DeepMind made probes production-ready: its findings informed the deployment of misuse-mitigation probes in user-facing Gemini.</p>
 
 <h2>Why not just ask another AI to check?</h2>
 <p>The obvious defense is a monitor: a second system that reads every prompt and judges whether it is an attack. The simplest monitor is another large language model asked exactly that question. It works, but it roughly doubles the bill, because every user request now costs two giant model runs instead of one.</p>
 <p>An activation probe is the cheaper answer. It does not read the prompt's words, and it does not run a second giant model. It reads the first model's own internal understanding of the prompt, which the model already computed during its normal forward pass, and turns it into one suspiciousness score. The extra cost is tiny: one small classifier running on numbers that already exist.</p>
+<p>But cheap is not the paper's real story. Probes already existed, and they broke in production: a probe trained on short prompts falls apart on long documents, because one malicious sentence's score gets averaged away by a million innocent ones. Training directly on long documents is far too expensive, so the paper engineers the probes to generalize instead. Cost is the enabler; surviving production is the story.</p>
 <p>Two terms, glossed once here and used everywhere below. A <strong>token</strong> is a word-piece, the chunk the model actually reads ("injection" might be one token, "unbelievable" might be three). An <strong>activation</strong> is a list of numbers inside the model describing what it has understood so far.</p>
 
 <h2>Listening to the model's thoughts</h2>
@@ -909,7 +911,25 @@
 
 <h2>Where in the model?</h2>
 <p>Think of the model's layers as an assembly line. The early layers handle raw word pieces. The middle layers build meaning: this is where each position's list absorbs the whole prompt and the model forms its understanding of what is being asked, including whether something is off. The late layers spend that understanding on planning the next word of the answer.</p>
+<div class="diagram eml-layers">
+<div class="eml-band eml-late"><b>Late layers</b><span>planning the next word</span></div>
+<div class="eml-arrow">understanding builds upward</div>
+<div class="eml-band eml-mid"><b>Middle layers</b><span>meaning builds here</span><span class="eml-tap">tap here: the probe reads this layer</span></div>
+<div class="eml-arrow">understanding builds upward</div>
+<div class="eml-band eml-early"><b>Early layers</b><span>raw word pieces</span></div>
+<div class="caption"><span class="cap-title" style="display:block;font-weight:700;color:#2c3e50;margin-bottom:4px;">What this shows</span>This gradient is the standard interpretability picture, not a claim from the paper; the paper only specifies that it taps the halfway layer. The probe reads the middle because that is where the understanding is richest, before it gets spent on the answer.</div>
+</div>
+<style>
+.eml-layers { max-width: 420px; margin: 1rem auto; }
+.eml-band { border: 1px solid #dee2e6; border-radius: 10px; padding: 10px 14px; margin: 0; background: #f8f9fa; }
+.eml-band b { display: block; color: #2c3e50; font-size: 0.95em; }
+.eml-band span { display: block; color: #777; font-size: 12px; }
+.eml-mid { background: #eaf2f8; border-color: #2980b9; border-width: 2px; }
+.eml-mid .eml-tap { display: inline-block; background: #2980b9; color: #fff; font-weight: 700; border-radius: 6px; padding: 2px 10px; margin-top: 6px; font-size: 12px; }
+.eml-arrow { text-align: center; color: #999; font-size: 12px; padding: 2px 0; }
+</style>
 <p>The probe taps the middle because that is where thoughts live. Tap too early and the lists are still just words, with no understanding to read. Tap too late and the model is already committed to answering. The middle layer's residual stream, the model's running memory, holds the understanding at its richest, before it gets spent on output.</p>
+<p>One thing to lock in now, because it is true for every probe below: the tap is identical. One fixed middle layer, one list of numbers per position. Every probe then scores each position, combines those scores into one number, and compares it to a threshold. The paper's whole argument lives in the combine step, so that is the step to watch.</p>
 <p>This is also why the probe works at all. The probe is not detecting attacks from scratch. By the middle of the model, the model itself has already done the hard work of understanding the prompt. The probe is just a cheap reader of that understanding, trained to report one thing: does this understanding look like an attack?</p>
 
 <h2>The concrete machine</h2>
@@ -1068,33 +1088,132 @@ $$s_i = \max_j (w^T x_{i,j}) \qquad p_i = \sigma(s_i + b)$$
 <div class="worked-example">
 <b>Reading the symbols, one per line.</b><br>
 \(w\): the learned direction. A list of 768 numbers in the real setting (the toy shows 8 of them), learned from labeled prompts.<br>
-\(x_{i,j}\): the list of numbers at position \(j\) of prompt \(i\). For the winning position, the list is [1.30, &minus;0.90, 1.60, 0.50, &minus;1.40, 1.10, 2.10, &minus;0.60].<br>
+\(x_{i,j}\): the list of numbers at position \(j\) of prompt \(i\).<br>
 \(w^T x_{i,j}\): the dot product, how much that position's list points along the learned direction. For the winning position this is 10.32 (computed in the tool above).<br>
 \(\max_j\): keep the largest position score, not the average. This is the combine step the whole paper turns on.<br>
-\(b = -1.5\): the bias, a learned offset. 10.32 &minus; 1.50 = 8.82.<br>
-\(\sigma\): squash into 0 to 1. \(\sigma(8.82) \approx 1.00\). Above the 0.5 threshold: flagged.
+\(b\): the bias, a learned offset that shifts the score before the squash.<br>
+\(\sigma\): squash into 0 to 1. Above the 0.5 threshold: flagged.
 </div>
 
 <h2>One skeleton, one knob</h2>
-<p>Every probe in the paper is the same machine with one knob changed: <strong>how position scores get combined into one number</strong>. The tap, the scoring, and the threshold are shared. Only the combine step differs, because the combine step is what breaks on long documents. The paper's Section 3 walks through the probes in two groups: baselines from prior work, then the new designs. Here is each one, in plain words, with its combine rule and its fate on long contexts.</p>
+<p>The paper walks through its probes in two groups: baselines from prior work, then the new designs. For each one: how it scores positions, how it combines them, why the combine rule helps or fails, and where it works.</p>
 <h3>The baselines</h3>
-<p><strong>Linear probe (mean pooling).</strong> The classic, from 2016. Score every position with the learned weights, then <strong>average</strong> all the scores. It is the simplest thing that works, and it is the reason the paper exists: on a short prompt the average is fine, but in a million-token document one attack sentence's score gets divided by a million and vanishes. Dilution is the failure mode.</p>
-<p><strong>EMA probe.</strong> The prior state of the art. Read the positions in order while keeping a running average that decays, so recent positions count more, then <strong>take the peak</strong> of that smoothed curve. Smoothing rides out noisy positions, but the peak of a smoothed curve still washes out when the document gets very long.</p>
-<p><strong>Attention probe.</strong> Let the probe learn its own weights over positions, then take a <strong>weighted average</strong>. On short prompts this is the strongest baseline. On long contexts it collapses: the learned weights spread over thousands of positions and the attack's share goes to nearly zero. The paper's long-context test caught it missing 87.9% of attacks. That number is why averaging, even smart averaging, had to go.</p>
+<p><strong>Linear probe.</strong> The classic, from Alain and Bengio 2016. Score every position with the learned weights, then <strong>average</strong> all the scores. On a short prompt the average is fine, but in a million-token document one attack sentence gets divided by a million and vanishes. Dilution is the failure mode.</p>
+<p><strong>EMA probe.</strong> From Cunningham et al. 2025. First train the linear probe above. Then sweep the prompt left to right, keeping a running average that decays: half the new position's score, half the running average. Then <strong>take the peak</strong> of that smoothed curve. It asks "was there ever a sustained stretch that looked bad," which survives long contexts better than one flat average, but the peak still washes out on very long documents.</p>
+<div class="diagram ema-curve">
+<div class="ema-title">Smoothed suspiciousness per position</div>
+<div class="ema-bars" id="emaBars"></div>
+<div class="ema-x">position in the prompt &rarr;</div>
+<div class="ema-legend"><span class="ema-sw"></span>peak: the worst sustained stretch. This peak is the probe's score.</div>
+<div class="caption"><span class="cap-title" style="display:block;font-weight:700;color:#2c3e50;margin-bottom:4px;">What this shows</span>The running average rises where the attack stretch sits, and the probe keeps only its peak. One sustained bad stretch is enough; the average over the whole document never enters the picture.</div>
+</div>
+<style>
+.ema-curve { max-width: 560px; margin: 1rem auto; }
+.ema-title { font-size: 12px; color: #555; margin-bottom: 6px; }
+.ema-bars { display: flex; align-items: flex-end; height: 120px; border-left: 1px solid #ccc; border-bottom: 1px solid #ccc; padding-left: 2px; }
+.ema-bars .ebar { flex: 1; margin: 0 1px; background: #2980b9; min-height: 2px; border-radius: 2px 2px 0 0; }
+.ema-bars .ebar.peak { background: #c0392b; }
+.ema-x { font-size: 12px; color: #777; text-align: center; margin-top: 4px; }
+.ema-legend { font-size: 12px; color: #555; margin-top: 6px; }
+.ema-sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; background: #c0392b; vertical-align: -1px; margin-right: 6px; }
+</style>
+<script>
+(function () {
+  var SC = [0.05,0.08,0.03,0.10,0.06,0.04,0.09,0.02,0.07,0.05,0.06,0.03,0.08,0.04,0.07,
+            0.75,0.88,0.92,0.95,0.86,0.78,
+            0.06,0.04,0.09,0.05,0.03,0.07,0.04,0.06,0.05,0.08,0.03,0.06,0.04,0.07,0.05,0.04,0.06,0.03,0.05];
+  var ema = [], run = 0, peak = 0, pi = 0, i;
+  for (i = 0; i < SC.length; i++) {
+    run = 0.5 * SC[i] + 0.5 * run;
+    ema.push(run);
+    if (run > peak) { peak = run; pi = i; }
+  }
+  var el = document.getElementById("emaBars");
+  if (el) {
+    el.innerHTML = ema.map(function (v, j) {
+      return '<div class="ebar' + (j === pi ? " peak" : "") + '" style="height:' + Math.max(2, v / peak * 100).toFixed(1) + '%"></div>';
+    }).join("");
+  }
+})();
+</script>
+<p><strong>MLP probe.</strong> Score each position with a small neural net (two layers of width 100) instead of one dot product, then <strong>average</strong>. The nonlinearity lets each position's "this looks dangerous" judgment be richer than a straight line. But it still averages, so it inherits the dilution problem.</p>
+<p><strong>Attention probe.</strong> The probe learns its own weights over positions, this attention belongs to the probe, not the model, then takes a <strong>weighted average</strong>. On short prompts it is the strongest baseline. On long contexts the weights spread over thousands of positions and the attack's share shrinks to nearly zero: it missed 87.9% of long-context attacks. Running it is cheap, O(n) streaming with O(1) memory per head (paper Appendix L), so this is a weighting failure, not a compute one.</p>
+<div class="demo" id="dilDemo">
+<div class="dil-readout" id="dilReadout">1 attack token among 9 benign tokens: the attack token gets <b>94.3%</b> of the attention weight.</div>
+<div class="dil-barwrap"><div class="dil-bar" id="dilBar" style="width:94.3%"></div></div>
+<div class="demo-controls">
+<div class="play-row">
+<button class="play-btn" id="dilPlay">Play</button>
+<button class="play-btn" id="dilReset">Reset</button>
+<span class="play-step" id="dilStep">Start: 10 tokens. Drag the slider, or press Play.</span>
+</div>
+<label class="dil-slider-row"><span class="dil-cap">Context length</span><span class="dil-mid"><input type="range" id="dilSlider" min="1" max="5" step="0.01" value="1" aria-label="Context length in tokens, log scale"><span class="dil-ticks"><span>10</span><span>100</span><span>1k</span><span>10k</span><span>100k</span></span></span><b id="dilN">10 tokens</b></label>
+</div>
+<div class="caption"><span class="cap-title" style="display:block;font-weight:700;color:#2c3e50;margin-bottom:4px;">How to play</span><b>The point:</b> attention's weights spread over thousands of benign tokens, so the attack token's share shrinks to nearly zero. <b>Play</b> sweeps the context length from 10 to 100,000 tokens. <b>Reset</b> returns the slider to 10. <b>Try</b> dragging the slider yourself and watch the attack token's share collapse as the context grows. <b>Caveat:</b> the numbers are illustrative, the paper publishes no per-token weight traces, but the mechanism, softmax weights spreading over more tokens, is the paper's.</div>
+</div>
+<style>
+#dilDemo .dil-readout { font-size: 14px; color: #2c3e50; margin: 0.4rem 0; }
+#dilDemo .dil-readout b { color: #c0392b; }
+#dilDemo .dil-barwrap { height: 18px; background: #eceff3; border-radius: 9px; overflow: hidden; margin: 8px 0; }
+#dilDemo .dil-bar { height: 100%; background: #2980b9; border-radius: 9px; transition: width 0.15s; }
+#dilDemo .dil-slider-row { display: flex; align-items: center; gap: 10px; font-size: 12px; color: #555; margin: 0.6rem 0 0; }
+#dilDemo .dil-slider-row .dil-cap { white-space: nowrap; }
+#dilDemo .dil-slider-row .dil-mid { flex: 1; min-width: 0; }
+#dilDemo .dil-slider-row input { width: 100%; display: block; }
+#dilDemo .dil-ticks { display: flex; justify-content: space-between; font-size: 12px; color: #999; }
+#dilDemo .dil-slider-row b { color: #2c3e50; min-width: 76px; text-align: right; font-size: 12px; }
+</style>
+<script>
+(function () {
+  var EG = Math.exp(5);
+  function $(id) { return document.getElementById(id); }
+  function fmtT(t) { return t >= 1000 ? Math.round(t / 1000) + "k" : "" + t; }
+  function fmtP(p) { return (p * 100).toFixed(1) + "%"; }
+  function render() {
+    var t = Math.round(Math.pow(10, parseFloat($("dilSlider").value)));
+    var p = EG / (EG + (t - 1));
+    $("dilN").textContent = fmtT(t) + " tokens";
+    $("dilReadout").innerHTML = "1 attack token among " + (t - 1).toLocaleString("en-US") + " benign tokens: the attack token gets <b>" + fmtP(p) + "</b> of the attention weight.";
+    $("dilBar").style.width = (p * 100).toFixed(2) + "%";
+    return { t: t, p: p };
+  }
+  var playing = false, raf = 0, t0 = 0;
+  function stop() { playing = false; cancelAnimationFrame(raf); $("dilPlay").textContent = "Play"; }
+  function frame(now) {
+    if (!playing) return;
+    var k = Math.min(1, (now - t0) / 5000);
+    $("dilSlider").value = 1 + 4 * k;
+    var r = render();
+    $("dilStep").textContent = "Sweeping: " + fmtT(r.t) + " tokens, attack share " + fmtP(r.p) + ".";
+    if (k < 1) { raf = requestAnimationFrame(frame); }
+    else { stop(); $("dilStep").textContent = "End: 100,000 tokens. The attack token's share has nearly vanished. Reset to replay."; }
+  }
+  $("dilPlay").addEventListener("click", function () {
+    if (playing) { stop(); $("dilSlider").value = 1; render(); $("dilStep").textContent = "Start: 10 tokens. Drag the slider, or press Play."; return; }
+    playing = true; this.textContent = "Stop"; t0 = performance.now();
+    raf = requestAnimationFrame(frame);
+  });
+  $("dilReset").addEventListener("click", function () {
+    stop(); $("dilSlider").value = 1; render();
+    $("dilStep").textContent = "Start: 10 tokens. Drag the slider, or press Play.";
+  });
+  $("dilSlider").addEventListener("input", function () { if (playing) stop(); render(); });
+  render();
+})();
+</script>
 <h3>The new designs</h3>
-<p><strong>MultiMax.</strong> Stop averaging entirely. Give the probe several heads and let each head <strong>keep only its single most suspicious position</strong>. A short attack can no longer hide in a long document, because the max does not care how many innocent positions surround it. This is the combine step the toy equation on this page uses.</p>
-<p><strong>Max of Rolling Means (the paper's selected probe).</strong> Slide a <strong>10-position window</strong> across the prompt, score each window with attention, then <strong>take the worst window</strong>. It keeps attention's smart scoring but applies it locally, where dilution cannot reach, and takes the max across windows. This is the probe the paper reports its headline results with: 3.0% missed attacks and 1.2% false alarms on long contexts it never trained on.</p>
-<p><strong>MLP probes.</strong> Keep the averaging combine, but score each position with a small neural net first instead of one dot product. Figure 2's Transformations panel shows the options: Identity (leave the numbers alone, what the linear probe uses), ReLU MLP, and Gated MLP. Smarter per-position scoring, same combine step, so the same long-context weakness.</p>
-<p><strong>AlphaEvolve probes.</strong> Instead of hand-designing the combine step, let an AI system search for it. Starting from the attention probe as a seed, AlphaEvolve generated and tested about 2,500 candidate architectures and kept the winners. It rediscovered max-style combining on its own and closed roughly half the gap between the attention baseline and a perfect probe. The machine confirmed the lesson: when documents get long, the max beats the average.</p>
+<p><strong>MultiMax.</strong> The paper's own invention. Same attention-style setup, but at inference each head keeps only its single most suspicious position, and the heads' winners are <strong>summed</strong> into one score. A head here is just one independent scorer; the toy on this page uses a single head. Max beats dilution, but it is twitchy: some configurations false-alarm on up to 82% of long benign traffic.</p>
+<p><strong>Max of Rolling Means (the paper's selected probe).</strong> The rolling-aggregation variant, not the MultiMax-eval variant with wider error bars. Slide a <strong>10-position window</strong> across the prompt, score each window with attention, then <strong>take the worst window</strong>. Attention finds the suspicious region, the window keeps the judgment local, the max picks the worst window: 3.0% missed attacks and 1.2% false alarms on long contexts it never trained on.</p>
+<p><strong>AlphaEvolve probes.</strong> Instead of hand-designing the combine step, let an AI system search for it: about 2,500 candidate architectures, seeded from the attention probe. It independently rediscovered max-style combining and closed roughly half the gap between the attention baseline and a perfect probe. Caveat: it optimized an older metric weighting and saw some long-context data during validation, though the final numbers were retrained on the final mixture. One honest note on how winners were picked: the paper trained 100 seeds per architecture and kept the best, but architecture choice moved test error 13 times more than seed luck. The method is the architecture, not the seed lottery.</p>
 <div class="table-scroll"><table style="border-collapse:collapse;margin:0 auto;font-size:0.85em;max-width:100%">
-<tr><th style="border:1px solid #bdc3c7;padding:0.4em 0.6em;background:#ecf0f1;color:#2c3e50;text-align:left">Probe</th><th style="border:1px solid #bdc3c7;padding:0.4em 0.6em;background:#ecf0f1;color:#2c3e50;text-align:left">Per-position scoring</th><th style="border:1px solid #bdc3c7;padding:0.4em 0.6em;background:#ecf0f1;color:#2c3e50;text-align:left">Combine rule</th><th style="border:1px solid #bdc3c7;padding:0.4em 0.6em;background:#ecf0f1;color:#2c3e50;text-align:left">On long contexts</th></tr>
-<tr><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">Linear</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">dot product</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">average</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">diluted</td></tr>
-<tr><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">EMA</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">dot product</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">peak of smoothed curve</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">washes out</td></tr>
-<tr><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">Attention</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">dot product</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">learned weighted average</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">misses 87.9% of attacks</td></tr>
-<tr><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">MultiMax</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">dot product, per head</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">max per head</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">holds</td></tr>
-<tr><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">Max of Rolling Means</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">attention per 10-token window</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">worst window wins</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">3.0% missed, 1.2% false alarms</td></tr>
-<tr><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">MLP</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">small neural net</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">average</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">same dilution problem</td></tr>
-<tr><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">AlphaEvolve</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">machine-found</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">machine-found, max-style</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">holds</td></tr>
+<tr><th style="border:1px solid #bdc3c7;padding:0.4em 0.6em;background:#ecf0f1;color:#2c3e50;text-align:left">Probe</th><th style="border:1px solid #bdc3c7;padding:0.4em 0.6em;background:#ecf0f1;color:#2c3e50;text-align:left">How it combines positions into one score</th></tr>
+<tr><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">Linear</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">average of all position scores</td></tr>
+<tr><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">EMA</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">peak of the decaying running average</td></tr>
+<tr><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">MLP</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">average (after a small neural net per position)</td></tr>
+<tr><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">Attention</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">learned weighted average</td></tr>
+<tr><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">MultiMax</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">max per head, summed across heads</td></tr>
+<tr><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">Max of Rolling Means</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">worst 10-token window wins</td></tr>
+<tr><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">AlphaEvolve</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">machine-found, max-style pooling</td></tr>
 </table></div>
 <p>The tool below makes the combine column visible: the same document, three combine rules, one threshold.</p>
 <div class="demo" id="probeDemoB">
@@ -1306,7 +1425,7 @@ $$s_i = \max_j (w^T x_{i,j}) \qquad p_i = \sigma(s_i + b)$$
 <b>How the nudge sizes work.</b><br>
 An attack prompt the probe scores at 0.9 (confident and correct): loss about 0.11. Small loss, small nudge.<br>
 The same attack scored at 0.2 (confident and wrong): loss about 1.61. Large loss, large nudge.<br>
-The wrong answer gets a nudge roughly 15 times larger. The optimizer (AdamW) repeats this over the prompts' precomputed activations, 1000 passes.
+The optimizer (AdamW) repeats this over the prompts' precomputed activations, 1000 passes.
 </div>
 <div class="diagram">
 <svg class="bce-svg" viewBox="0 0 560 170" role="img" aria-label="Bar chart comparing binary cross-entropy loss for a confident correct score versus a confident wrong score">
@@ -1369,13 +1488,7 @@ The wrong answer gets a nudge roughly 15 times larger. The optimizer (AdamW) rep
 
 <h2>Where do they work?</h2>
 <p>The paper tests the probes where it matters: short prompts, long documents, multi-turn chats, and real jailbreaks. Here is what held up.</p>
-<div class="stat-grid">
-<div class="stat-card"><div class="stat-num">22&times;</div><div class="stat-label">cheaper to train on short context than long. The new architectures match long-trained performance without paying it.</div></div>
-<div class="stat-card"><div class="stat-num">8%</div><div class="stat-label">of prompts deferred to Flash in the cascade. The probe decides the other 92% alone.</div></div>
-<div class="stat-card"><div class="stat-num">1/50</div><div class="stat-label">the inference cost of the probe-plus-Flash cascade versus Flash alone, at lower error.</div></div>
-<div class="stat-card"><div class="stat-num">~50%</div><div class="stat-label">of the gap between the attention baseline and a perfect probe, closed by AlphaEvolve's automatic architecture search.</div></div>
-<div class="stat-card"><div class="stat-num">10,000&times;+</div><div class="stat-label">cheaper the probe alone is than the LLM judge, at better error (Figure 1 above).</div></div>
-</div>
+<p>The cost story, stated once with both denominators. A probe alone costs a tiny fraction of an LLM judge: over 10,000 times cheaper at better error, because the probe is a small classifier running on numbers the model already computed (Figure 1 above). The probe-plus-Flash cascade is a different comparison: versus Flash alone it costs about 1/50th at inference, defers 8% of prompts, and scores lower error than Flash by itself. Two denominators, two claims; do not mix them.</p>
 <p>The central test of the paper is long-context generalization: probes trained only on short prompts, evaluated on long contexts they never saw. Each group below is one probe. The solid bars are FNR, the fraction of real attacks missed (left axis). The hatched bars are FPR, the fraction of benign prompts falsely flagged (right axis). Lower is better on both.</p>
 <div class="diagram">
 <img src="figures/papers/probes-figLC-longcontext.png" alt="Long-context generalization: missed-attack and false-alarm rates for three probes on long contexts" style="width:100%;height:auto;display:block;max-width:640px;margin:0 auto">
@@ -1383,7 +1496,7 @@ The wrong answer gets a nudge roughly 15 times larger. The optimizer (AdamW) rep
 <div class="caption"><span class="cap-title" style="display:block;font-weight:700;color:#2c3e50;margin-bottom:4px;">About this figure</span>Panel (c) of the distribution-shift comparison figure in Kram&aacute;r et al., arXiv:2601.11516. The paper's caption explains the four panels: (a) test error by method, (b) probes matching LLM classifiers at a fraction of the cost, (c) long-context generalization where the AlphaEvolve probes keep false alarms low, (d) adversarial attacks remaining hard for every method, with attack success above 1% throughout. Error bars are omitted here; the paper shows them on the main figures. Extracted from the arXiv e-print source.</div>
 </div>
 
-<p>Three more findings round it out. No single probe wins on every distribution shift: the best architecture for long contexts is not the best for multi-turn, so production means choosing per deployment. The automatic search worked: starting from a plain attention probe, AlphaEvolve evaluated about 2,500 architectures and rediscovered max-style combining on its own. And the findings informed real deployment: misuse-mitigation probes built on this work now run in user-facing Gemini.</p>
+<p>Three more findings round it out. No single probe wins on every distribution shift: the best architecture for long contexts is not the best for multi-turn, so production means choosing per deployment. The receipts: on long contexts, MultiMax variants can miss 0% of attacks while false-alarming on up to 82% of long benign traffic; the rolling probe balances both at 3.0% missed and 1.2% false alarms. With no distribution shift at all, plain attention is already near-optimal. The automatic search worked: starting from a plain attention probe, AlphaEvolve evaluated about 2,500 architectures and rediscovered max-style combining on its own. And the findings informed real deployment: misuse-mitigation probes built on this work now run in user-facing Gemini.</p>
 
 <h2>Caveats</h2>
 <ul>

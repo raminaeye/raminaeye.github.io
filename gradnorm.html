@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Loss Weighting for Multitask Learning</title>
+    <title>GradNorm</title>
     <style>
         body {
             font-family: sans-serif;
@@ -584,6 +584,8 @@
     <style>
     /* GradNorm sim tool */
     #gnSim .gn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0.9rem 0; }
+    /* Fit-in-one-page: cap panel charts so the 2x2 grid stays compact. */
+    #gnSim .gn-panel svg { max-width: 380px; margin-left: auto; margin-right: auto; }
     .gn-panel { border: 1px solid #d5dbdb; border-radius: 8px; background: #fff; padding: 10px 12px; position: relative; }
     .gn-panel svg { width: 100%; height: auto; display: block; }
     .gn-ptitle { font-weight: 700; color: #2c3e50; font-size: 0.92em; margin: 0 0 4px; }
@@ -611,6 +613,8 @@
     #gnThermo .th-split { display: grid; grid-template-columns: minmax(0,1.2fr) minmax(0,1fr); gap: 1.25rem; align-items: start; margin-top: 0.4rem; }
     #gnThermo .th-split .th-loop-wrap { margin: 0; max-width: none; }
     @media (max-width: 760px) { #gnThermo .th-split { display: block; } }
+    /* Fit-in-one-page: keep the loop diagram compact when stacked on mobile. */
+    @media (max-width: 760px) { #gnThermo .th-split .th-loop-wrap { max-width: 380px; margin: 0 auto 0.6rem; } }
     #gnThermo .th-station { cursor: pointer; }
     #gnThermo .th-station.dim { opacity: 0.38; }
     #gnThermo .th-stage-title { font-weight: 700; color: #2c3e50; font-size: 1.05em; margin: 0.7rem 0 0.2rem; }
@@ -641,7 +645,7 @@
     #gnFig .gnf-foot .cap-card { margin-top: 0; }
     #gnFig .gnf-foot .caption:first-child { margin-top: 0; }
     @media (max-width: 760px) { #gnFig .gnf-foot { display: block; } }
-    #gnFig .gnf-stage img { width: 100%; height: auto; display: block; border: 1px solid #d5dbdb; border-radius: 8px; background: #fff; }
+    #gnFig .gnf-stage img { width: 100%; max-width: 640px; height: auto; display: block; border: 1px solid #d5dbdb; border-radius: 8px; background: #fff; margin-left: auto; margin-right: auto; }
     #gnFig .gnf-hotspot { position: absolute; background: transparent; border: 0; padding: 0; cursor: pointer; }
     /* No outline over the paper figure: focus shows the approved veil + red badge instead. */
     #gnFig .gnf-hotspot:focus-visible { outline: none; }
@@ -757,10 +761,10 @@
 
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-    <script>hljs.highlightAll();</script>
+    <script>if (window.hljs) hljs.highlightAll();</script>
 </head>
 <body>
-        <nav class="topnav" aria-label="Site">
+<nav class="topnav" aria-label="Site">
     <div class="nav-inner">
         <a class="wordmark" href="index.html">Ramin Anushiravani</a>
         <div class="nav-links">
@@ -788,30 +792,38 @@
     </div>
 </nav>
     <p class="crumb"><a href="tutorial.html">&larr; All tutorials</a></p>
-    <h1>Loss Weighting for Multitask Learning</h1>
-    <p class="dek">Two volume knobs for multitask training: by pace (GradNorm) or by noise (uncertainty weighting).</p>
+    <h1>GradNorm</h1>
+    <p class="dek">Learn one volume knob per task so every task trains at the same pace. No hand-tuning.</p>
+
+<p>
+        You have seen the three diseases that break the naive sum. The first medicine treats the
+        first two, scale and speed: GradNorm watches how training is going and turns each task's
+        volume until nobody is falling behind.
+    </p>
 
     <p class="tabs-label">On this page</p>
     <div class="tab-strip">
         <a class="tab-link" href="#loudness">The loudness problem</a>
         <a class="tab-link" href="#gn-paper">GradNorm: the paper</a>
         <a class="tab-link" href="#gn-moderator">The moderator</a>
+        <a class="tab-link" href="#gn-measurements">Two measurements, one rule</a>
+        <a class="tab-link" href="#gn-thermostat">The target and the adjustment</a>
+        <a class="tab-link" href="#gn-byhand">One update, with numbers</a>
         <a class="tab-link" href="#gn-replay">Watch it work</a>
         <a class="tab-link" href="#gn-loop">The loop, live</a>
         <a class="tab-link" href="#gn-fig2">What the paper shows</a>
-        <a class="tab-link" href="#uw-paper">Uncertainty: the paper</a>
-        <a class="tab-link" href="#uw-objective">The objective</a>
-        <a class="tab-link" href="#uw-pricing">Feel the pricing</a>
-        <a class="tab-link" href="#when-enough">When weighting is enough</a>
+        <a class="tab-link" href="#gn-knobs">The knobs</a>
+        <a class="tab-link" href="#gn-when">When to reach for it</a>
     </div>
 
-    <h2 id="loudness">The loudness problem</h2>
+<h2 id="loudness">The loudness problem</h2>
 
     <p>Picture several tasks sharing one trunk. Each task reports a loss, but the losses live on different planets: a depth loss near 800, a classification loss near 2. Add them up as-is and the big one shouts while the others whisper. And even after you fix the scales, one task can still dominate: its gradients are simply louder, so the shared weights move mostly for it. Hand-tuning a weight per task works, until the tasks' fortunes change mid-training and your tuned weights go stale.</p>
 
     <p>This page is about the two classic fixes that turn the volume knobs for you. <strong>GradNorm</strong> learns the knobs from training dynamics, boosting whichever task falls behind. <strong>Uncertainty weighting</strong> sets them from the data itself, turning each task down in proportion to how noisy it inherently is. One watches pace, the other watches noise. Both are loss-weighting methods: they change how loud each loss is, before any gradient surgery. At the end, the question: when is turning the volume down enough, and when is it not?</p>
 
-    <h2 id="gn-paper">The paper behind the thermostat</h2>
+    
+<h2 id="gn-paper">The paper behind the thermostat</h2>
     <div class="paper-card">
         <span class="pc-label">The paper</span>
         <p class="pc-authors">Zhao Chen, Vijay Badrinarayanan, Chen-Yu Lee, Andrew Rabinovich</p>
@@ -822,11 +834,13 @@
     <p>But these networks are hard to train. Every task has to be balanced properly so the shared parameters converge to features useful across all of them. Earlier approaches tried to fix the imbalance in the forward pass, by engineering feature relationships or searching architectures. The authors' key point is that those approaches miss the real mechanism: a task that dominates training necessarily expresses that dominance as large gradients. The imbalance you see in the losses is, at its root, an imbalance in the backpropagated gradients.</p>
     <p>So they attacked the root instead of the architecture: tune the gradient magnitudes directly, through the loss weights. Each weight \(w_i\) couples linearly into its task's backpropagated gradients, which makes the weights a clean lever. The catch is that the right setting changes at every training step, and finding it by hand is what they call, in the abstract, a tedious search process that incurred exponentially more compute for each task added. GradNorm is their answer: balance training automatically, match the accuracy of exhaustive grid search, and only ever tune one knob, \(\alpha\).</p>
 
-    <h2 id="gn-moderator">The moderator</h2>
+    
+<h2 id="gn-moderator">The moderator</h2>
 
     <p>I picture K coaches all shouting advice at one athlete, the shared trunk. The loudest coach, the one with the biggest gradient, is the only one the athlete hears, and the coach whose part of the training is nearly done keeps shouting anyway. GradNorm is the moderator in the room. It puts a volume knob \(w_i\) in front of each coach and keeps turning the knobs so that (a) everyone is equally easy to hear, and (b) a coach whose part of the job is falling behind gets turned up for a while. There is even a strength dial, \(\alpha\), for how hard the moderator pushes for equal progress.</p>
 
-    <h2 id="gn-measurements">Two measurements, one rule</h2>
+    
+<h2 id="gn-measurements">Two measurements, one rule</h2>
 
     <p>Every training step, each task produces a gradient: a to-do list of changes to the shared weights that would help that task. If task 1's list is full of small numbers and task 2's is full of huge ones, the sum looks like task 2's list. GradNorm's answer: adjust the knobs a little every step using two measurements, taken at the last shared layer \(W\), the spot where the fight actually happens (about 5% extra training cost on NYUv2).</p>
 
@@ -854,7 +868,8 @@
 
     <p>Each ratio divided by the group average. \(r = 1\): on pace. \(r = 0.5\): ahead. \(r = 1.5\): behind, needs attention. The ratio by itself does not tell you who needs help: if every task sits at 0.75, nobody is behind. The problem is tasks falling <em>out of sync</em>, and you only spot that by comparing each task to the group. Nice side effect: if all tasks move at the same speed, every \(r_i\) stays at 1 and GradNorm does nothing. It only acts when tasks drift apart. In the worked example the mean ratio is \((0.25 + 0.75)/2 = 0.5\), so \(r_1 = 0.25/0.5 = 0.5\) (ahead) and \(r_2 = 0.75/0.5 = 1.5\) (behind).</p>
 
-    <h2 id="gn-thermostat">The target and the adjustment</h2>
+    
+<h2 id="gn-thermostat">The target and the adjustment</h2>
 
     <div class="math-display">
     $$G_W^{(i)}(t) \;\mapsto\; \bar{G}_W(t) \times [r_i(t)]^{\alpha}$$
@@ -895,7 +910,8 @@ L_grad = sum(abs(G - target))         # how far each norm is from its target
 w = w - lr_w * grad(L_grad, w)        # nudge ONLY the weights
 w = w * K / sum(w)                    # fixed budget: one task up, another down</code></pre>
 
-    <h2 id="gn-byhand">One GradNorm update, with numbers</h2>
+    
+<h2 id="gn-byhand">One GradNorm update, with numbers</h2>
 
     <p>Two tasks, mid-training: \(L_1(0) = 2\), \(L_1(t) = 0.5\) (nearly finished); \(L_2(0) = 800\), \(L_2(t) = 600\) (far from done). Measured loudness: \(G_1 = 4\), \(G_2 = 400\), average 202. With \(\alpha = 0.5\), one computation per line:</p>
 
@@ -917,7 +933,8 @@ w = w * K / sum(w)                    # fixed budget: one task up, another down<
     </ol>
 
     <p>Task 1 is too quiet (\(4 \ll 143\)) so its weight rises; task 2 is too loud (\(400 \gg 247\)) so its weight falls. The scale term pulls both toward 202 while the rate term boosts whoever is behind: task 2 gets a \(1.5^{0.5} \approx 1.22\times\) boost, task 1 a \(0.5^{0.5} \approx 0.71\times\) discount.</p>
-    <h2 id="gn-replay">Watch it work: the schematic replay</h2>
+    
+<h2 id="gn-replay">Watch it work: the schematic replay</h2>
 
     <p>This is a schematic replay of the paper's Figure 2 toy: one shared trunk, two tasks, the second task starting \(S_2\) times louder. (The paper uses a 100&times; output scale and reports curves; the replay exaggerates the gap so it shows.) Three runs race in every panel: each task trained alone (gray, the best it could hope for), both with fixed equal weights (red), and both with GradNorm (purple).</p>
 
@@ -973,7 +990,8 @@ w = w * K / sum(w)                    # fixed budget: one task up, another down<
       </div>
     </div>
 
-    <h2 id="gn-loop">The loop, live</h2>
+    
+<h2 id="gn-loop">The loop, live</h2>
 
     <p>Algorithm 1 is a loop that runs every training step. Replay one full turn of it below, then move &alpha; and watch the thermostat's response change.</p>
 
@@ -1011,7 +1029,8 @@ w = w * K / sum(w)                    # fixed budget: one task up, another down<
       </div>
     </div>
 
-    <h2 id="gn-fig2">What the paper shows: Figure 2</h2>
+    
+<h2 id="gn-fig2">What the paper shows: Figure 2</h2>
 
     <p>The paper's own version of this toy uses a 100&times; output scale and reports curves rather than single numbers. With fixed equal weights, the quiet task stalls far short of its solo run while the loud task is hurt too: the interference is not zero-sum. GradNorm turns the loud task's weight down and the quiet one's up. In this replay the gap does not drift into triple digits: it starts there, at 300:1 with the default scale, in both runs. The difference is how fast it collapses. GradNorm has it down to 16:1 by step 50 while equal weights still sits at 112:1, and that early rebalancing is what frees the quiet task: by step 100 its loss is 0.653 with GradNorm while it is still stalled at 0.979 under equal weights. That equalizing of loudness is the entire mechanism. Walk the real figure below.</p>
 
@@ -1046,7 +1065,7 @@ w = w * K / sum(w)                    # fixed budget: one task up, another down<
         <ul>
           <li><strong>The point:</strong> The paper's actual Figure 2: the toy systems GradNorm was tested on. The insight is the middle column: watch the small-scale tasks' weights climb while the big-scale tasks' fall, exactly the rebalancing the tools above replay.</li>
           <li><strong>What you'll see:</strong> Play spotlights the three columns, about 2.2 seconds each: the loss scale diagrams, the adaptive weight traces, then the task-normalized test loss curves where GradNorm beats both baselines. Each stop lands a one-line explanation below the figure.</li>
-          <li class="try-it"><strong>Try this:</strong> tap region 2 and compare the top and bottom rows: in the 2-task toy the easy task's weight climbs toward 1.9 while the hard task's falls toward 0.1; in the 10-task toy every small-scale task's weight climbs the same way. Then tap region 3 and find the green GradNorm curve finishing below the blue equal-weights curve in both rows.</li>
+          <li class="try-it"><strong>Try this:</strong> tap region 2: in the 2-task toy the easy task's weight climbs toward 1.9 while the hard task's falls toward 0.1; in the 10-task toy every small-scale task's weight climbs the same way. Then tap region 3 and find the green GradNorm curve finishing below the blue equal-weights curve in both rows.</li>
           <li><strong>Reset:</strong> the Reset button next to Play clears the spotlight, back to the full figure with no region picked.</li>
         </ul>
       </div>
@@ -1058,7 +1077,8 @@ w = w * K / sum(w)                    # fixed budget: one task up, another down<
       </div>
     </div>
 
-    <h2 id="gn-knobs">The knobs, one by one</h2>
+    
+<h2 id="gn-knobs">The knobs, one by one</h2>
 
     <div class="gn-table-wrap">
     <table class="gn-table">
@@ -1086,7 +1106,8 @@ w = w * K / sum(w)                    # fixed budget: one task up, another down<
     </table>
     </div>
 
-    <h2 id="gn-when">When to reach for it</h2>
+    
+<h2 id="gn-when">When to reach for it</h2>
 
     <p><strong>Reach for it when</strong> your tasks have very different loss scales or learning speeds. The classic case is dense prediction (segmentation + depth + normals).</p>
 
@@ -1094,439 +1115,9 @@ w = w * K / sum(w)                    # fixed budget: one task up, another down<
 
     <p><strong>Keep in mind:</strong> GradNorm is a heuristic with no convergence guarantee, and it says nothing about gradient <em>direction</em>. Two perfectly balanced gradients can still point against each other.</p>
 
-    <p>GradNorm sets the volume by watching <em>pace</em>: who is falling behind, right now. But pace is a symptom of training dynamics. What if the right volume is knowable before training dynamics even enter, from the data itself? Some tasks are just noisier than others, and a noisy task should count less. That is the next method's whole idea.</p>
-    <h2 id="uw-paper">The paper behind the pricing</h2>
-    <div class="paper-card">
-        <span class="pc-label">The paper</span>
-        <p class="pc-authors">Alex Kendall, Yarin Gal, Roberto Cipolla</p>
-        <p class="pc-title"><em>Multi-Task Learning Using Uncertainty to Weigh Losses for Scene Geometry and Semantics.</em></p>
-        <p class="pc-venue">CVPR 2018 &middot; <a href="https://arxiv.org/abs/1705.07115">arXiv:1705.07115</a></p>
-    </div>
-    <p>The authors were working on scene understanding for robotics, where slow computation is not an option. A scene-understanding system has to see geometry and semantics at the same time: per-pixel depth (a regression task), plus semantic and instance segmentation (classification tasks). Different units, different scales, one shared representation.</p>
-    <p>Their practical case for combining them: one model cuts the computation, and cues from one task, like depth, can regularize and improve another, like segmentation. Their network takes a single monocular image and produces all three outputs jointly.</p>
-    <p>But there was a wall: performance depends strongly on the relative weighting between the tasks' losses, and tuning those weights by hand is, in their words, a difficult and expensive process, making multi-task learning prohibitive in practice. Their contribution is a principled alternative: derive the weights from each task's homoscedastic uncertainty, a per-task noise level learned during training, so the model learns how much to trust each loss instead of you guessing.</p>
+    <p>GradNorm sets the volume by watching <em>pace</em>: who is falling behind, right now. But pace is a symptom of training dynamics. What if the right volume is knowable before training dynamics even enter, from the data itself? Some tasks are just noisier than others, and a noisy task should count less. That is <a href="uncertainty-weighting.html">the next method's whole idea</a>.</p>
 
-    <h2 id="uw-intuition">The intuition</h2>
-
-    <p>GradNorm, the method above, steps in after the losses exist. It takes the gradients as given and repairs their loudness, watching who falls behind. This idea is older and quieter, and it works one level earlier. Instead of asking how to fix conflicting gradients, it asks how loud each loss should be in the first place. And it answers with a principle from probabilistic modeling: a loss that is inherently noisier should count less.</p>
-
-    <h2 id="uw-noise">Some tasks are just harder to be sure about</h2>
-
-    <p>Think of each task's output as a measurement. Some measurements are crisp: given the same image, the right answer barely changes. Is this a cat or a dog. Some are inherently fuzzy: predicting the exact depth of every pixel has a floor of guesswork no model can beat, because the information simply is not in the image. Kendall, Gal, and Cipolla call this irreducible fuzziness <strong>task uncertainty</strong>, written \(\sigma_i\). A task with high \(\sigma_i\) is one where even a perfect model would still spread probability over several answers.</p>
-
-    <p>Here is the key move. If a task is that noisy, pushing hard on its loss is partly pushing on noise: the model chases fluctuations it cannot remove. The sensible thing is to turn the volume down on exactly those tasks, by an amount tied to how noisy they are. Each task gets a weight of \(1/(2\sigma_i^2)\) for regression, and \(1/\sigma_i^2\) for classification (the likelihood gives no 1/2 there). Either way, a task twice as noisy counts four times less. And the \(\sigma_i\) are learned as parameters during training, not set by hand.</p>
-
-    <h2 id="uw-objective">The objective, in plain words</h2>
-
-    <p>The plain-words version first. The total loss is a sum over tasks. Each task's own loss gets divided by its noise squared, so a noisier task contributes a smaller share, and then each task pays a small honesty tax for claiming to be noisy. Regression and classification price the noise slightly differently: the Gaussian likelihood behind regression brings a factor of 1/2 that the classification form does not have.</p>
-
-    <div class="math-display">
-    $$\begin{aligned}
-    \text{regression:}\qquad L_{\text{total}} &= \sum_i \left( \frac{L_i}{2\sigma_i^2} + \log \sigma_i \right) \\
-    \text{classification:}\qquad L_{\text{total}} &= \sum_i \left( \frac{L_i}{\sigma_i^2} + \log \sigma_i \right)
-    \end{aligned}$$
-    </div>
-    <p class="caption">Two likelihoods, two objectives. The 1/2 belongs only to regression: keep the two forms separate.</p>
-
-    <ol class="worked-example">
-        <li>\(L_i\) is task \(i\)'s usual loss, the same number you already compute. In the worked example below I set every \(L_i\) to 1.0, so only the pricing shows.</li>
-        <li>\(\sigma_i\) is the learned noise level of task \(i\): one number per task, bigger means noisier. The example uses \(\sigma = (0.7, 1.5, 2.4)\).</li>
-        <li>\(1/(2\sigma_i^2)\) is the volume knob (\(1/\sigma_i^2\) for classification). As \(\sigma_i\) grows, the task is turned down, quadratically.</li>
-        <li>\(\log \sigma_i\) is the penalty that keeps the model honest. Without it, the model could make every task free by inflating every \(\sigma_i\) to infinity. The log term charges a price for saying "this task is noisy", so a task only gets turned down if it genuinely is.</li>
-    </ol>
-
-    <p><strong>The point:</strong> the model is allowed to quiet a task, but it has to pay \(\log \sigma_i\) for the privilege, so it only quiets tasks that truly are noisy.</p>
-
-    <h3>The pricing, worked by hand</h3>
-
-    <p>Three tasks, equal losses \(L_i = 1.0\), noise levels \(\sigma = (0.7, 1.5, 2.4)\), regression form. One computation per line:</p>
-
-    <ol class="worked-example">
-        <li>Task 1, noise squared: \(\sigma_1^2 = 0.7^2 = 0.49\).</li>
-        <li>Task 1, volume: \(1/(2 \times 0.49) \approx 1.0204\).</li>
-        <li>Task 1, honesty price: \(\log 0.7 \approx -0.3567\).</li>
-        <li>Task 1, total bill: \(1.0204 - 0.3567 = 0.6637\).</li>
-        <li>Task 2, noise squared: \(\sigma_2^2 = 1.5^2 = 2.25\).</li>
-        <li>Task 2, volume: \(1/(2 \times 2.25) \approx 0.2222\).</li>
-        <li>Task 2, honesty price: \(\log 1.5 \approx 0.4055\).</li>
-        <li>Task 2, total bill: \(0.2222 + 0.4055 = 0.6277\).</li>
-        <li>Task 3, noise squared: \(\sigma_3^2 = 2.4^2 = 5.76\).</li>
-        <li>Task 3, volume: \(1/(2 \times 5.76) \approx 0.0868\).</li>
-        <li>Task 3, honesty price: \(\log 2.4 \approx 0.8755\).</li>
-        <li>Task 3, total bill: \(0.0868 + 0.8755 = 0.9623\).</li>
-        <li>Grand total: \(0.6637 + 0.6277 + 0.9623 \approx 2.2537\).</li>
-    </ol>
-
-    <p>Task 3 is about 3.4 times noisier than task 1, and its weight is about 12 times smaller. That is the square doing its job. Notice the third bill: the tiny weight is partly paid back by the large log price. The model still quieted the task, because the noise was real.</p>
-
-    <p>Same noise, classification form: task 1's weight would be \(1/0.49 \approx 2.0408\), exactly double. No 1/2 anywhere in that form.</p>
-
-    <h2 id="uw-pricing">Feel the pricing</h2>
-    <div class="demo" id="uncDemo">
-        <div class="unc-regime" role="group" aria-label="Objective form">
-            <span class="unc-regime-label">Objective form:</span>
-            <button type="button" id="uncReg" class="unc-mode active" aria-pressed="true">Regression</button>
-            <button type="button" id="uncCls" class="unc-mode" aria-pressed="false">Classification</button>
-        </div>
-        <p class="unc-formula"><span id="uncFormulaMath">\(L = \sum_i \left( \frac{L_i}{2\sigma_i^2} + \log \sigma_i \right)\)</span> <span class="unc-formtag" id="uncFormTag">regression</span></p>
-
-        <div class="unc-row" id="uncRow0">
-            <div class="unc-lab"><span class="unc-dot" style="background:#c6a1ce"></span>Semantic segmentation</div>
-            <input type="range" id="uncS0" min="0.3" max="3" step="0.05" value="0.7" aria-label="Semantic segmentation noise sigma">
-            <div class="unc-read" id="uncR0"></div>
-        </div>
-        <div class="unc-row" id="uncRow1">
-            <div class="unc-lab"><span class="unc-dot" style="background:#aaf7b3"></span>Instance segmentation</div>
-            <input type="range" id="uncS1" min="0.3" max="3" step="0.05" value="1.5" aria-label="Instance segmentation noise sigma">
-            <div class="unc-read" id="uncR1"></div>
-        </div>
-        <div class="unc-row" id="uncRow2">
-            <div class="unc-lab"><span class="unc-dot" style="background:#8ab2d1"></span>Depth regression</div>
-            <input type="range" id="uncS2" min="0.3" max="3" step="0.05" value="2.4" aria-label="Depth regression noise sigma">
-            <div class="unc-read" id="uncR2"></div>
-        </div>
-
-        <div class="unc-controls">
-            <button type="button" class="play-btn" id="uncPlay">Play</button>
-            <button type="button" class="reset-btn" id="uncReset">Reset</button>
-            <span class="unc-start" id="uncStart">START: press Play, then watch the blue slice (depth).</span>
-        </div>
-
-        <p class="unc-share-label">Share of the total loss (who gets heard)</p>
-        <div class="unc-bar" id="uncBar" aria-hidden="true">
-            <div class="unc-seg" id="uncB0" style="background:#c6a1ce"></div>
-            <div class="unc-seg" id="uncB1" style="background:#aaf7b3"></div>
-            <div class="unc-seg" id="uncB2" style="background:#8ab2d1"></div>
-        </div>
-        <div class="unc-legend">
-            <span><span class="unc-dot" style="background:#c6a1ce"></span>Semantics <b id="uncL0"></b></span>
-            <span><span class="unc-dot" style="background:#aaf7b3"></span>Instance <b id="uncL1"></b></span>
-            <span><span class="unc-dot" style="background:#8ab2d1"></span>Depth <b id="uncL2"></b></span>
-            <span class="unc-total">Total bill (\(L_i = 1\)): <b id="uncTotal"></b></span>
-        </div>
-
-        <p class="unc-narr" id="uncNarr" aria-live="polite"></p>
-
-        <div class="cap-card">
-            <strong>How to play</strong>
-            <ul>
-                <li><strong>The point:</strong> this tool prices three tasks by noise: each task's weight is <span id="uncHowtoW">\(1/(2\sigma^2)\)</span>, and \(\log \sigma\) is the price of calling it noisy.</li>
-                <li><strong>What you'll see:</strong> Play drops the depth task's noise to the floor, then cranks it to the top: watch its blue slice grow, then collapse, while the other two slices only move because the bar is shared.</li>
-                <li class="try-it"><strong>Try this:</strong> drag any \(\sigma\) slider and watch that task's slice and its \(\log \sigma\) price change live; flip Regression to Classification and watch the 2 leave the formula while every weight doubles.</li>
-                <li><strong>Reset:</strong> puts every slider and the form back to the start.</li>
-            </ul>
-        </div>
-    </div>
-
-    <script>
-    (function () {
-        "use strict";
-        var DEFAULTS = [0.7, 1.5, 2.4];
-        var sig = DEFAULTS.slice();
-        var mode = "reg"; /* "reg" or "cls" */
-        var sliders = [document.getElementById("uncS0"), document.getElementById("uncS1"), document.getElementById("uncS2")];
-        var reads = [document.getElementById("uncR0"), document.getElementById("uncR1"), document.getElementById("uncR2")];
-        var segs = [document.getElementById("uncB0"), document.getElementById("uncB1"), document.getElementById("uncB2")];
-        var legs = [document.getElementById("uncL0"), document.getElementById("uncL1"), document.getElementById("uncL2")];
-        var narr = document.getElementById("uncNarr");
-        var startPill = document.getElementById("uncStart");
-        var playBtn = document.getElementById("uncPlay");
-        var resetBtn = document.getElementById("uncReset");
-        var regBtn = document.getElementById("uncReg");
-        var clsBtn = document.getElementById("uncCls");
-        var formulaMath = document.getElementById("uncFormulaMath");
-        var formTag = document.getElementById("uncFormTag");
-        var howtoW = document.getElementById("uncHowtoW");
-        var totalEl = document.getElementById("uncTotal");
-        var depthRow = document.getElementById("uncRow2");
-
-        function weight(s) {
-            var s2 = s * s;
-            return mode === "reg" ? 1 / (2 * s2) : 1 / s2;
-        }
-        function fmt(x, d) { return x.toFixed(d); }
-        function formulaTex() {
-            var half = mode === "reg" ? "2\\sigma_i^2" : "\\sigma_i^2";
-            return "\\(L = \\sum_i \\left( \\frac{L_i}{" + half + "} + \\log \\sigma_i \\right)\\)";
-        }
-        function howtoTex() {
-            return mode === "reg" ? "\\(1/(2\\sigma^2)\\)" : "\\(1/\\sigma^2\\)";
-        }
-        function typesetMath(el) {
-            if (window.MathJax && MathJax.Hub) { MathJax.Hub.Queue(["Typeset", MathJax.Hub, el]); }
-        }
-        function renderFormula() {
-            formulaMath.textContent = formulaTex();
-            howtoW.textContent = howtoTex();
-            typesetMath(formulaMath);
-            typesetMath(howtoW);
-        }
-
-        function render() {
-            var w = sig.map(weight);
-            var totalW = w[0] + w[1] + w[2];
-            var totalBill = 0;
-            for (var i = 0; i < 3; i++) {
-                var p = Math.log(sig[i]);
-                totalBill += w[i] * 1.0 + p;
-                var wform = mode === "reg" ? "1/(2s^2)" : "1/(s^2)";
-                reads[i].textContent = "s = " + fmt(sig[i], 2) + "  |  weight " + wform + " = " + fmt(w[i], 2) + "  |  price log s = " + fmt(p, 2);
-                segs[i].style.width = (100 * w[i] / totalW) + "%";
-                legs[i].textContent = fmt(100 * w[i] / totalW, 1) + "%";
-            }
-            totalEl.textContent = fmt(totalBill, 2);
-            formTag.textContent = mode === "reg" ? "regression" : "classification";
-        }
-
-        function setMode(m) {
-            mode = m;
-            var isReg = (m === "reg");
-            regBtn.classList.toggle("active", isReg);
-            clsBtn.classList.toggle("active", !isReg);
-            regBtn.setAttribute("aria-pressed", isReg ? "true" : "false");
-            clsBtn.setAttribute("aria-pressed", isReg ? "false" : "true");
-            render();
-            renderFormula();
-        }
-        regBtn.addEventListener("click", function () { stopPlay(); setMode("reg"); });
-        clsBtn.addEventListener("click", function () { stopPlay(); setMode("cls"); });
-
-        for (var s = 0; s < 3; s++) {
-            (function (i) {
-                sliders[i].addEventListener("input", function () {
-                    stopPlay(); /* user takes the wheel: halt the replay */
-                    sig[i] = parseFloat(sliders[i].value);
-                    render();
-                });
-            })(s);
-        }
-
-        /* ---- Play: a 4-stage replay. Text stages hold 2400ms (>=2200 measured).
-           Visual stages animate with requestAnimationFrame (2400ms and 3200ms,
-           both >= 800ms). No scrolling anywhere. ---- */
-        var TEXT_MS = 2400;
-        var timers = [];
-        var rafId = null;
-        var playing = false;
-
-        function later(ms, fn) {
-            timers.push(window.setTimeout(fn, ms));
-        }
-        function stopPlay() {
-            for (var t = 0; t < timers.length; t++) window.clearTimeout(timers[t]);
-            timers = [];
-            if (rafId !== null) { window.cancelAnimationFrame(rafId); rafId = null; }
-            if (playing) {
-                playing = false;
-                playBtn.textContent = "Play";
-                depthRow.classList.remove("watch");
-                startPill.textContent = "START: press Play, then watch the blue slice (depth).";
-                startPill.style.visibility = "visible";
-            }
-        }
-        function animateDepth(from, to, dur, done) {
-            var t0 = null;
-            function frame(ts) {
-                if (t0 === null) t0 = ts;
-                var k = Math.min(1, (ts - t0) / dur);
-                var v = from + (to - from) * k;
-                sig[2] = Math.round(v * 100) / 100;
-                sliders[2].value = sig[2];
-                render();
-                if (k < 1 && playing) { rafId = window.requestAnimationFrame(frame); }
-                else { rafId = null; if (done) done(); }
-            }
-            rafId = window.requestAnimationFrame(frame);
-        }
-        function play() {
-            stopPlay();
-            /* snap to the canonical start state */
-            sig = DEFAULTS.slice();
-            for (var i = 0; i < 3; i++) sliders[i].value = sig[i];
-            setModeSilent("reg");
-            render();
-            playing = true;
-            playBtn.textContent = "Playing...";
-            startPill.style.visibility = "hidden";
-            depthRow.classList.add("watch");
-            narr.textContent = "Starting price list, regression form. Watch the blue slice: the depth task. I drop its noise to the floor first, then crank it to the top.";
-            later(TEXT_MS, function () {
-                narr.textContent = "Quiet first: depth drops to s = 0.30. Its weight jumps to 5.56, and the blue slice takes over four-fifths of the bar.";
-                animateDepth(sig[2], 0.3, 2400, function () {
-                    later(600, function () {
-                        narr.textContent = "Now the noise: depth climbs to s = 3.00. Watch the blue slice collapse. The other two sliders never moved, yet their shares grow, because the bar is shared.";
-                        animateDepth(sig[2], 3.0, 3200, function () {
-                            later(TEXT_MS, function () {
-                                narr.textContent = "Noise up 10x, weight down 100x. The honesty price climbs from -1.20 to 1.10, so the model only buys quiet for noise that is real. Press Reset to run it again.";
-                                depthRow.classList.remove("watch");
-                                playing = false;
-                                playBtn.textContent = "Play again";
-                                startPill.textContent = "Done. Reset restores the starting price list.";
-                                startPill.style.visibility = "visible";
-                            });
-                        });
-                    });
-                });
-            });
-        }
-        function setModeSilent(m) {
-            mode = m;
-            var isReg = (m === "reg");
-            regBtn.classList.toggle("active", isReg);
-            clsBtn.classList.toggle("active", !isReg);
-            regBtn.setAttribute("aria-pressed", isReg ? "true" : "false");
-            clsBtn.setAttribute("aria-pressed", isReg ? "false" : "true");
-            renderFormula();
-        }
-        function resetAll() {
-            stopPlay();
-            sig = DEFAULTS.slice();
-            for (var i = 0; i < 3; i++) sliders[i].value = sig[i];
-            setModeSilent("reg");
-            narr.textContent = "";
-            render();
-            playBtn.textContent = "Play";
-            startPill.textContent = "START: press Play, then watch the blue slice (depth).";
-            startPill.style.visibility = "visible";
-        }
-        playBtn.addEventListener("click", play);
-        resetBtn.addEventListener("click", resetAll);
-        render();
-    })();
-    </script>
-    <h2 id="uw-algorithm">Algorithm 2: one training step</h2>
-
-    <ol class="worked-example">
-        <li>Forward pass; compute each task loss \(L_i\).</li>
-        <li>Form the total \(L_{\text{total}} = \sum_i (L_i/(2\sigma_i^2) + \log \sigma_i)\), the regression form; classification drops the 1/2.</li>
-        <li>Backpropagate \(L_{\text{total}}\) once. The gradient reaches both the network and the \(\log \sigma_i\) values, since they are learnable.</li>
-        <li>Step the network and the \(\log \sigma_i\) together with the same optimizer.</li>
-    </ol>
-
-<pre><code class="language-python"># log_sigma = learnable vector, one entry per task, init 0
-# (regression form shown; classification uses w_i = 1 / sigma2, no 1/2)
-for i in range(K):
-    sigma2 = exp(2 * log_sigma[i])   # sigma_i^2, always positive
-    w_i = 1 / (2 * sigma2)           # the volume knob
-    total += w_i * losses[i] + log_sigma[i]  # loss + the honesty price
-backward(total)   # one pass updates network AND log_sigma
-step(optimizer)   # network and sigmas learn together</code></pre>
-
-    <p>The loop is deliberately boring: no second optimizer, no gradient editing, no extra backward pass. Paste the loss, add one vector of parameters, done. In practice the \(\sigma_i\) are learned as \(\log \sigma_i\), an unconstrained number that is easier for the optimizer, exponentiated inside the loss. It is the cheapest method in this series to adopt.</p>
-
-    <h2 id="uw-fig7">From the paper</h2>
-
-    <p>The paper's own evidence for the pricing idea. Figure 7 tracks all three tasks of the CityScapes model through training: the losses on top, the learned task uncertainties (\(\sigma^2\)) below. The uncertainties converge in about a hundred iterations, while the network trains for tens of thousands. Tap a numbered marker to tour the six panels.</p>
-
-    <div class="demo" id="paperFig7">
-      <figure class="paperfig" style="margin:0;">
-        <div class="paperfig-wrap">
-            <img src="figures/papers/uncertainty-fig7-taskunc.png" alt="Figure 7 from Kendall, Gal, and Cipolla (2018): six training plots. Top row: the loss curves for semantic segmentation, instance segmentation, and depth regression. Bottom row: the learned task uncertainty (sigma squared) for each task, converging early in training." style="width:100%;height:auto;display:block;">
-            <div class="veil" id="veilT" hidden></div>
-            <div class="veil" id="veilB" hidden></div>
-            <div class="veil" id="veilL" hidden></div>
-            <div class="veil" id="veilR" hidden></div>
-            <button type="button" class="pmark" data-h="0" style="left:27.1%;top:5.7%;" aria-label="Marker 1: semantic segmentation loss">1</button>
-            <button type="button" class="pmark" data-h="1" style="left:60.6%;top:5.7%;" aria-label="Marker 2: instance segmentation loss">2</button>
-            <button type="button" class="pmark" data-h="2" style="left:94.1%;top:5.7%;" aria-label="Marker 3: depth regression loss">3</button>
-            <button type="button" class="pmark" data-h="3" style="left:27.1%;top:54.0%;" aria-label="Marker 4: semantic segmentation uncertainty">4</button>
-            <button type="button" class="pmark" data-h="4" style="left:60.6%;top:54.0%;" aria-label="Marker 5: instance segmentation uncertainty">5</button>
-            <button type="button" class="pmark" data-h="5" style="left:94.1%;top:54.0%;" aria-label="Marker 6: depth regression uncertainty">6</button>
-        </div>
-        <figcaption><strong>Figure 7.</strong> Learning task uncertainty. These training plots show the losses and task uncertainty estimates for each task during training. Results are shown for the final model, trained on the fullsize CityScapes dataset. Rebuilt from Figure 7 of Kendall, Gal, and Cipolla, "Multi-Task Learning Using Uncertainty to Weigh Losses for Scene Geometry and Semantics," <em>CVPR</em> 2018. <a href="https://arxiv.org/abs/1705.07115">arXiv:1705.07115</a>. Figure and caption both taken from the arXiv e-print source.</figcaption>
-        <p class="hotspot-text" id="paperHotspotText">Tap a numbered marker on the figure to tour it.</p>
-      </figure>
-      <div class="cap-card">
-        <strong>How to play</strong>
-        <ul>
-          <li><strong>The point:</strong> the paper's actual Figure 7: the learned uncertainties for all three CityScapes tasks. The insight is the bottom row: the \(\sigma^2\) values settle after about a hundred iterations, long before the network finishes training.</li>
-          <li><strong>What you'll see:</strong> tap a numbered marker to spotlight one panel at a time; the white veil dims the rest while the marker turns red. Each stop lands a one-line explanation below the figure.</li>
-          <li class="try-it"><strong>Try this:</strong> compare marker 2 (instance loss, swinging between 20 and 140) with marker 1 (semantic loss, under 0.05): no single fixed weight could price both. Then tap marker 5 and watch how the noisiest task keeps the largest \(\sigma^2\), hence the smallest weight.</li>
-          <li><strong>Reset:</strong> tap the active marker again to clear the spotlight, back to the full figure.</li>
-        </ul>
-      </div>
-    </div>
-
-    <script>
-    (function () {
-        "use strict";
-        /* Panel rects in percent of the figure container: [left, top, width, height].
-           White-veil spotlight: four plain panes with a hole at the panel's rect,
-           no drawn lines; the active badge turns red. */
-        var PANELS = [
-            [0, 0, 33.0, 47.3], [33.5, 0, 33.0, 47.3], [67.0, 0, 33.0, 47.3],
-            [0, 48.3, 33.0, 47.3], [33.5, 48.3, 33.0, 47.3], [67.0, 48.3, 33.0, 47.3]
-        ];
-        var TEXTS = [
-            "1. Top left: the semantic segmentation loss. Classification, small numbers: it drops from about 0.9 to below 0.05 in the first few thousand iterations and stays there.",
-            "2. Top middle: the instance segmentation loss. Regression in huge units: it swings between roughly 20 and 140 for the whole run. Compare that scale with panel 1. No single fixed weight can price both.",
-            "3. Top right: the depth regression loss. It falls from about 22 to about 2. Three tasks, three different planets of scale.",
-            "4. Bottom left: the learned uncertainty for semantics. It converges after roughly a hundred iterations, long before the network finishes training, then keeps shrinking as the model gets surer.",
-            "5. Bottom middle: the learned uncertainty for instance segmentation. The noisiest task keeps the largest sigma squared, so its weight 1/(2 sigma squared) stays small the whole run. The method prices the noise it sees.",
-            "6. Bottom right: the learned uncertainty for depth. It decays as training progresses: the model gets better at depth, trusts it more, and turns the weight up."
-        ];
-        var marks = document.querySelectorAll("#paperFig7 .pmark");
-        var veils = {
-            t: document.getElementById("veilT"), b: document.getElementById("veilB"),
-            l: document.getElementById("veilL"), r: document.getElementById("veilR")
-        };
-        var label = document.getElementById("paperHotspotText");
-        var active = -1;
-        function hideVeils() {
-            for (var k in veils) veils[k].hidden = true;
-        }
-        function show(i) {
-            var p = PANELS[i];
-            var x = p[0], y = p[1], w = p[2], h = p[3];
-            veils.t.style.cssText = "left:0;top:0;width:100%;height:" + y + "%;";
-            veils.b.style.cssText = "left:0;top:" + (y + h) + "%;width:100%;height:" + (100 - y - h) + "%;";
-            veils.l.style.cssText = "left:0;top:" + y + "%;width:" + x + "%;height:" + h + "%;";
-            veils.r.style.cssText = "left:" + (x + w) + "%;top:" + y + "%;width:" + (100 - x - w) + "%;height:" + h + "%;";
-            for (var k in veils) veils[k].hidden = false;
-            for (var m = 0; m < marks.length; m++) marks[m].classList.toggle("active", m === i);
-            label.textContent = TEXTS[i];
-            active = i;
-        }
-        function clear() {
-            hideVeils();
-            for (var m = 0; m < marks.length; m++) marks[m].classList.remove("active");
-            label.textContent = "Tap a numbered marker on the figure to tour it.";
-            active = -1;
-        }
-        for (var i = 0; i < marks.length; i++) {
-            (function (idx) {
-                marks[idx].addEventListener("click", function () {
-                    if (active === idx) clear(); else show(idx);
-                });
-            })(i);
-        }
-    })();
-    </script>
-
-    <h2 id="when-enough">When weighting is enough, and when it isn't</h2>
-
-    <p>Step back. GradNorm and uncertainty weighting are both <strong>scale methods</strong>: they change how loud each loss is, never what the gradients say. GradNorm learns the volumes from training dynamics, boosting whichever task falls behind. Uncertainty weighting sets them from the data, turning down whichever task is inherently noisy. On multi-task vision benchmarks, both matched or beat hand-tuned and grid-searched weights.</p>
-
-    <p>The two methods even compose, because uncertainty weighting only ever sees losses. Weight the losses by learned uncertainty, then run PCGrad or CAGrad on the resulting gradients: the \(\sigma_i\) handle scale while the surgery handles direction.</p>
-
-    <p>And that is the boundary. Neither method fixes <strong>direction</strong>. Two tasks can be perfectly weighted by noise and still have gradients that point against each other. Uncertainty weighting never looks at gradients at all; GradNorm measures only their lengths, never their angles. GradNorm is also a heuristic with no convergence guarantee: equal loudness does not mean the tasks agree.</p>
-
-    <p>The two volume knobs and the two steering methods, side by side:</p>
-
-    <table class="cmp">
-        <thead><tr><th>Method</th><th>The question it answers</th></tr></thead>
-        <tbody>
-            <tr><td><strong>GradNorm</strong></td><td>How loud should each task be, to keep progress balanced? (learned, driven by training dynamics)</td></tr>
-            <tr><td><strong>Uncertainty</strong></td><td>How loud should each task be, given how noisy it inherently is? (learned, driven by the data)</td></tr>
-            <tr><td><strong>PCGrad</strong></td><td>How should the directions be edited so tasks stop fighting?</td></tr>
-            <tr><td><strong>CAGrad</strong></td><td>How do we protect the worst-off task and stay near the average, with a guarantee?</td></tr>
-        </tbody>
-    </table>
-
-    <p>The volume knobs are balanced. But what if the directions themselves fight? That is <a href="multitask-surgery.html">the next page's question</a>.</p>
-
-
-  <script>
+<script>
   /* ============ Tool (a): GradNorm schematic replay ============ */
   (function () {
     var STEPS = 600, KLR = 0.02, NPTS = 150, STAGE_MS = 2200;
@@ -2096,7 +1687,7 @@ step(optimizer)   # network and sigmas learn together</code></pre>
   })();
 
   </script>
-            <script>
+<script>
         (function () {
             var nav = document.querySelector('.topnav');
             function onNavScroll() {
@@ -2132,7 +1723,7 @@ step(optimizer)   # network and sigmas learn together</code></pre>
             }
         })();
     </script>
-  <script>
+<script>
   /* Shared Play helper: no-yank scrolling. */
   function playScrollEnsure(el) {
     /* Disabled 2026-10-06: user hates scroll-on-Play. No scrolling. */
@@ -2186,8 +1777,8 @@ step(optimizer)   # network and sigmas learn together</code></pre>
 }
 </style>
 <nav class="series-nav" aria-label="Tutorial series navigation">
-    <a class="nav-prev" href="multitask-pareto.html"><span class="nav-dir">&larr; Previous</span><span class="nav-title">Pareto Fronts in Multitask Learning</span></a>
-    <a class="nav-next" href="multitask-surgery.html"><span class="nav-dir">Next &rarr;</span><span class="nav-title">PCGrad (Gradient Surgery)</span></a>
+    <a class="nav-prev" href="multitask-intro.html"><span class="nav-dir">&larr; Previous</span><span class="nav-title">Introduction to Multitask Learning</span></a>
+    <a class="nav-next" href="uncertainty-weighting.html"><span class="nav-dir">Next &rarr;</span><span class="nav-title">Uncertainty Weighting</span></a>
 </nav>
 </body>
 </html>

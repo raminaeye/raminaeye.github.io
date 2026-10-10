@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Gradient Surgery: PCGrad and GradVac</title>
+    <title>GradVac</title>
     <style>
         body {
             font-family: sans-serif;
@@ -707,6 +707,10 @@
         }
         /* GradVac paper-figure hotspot tour (Figure 5 of Wang et al., ICLR 2021) */
         #gvPaperDemo .pf-stage { position: relative; max-width: 640px; margin: 0 auto; }
+/* Fit-in-one-page: the two cases sit side by side on desktop. */
+#gvPaperDemo .pf-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; margin: 0.4rem 0; }
+#gvPaperDemo .pf-pair .pf-stage { max-width: none; margin: 0; }
+@media (max-width: 760px) { #gvPaperDemo .pf-pair { grid-template-columns: 1fr; } }
         #gvPaperDemo .pf-stage img { width: 100%; height: auto; display: block; background: #fff; border: 1px solid #bdc3c7; border-radius: 4px; }
         #gvPaperDemo .pf-hotspot {
           position: absolute; border: 2px dashed transparent; border-radius: 10px;
@@ -771,10 +775,10 @@
 
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-    <script>hljs.highlightAll();</script>
+    <script>if (window.hljs) hljs.highlightAll();</script>
 </head>
 <body>
-        <nav class="topnav" aria-label="Site">
+<nav class="topnav" aria-label="Site">
     <div class="nav-inner">
         <a class="wordmark" href="index.html">Ramin Anushiravani</a>
         <div class="nav-links">
@@ -801,361 +805,31 @@
         </div>
     </div>
 </nav>
-
-
-
     <p class="crumb"><a href="tutorial.html">&larr; All tutorials</a></p>
-    <h1>Gradient Surgery: PCGrad and GradVac</h1>
-    <p class="dek">When gradients fight, cut only the interfering part. When they cooperate, protect the friendship.</p>
+    <h1>GradVac</h1>
+    <p class="dek">Nudge each task pair back to its own healthy level of cooperation, not to zero.</p>
+
+<p>
+        PCGrad cuts every fight to exactly zero. GradVac asks whether zero is the right target:
+        each pair of tasks gets its own target cosine, learned from how that pair usually
+        cooperates, and sagging pairs are nudged back up to it.
+    </p>
 
     <p class="tabs-label">On this page</p>
     <div class="tab-strip">
-        <a class="tab-link" href="#the-paper">The PCGrad paper</a>
-        <a class="tab-link" href="#the-deal">The deal</a>
-        <a class="tab-link" href="#the-geometry">The geometry</a>
-        <a class="tab-link" href="#surgery-stepper">Watch the surgery</a>
-        <a class="tab-link" href="#why-this-cut">Why this cut</a>
-        <a class="tab-link" href="#algorithm">One training step</a>
-        <a class="tab-link" href="#tragic-triad">When the cut pays</a>
-        <a class="tab-link" href="#betrayal">The betrayal case</a>
-        <a class="tab-link" href="#paper-figure">PCGrad's figure</a>
         <a class="tab-link" href="#zero-question">Is zero the right target?</a>
-        <a class="tab-link" href="#the-paper-gv">The GradVac paper</a>
+        <a class="tab-link" href="#the-paper-gv">The paper</a>
         <a class="tab-link" href="#measured">What they measured</a>
         <a class="tab-link" href="#own-target">Each pair's target</a>
         <a class="tab-link" href="#feel-the-nudge">Feel the nudge</a>
-        <a class="tab-link" href="#algorithm-gv">GradVac's step</a>
-        <a class="tab-link" href="#does-it-pay">Does it pay</a>
+        <a class="tab-link" href="#algorithm-gv">One training step</a>
+        <a class="tab-link" href="#does-it-pay">Does it pay?</a>
         <a class="tab-link" href="#paper-figure-gv">GradVac's figure</a>
         <a class="tab-link" href="#knobs">The knobs</a>
         <a class="tab-link" href="#practical">Practical notes</a>
     </div>
 
-    <p>
-        Two task gradients can be perfectly well behaved on their own and still ruin each other the
-        moment you add them. That is the fight this page is about. The first method answers it by
-        operating: when two gradients conflict, cut away only the part that interferes, and leave
-        everything else alone. The second method asks a softer question first: what if the fight never
-        had to happen, because each pair was held at the level of cooperation it normally has?
-    </p>
-
-    <h2 id="the-paper">The paper behind the surgery</h2>
-    <div class="paper-card">
-        <span class="pc-label">The paper</span>
-        <p class="pc-authors">Tianhe Yu, Saurabh Kumar, Abhishek Gupta, Sergey Levine, Karol Hausman, Chelsea Finn</p>
-        <p class="pc-title"><em>Gradient Surgery for Multi-Task Learning.</em></p>
-        <p class="pc-venue">NeurIPS 2020 &middot; <a href="https://arxiv.org/abs/2001.06782">arXiv:2001.06782</a></p>
-    </div>
-    <p>
-        The authors start from the promise of multi-task learning: train one network on many tasks,
-        discover shared structure, and beat learning each task alone on both efficiency and
-        performance. But joint training is a hard optimization problem. It can come out worse than
-        independent training, so badly that several multi-task RL methods quietly retreated to
-        training tasks separately first and distilling afterward, which throws away the efficiency
-        gains the whole thing was for.
-    </p>
-    <p>
-        And the reasons were not well understood. Other work blamed different learning speeds per
-        task, plateaus in the landscape, or the architecture. The authors propose a different
-        culprit: gradients from different tasks can conflict, meaning they point away from each
-        other, and following their sum can be destructive. They name three conditions that together
-        make the damage severe, a tragic triad: conflicting gradients, high positive curvature in
-        the landscape, and a large gap in gradient magnitudes. Picture a deep valley: the
-        multi-task gradient is dominated by one task, the curvature makes the optimizer misjudge
-        both moves, and the other task pays for it.
-    </p>
-    <p>
-        Their answer was to stop tuning around the gradients and operate on them directly. They
-        call it gradient surgery: when two gradients conflict, project each onto the normal plane
-        of the other, cutting away only the interfering components. They prove the local
-        conditions under which that beats plain multi-task gradient descent, and they show it
-        working across multi-task supervised learning and multi-task RL.
-    </p>
-
-    <h2 id="the-deal">The deal</h2>
-    <p>
-        GradNorm fixes loudness. But loudness was never the only disease. Sometimes the directions
-        themselves fight: two task gradients point partly against each other, and adding them lets the
-        tasks cancel each other out before the step even happens. PCGrad ignores the size of gradients
-        completely and goes straight after the direction problem.
-    </p>
-    <p>
-        I picture it as two people steering one cart. One pulls north-east, the other pulls north-west,
-        so part of each person's effort is wasted fighting the other. Then they make a deal: "I will drop
-        the part of my pull that works against you, if you drop the part of yours that works against me."
-        What is left still moves the cart forward for both of them. And nobody gave up any part of their
-        pull that was actually helping.
-    </p>
-    <p>
-        That deal is the whole method. PCGrad stands for <strong>projecting conflicting
-        gradients</strong>, nicknamed <strong>gradient surgery</strong>. Its rule fits in one sentence:
-        if two task gradients fight, cut off the part of each one that works against the other, and only
-        then add them up.
-    </p>
-
-    <h2 id="the-geometry">The geometry</h2>
-    <p>
-        A fight is measured by the cosine of the angle \(\phi\) between two task gradients. When
-        \(\cos \phi\) is below zero, the pair is conflicting, and PCGrad cuts the shadow: the part of
-        one gradient that points along (or against) the other.
-    </p>
-    <div class="math-display">
-        \[ g_i \leftarrow g_i - \frac{g_i \cdot g_j}{\|g_j\|^2} \, g_j \]
-    </div>
-    <p>
-        Every symbol, plainly: \(g_i\) is task \(i\)'s gradient on the shared parameters, and \(g_j\) is
-        task \(j\)'s. The dot product \(g_i \cdot g_j\) measures how much the two agree: negative means
-        they fight. \(\|g_j\|^2\) is the squared length of \(g_j\), which turns the fraction into the
-        projection coefficient. The whole subtracted piece,
-        \(\frac{g_i \cdot g_j}{\|g_j\|^2} g_j\), is exactly the part of \(g_i\) that points along
-        \(g_j\)'s line. When the cosine is negative, that piece points against \(g_j\): it is the
-        offending part. Everything that agrees, or points sideways, is left alone. Then the same cut is
-        done on \(g_j\). Pairs that are not fighting are never touched, so cooperation costs nothing.
-    </p>
-    <p>
-        Let me run one full surgery with numbers, the worked example the tool below animates.
-        \(g_1 = (3, 1)\), \(g_2 = (-1, 2)\).
-    </p>
-    <ol class="worked-example">
-        <li>Check the fight: \(\langle g_1, g_2 \rangle = 3(-1) + 1(2) = -1 &lt; 0\), so the cut is needed.</li>
-        <li>Shadow of \(g_1\) on \(g_2\): \(\left(-\frac{1}{5}\right) g_2 = (0.2, -0.4)\). The minus sign means it points against \(g_2\).</li>
-        <li>Subtract: \(g_1\) becomes \((3, 1) - (0.2, -0.4) = (2.8, 1.4)\).</li>
-        <li>Verify: \(\langle (2.8, 1.4), g_2 \rangle = -2.8 + 2.8 = 0\). An exact right angle, so it can no longer hurt task 2.</li>
-    </ol>
-    <p>
-        The same surgery on the other side gives \(g_2 = (-0.7, 2.1)\), perpendicular to \(g_1\).
-        The update changes from (2, 3) to (2.1, 3.5): nearly the same step, but now guaranteed to contain
-        nothing that fights either task. The scores confirm it: \(\langle d, g_1 \rangle = 9.8\) and
-        \(\langle d, g_2 \rangle = 4.9\), both positive. Try these exact vectors in the
-        <a href="multitask-playground.html">playground</a>.
-    </p>
-
-    <h2 id="surgery-stepper">Watch the surgery happen</h2>
-    <p>
-        The paper draws the surgery as a sequence: the check, the shadows, the cut, and the final add.
-        Step through the four beats with the exact vectors from the worked example above. Nothing moves
-        until you click a beat.
-    </p>
-
-<div class="demo" id="pcgradStepper">
-        <div class="stepper-grid">
-        <div class="surgery-wrap" id="surgeryWrap">
-            <svg viewBox="100 -25 345 262" role="img" aria-label="Four-beat PCGrad surgery on g1 = (3, 1) and g2 = (-1, 2)">
-                <defs>
-                    <marker id="ah-p" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
-                        <path d="M0,0 L10,5 L0,10 z" fill="#8e6fb8"></path>
-                    </marker>
-                    <marker id="ah-g" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
-                        <path d="M0,0 L10,5 L0,10 z" fill="#3f9e4d"></path>
-                    </marker>
-                    <marker id="ah-o" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
-                        <path d="M0,0 L10,5 L0,10 z" fill="#c0924e"></path>
-                    </marker>
-                    <marker id="ah-c" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
-                        <path d="M0,0 L10,5 L0,10 z" fill="#f0927e"></path>
-                    </marker>
-                </defs>
-                <line x1="100" y1="190" x2="445" y2="190" stroke="rgba(44,62,80,.14)" stroke-width="1"></line>
-                <line x1="200" y1="-25" x2="200" y2="237" stroke="rgba(44,62,80,.14)" stroke-width="1"></line>
-                <g id="origG">
-                    <line id="arrG1" x1="200" y1="190" x2="356" y2="138" stroke="#8e6fb8" stroke-width="3" marker-end="url(#ah-p)"></line>
-                    <line id="arrG2" x1="200" y1="190" x2="148" y2="86" stroke="#3f9e4d" stroke-width="3" marker-end="url(#ah-g)"></line>
-                </g>
-                <g id="sum0G" class="hidden-layer">
-                    <line x1="200" y1="190" x2="304" y2="34" stroke="#c0924e" stroke-width="3.5" marker-end="url(#ah-o)"></line>
-                </g>
-                <g id="shadowG" class="hidden-layer">
-                    <line x1="356" y1="138" x2="345.6" y2="117.2" stroke="#f0927e" stroke-width="5" stroke-opacity="0.9" stroke-linecap="round"></line>
-                    <line x1="148" y1="86" x2="163.6" y2="80.8" stroke="#f0927e" stroke-width="5" stroke-opacity="0.9" stroke-linecap="round"></line>
-                </g>
-                <g id="cutG" class="hidden-layer">
-                    <line x1="200" y1="190" x2="345.6" y2="117.2" stroke="#8e6fb8" stroke-width="3.5" marker-end="url(#ah-p)"></line>
-                    <line x1="200" y1="190" x2="163.6" y2="80.8" stroke="#3f9e4d" stroke-width="3.5" marker-end="url(#ah-g)"></line>
-                </g>
-                <g id="dG" class="hidden-layer">
-                    <line x1="200" y1="190" x2="309.2" y2="8" stroke="#c0924e" stroke-width="4" marker-end="url(#ah-o)"></line>
-                </g>
-            </svg>
-            <div class="svg-label start-tag" id="lbl-start" style="left:30.5%; top:86.5%;">START</div>
-            <div class="svg-label" id="lbl-g1" style="left:74.2%; top:62.6%; transform:translate(16px,4px); color:#8e6fb8;">g1 <small>(3, 1)</small></div>
-            <div class="svg-label" id="lbl-g2" style="left:13.9%; top:42.7%; transform:translate(calc(-100% - 10px),-8px); color:#3f9e4d;">g2 <small>(-1, 2)</small></div>
-            <div class="svg-label hidden-layer" id="lbl-g1c" style="left:71.2%; top:54.5%; transform:translate(16px,-14px); color:#8e6fb8;">g1 cut <small>(2.8, 1.4)</small></div>
-            <div class="svg-label hidden-layer" id="lbl-g2c" style="left:18.4%; top:40.6%; transform:translate(16px,-18px); color:#3f9e4d;">g2 cut <small>(-0.7, 2.1)</small></div>
-            <div class="svg-label" id="lbl-sum" style="left:59.1%; top:22.5%; transform:translate(10px,-12px); color:#c0924e;">naive sum <small>(2, 3)</small></div>
-            <div class="svg-label hidden-layer" id="lbl-d" style="left:60.6%; top:12.6%; transform:translate(10px,-12px); color:#c0924e;">d <small>(2.1, 3.5)</small></div>
-        </div>
-        <div class="stepper-side">
-        <div class="step-stage">
-            <div class="stage-title" id="stageTitle">Beat 1 of 4: check for a fight</div>
-            <div class="stage-desc" id="stageDesc"></div>
-        </div>
-        <div>
-            <button class="step-btn active" data-beat="1" aria-label="Beat 1: check for a fight">1</button>
-            <button class="step-btn" data-beat="2" aria-label="Beat 2: find the shadows">2</button>
-            <button class="step-btn" data-beat="3" aria-label="Beat 3: subtract them">3</button>
-            <button class="step-btn" data-beat="4" aria-label="Beat 4: add what is left">4</button>
-            <button class="step-btn nav" id="beatNext">Next &rarr;</button>
-            <button class="step-btn nav" id="beatReset">Reset</button>
-        </div>
-        </div>
-        </div>
-        <div class="cap-card">
-            <strong>How to play</strong>
-            <ul>
-                <li><span class="mono-nums">The point:</span> step the four beats; only the conflicting shadow is cut, nothing else.</li>
-                <li>What it shows: one PCGrad surgery, beat by beat. Purple is task 1, green is task 2, gold is the combined step; each beat's new piece glows amber.</li>
-                <li>Click a beat to jump straight to it, or Next to step forward (wraps from 4 to 1). Nothing moves until you click.</li>
-                <li class="try-it">Try beat 2 and watch the coral pieces: those are the only parts of the arrows that get removed. Try beat 3 and watch each arrow land at a right angle to the other task's gradient.</li>
-                <li><strong>Simplification, stated plainly:</strong> this stepper cuts both shadows at once. The paper's Algorithm 1 instead cuts one task at a time, in random order. For two tasks the result is the same.</li>
-                <li>Reset returns the tool to beat 1, the start.</li>
-            </ul>
-        </div>
-    </div>
-
-    
-    <h2 id="why-this-cut">Why this exact cut</h2>
-    <p>
-        The surgery is three choices, and each one has a reason.
-    </p>
-    <ol>
-        <li>
-            <strong>Why cut exactly the shadow?</strong> The shadow is the only part of \(g_i\) that task
-            \(j\) can feel: the leftover sits at a right angle to \(g_j\), so it cannot move task \(j\)'s
-            loss at all. Cutting less would leave some of the fight in place; cutting more would throw
-            away parts of \(g_i\) that were helping task \(i\) for free. The shadow is the smallest
-            possible edit that makes the two gradients harmless to each other.
-        </li>
-        <li>
-            <strong>Why cut both gradients?</strong> One-sided surgery only moves the problem: the combined
-            step can end up pointing against the un-cut task. Cutting both sides guarantees the final sum
-            contains nothing that fights either task.
-        </li>
-        <li>
-            <strong>Why a random order?</strong> With more than two tasks, each gradient is cut against the
-            others one by one, and a later cut can undo an earlier one. So the answer depends on the
-            order, and whichever task is processed last gets the cleanest gradient. Shuffling every step
-            shares that advantage evenly over training.
-        </li>
-    </ol>
-
-    <h2 id="algorithm">One training step</h2>
-    <p>
-        The full procedure, per training step:
-    </p>
-    <ol>
-        <li>Compute each task gradient \(g_i\) on the shared parameters (one backward pass per task).</li>
-        <li>For each task \(i\): for every other task \(j\) in random order, if \(g_i \cdot g_j &lt; 0\), cut the shadow: \(g_i \leftarrow g_i - \frac{g_i \cdot g_j}{\|g_j\|^2} g_j\).</li>
-        <li>Combine the edited gradients (sum or average) and hand the result to any optimizer: SGD, Adam, anything.</li>
-    </ol>
-    <pre><code class="language-python">import numpy as np
-def pcgrad_combine(grads):
-    # grads: list of per-task gradient vectors on the shared parameters
-    g = [x.copy() for x in grads]
-    for i in range(len(g)):
-        for j in np.random.permutation(len(g)):   # random order, fairness
-            if i != j and g[i] @ g[j] < 0:         # conflict detected
-                g[i] -= (g[i] @ g[j]) / (g[j] @ g[j]) * g[j]  # cut the shadow
-    return sum(g)</code></pre>
-
-    <h2 id="tragic-triad">When the cut actually pays</h2>
-    <p>
-        Conflict alone is not fatal. It only turns destructive when three things come together:
-    </p>
-    <ol>
-        <li>
-            <strong>Conflicting gradients:</strong> the tasks pull against each other, \(\cos \phi &lt; 0\).
-        </li>
-        <li>
-            <strong>Dominating gradients:</strong> one task is much louder. Loudness gap is measured by
-            \(\Phi(g_i, g_j) = \frac{2\|g_i\|\,\|g_j\|}{\|g_i\|^2 + \|g_j\|^2}\),
-            which equals 1 when the two are equally loud and shrinks toward 0 as the gap grows.
-        </li>
-        <li>
-            <strong>High curvature</strong> along the combined direction, so the hopeful "everyone improves
-            a little" picture breaks within a single step.
-        </li>
-    </ol>
-    <p>
-        The theory ties it together: PCGrad is proven to lower the multitask loss more than plain gradient
-        descent when the fight is strong compared to the loudness gap (\(\cos \phi \le -\Phi\)), the
-        landscape is curved enough, and the step size is big enough. In other words, when the triad shows
-        up. On simple convex two-task problems, PCGrad is proven to reach the best point or a point of
-        perfect standoff. And the gains are real: over 30% absolute improvement on multi-task
-        robot-learning benchmarks.
-    </p>
-    <p>
-        Let me check the triad against the worked example above, one computation per line:
-    </p>
-    <ol class="worked-example">
-        <li>\(\|g_1\| = \sqrt{9 + 1} = \sqrt{10} = 3.162\)</li>
-        <li>\(\|g_2\| = \sqrt{1 + 4} = \sqrt{5} = 2.236\)</li>
-        <li>\(\Phi = 2(3.162)(2.236) / (10 + 5)\) \(= 14.142 / 15 = 0.943\)</li>
-        <li>\(\cos \phi = -1 / (3.162 \times 2.236)\) \(= -1 / 7.071 = -0.141\)</li>
-        <li>\(-0.141\) is not \(\le -0.943\), so this toy fight is nowhere near the tragic regime. The surgery still
-        works, but the plain sum was not going to betray anyone here.</li>
-    </ol>
-
-    <h2 id="betrayal">A case where the plain sum betrays a task</h2>
-    <p>
-        Task 1 is loud, \(g_1 = (3, 1)\); task 2 is quiet, \(g_2 = (-1.5, 0.5)\); they conflict
-        (\(\langle g_1, g_2 \rangle = -4\)). The sum \((1.5, 1.5)\) raises task 2's loss, since
-        \(\langle g_1 + g_2, g_2 \rangle = -1.5 &lt; 0\): the loud task simply outvotes the quiet one.
-        After surgery, \(g_1' = (0.6, 1.8)\) and \(g_2' = (-0.3, 0.9)\), and the combined step \((0.3, 2.7)\)
-        helps both: \(\langle d, g_1 \rangle = 3.6\) and \(\langle d, g_2 \rangle = 0.9\), both positive.
-        This is the "Loud vs quiet" preset in the
-        <a href="multitask-playground.html">playground</a>, where you can drag the arrows and watch the
-        scores flip.
-    </p>
-
-    <h2 id="paper-figure">From the paper: the surgery in four panels</h2>
-    <p>
-        This is the paper's own illustration of the surgery, not a redraw. Click a numbered badge to
-        spotlight one panel.
-    </p>
-
-<div class="demo">
-        <div class="pf-wrap" id="pfWrap">
-            <img src="figures/pcgrad-grads.png" alt="PCGrad paper figure: conflicting gradients and the projection surgery in four panels" id="pfImg">
-            <div class="pf-veil" id="pfTop"></div>
-            <div class="pf-veil" id="pfBottom"></div>
-            <div class="pf-veil" id="pfLeft"></div>
-            <div class="pf-veil" id="pfRight"></div>
-            <button class="pf-hot" data-pf="0" style="left:0.5%; top:4%; width:24%; height:80%;" aria-label="Spotlight panel a: the conflict"></button>
-            <button class="pf-hot" data-pf="1" style="left:25.5%; top:4%; width:24%; height:80%;" aria-label="Spotlight panel b: cut one side"></button>
-            <button class="pf-hot" data-pf="2" style="left:50.5%; top:4%; width:24%; height:80%;" aria-label="Spotlight panel c: cut the other side"></button>
-            <button class="pf-hot" data-pf="3" style="left:75.5%; top:4%; width:24%; height:80%;" aria-label="Spotlight panel d: left alone"></button>
-        </div>
-        <div class="pf-badges">
-            <button class="pf-badge" data-pf="0">1 &middot; the conflict</button>
-            <button class="pf-badge" data-pf="1">2 &middot; cut g_i</button>
-            <button class="pf-badge" data-pf="2">3 &middot; cut g_j</button>
-            <button class="pf-badge" data-pf="3">4 &middot; left alone</button>
-            <button class="pf-badge" id="pfReset">Reset</button>
-        </div>
-        <div class="pf-desc" id="pfDesc">All four panels: (a) the conflict, (b) and (c) the two cuts, (d) a non-conflicting pair left alone.</div>
-        <div class="cap-card">
-            <strong>How to play</strong>
-            <ul>
-                <li><span class="mono-nums">The point:</span> click the panels; the paper cuts one shadow per panel and leaves agreement alone.</li>
-                <li>What it shows: the real Figure 2 from the PCGrad paper. Panel (a) is the conflict; (b) and (c) are the two cuts; (d) is a non-conflicting pair.</li>
-                <li>Click a numbered badge (or the panel itself) to spotlight it with a white veil. Nothing is drawn over the figure.</li>
-                <li class="try-it">Try badge 4 and compare with badge 1: same two arrows, but in (d) they agree, so nothing is removed.</li>
-                <li>Reset shows the full figure again.</li>
-            </ul>
-        </div>
-        <p class="pf-cap">
-            Rebuilt from Figure 2 of Yu, T., Kumar, S., Gupta, A., Levine, S., Hausman, K., Finn, C.,
-            "Gradient Surgery for Multi-Task Learning," NeurIPS 2020.
-            (<a href="https://arxiv.org/abs/2001.06782">arXiv:2001.06782</a>)
-        </p>
-        <p class="pf-cap">
-            <span class="verbatim">Original caption: "Conflicting gradients and PCGrad. In (a), tasks i and j have conflicting gradient directions, which can lead to destructive interference. In (b) and (c), we illustrate the PCGrad algorithm in the case where gradients are conflicting. PCGrad projects task i's gradient onto the normal vector of task j's gradient, and vice versa. Non-conflicting task gradients (d) are not altered under PCGrad, allowing for constructive interaction."</span>
-            Figure extracted from the arXiv e-print source and shown with its original caption.
-        </p>
-    </div>
-
-    
-    <h2 id="zero-question">Is zero the right target?</h2>
+<h2 id="zero-question">Is zero the right target?</h2>
     <p>
         Surgery is all-or-nothing: it either cuts the whole shadow or leaves the pair untouched. But
         there is a quieter assumption hiding inside the rule, and I did not notice it at first. Read the
@@ -1177,7 +851,8 @@ def pcgrad_combine(grads):
         The tool below shows that crossover live.
     </p>
 
-    <h2 id="the-paper-gv">The paper behind the vaccine</h2>
+    
+<h2 id="the-paper-gv">The paper behind the vaccine</h2>
     <div class="paper-card">
         <span class="pc-label">The paper</span>
         <p class="pc-authors">Zirui Wang, Yulia Tsvetkov, Orhan Firat, Yuan Cao</p>
@@ -1205,7 +880,8 @@ def pcgrad_combine(grads):
         yes, and that is what the rest of this page is built on.
     </p>
 
-    <h2 id="measured">What the authors measured first</h2>
+    
+<h2 id="measured">What the authors measured first</h2>
     <p>
         Before fixing anything, the authors recorded what PCGrad never looks at: the cosine between every
         pair of task gradients, checkpoint by checkpoint, over entire training runs. Three things showed up.
@@ -1225,7 +901,8 @@ def pcgrad_combine(grads):
         table.
     </p>
 
-    <h2 id="own-target">Each pair gets its own target</h2>
+    
+<h2 id="own-target">Each pair gets its own target</h2>
     <p>
         The fix: keep a running estimate of what "normal" looks like for each pair, a slow-moving average
         of the cosines seen so far, tracked separately for each group of layers. Call the current cosine
@@ -1279,7 +956,8 @@ def pcgrad_combine(grads):
         iteration needed.
     </p>
 
-    <h2 id="feel-the-nudge">Feel the nudge</h2>
+    
+<h2 id="feel-the-nudge">Feel the nudge</h2>
 
 <div class="demo" id="gvDemo">
       <h3 style="margin-top: 0;">The nudge, live</h3>
@@ -1374,7 +1052,8 @@ def pcgrad_combine(grads):
 
 
     
-    <h2 id="algorithm-gv">The algorithm, per training step</h2>
+    
+<h2 id="algorithm-gv">The algorithm, per training step</h2>
 
     <p>One step of GradVac, exactly as the paper describes it:</p>
 
@@ -1395,13 +1074,15 @@ for i, j in pairs:
         grads[i] = grads[i] + a * grads[j]  # nudge, not a full cut
 d = sum(grads)                              # combine the edited gradients</code></pre>
 
-    <h2 id="does-it-pay">Does it pay?</h2>
+    
+<h2 id="does-it-pay">Does it pay?</h2>
 
     <p>On small-scale WMT translation, GradVac beat the plain baseline and all three of GradNorm, MGDA, and PCGrad: on average and on every single language, which multitask methods rarely manage. On a 25-language-pair production benchmark the gains held up and were largest exactly where interference bites hardest: the high-resource languages. It also improved multilingual BERT on named-entity recognition.</p>
 
     <p>And there is a free side product I keep coming back to: the pairwise-cosine log itself costs a few lines of code and draws me a map of how my tasks relate while I train, which is why the Field Guide puts it on the diagnose-first checklist. Even if you never vaccinate a single pair, watching the cosines is worth it.</p>
 
-    <h2 id="paper-figure-gv">From the paper: two cases, side by side</h2>
+    
+<h2 id="paper-figure-gv">From the paper: two cases, side by side</h2>
 
     <p>This is the paper's own comparison of the two methods, the diagram the whole idea hangs on. Case (a) is a pair that is really fighting, negative cosine. Case (b) is a pair that agrees, positive cosine, but less than it used to.</p>
 
@@ -1412,6 +1093,8 @@ d = sum(grads)                              # combine the edited gradients</code
         <button type="button" class="play-btn" id="gvpPlay">Play</button>
         <button type="button" class="play-btn" id="gvpReset">Reset</button>
       </div>
+      <div class="pf-pair">
+      <div>
       <div class="pf-stage" id="gvpStageA">
         <img src="figures/papers/gradvac-fig5a.png" alt="Figure 5 case a of the GradVac paper: PCGrad and GradVac on negative gradient similarity" id="gvpImgA">
         <div class="pf-veil" id="gvpVeilA" aria-hidden="true">
@@ -1424,6 +1107,8 @@ d = sum(grads)                              # combine the edited gradients</code
         <button type="button" class="pf-hotspot" id="gvpHs1" data-m="1" style="left:40%;top:4%;width:58%;height:92%;" aria-label="Case a, GradVac: same fight, adaptive target"><span class="pf-badge" aria-hidden="true">2</span></button>
       </div>
       <p class="caption">Case (a): negative similarity. Left is PCGrad, right is GradVac.</p>
+      </div>
+      <div>
       <div class="pf-stage" id="gvpStageB">
         <img src="figures/papers/gradvac-fig5b.png" alt="Figure 5 case b of the GradVac paper: PCGrad and GradVac on positive gradient similarity" id="gvpImgB">
         <div class="pf-veil" id="gvpVeilB" aria-hidden="true">
@@ -1436,6 +1121,8 @@ d = sum(grads)                              # combine the edited gradients</code
         <button type="button" class="pf-hotspot" id="gvpHs3" data-m="3" style="left:40%;top:4%;width:58%;height:92%;" aria-label="Case b, GradVac: still active below the healthy target"><span class="pf-badge" aria-hidden="true">4</span></button>
       </div>
       <p class="caption">Case (b): positive similarity. Left is PCGrad, right is GradVac.</p>
+      </div>
+      </div>
       <div class="pf-mods" id="gvpList">
         <button type="button" class="pf-mod" data-m="0"><span class="pf-badge" aria-hidden="true">1</span><span><strong>(a) PCGrad</strong>: surgery for a real fight</span></button>
         <button type="button" class="pf-mod" data-m="1"><span class="pf-badge" aria-hidden="true">2</span><span><strong>(a) GradVac</strong>: same fight, adaptive target</span></button>
@@ -1457,11 +1144,13 @@ d = sum(grads)                              # combine the edited gradients</code
     </div>
 
     
-    <h2 id="knobs">The knobs</h2>
+    
+<h2 id="knobs">The knobs</h2>
 
     <p>Three, and the paper's defaults all worked well. The averaging speed \(\beta\) (\(10^{-2}\) was best): slow enough that one noisy batch cannot yank a target around, fast enough to follow real drift over training. <strong>Which tasks to vaccinate</strong>: only the low-resource ones, since they have the most to gain from borrowed alignment. And <strong>granularity</strong>: one target per layer group beat one target for the whole model, matching the finding that alignment varies by layer.</p>
 
-    <h2 id="practical">Practical notes</h2>
+    
+<h2 id="practical">Practical notes</h2>
     <ol>
         <li>
             <strong>Reach for surgery when</strong> your task gradients often fight (negative cosines). Log the
@@ -1493,125 +1182,6 @@ d = sum(grads)                              # combine the edited gradients</code
     <hr>
     <p>Direction is handled softly now: each pair is nudged back to its own healthy level, never forced to a universal zero. But nothing on this page promises anything about the task that ends up worst off. What if, instead of nudging pairs back to normal, we demanded a guarantee on the worst task? That is <a href="cagrad.html">the next page</a>.</p>
 
-
-<script>
-    (function () {
-        var stageTitles = [
-            "Beat 1 of 4: check for a fight",
-            "Beat 2 of 4: find the shadows",
-            "Beat 3 of 4: subtract them",
-            "Beat 4 of 4: add what is left"
-        ];
-        var stageDescs = [
-            "\u27E8g1, g2\u27E9 = 3(-1) + 1(2) = -1 < 0. The arrows partly pull against each other, so the cut is needed. The gold arrow is the naive sum (2, 3).",
-            "Shadow of g1 on g2 = (-1/5) g2 = (0.2, -0.4). The minus sign means it points against g2: exactly the offending part. Same on the other side: (-0.3, -0.1). Watch the coral pieces: those are the only parts that get removed.",
-            "g1 becomes (3,1) - (0.2,-0.4) = (2.8, 1.4); g2 becomes (-1,2) - (-0.3,-0.1) = (-0.7, 2.1). Each now sits at an exact right angle to the other task's gradient: \u27E8(2.8,1.4), g2\u27E9 = -2.8 + 2.8 = 0.",
-            "The update moves from (2, 3) to (2.1, 3.5): nearly the same step, but now guaranteed to contain nothing that fights either task. Scores: \u27E8d, g1\u27E9 = 9.8, \u27E8d, g2\u27E9 = 4.9, both positive."
-        ];
-        var beat = 1;
-        function show(el, on) { el.classList.toggle("hidden-layer", !on); }
-        function setBeat(b) {
-            beat = b;
-            show(document.getElementById("sum0G"), b === 1);
-            show(document.getElementById("shadowG"), b >= 2);
-            show(document.getElementById("cutG"), b >= 3);
-            show(document.getElementById("dG"), b === 4);
-            /* One focal cue per beat: the newly introduced layer glows amber,
-               so the eye lands on exactly what changed. */
-            document.getElementById("sum0G").classList.toggle("fresh", b === 1);
-            document.getElementById("shadowG").classList.toggle("fresh", b === 2);
-            document.getElementById("cutG").classList.toggle("fresh", b === 3);
-            document.getElementById("dG").classList.toggle("fresh", b === 4);
-            show(document.getElementById("lbl-start"), b === 1);
-            show(document.getElementById("lbl-g1"), b <= 2);
-            show(document.getElementById("lbl-g2"), b <= 2);
-            show(document.getElementById("lbl-g1c"), b >= 3);
-            show(document.getElementById("lbl-g2c"), b >= 3);
-            show(document.getElementById("lbl-sum"), b === 1);
-            show(document.getElementById("lbl-d"), b === 4);
-            var g1 = document.getElementById("arrG1"), g2 = document.getElementById("arrG2");
-            g1.classList.toggle("orig-faded", b >= 3);
-            g2.classList.toggle("orig-faded", b >= 3);
-            document.getElementById("stageTitle").textContent = stageTitles[b - 1];
-            document.getElementById("stageDesc").textContent = stageDescs[b - 1];
-            var btns = document.querySelectorAll("#pcgradStepper .step-btn[data-beat]");
-            for (var i = 0; i < btns.length; i++) {
-                btns[i].classList.toggle("active", parseInt(btns[i].getAttribute("data-beat"), 10) === b);
-            }
-        }
-        var btns = document.querySelectorAll("#pcgradStepper .step-btn[data-beat]");
-        for (var i = 0; i < btns.length; i++) {
-            btns[i].addEventListener("click", function () {
-                setBeat(parseInt(this.getAttribute("data-beat"), 10));
-            });
-        }
-        document.getElementById("beatNext").addEventListener("click", function () {
-            setBeat(beat % 4 + 1);
-        });
-        document.getElementById("beatReset").addEventListener("click", function () {
-            setBeat(1);
-        });
-        setBeat(1);
-    })();
-    </script>
-
-<script>
-    (function () {
-        var rects = [
-            { x0: 0.5, x1: 24.5, y0: 4, y1: 84 },
-            { x0: 25.5, x1: 49.5, y0: 4, y1: 84 },
-            { x0: 50.5, x1: 74.5, y0: 4, y1: 84 },
-            { x0: 75.5, x1: 99.5, y0: 4, y1: 84 }
-        ];
-        var descs = [
-            "(a) The conflict. gi and gj pull partly against each other: their cosine is below zero, which is the only trigger PCGrad needs.",
-            "(b) Cut one side. gi is projected onto the normal plane of gj (the dashed arrow): exactly the shadow is removed, nothing else.",
-            "(c) Cut the other side. gj is projected onto the normal plane of gi. Both cuts together leave no interference in either direction.",
-            "(d) Left alone. These two gradients do not fight, so PCGrad touches neither. Cooperation costs nothing."
-        ];
-        var top = document.getElementById("pfTop"), bottom = document.getElementById("pfBottom"),
-            left = document.getElementById("pfLeft"), right = document.getElementById("pfRight"),
-            desc = document.getElementById("pfDesc");
-        var badges = document.querySelectorAll(".pf-badge[data-pf]");
-        var hots = document.querySelectorAll(".pf-hot[data-pf]");
-        function clearVeil() {
-            [top, bottom, left, right].forEach(function (p) { p.classList.remove("on"); });
-            for (var i = 0; i < badges.length; i++) badges[i].classList.remove("active");
-        }
-        function setPanel(n) {
-            clearVeil();
-            var r = rects[n];
-            top.style.cssText = "left:0; right:0; top:0; height:" + r.y0 + "%;";
-            bottom.style.cssText = "left:0; right:0; top:" + r.y1 + "%; bottom:0;";
-            left.style.cssText = "top:" + r.y0 + "%; height:" + (r.y1 - r.y0) + "%; left:0; width:" + r.x0 + "%;";
-            right.style.cssText = "top:" + r.y0 + "%; height:" + (r.y1 - r.y0) + "%; left:" + r.x1 + "%; right:0;";
-            [top, bottom, left, right].forEach(function (p) { p.classList.add("on"); });
-            badges[n].classList.add("active");
-            desc.textContent = descs[n];
-        }
-        function reset() {
-            clearVeil();
-            desc.textContent = "All four panels: (a) the conflict, (b) and (c) the two cuts, (d) a non-conflicting pair left alone.";
-        }
-        for (var i = 0; i < badges.length; i++) {
-            (function (n) {
-                badges[n].addEventListener("click", function () { setPanel(n); });
-            })(i);
-        }
-        for (var j = 0; j < hots.length; j++) {
-            (function (n) {
-                /* Keyboard focus previews the same approved spotlight (veil + red badge) a click shows.
-                   Blur restores rest state, unless the focus turned into a click/Enter selection. */
-                var fromFocus = false;
-                hots[n].addEventListener("click", function () { fromFocus = false; setPanel(n); });
-                hots[n].addEventListener("focus", function () { fromFocus = true; setPanel(n); });
-                hots[n].addEventListener("blur", function () { if (fromFocus) { fromFocus = false; reset(); } });
-            })(j);
-        }
-        document.getElementById("pfReset").addEventListener("click", reset);
-    })();
-    </script>
-
 <script>
     (function () {
         /* GradVac nudge tool: pure math, no libraries. */
@@ -1621,7 +1191,7 @@ d = sum(grads)                              # combine the edited gradients</code
         var OX = 150, OY = 280, SC = 62;
         var STAGE_MS = 2200;
         var DEFAULTS = { angle: 115, target: 0.3 };
-        var st = { angle: DEFAULTS.angle, target: DEFAULTS.target, showPcg: false };
+        var st = { angle: DEFAULTS.angle, target: DEFAULTS.target, showPcg: false, touched: false };
 
         /* Fit the drawing scale so the nudged arrow never leaves the 380x420
            frame, even at extreme targets (~0.9). Margins leave room for the
@@ -1848,10 +1418,18 @@ d = sum(grads)                              # combine the edited gradients</code
             el.playG.style.display = 'none';
             el.startPill.style.display = '';
             drawBase(c); drawGhost(c); drawPcg(c); focusNone();
-            el.status.textContent = '';
-            el.status.innerHTML = statusHTML(c);
-            el.status.className = 'gv-status ' + (c.acts ? 'acts' : 'idle');
-            el.readout.innerHTML = readoutHTML(c);
+            if (!st.touched) {
+                /* Rest-state purity: the dose and the land-on-target conclusion
+                   arrive during Play or slider drags, never before. */
+                el.status.textContent = '';
+                el.status.className = 'gv-status';
+                el.readout.innerHTML = 'Press Play, or drag a slider, to see the nudge.';
+            } else {
+                el.status.textContent = '';
+                el.status.innerHTML = statusHTML(c);
+                el.status.className = 'gv-status ' + (c.acts ? 'acts' : 'idle');
+                el.readout.innerHTML = readoutHTML(c);
+            }
             el.stage.innerHTML = '<span class="gv-stage-tag">START.</span> Drag a slider, or press Play to watch the nudge in three stages: measure, nudge, check.';
             el.angleVal.textContent = st.angle + ' deg, cos = ' + f2(c.cos);
             el.targetVal.textContent = f2(st.target);
@@ -1961,6 +1539,7 @@ d = sum(grads)                              # combine the edited gradients</code
         }
         function play() {
             stopPlay();
+            st.touched = true;
             var c = compute();
             var my = ++token;
             el.play.classList.add('playing'); el.play.textContent = 'Playing';
@@ -1977,7 +1556,7 @@ d = sum(grads)                              # combine the edited gradients</code
         }
         function reset() {
             stopPlay();
-            st.angle = DEFAULTS.angle; st.target = DEFAULTS.target; st.showPcg = false;
+            st.angle = DEFAULTS.angle; st.target = DEFAULTS.target; st.showPcg = false; st.touched = false;
             el.angle.value = String(DEFAULTS.angle);
             el.target.value = String(DEFAULTS.target);
             el.cmp.checked = false;
@@ -1988,6 +1567,7 @@ d = sum(grads)                              # combine the edited gradients</code
             st.angle = parseFloat(el.angle.value);
             st.target = parseFloat(el.target.value);
             st.showPcg = el.cmp.checked;
+            st.touched = true;
             renderRest();
         }
         el.angle.addEventListener('input', onInput);
@@ -2018,7 +1598,6 @@ d = sum(grads)                              # combine the edited gradients</code
         reserveStageHeight();
     })();
     </script>
-
 <script>
     (function () {
         /* Paper-figure hotspot tour: Figure 5 of Wang et al. (ICLR 2021). */
@@ -2121,7 +1700,6 @@ d = sum(grads)                              # combine the edited gradients</code
         reserveExplainHeight();
     })();
     </script>
-
 <script>
         (function () {
             var nav = document.querySelector('.topnav');
@@ -2158,7 +1736,6 @@ d = sum(grads)                              # combine the edited gradients</code
             }
         })();
     </script>
-
 <script>
   /* Shared Play helper: no-yank scrolling. */
   function playScrollEnsure(el) {
@@ -2166,7 +1743,6 @@ d = sum(grads)                              # combine the edited gradients</code
     return;
   }
   </script>
-
 <style>
 /* r9nav: series previous/next navigation bar */
 .series-nav {
@@ -2214,7 +1790,7 @@ d = sum(grads)                              # combine the edited gradients</code
 }
 </style>
 <nav class="series-nav" aria-label="Tutorial series navigation">
-    <a class="nav-prev" href="multitask-weighting.html"><span class="nav-dir">&larr; Previous</span><span class="nav-title">Loss Weighting for Multitask Learning</span></a>
+    <a class="nav-prev" href="pcgrad.html"><span class="nav-dir">&larr; Previous</span><span class="nav-title">PCGrad</span></a>
     <a class="nav-next" href="cagrad.html"><span class="nav-dir">Next &rarr;</span><span class="nav-title">CAGrad (Conflict-Averse Gradient Descent)</span></a>
 </nav>
 </body>

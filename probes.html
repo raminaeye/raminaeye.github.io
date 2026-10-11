@@ -704,6 +704,28 @@
 
     <p class="crumb"><a href="tutorial.html">&larr; All tutorials</a></p>
 
+    <p class="tabs-label">On this page</p>
+    <div class="tab-strip">
+        <a class="tab-chip" href="#threat">The threat</a>
+        <a class="tab-chip" href="#cheaper">Cheaper than a judge</a>
+        <a class="tab-chip" href="#listening">Listening to one layer</a>
+        <a class="tab-chip" href="#early-warning">Early warning</a>
+        <a class="tab-chip" href="#what-it-means">What an activation probe means</a>
+        <a class="tab-chip" href="#number-lists">Prompt slices as numbers</a>
+        <a class="tab-chip" href="#positions">Positions, not words</a>
+        <a class="tab-chip" href="#middle-layers">Meaning in the middle</a>
+        <a class="tab-chip" href="#toy-model">The toy model</a>
+        <a class="tab-chip" href="#scoring">How a probe scores</a>
+        <a class="tab-chip" href="#skeleton">Score, then combine</a>
+        <a class="tab-chip" href="#training">Trained on short prompts</a>
+        <a class="tab-chip" href="#train-walkthrough">Train one probe in four steps</a>
+        <a class="tab-chip" href="#cascade">The cascade</a>
+        <a class="tab-chip" href="#results">Results</a>
+        <a class="tab-chip" href="#limitations">Limitations</a>
+        <a class="tab-chip" href="#next">What's next</a>
+        <a class="tab-chip" href="#references">References</a>
+    </div>
+
   <h1>Activation Probes</h1>
 <style>
 /* probes.html additions */
@@ -742,6 +764,8 @@
 .dzone b { display: block; font-size: 15px; }
 .dzone span { font-size: 13px; color: #555; }
 .dzone i { display: block; font-size: 12px; color: #777; font-style: normal; margin-top: 2px; }
+.refs { margin: 1em 0 0; padding-left: 22px; }
+.refs li { margin-bottom: 0.6em; }
 .dzone.benign { background: #e8f5e9; border: 1px solid #a5d6a7; }
 .dzone.benign b { color: #2e7d32; }
 .dzone.unsure { background: #fff8e1; border: 1px solid #ffe082; }
@@ -765,40 +789,40 @@
 
 <p class="dek">Tiny classifiers that read a model's internal activations to flag harmful prompts, before it answers.</p>
 
-<h2>The threat: hidden instructions inside innocent prompts</h2>
+<h2 id="threat">The threat: hidden instructions inside innocent prompts</h2>
 <p>What if you could catch a jailbreak before the model writes a single word? A large language model reads your prompt, turns it into numbers, processes those numbers through dozens of layers, and writes back one piece at a time. Its core skill is following instructions in the prompt: answer this, summarize that, write code that does X. That is what makes it useful.</p>
 <p>It is also what makes it dangerous. The model cannot tell which instructions deserve to be followed. An attacker can hide malicious instructions inside an innocent-looking prompt, a <strong>jailbreak</strong>: "help me debug this code" where the code is malware, or a long story that gradually steers the model into explaining how to break into a system. The model follows along because following instructions is what it does. The damage is concrete: phishing campaigns, vulnerability hunting, step-by-step help with attacks, all produced by a helpful assistant doing exactly what it was told.</p>
 <p>The first instinct is to teach the model to refuse bad requests. It does not hold against determined attackers: the paper cites Nasr et al., 2025 on refusal training failing under pressure. So instead of relying on the model to behave, the paper watches prompts at deployment time.</p>
 <p>Google DeepMind made probes production-ready: their findings informed the deployment of misuse-mitigation probes in user-facing Gemini.</p>
 
-<h2>An LLM judge doubles the bill; a probe reads numbers that already exist</h2>
+<h2 id="cheaper">An LLM judge doubles the bill; a probe reads numbers that already exist</h2>
 <p>The obvious defense is a monitor: a second system that reads every prompt and judges whether it is an attack. The simplest monitor is another large language model asked exactly that question. It works, but it roughly doubles the bill, because every user request now costs two giant model runs instead of one.</p>
 <p>An activation probe is the cheaper answer. It does not read the prompt's words, and it does not run a second giant model. It reads the first model's own internal understanding of the prompt, which the model already computed during its normal forward pass, and turns it into one suspiciousness score. The extra cost is tiny: one small classifier running on numbers that already exist.</p>
 <p>But cheap is not the paper's real story. Probes already existed, and they broke in production: a probe trained on short prompts falls apart on long documents, because one malicious sentence's score gets averaged away by a million innocent ones. Training directly on long documents is far too expensive, so the paper engineers the probes to generalize instead. Cost is the enabler; surviving production is the story.</p>
 <p>Two terms, glossed once here and used everywhere below. A <strong>token</strong> is a word-piece, the chunk the model actually reads ("injection" might be one token, "unbelievable" might be three). An <strong>activation</strong> is a list of numbers inside the model describing what it has understood so far.</p>
 
-<h2>Probes: tiny classifiers that listen to one layer</h2>
+<h2 id="listening">Probes: tiny classifiers that listen to one layer</h2>
 <p>Neural networks have a reputation as black boxes: millions of numbers with no labels saying what any of them mean. Scientists have wanted to look inside for years, and the standard trick comes from neuroscience. Brain researchers attach small classifiers to recordings from a brain region and ask: from this region's activity alone, can you tell what the subject is seeing? If yes, that information is present in that region.</p>
 <p>Machine learning borrowed the trick. In 2016, Alain and Bengio attached tiny linear classifiers, which they called <strong>probes</strong>, to the intermediate layers of neural networks. A probe is deliberately too simple to learn anything on its own. It just listens to one layer's numbers and answers one question about them. If it answers well, the knowledge was already in the layer. And crucially, the probe never changes the model: it is attached after training and only reads.</p>
 <p>This paper points that listening trick at safety. Instead of asking "does this layer know French grammar," the probe asks "does this layer think the prompt is an attack?" Everything that follows is that one idea, engineered until it works in production.</p>
 
-<h2>Early warning: the probe scores before the model answers</h2>
+<h2 id="early-warning">Early warning: the probe scores before the model answers</h2>
 <p>A probe is a tiny watcher that reads what the model understood, not what it said.</p>
 <p>The probe sits to the side of the model, tapped into one middle layer. It copies numbers out, computes a score, and stops there. If the score clears a threshold, the surrounding system acts instead of letting the model answer. It can block the request, refuse it, or hand the prompt to a bigger model for a second opinion. If the score is low, nothing happens and the model answers normally.</p>
 <p>Timing is the point. The probe finishes scoring while the model is still reading the prompt, before any answer exists. Early warning, not a lock on the door.</p>
 
-<h2>What "activation probe" means</h2>
+<h2 id="what-it-means">What "activation probe" means</h2>
 <p>This thing has a name: an <strong>activation probe</strong>.</p>
 <p>tap a middle layer of the model, check every part of the prompt, keep the most suspicious part, compare it to a threshold. The precise meaning of "part" arrives in two steps below.</p>
 
-<h2>Every prompt slice is a list of numbers</h2>
+<h2 id="number-lists">Every prompt slice is a list of numbers</h2>
 <p>Each part of the prompt that the model processes is represented as a list of numbers. "Hidden size" is just the length of that list: how many dials the model gets for describing what it understood. The toy's full list is <code>768</code> numbers long; I only show <code>8</code> of them here, so the arithmetic stays visible. In the paper's setting the lists are thousands of numbers long, and the same arithmetic runs over all of them.</p>
 
-<h2>Positions, not words</h2>
+<h2 id="positions">Positions, not words</h2>
 <p>By the middle of the model, those lists are no longer word lists. Every block lets each slice of the prompt look at the other slices and mix their information in, so by block <code>8</code> the list sitting where "injection" was has absorbed the whole sentence around it. Call each slice a <strong>position</strong>: a slot in the prompt whose list of numbers sees the entire prompt, not just its own word.</p>
 <p>The probe scores positions, not words. Here is the proof, in the toy numbers below: the word "SQL" appears in both demo prompts, but its list of numbers is different each time, so its score is different too, <code>2.84</code> in the attack prompt and <code>0.75</code> in the benign one. Same word, different situation, different score. The probe is not detecting the word "SQL." It is detecting the situation the word sits in, as the model understood it. That is the entire reason for tapping the middle of the model instead of scanning the raw text.</p>
 
-<h2>Meaning builds in the middle layers</h2>
+<h2 id="middle-layers">Meaning builds in the middle layers</h2>
 <p>Think of the model's layers as an assembly line. The early layers handle raw word pieces. The middle layers build meaning: this is where each position's list absorbs the whole prompt and the model forms its understanding of what is being asked, including whether something is off. The late layers spend that understanding on planning the next word of the answer.</p>
 <div class="diagram eml-layers">
 <div class="eml-band eml-late"><b>Late layers</b><span>planning the next word</span></div>
@@ -821,7 +845,7 @@
 <p>One thing to lock in now, because it is true for every probe below: the tap is identical. One fixed middle layer, one list of numbers per position. Every probe then scores each position, combines those scores into one number, and compares it to a threshold. The paper's whole argument lives in the combine step, so that is the step to watch.</p>
 <p>This is also why the probe works at all. The probe is not detecting attacks from scratch. By the middle of the model, the model itself has already done the hard work of understanding the prompt. The probe is just a cheap reader of that understanding, trained to report one thing: does this understanding look like an attack?</p>
 
-<h2>The toy model: <code>12</code> blocks, hidden size <code>768</code>, tap block <code>8</code></h2>
+<h2 id="toy-model">The toy model: <code>12</code> blocks, hidden size <code>768</code>, tap block <code>8</code></h2>
 <p>The toy model on this page is a GPT-style transformer: <code>12</code> blocks, hidden size <code>768</code> (<code>8</code> of the <code>768</code> numbers are shown, so the arithmetic stays visible), <code>12</code> attention heads, meaning <code>12</code> independent scorers reading the prompt in parallel. The probe taps block <code>8</code> and copies every position's list of numbers. In the paper, the same setup watches Gemini 2.5 Flash; the toy stands in for it, and you will meet Flash properly in the cascade section below.</p>
 
 <div class="demo" id="probeDemoA">
@@ -853,7 +877,7 @@
 <div id="probeAChips" style="margin:0.4rem 0"></div>
 <div id="probeARows" style="opacity:0;transition:opacity .5s"></div>
 <div id="probeADec" style="display:none"></div>
-<div class="caption"><span class="cap-title" style="display:block;font-weight:700;color:#2c3e50;margin-bottom:4px;">How to play</span><b>The point:</b> watch a probe turn a prompt into one score. The prompt flows up the stack, the tap copies each position's numbers, every position gets a score, the max wins and the verdict arrives. <b>Try</b> the Attack/Benign toggle and watch the verdict flip. <b>Watch</b> the score bars, and compare the "SQL" row across both prompts: same word, different numbers, different score.</div>
+<div class="caption"><span class="cap-title" style="display:block;font-weight:700;color:#2c3e50;margin-bottom:4px;">How to play</span><b>The point:</b> a probe turns a prompt into one score: the prompt flows up the stack, the tap copies each position's numbers, every position gets a score, the max wins, and the verdict arrives. The Attack/Benign toggle flips the verdict, and the "SQL" row lands differently in each prompt: same word, different numbers, different score.</div>
 </div>
 <style>
 #probeDemoA .blk { fill: #f4f6f8; stroke: #dee2e6; stroke-width: 1.5; transition: fill .3s, stroke .3s; }
@@ -972,12 +996,12 @@
 })();
 </script>
 
-<h2>How a probe scores a prompt</h2>
+<h2 id="scoring">How a probe scores a prompt</h2>
 <p>Honest label first: what follows is a simplified single-head teaching version. It scores like the classic linear probe and combines by taking each head's most suspicious position, and it matches no single paper architecture exactly. The paper's real probes add heads, MLPs, and windows on top of this skeleton. score every position in the prompt by how attack-like its numbers look, keep the single most suspicious position's score, then squash that one number into a probability.</p>
 <p>In one line: every position's numbers get dotted against the learned direction, which measures how attack-like that position reads. The max over positions keeps only the single most suspicious score instead of an average, and that keep-only-the-winner move is the combine step. A bias nudges the winning score, and a sigmoid squashes it into a probability.</p>
 
-<h2>One skeleton for every probe: score positions, then combine</h2>
-<p>The paper walks through its probes in two groups: baselines from prior work, then the new designs. For each one: how it scores positions, how it combines them, why the combine rule helps or fails, and where it works.</p>
+<h2 id="skeleton">One skeleton for every probe: score positions, then combine</h2>
+<p>The probes split into two groups: earlier designs, then the ones that survive long contexts. For each one: how it scores positions, how it combines them, why the combine rule helps or fails, and where it works.</p>
 <h3>The baselines: linear, EMA, and attention probes</h3>
 <p><strong>Linear probe.</strong> The classic, from Alain and Bengio 2016. Score every position with the learned weights, then <strong>average</strong> all the scores. On a short prompt the average is fine, but in a million-token document one attack sentence gets divided by a million and vanishes. Dilution is the failure mode.</p>
 <p><strong>EMA probe.</strong> From Cunningham et al. 2025. First train the linear probe above. Then sweep the prompt left to right, keeping a running average that decays: half the new position's score, half the running average. Then <strong>take the peak</strong> of that smoothed curve. It asks "was there ever a sustained stretch that looked bad." That question survives long contexts better than one flat average, but the peak still washes out on very long documents.</p>
@@ -1030,7 +1054,7 @@
 </div>
 <label class="dil-slider-row"><span class="dil-cap">Context length</span><span class="dil-mid"><input type="range" id="dilSlider" min="1" max="5" step="0.01" value="1" aria-label="Context length in tokens, log scale"><span class="dil-ticks"><span>10</span><span>100</span><span>1k</span><span>10k</span><span>100k</span></span></span><b id="dilN">10 tokens</b></label>
 </div>
-<div class="caption"><span class="cap-title" style="display:block;font-weight:700;color:#2c3e50;margin-bottom:4px;">How to play</span><b>The point:</b> attention's weights spread over thousands of benign tokens, so the attack token's share shrinks to nearly zero.  <b>Try</b> dragging the slider yourself and watch the attack token's share collapse as the context grows. <b>Caveat:</b> the numbers are illustrative, the paper publishes no per-token weight traces. But the mechanism is the paper's: weights spreading over more tokens.</div>
+<div class="caption"><span class="cap-title" style="display:block;font-weight:700;color:#2c3e50;margin-bottom:4px;">How to play</span><b>The point:</b> attention's weights spread over thousands of benign tokens, so the attack token's share collapses as the context grows, from 94.3% at 10 tokens to nearly zero at 100,000. <b>Caveat:</b> the numbers are illustrative; the paper publishes no per-token weight traces. The mechanism is the paper's: weights spreading over more tokens.</div>
 </div>
 <style>
 #dilDemo .dil-readout { font-size: 14px; color: #2c3e50; margin: 0.4rem 0; }
@@ -1114,7 +1138,7 @@
 </div>
 </div>
 <div id="probeBPanels"></div>
-<div class="caption"><span class="cap-title" style="display:block;font-weight:700;color:#2c3e50;margin-bottom:4px;">How to play</span><b>The point:</b> the combine step decides everything on long documents. <b>Play</b> reveals the three strategies one by one on the same document: average, max, and max over <code>10</code>-token windows. <b>Try</b> the position control and watch the average stay low while the max stays high wherever the sentence hides. <b>Watch</b> the three final scores against the <code>0.5</code> threshold. The red chips mark the attack sentence, and the <code>0.5</code> tick is the decision threshold. Scores are illustrative toy numbers.</div>
+<div class="caption"><span class="cap-title" style="display:block;font-weight:700;color:#2c3e50;margin-bottom:4px;">How to play</span><b>The point:</b> the combine step decides everything on long documents. On the same 40-token document, the average stays below <code>0.5</code> while the max and the worst <code>10</code>-token window clear it, wherever the attack sentence hides. The red chips mark the attack sentence and the <code>0.5</code> tick is the decision threshold. Scores are illustrative toy numbers.</div>
 </div>
 <style>
 #probeBDoc .tok-chip { font-size: 0.78em; padding: 2px 8px; }
@@ -1233,7 +1257,7 @@
 <div class="caption">Figure 2, verbatim caption: &ldquo;Different probing classifiers that we compare in Section 3. All our probing classifiers can be composed into six states 1) to 6) as illustrated. [&hellip;]&rdquo;</div>
 </div>
 
-<h2>Trained only on short prompts, tested on long ones</h2>
+<h2 id="training">Trained only on short prompts, tested on long ones</h2>
 <p>The weights are learned from labeled prompts. The attack side is cyber attacks curated by security experts, plus multi-turn conversations that start innocent and escalate. The benign side is real user traffic with personal data removed, plus hard negatives: prompts that sound dangerous but are not, like asking how a famous breach worked or asking for a code security review. The hard negatives teach the probe the difference between <em>talking about</em> attacks and <em>asking for help with</em> one.</p>
 <p>The training loss is binary cross-entropy, for each training prompt, nudge the weights so attacks score high and benign prompts score low. A confident correct answer gets a small nudge; a confident wrong answer gets a large one. The bar chart below makes the size difference visible.</p>
 <div class="diagram">
@@ -1259,7 +1283,118 @@
 <p>The decision threshold is picked on a validation set with false alarms weighted heaviest: overtriggering on benign traffic counts <code>50</code> against <code>5</code> for a missed attack and <code>2</code> for a hard-negative false alarm.</p>
 <p>A smoke detector that cries wolf gets ripped off the wall.</p>
 
-<h2>Cheap triage, expensive second opinion: the unsure middle goes to Flash</h2>
+<h2 id="train-walkthrough">Train one probe in four steps</h2>
+<p>Training a probe is four moves: copy the numbers out of the middle layer, learn one direction that scores them, test it on fresh prompts, and read the accuracy as a report on what the layer knew. Walk through the four moves below.</p>
+<div class="demo" id="probeTrain">
+<style>
+.pt-dots{display:flex;gap:10px;justify-content:center;margin:0 0 0.6rem}
+.pt-dot{width:34px;height:34px;border-radius:50%;border:2px solid #2980b9;background:#fff;color:#2980b9;font-weight:700;font-size:15px;cursor:pointer;line-height:1;padding:0}
+.pt-dot.active{background:#2980b9;color:#fff}
+.pt-dot:focus-visible{outline:2px solid #2c3e50;outline-offset:2px}
+#probeTrain .play-btn:disabled{opacity:.35;cursor:default}
+#ptOutcome{min-height:2.8em;margin:0.5rem 0 0}
+</style>
+<svg id="ptSvg" viewBox="0 0 360 250" role="img" aria-label="Step-through of training one probe in four steps" style="width:100%;max-width:520px;height:auto;display:block;margin:0 auto;"></svg>
+<div class="pt-dots">
+<button type="button" class="pt-dot active" data-s="0" aria-label="Step 1: tap the middle layer">1</button>
+<button type="button" class="pt-dot" data-s="1" aria-label="Step 2: train the tiny classifier">2</button>
+<button type="button" class="pt-dot" data-s="2" aria-label="Step 3: measure accuracy on fresh prompts">3</button>
+<button type="button" class="pt-dot" data-s="3" aria-label="Step 4: the accuracy reveals what the layer knew">4</button>
+</div>
+<div class="demo-controls">
+<button type="button" class="play-btn" id="ptPrev">Prev</button>
+<button type="button" class="play-btn" id="ptNext">Next</button>
+</div>
+<p id="ptOutcome" aria-live="polite"></p>
+<div class="caption"><span class="cap-title" style="display:block;font-weight:700;color:#2c3e50;margin-bottom:4px;">What this shows</span><b>The point:</b> training a probe is four moves: copy each position's numbers from block 8, learn one direction that scores attack-like numbers high, test on fresh prompts, and read the accuracy as a report on the layer. The probe adds no understanding of its own; it only reveals what was already there.</div>
+</div>
+<script>
+(function () {
+  var svg = document.getElementById('ptSvg');
+  var out = document.getElementById('ptOutcome');
+  var step = 0;
+  var dots = document.querySelectorAll('#probeTrain .pt-dot');
+  var prev = document.getElementById('ptPrev'), next = document.getElementById('ptNext');
+  function step0() {
+    var h = '<text x="180" y="16" text-anchor="middle" font-size="13" fill="#777">prompts flow up the stack</text>';
+    var ys = [74, 98, 122, 146, 170];
+    for (var i = 0; i < 5; i++) {
+      var y = ys[i], mid = (i === 2);
+      h += '<rect x="150" y="' + y + '" width="60" height="20" rx="4" fill="' + (mid ? '#2980b9' : '#f4f6f8') + '" stroke="' + (mid ? '#2980b9' : '#dee2e6') + '"/>';
+      if (mid) h += '<text x="180" y="' + (y + 14) + '" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">tap here</text>';
+    }
+    h += '<text x="216" y="88" font-size="11" fill="#777">block 12</text><text x="216" y="184" font-size="11" fill="#777">block 1</text>';
+    h += '<rect x="30" y="208" width="130" height="30" rx="6" fill="#fdecea" stroke="#e74c3c"/>' +
+         '<text x="95" y="227" text-anchor="middle" font-size="12" font-weight="700" fill="#c0392b">attack prompt</text>' +
+         '<rect x="200" y="208" width="130" height="30" rx="6" fill="#e8f5e9" stroke="#27864a"/>' +
+         '<text x="265" y="227" text-anchor="middle" font-size="12" font-weight="700" fill="#27864a">benign prompt</text>';
+    h += '<line x1="95" y1="206" x2="152" y2="194" stroke="#999" stroke-width="1.5"/><line x1="265" y1="206" x2="208" y2="194" stroke="#999" stroke-width="1.5"/>';
+    h += '<line x1="214" y1="132" x2="246" y2="132" stroke="#2980b9" stroke-width="2"/>' +
+         '<text x="244" y="120" font-size="12" fill="#2c3e50">[1.3, -0.9, ...]</text>' +
+         '<text x="244" y="136" font-size="11" fill="#777">copied numbers</text>';
+    return h;
+  }
+  function step1() {
+    var h = '<text x="10" y="40" font-size="12" font-weight="700" fill="#c0392b">attack numbers</text>' +
+      '<text x="10" y="60" font-size="12" fill="#2c3e50">[1.3, -0.9, 1.6, ...]</text>' +
+      '<text x="10" y="82" font-size="13" font-weight="700" fill="#c0392b">score: 10.32</text>' +
+      '<text x="10" y="120" font-size="12" font-weight="700" fill="#27864a">benign numbers</text>' +
+      '<text x="10" y="140" font-size="12" fill="#2c3e50">[0.3, 0.1, 0.2, ...]</text>' +
+      '<text x="10" y="162" font-size="13" font-weight="700" fill="#27864a">score: 0.75</text>' +
+      '<text x="10" y="200" font-size="12" fill="#777">each position dotted against the learned direction</text>';
+    h += '<rect x="210" y="46" width="140" height="120" rx="8" fill="#eef4fa" stroke="#2980b9" stroke-width="2"/>' +
+      '<text x="280" y="68" text-anchor="middle" font-size="13" font-weight="700" fill="#2c3e50">the probe</text>' +
+      '<text x="280" y="90" text-anchor="middle" font-size="12" fill="#2c3e50">768 weights</text>' +
+      '<text x="280" y="108" text-anchor="middle" font-size="11" fill="#555">0.9, -0.6, 1.4, ...</text>' +
+      '<text x="280" y="126" text-anchor="middle" font-size="12" fill="#2c3e50">bias: -1.5</text>' +
+      '<text x="280" y="148" text-anchor="middle" font-size="11" fill="#777">one learned direction</text>';
+    h += '<line x1="185" y1="66" x2="206" y2="76" stroke="#999" stroke-width="1.5"/><line x1="185" y1="146" x2="206" y2="136" stroke="#999" stroke-width="1.5"/>';
+    return h;
+  }
+  function chipGrid() {
+    var kinds = ['attack', 'benign', 'attack', 'benign', 'benign', 'attack', 'benign', 'attack'];
+    var h = '<text x="180" y="36" text-anchor="middle" font-size="13" fill="#777">fresh prompts, never seen in training</text>';
+    for (var i = 0; i < 8; i++) {
+      var col = i % 4, row = (i / 4) | 0;
+      var x = 14 + col * 84, y = 52 + row * 44;
+      var atk = kinds[i] === 'attack';
+      var wrong = (i === 5);
+      h += '<rect x="' + x + '" y="' + y + '" width="76" height="32" rx="6" fill="' + (atk ? '#fdecea' : '#e8f5e9') + '" stroke="' + (atk ? '#e74c3c' : '#27864a') + '"/>' +
+        '<text x="' + (x + 28) + '" y="' + (y + 21) + '" text-anchor="middle" font-size="11" fill="' + (atk ? '#c0392b' : '#27864a') + '">' + kinds[i] + '</text>' +
+        '<text x="' + (x + 62) + '" y="' + (y + 23) + '" text-anchor="middle" font-size="16" font-weight="700" fill="' + (wrong ? '#c0392b' : '#27864a') + '">' + (wrong ? '\u2717' : '\u2713') + '</text>';
+    }
+    return h;
+  }
+  var scenes = [
+    step0(),
+    step1(),
+    chipGrid() + '<text x="180" y="170" text-anchor="middle" font-size="16" font-weight="700" fill="#2c3e50">7 of 8 right (87.5%)</text>',
+    chipGrid() + '<text x="180" y="170" text-anchor="middle" font-size="15" font-weight="700" fill="#2c3e50">87.5% = what block 8 already knew</text>' +
+      '<text x="180" y="194" text-anchor="middle" font-size="12" fill="#777">the probe is too simple to learn on its own</text>'
+  ];
+  var texts = [
+    'Step 1 of 4: the tap copies each position\u2019s numbers out of block 8. Every prompt becomes lists of numbers the probe can read.',
+    'Step 2 of 4: the probe learns one direction (768 weights plus a bias) that scores attack-like numbers high and benign numbers low: 10.32 for the attack position, 0.75 for the benign one.',
+    'Step 3 of 4: test on fresh prompts it never studied for. 7 of 8 right: 87.5%.',
+    'Step 4 of 4: the probe is deliberately too simple to learn anything on its own. That 87.5% is not the probe being smart; it is a measurement of what block 8 already knew.'
+  ];
+  function render() {
+    svg.innerHTML = scenes[step];
+    out.textContent = texts[step];
+    for (var i = 0; i < dots.length; i++) dots[i].classList.toggle('active', i === step);
+    prev.disabled = (step === 0);
+    next.disabled = (step === 3);
+  }
+  for (var j = 0; j < dots.length; j++) {
+    (function (k) { dots[k].addEventListener('click', function () { step = k; render(); }); })(j);
+  }
+  prev.addEventListener('click', function () { if (step > 0) { step--; render(); } });
+  next.addEventListener('click', function () { if (step < 3) { step++; render(); } });
+  render();
+})();
+</script>
+
+<h2 id="cascade">Cheap triage, expensive second opinion: the unsure middle goes to Flash</h2>
 <p>The probe is cheap and the big model is not, so the paper pairs them. The probe scores every prompt. Clear cases are decided by the probe alone. The unsure middle, scores too close to call, goes to Gemini 2.5 Flash for a second opinion.</p>
 <div class="diagram">
 <svg class="defer-svg" viewBox="0 0 600 130" role="img" aria-label="Cascade deferral band diagram">
@@ -1296,7 +1431,7 @@
 </div>
 
 
-<h2>Results: 3% missed attacks at 1/50th of the cost</h2>
+<h2 id="results">Results: 3% missed attacks at 1/50th of the cost</h2>
 <p>The paper tests the probes where it matters: short prompts, long documents, multi-turn chats, and real jailbreaks. Here is what held up.</p>
 <p>The cost story, stated once with both denominators. A probe alone costs a tiny fraction of an LLM judge: over <code>10,000</code> times cheaper at better error, because the probe is a small classifier running on numbers the model already computed (Figure 1 above). The probe-plus-Flash cascade is a different comparison: versus Flash alone it costs about <code>1/50th</code> at inference, defers <code>8%</code> of prompts, and scores lower error than Flash by itself. Two denominators, two claims; do not mix them.</p>
 <p>The central test of the paper is long-context generalization: probes trained only on short prompts, evaluated on long contexts they never saw. Each group below is one probe. The solid bars are FNR, the fraction of real attacks missed (left axis). The hatched bars are FPR, the fraction of benign prompts falsely flagged (right axis). Lower is better on both.</p>
@@ -1312,17 +1447,26 @@
 <p>The automatic search worked: starting from a plain attention probe, AlphaEvolve evaluated about <code>2,500</code> architectures and rediscovered max-style combining on its own.</p>
 <p>And the findings informed real deployment: misuse-mitigation probes built on this work now run in user-facing Gemini.</p>
 
-<h2>Probe limitations: adaptive attackers, inputs only, diverse training</h2>
+<h2 id="limitations">Probe limitations: adaptive attackers, inputs only, diverse training</h2>
 <ul>
 <li><strong>Adaptive attackers still get through.</strong> Every method tested leaves at least <code>1%</code> attack success on the jailbreak set, and the authors note some of that may be dataset labeling error. A probe is a speed bump for a determined adversary, not a wall.</li>
 <li><strong>Inputs only.</strong> Everything in the paper watches the prompt going in. Watching the model's answer is listed as future work.</li>
 <li><strong>Architecture was not enough alone.</strong> The new designs fixed the context-length problem, but broad generalization still required training on diverse distributions too.</li>
 </ul>
 
-<h2>Next: probes that watch the answer</h2>
+<h2 id="next">Next: probes that watch the answer</h2>
 <p>The probe watches the prompt. Who watches the answer? That is the next question, and a future tutorial.</p>
 
         <p>Background: the DeepMind team needed misuse protection for Gemini that survives production distribution shifts, especially the jump from short to very long contexts, without paying for an LLM judge on every request. Probes were promising but fragile. This paper is the engineering story of making them production-ready. The probing idea itself is older: linear classifier probes were introduced by Alain and Bengio in 2016 to study what information lives in a network's intermediate layers, borrowing the concept from neuroscience.</p>
+
+<h2 id="references">References</h2>
+<ol class="refs">
+<li>Kram&aacute;r, J., et al. (2026). arXiv:2601.11516. <a href="https://arxiv.org/abs/2601.11516">arxiv.org/abs/2601.11516</a></li>
+<li>Alain, G. and Bengio, Y. (2016). The original linear probe classifiers, introduced to study what information lives in a network's intermediate layers.</li>
+<li>Cunningham et al. (2025). The EMA probe: a decaying running average over positions, keeping the peak of the smoothed curve.</li>
+<li>Nasr et al. (2025). Cited for refusal training failing under determined attackers.</li>
+</ol>
+<p style="font-size:0.9em;color:#555">The Gemini misuse-mitigation probe deployment is described in the paper above; no separate citation.</p>
 
     <script>
         (function () {

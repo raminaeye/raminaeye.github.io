@@ -824,10 +824,10 @@ model.qconfig = qconfig_hist
      <h2 id="where-should-the-range-end">The clipping range decides the whole error tradeoff</h2>
      <p>Here is the decision that makes or breaks low-bit quantization, and it is embarrassingly simple: <em>where do you cut the range?</em> Every weight outside your clipping range gets clipped, and every weight inside gets rounded to a <code>4-bit</code> grid. <em>Cut wide and the outliers are safe but the bins get fat. Cut tight and the bins get fine but the outliers get beheaded.</em></p>
      <p>Nagel and co.'s whitepaper frames it as two named strategies. <strong>Min-max</strong> (Eq. 14-15): set the range to the weight tensor's actual minimum and maximum. Zero clipping error by construction, but one loud outlier stretches the bins for everyone. <strong>MSE</strong> (Eq. 16): search the range that minimizes the <strong>Frobenius norm</strong> between the weights and their quantized version, outliers be damned. A third trick from Nagel et al. (2019): when a layer has batch norm, set the range from the batch-norm parameters so only large outliers get clipped.</p>
-     <p class="caption">Nagel, M., Fournarakis, M., Amjad, R. A., Bondarenko, Y., van Baalen, M., and Blankevoort, T. <i>A White Paper on Neural Network Quantization.</i> arXiv, 2021. arXiv:2106.08295. <a href="https://arxiv.org/abs/2106.08295">Read the paper</a></p>
+     <p class="caption">Nagel et al. <i>A White Paper on Neural Network Quantization.</i> arXiv, 2021. arXiv:2106.08295. <a href="https://arxiv.org/abs/2106.08295">Read the paper</a></p>
      <div class="figure">
        <img src="figures/papers/quant-fig5-channel-ranges.png" alt="Figure 5 from the quantization whitepaper: boxplots of per-channel weight ranges for the first depthwise-separable layer of MobileNetV2 after BN folding. Most channels are tiny, a few span huge ranges." style="max-width:100%;height:auto;">
-       <p class="caption">Rebuilt from Figure 5 of Nagel et al. (2021). <a href="https://arxiv.org/abs/2106.08295">arXiv:2106.08295</a></p>
+       <p class="caption">Rebuilt from Figure 5 of Nagel et al. (arXiv 2021). <a href="https://arxiv.org/abs/2106.08295">arXiv:2106.08295</a></p>
        <p class="caption">Figure 5, verbatim caption: \"Per (output) channel weight ranges of the first depthwise-separable layer in MobileNetV2 after BN folding. The boxplots show the min and max value, the 2nd and 3rd quartile and the median are plotted for each channel.\"</p>
      </div>
      <p>Figure 5 is why min-max loses. These are per-channel weight ranges from the first depthwise layer of MobileNetV2 after batch-norm folding. Most channels are tiny. A few are enormous. One global min-max range is set by the freaks, and every normal channel pays for it in rounding error. Play with the toy below, then look at the figure again.</p>
@@ -861,14 +861,14 @@ model.qconfig = qconfig_hist
          <strong>How to play</strong>
          <ul>
            <li><strong>The point:</strong> Picking the clipping range is a trade: too tight and outliers get beheaded (clipping error), too wide and the bins get fat for everyone (rounding error). The MSE-optimal range sits in the valley between and beats min-max at <code>4</code> bits.</li>
-           <li><strong>What you'll see:</strong> the range widens from tight around the bulk toward the data extremes in <code>2.2s</code> steps, then snaps to the green MSE-optimal marker. The orange dot rides the dark total-error curve down into the valley while clipping error falls and rounding error climbs.</li>
+           <li><strong>What you'll see:</strong> the range widens from tight around the bulk toward the data extremes, then snaps to the green MSE-optimal marker. The orange dot rides the dark total-error curve down into the valley while clipping error falls and rounding error climbs.</li>
            <li><strong>Min-max:</strong> snaps the range to the data extremes (widest, most rounding error); <strong>MSE-optimal:</strong> grid-searches the range that minimizes total error (the valley). Try both and watch the orange dot land in different spots on the curve.</li>
            <li><strong>Drag the red lines:</strong> grab the qmin/qmax handles and drag them by hand; the error readouts and the orange dot update live as you trade clipping error against rounding error.</li>
          </ul>
        </div>
      </div>
      <div class="crp-paperbox">
-       <h4>From the paper (Table 1)</h4>
+       <h4>The paper's Table 1: MSE beats min-max at 4 bits</h4>
        <p>ImageNet validation accuracy, %, symmetric weight quantization with activations in FP32, averaged over <code>5</code> runs. FP32 baselines: ResNet18 <code>69.68</code>, MobileNetV2 <code>71.72</code>.</p>
        <div class="table-scroll"><table class="datatable">
          <tr><th>Model (FP32)</th><th>W8 Min-Max</th><th>W8 MSE</th><th>W4 Min-Max</th><th>W4 MSE</th></tr>
@@ -1985,7 +1985,7 @@ class RoundSTE(torch.autograd.Function):
         <p>QAT is fussy. You need lower learning rates, more epochs, and a good starting point, so always start from your trained FP32 model. And same as static quantization, you fuse BatchNorm into the conv or linear layer before conversion. It stops being its own layer.</p>
         <p>Here is the trick that actually works: warm up first. Let the observers watch data and learn the scale and zero-point while the model trains. Then freeze those numbers and keep training. The second phase is the model learning to live with one fixed, consistent flavor of quantization noise. If you keep moving the noise around while the model is trying to learn, it never settles.</p>
         
-        <h3>A note on observers and FakeQuantize modules</h3>
+        <h3>What FakeQuantize actually contains</h3>
         <p>Under the hood, a <code>FakeQuantize</code> module is two things glued together: an observer that watches the range, and a quantize-then-dequantize simulator. You can poke at both. One thing that tripped me up the first time: the <code>activation_post_process</code> attribute on a layer (e.g., <code>model.conv1.activation_post_process</code>) *is* the <code>FakeQuantize</code> module itself after <code>prepare_qat_fx</code>. Same object, just wearing PyTorch's naming hat.</p>
         <pre><code class="language-python">
 if hasattr(model_prepared_qat, 'conv1') and hasattr(model_prepared_qat.conv1, 'activation_post_process'):

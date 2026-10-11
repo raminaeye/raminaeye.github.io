@@ -602,15 +602,15 @@
 
    <p class="tabs-label">On this page</p>
    <div class="tab-strip">
-     <a class="tab-chip" href="#dynamic-quantization">Dynamic quantization</a>
-     <a class="tab-chip" href="#static-quantization">Static quantization</a>
-     <a class="tab-chip" href="#histogram-observers">Histogram observers</a>
+     <a class="tab-chip" href="#dynamic-quantization">Dynamic quantization: no calibration, activations quantized on the fly</a>
+     <a class="tab-chip" href="#static-quantization">Static quantization: calibrate first, run everything in int8</a>
+     <a class="tab-chip" href="#histogram-observers">MinMax gets clobbered by outliers: use histogram observers</a>
      <a class="tab-chip" href="#a-real-histogram-from-a-real-model">A real histogram</a>
      <a class="tab-chip" href="#where-should-the-range-end">The clipping range</a>
      <a class="tab-chip" href="#quick-refresher-scale-and-zero-point">Scale and zero-point</a>
-     <a class="tab-chip" href="#calibration-matters">Calibration matters</a>
+     <a class="tab-chip" href="#calibration-matters">Your quantization is only as good as your calibration data</a>
      <a class="tab-chip" href="#be-smart-about-quant-boundaries">Quant boundaries</a>
-     <a class="tab-chip" href="#visualize-with-fx">Visualize with FX</a>
+     <a class="tab-chip" href="#visualize-with-fx">See what quantization did to your model with FX</a>
      <a class="tab-chip" href="#ptq-example-cnn-with-manual-observers">PTQ example</a>
      <a class="tab-chip" href="#quantization-aware-training-qat">QAT</a>
      <a class="tab-chip" href="#qat-training-fakequantize-details">FakeQuantize details</a>
@@ -625,7 +625,7 @@
    <p>There are two ways to get there: <strong>Post-Training Quantization (PTQ)</strong>, where you quantize a model after training, and <strong>Quantization-Aware Training (QAT)</strong>, where the model trains with quantization in the loop. PTQ itself comes in two flavors, <strong>Dynamic</strong> and <strong>Static</strong>. I will start with the easy one.</p>
 
    <section>
-     <h2 id="dynamic-quantization">Dynamic Quantization</h2>
+     <h2 id="dynamic-quantization">Dynamic quantization: no calibration, activations quantized on the fly</h2>
      <p>I think of dynamic quantization as the lazy version, and I mean that as a compliment. You quantize the weights after training and leave it at that. Activations stay in float32 during inference but get quantized on the fly, per batch. No calibration, no fuss. It is the fastest win I know on CPUs for Linear-heavy models.</p>
      <pre><code class="language-python">
 import torch.quantization
@@ -660,7 +660,7 @@ quantized_model = torch.quantization.quantize_dynamic(
    </section>
 
    <section>
-     <h2 id="static-quantization">Static Quantization</h2>
+     <h2 id="static-quantization">Static quantization: calibrate first, run everything in int8</h2>
      <p>Static quantization is the version I actually deploy. Both weights and activations go to int8. But to quantize activations, you first need to know their range. That is where <strong>calibration</strong> comes in. You run some input data through the model (no labels needed) to collect min and max values of activations. PyTorch uses that to decide how to quantize.</p>
      <p>This works great for CNNs and edge deployment. You get full int8 inference.</p>
      <p>The workflow looks like this:</p>
@@ -699,9 +699,9 @@ torch.quantization.convert(model, inplace=True)
        </div>
      </div>
      <p>So what is actually happening under the hood?</p>
-     <h3>Fusion</h3>
+     <h3>Fuse Conv+BN+ReLU into a single op first</h3>
      <p>Before quantizing, you fuse Conv + BatchNorm + ReLU into a single op. Why? It reduces memory overhead, speeds things up, and minimizes numerical errors.</p>
-     <h3>QConfig</h3>
+     <h3>QConfig tells PyTorch how to quantize each tensor</h3>
      <p>QConfig tells PyTorch how to quantize: symmetric vs asymmetric, per-tensor vs per-channel. Example:</p>
      <pre><code class="language-python">
 from torch.quantization import default_per_channel_weight_observer, MinMaxObserver
@@ -713,7 +713,7 @@ my_qconfig = torch.quantization.QConfig(
 )
 model.qconfig = my_qconfig # Then assign it to your model
      </code></pre>
-     <h3>Observers</h3>
+     <h3>Observers measure activation ranges during calibration</h3>
      <p>Observers are how PyTorch measures activation ranges. Here's a basic one (conceptual, PyTorch's <code>ObserverBase</code> is more complex):</p>
      <pre><code class="language-python">
 from torch.ao.quantization.observer import ObserverBase
@@ -766,7 +766,7 @@ class MinMaxObserverExample(ObserverBase): # Conceptual
    </section>
 
    <section>
-     <h2 id="histogram-observers">Histogram Observers</h2>
+     <h2 id="histogram-observers">MinMax gets clobbered by outliers: use histogram observers</h2>
      <p>MinMax gets clobbered by outliers. Histogram observers are smarter. They build a histogram of the activations, simulate multiple clipping thresholds, and pick the one that gives the smallest quantization error.</p>
      <pre><code class="language-python">
 import torch.quantization as tq 
@@ -1563,13 +1563,13 @@ model.qconfig = qconfig_hist
      <p>When you quantize a float, the recipe is two steps: squeeze each value onto the integer grid, then map it back. In plain words: dividing by the scale shrinks the float range down to the integer grid, rounding snaps each value to the nearest integer, and the zero-point shifts the grid so float zero lands exactly on an integer.</p>
      
      <p>To dequantize, run it backward: undo the zero-point shift, then multiply back up by the scale.</p>
-     <h3>Symmetric</h3>
+     <h3>Symmetric: zero stays at zero, for weights</h3>
      <ul>
         <li>The zero-point is <code>0</code>, so the integer grid stays centered on zero.</li>
         <li>The scale is the largest absolute value divided by <code>127</code> (for int8, typically range <code>[-127, 127]</code> or <code>[-128, 127]</code>)</li>
      </ul>
      <p>Used for weights. Assumes distribution is centered around <code>0</code> (which is usually true for weights).</p>
-     <h3>Asymmetric</h3>
+     <h3>Asymmetric: shift the grid for skewed activations</h3>
      <ul>
         <li>The zero-point is usually not <code>0</code>: the grid shifts to fit the data.</li>
         <li>The scale is the full value range divided by <code>255</code> (for quint8, typically range <code>[0, 255]</code>)</li>
@@ -1829,7 +1829,7 @@ model.qconfig = qconfig_hist
    </section>
 
    <section>
-     <h2 id="calibration-matters">Calibration Matters</h2>
+     <h2 id="calibration-matters">Your quantization is only as good as your calibration data</h2>
      <p>Here is the gotcha that bites everyone once: your quantization is only as good as your calibration data.</p>
      <p>If the calibration set is too small or does not look like production, the observers learn the wrong ranges. The model either clips real activations or wastes resolution on ranges that never show up. The more your calibration inputs look like the real thing, the better your scale and zero-point.</p>
      <p>And PTQ is a one-shot deal. Once you calibrate and convert, there is no fine-tuning afterward. The numbers are baked in, so get the calibration right the first time.</p>
@@ -1842,7 +1842,7 @@ model.qconfig = qconfig_hist
    </section>
 
    <section>
-     <h2 id="visualize-with-fx">Visualize with FX</h2>
+     <h2 id="visualize-with-fx">See what quantization did to your model with FX</h2>
      <p>When I need to see what quantization actually did to my model, I reach for FX. It traces the model into a graph you can inspect and manipulate.</p>
      <pre><code class="language-python">
 from torch.fx import symbolic_trace

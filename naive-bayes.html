@@ -524,41 +524,29 @@
 
   <h2 id="hook">How do you sort 15,000 forum posts without reading them?</h2>
 
-  <p>You know me, I love a question that sounds impossible and turns out to be bookkeeping. Here is one: how do you sort 15,076 forum posts into 20 newsgroups without reading a single one? <em>You do not read. You count.</em> The post in front of you says "windows" twice and "motif" twice, and you ask: which pile uses those words the most? That is <strong>naive Bayes</strong>. It is a classifier that treats every document as a <strong>bag of words</strong>, counts the bag, and bets on the class whose counts look most like it.</p>
+  <p>You know me, I love a question that sounds impossible and turns out to be bookkeeping. Here is one: how do you sort <code>15,076</code> forum posts into <code>20</code> newsgroups without reading a single one? <em>You do not read. You count.</em> The post in front of you says "windows" twice and "motif" twice, and you ask: which pile uses those words the most? That is <strong>naive Bayes</strong>. It is a classifier that treats every document as a <strong>bag of words</strong>, counts the bag, and bets on the class whose counts look most like it.</p>
 
   <h2 id="idea">Documents are bags of words</h2>
 
-  <p>The first move is to throw away word order. "I need to port several applications" becomes a bag: port x1, applications x1, need x2. The notebook in this series does exactly this with a custom CountVectorizer over the 20 Newsgroups corpus: 15,076 training posts become rows of 10,000 word counts. <em>Order gone, counts kept.</em> It feels lossy, and it is, but for topic sorting the counts carry almost all the signal. A comp.windows.x post says "windows" a lot. A rec.sport.hockey post never does. <em>The bag knows.</em></p>
+  <p>The first move is to throw away word order. "I need to port several applications" becomes a bag: port x1, applications x1, need x2. The notebook in this series does exactly this with a custom CountVectorizer over the 20 Newsgroups corpus: <code>15,076</code> training posts become rows of <code>10,000</code> word counts. <em>Order gone, counts kept.</em> It feels lossy, and it is, but for topic sorting the counts carry almost all the signal. A comp.windows.x post says "windows" a lot. A rec.sport.hockey post never does. <em>The bag knows.</em></p>
 
   <h2 id="how">Bayes rule, then the naive part</h2>
 
-  <p>Here is the whole classifier in one line. Read it slowly, because every symbol earns its place:</p>
+  <p>Here is the whole classifier in one line:</p>
 
   <div class="math-display">
   $$ P(c \mid d) \propto P(c) \prod_w P(w \mid c) $$
   </div>
 
-  <p>Term by term. <code>P(c | d)</code> is the answer we want: how likely class <code>c</code> is, given this document <code>d</code>. <code>P(c)</code> is the <strong>prior</strong>: how common the class is before we read anything. In the notebook, comp.windows.x posts are 0.0513 of the training set, so every document starts with that as its comp.windows.x score before a single word is counted. <code>∏<sub>w</sub> P(w | c)</code> is the <strong>likelihood</strong>: for every word in the document, how often does that word show up in class <code>c</code>'s posts? Multiply them all together. That product is the "naive" part: we pretend words appear independently, which is obviously false ("san" and "francisco" are not independent events) and works anyway. <em>The word "naive" is doing a lot of heavy lifting in this algorithm's name.</em></p>
+  <p>The left side is the answer we want: how likely the class is, given this document. The first factor is the <strong>prior</strong>, how common the class is before we read anything: in the notebook, comp.windows.x posts are <code>0.0513</code> of the training set, so every document starts with that as its comp.windows.x score before a single word is counted. The second factor is the <strong>likelihood</strong>: for every word in the document, how often that word shows up in the class's posts, all multiplied together. That product is the "naive" part: we pretend words appear independently, which is obviously false ("san" and "francisco" are not independent events) and works anyway. <em>The word "naive" is doing a lot of heavy lifting in this algorithm's name.</em></p>
 
-  <p>Now the second equation, the one that does the actual counting:</p>
+  <p>Each word's likelihood is its count in the class's training posts divided by the class's total word count, over a <code>10,000</code>-word vocabulary, plus the <strong>Laplace smoothing</strong> constant: the add-a-little-to-everything trick, a small amount added to every word's count and scaled by the vocabulary size in the denominator. Without it, one word the class never saw gets probability zero, and the whole product dies on the spot. With the notebook's smoothing of <code>0.1</code>, every word gets a tiny baseline probability, as if the model had seen each word a tenth of a time before training started. <em>It is stupid easy and it saves the entire classifier.</em></p>
 
-  <div class="math-display">
-  $$ P(w \mid c) = \frac{\mathrm{count}(w, c) + \alpha}{N_c + \alpha V} $$
-  </div>
-
-  <p>Term by term. <code>count(w, c)</code> is how many times word <code>w</code> appeared in class <code>c</code>'s training posts. <code>N<sub>c</sub></code> is the total number of words in class <code>c</code>. <code>V</code> is the vocabulary size: 10,000 in the notebook. And <code>α</code> is <strong>Laplace smoothing</strong>, the add-a-little-to-everything trick. Without it, one word the class never saw gives <code>P(w | c) = 0</code>, and the whole product dies on the spot. With the notebook's <code>α = 0.1</code>, every word gets a tiny baseline probability, as if the model had seen each word a tenth of a time before training started. <em>It is stupid easy and it saves the entire classifier.</em></p>
-
-  <p>One more equation, the one the code actually runs. Multiplying thousands of tiny probabilities underflows to zero, so the notebook computes in log space, and so does the tool below:</p>
-
-  <div class="math-display">
-  $$ \log P(c \mid d) \propto \log P(c) + \sum_w \log P(w \mid c) $$
-  </div>
-
-  <p>Same math, additions instead of multiplications. When <code>α = 0</code> makes a word probability exactly zero, <code>log(0)</code> would be negative infinity, so the tool floors it at a large negative number and marks the class "zeroed out" instead of letting the arithmetic explode. You will see this the moment you drag the alpha slider to zero.</p>
+  <p>The code never actually multiplies thousands of tiny probabilities: that underflows to zero. The notebook computes in log space instead, same math with additions instead of multiplications, and so does the tool below. When the smoothing is <code>0</code>, a word the class never saw gets probability zero, and the log of zero would be negative infinity, so the tool floors it at a large negative number and marks the class "zeroed out" instead of letting the arithmetic explode. You will see this the moment you drag the alpha slider to zero.</p>
 
   <h2 id="worked">The worked example</h2>
 
-  <p>The notebook walks through one test post: a guy porting OS/2 applications to X, begging for references, willing to take an emulator for sun. The model scores all 20 classes and lands on comp.windows.x. <em>Correct.</em> Here is what that run looks like in numbers:</p>
+  <p>The notebook walks through one test post: a guy porting OS/2 applications to X, begging for references, willing to take an emulator for sun. The model scores all <code>20</code> classes and lands on comp.windows.x. <em>Correct.</em> Here is what that run looks like in numbers:</p>
 
   <div class="stat-grid">
     <div class="stat-card">
@@ -583,7 +571,7 @@
     </div>
   </div>
 
-  <p>The tool below replays that moment on a corpus small enough to hold in your head: 62 posts across the same 20 newsgroups, with that exact post sitting in the training pile. The math is the notebook's math, including <code>α = 0.1</code> as the default.</p>
+  <p>The tool below replays that moment on a corpus small enough to hold in your head: <code>62</code> posts across the same <code>20</code> newsgroups, with that exact post sitting in the training pile. The math is the notebook's math, with the smoothing defaulting to <code>0.1</code>.</p>
 
   <p>Here is the notebook's classifier, stripped to the parts that matter:</p>
 
@@ -623,11 +611,11 @@
       <p class="cc-head">How to play</p>
       <ul>
         <li><strong>The point:</strong> Every word you add shifts all 20 class scores at once, because each word contributes its log probability to every class. You can watch "windows" drag the comp.windows.x bar up.</li>
-        <li><strong>What you will see:</strong> Play feeds the 13 words of the notebook's comp.windows.x post in one at a time at 2.25-second steps. comp.windows.x takes the lead on the first word and never lets go, while the other 19 bars drain away as evidence piles up. The word just added gets a green ring so you can spot it.</li>
+        <li><strong>What you will see:</strong> Play feeds the <code>13</code> words of the notebook's comp.windows.x post in one at a time at 2.25-second steps. comp.windows.x takes the lead on the first word and never lets go, while the other 19 bars drain away as evidence piles up. The word just added gets a green ring so you can spot it.</li>
         <li><strong>Play:</strong> steps through the naive Bayes classification, 2.25 seconds per step.</li>
-        <li class="tryit"><strong>Word chips:</strong> Toggle words in and out by hand and watch all 20 bars respond live. Try just "port", then add "windows" and watch the comp.windows.x bar jump from about 0.49 to about 0.81.</li>
-        <li class="tryit"><strong>Smoothing &alpha; (0 to 1):</strong> Sets the Laplace smoothing. Drag it to 0 and every class that never saw one of your words gets marked "zeroed out" (with the full post, that is 19 of the 20 classes: only comp.windows.x saw every word). Drag it back up and the bars soften as unseen words stop being fatal.</li>
-        <li class="tryit"><strong>Reset:</strong> Clears the words and puts the smoothing back at 0.10, so all 20 bars sit at their priors again. Try it after a run and watch the evidence drain away.</li>
+        <li class="tryit"><strong>Word chips:</strong> Toggle words in and out by hand and watch all 20 bars respond live. Try just "port", then add "windows" and watch the comp.windows.x bar jump from about <code>0.49</code> to about <code>0.81</code>.</li>
+        <li class="tryit"><strong>Smoothing &alpha; (0 to 1):</strong> Sets the Laplace smoothing. Drag it to <code>0</code> and every class that never saw one of your words gets marked "zeroed out" (with the full post, that is <code>19</code> of the <code>20</code> classes: only comp.windows.x saw every word). Drag it back up and the bars soften as unseen words stop being fatal.</li>
+        <li class="tryit"><strong>Reset:</strong> Clears the words and puts the smoothing back at <code>0.10</code>, so all <code>20</code> bars sit at their priors again. Try it after a run and watch the evidence drain away.</li>
       </ul>
     </div>
   </div>

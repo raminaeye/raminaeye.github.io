@@ -587,18 +587,17 @@
 
     <p class="tabs-label">On this page</p>
     <div class="tab-strip">
-        <a class="tab-link" href="#the-paper">Old fixes have no guarantees</a>
         <a class="tab-link" href="#intuition">Spend your freedom on the worst-off task</a>
         <a class="tab-link" href="#the-problem">The leash: stay inside a ball around the average</a>
-        <a class="tab-link" href="#four-choices">Why the worst-task rule, the ball, the radius, and the dual solve</a>
-        <a class="tab-link" href="#the-dual">The update: average plus one bounded nudge</a>
-        <a class="tab-link" href="#the-algorithm">One CAGrad training step</a>
-        <a class="tab-link" href="#the-knob">The c knob dials between gradient descent and MGDA</a>
-        <a class="tab-link" href="#the-guarantee">The guarantee: convergence to a stationary point</a>
-        <a class="tab-link" href="#the-racer">Four methods, five starts</a>
+        <a class="tab-link" href="#four-choices">The four moving parts inside one CAGrad step</a>
+        <a class="tab-link" href="#the-dual">The update: average gradient plus one bounded nudge toward the worst task</a>
+        <a class="tab-link" href="#the-algorithm">One CAGrad update, step by step</a>
+        <a class="tab-link" href="#the-guarantee">The guarantee: convergence to a stationary point of the average loss</a>
+        <a class="tab-link" href="#the-racer">The race: four methods, five starts, one toy landscape</a>
         <a class="tab-link" href="#what-it-shows">CAGrad keeps descending where gradient descent stalls</a>
         <a class="tab-link" href="#practical">When to use CAGrad, and what it costs</a>
-        <a class="tab-link" href="#paper-figure">Five runs per method, CAGrad across knob values</a>
+        <a class="tab-link" href="#paper-figure">CAGrad lands on the Pareto front; the others fall short</a>
+        <a class="tab-link" href="#references">References</a>
     </div>
 
     <style>
@@ -618,17 +617,6 @@
         .cg-hint { font-size: 0.82rem; color: #868e96; font-style: italic; }
         .cg-chip { display: inline-flex; align-items: center; gap: 7px; }
         .cg-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; flex: 0 0 auto; }
-        .cg-crow { align-items: center; }
-        .cg-cval { min-width: 3.4em; text-align: right; font-weight: 700; color: #212529; }
-        .cg-progwrap { display: flex; align-items: center; gap: 12px; margin: 0.5em 0; }
-        .cg-progwrap[hidden] { display: none; }
-        .cg-progbar { flex: 1; height: 8px; background: #e9ecef; border-radius: 999px; overflow: hidden; }
-        .cg-progfill { height: 100%; width: 0%; background: #007bff; border-radius: 999px; transition: width 0.1s linear; }
-        .cg-confrow { display: flex; align-items: center; gap: 12px; margin: 0.4em 0; font-size: 0.9rem; }
-        .cg-conflabel { display: inline-flex; align-items: center; gap: 7px; min-width: 11em; }
-        .cg-confbar { flex: 1; height: 10px; background: #e9ecef; border-radius: 999px; overflow: hidden; }
-        .cg-conffill { height: 100%; border-radius: 999px; }
-        .cg-confval { min-width: 3.6em; text-align: right; font-weight: 600; }
         .cg-readlist { margin: 0.8em 0; padding-left: 1.4em; }
         .cg-readlist li { margin: 0.35em 0; }
         .cg-figwrap { position: relative; border-radius: 8px; overflow-x: auto; overflow-y: hidden; border: 1px solid #e9ecef; }
@@ -643,11 +631,10 @@
         .cg-col { min-width: 0; }
         #cgDemo .caption { text-align: left; margin: 0.45em 0 0.9em; }
         #cgDemo .cg-legend { margin-top: 0.5em; }
-        #cgCurves, #cgFront { max-width: 380px; }
+        #cgCurves { max-width: 380px; }
         /* Fit-in-one-page: cap the race map so the grid stays compact. */
         #cgDemo #cgMap { max-width: 360px; margin-left: auto; margin-right: auto; }
         @media (max-width: 760px) { .cg-grid { grid-template-columns: 1fr; } }
-        @media (max-width: 480px) { .cg-conflabel { min-width: 8.5em; } }
 
         /* Paper citation card (shared across the method pages) */
         .paper-card { border: 1px solid #dee2e6; border-radius: 10px; background: #f8f9fa; padding: 14px 18px; margin: 1.1em 0; }
@@ -659,17 +646,21 @@
         .paper-card .pc-venue { font-size: 0.92em; color: #495057; }
     </style>
 
-    <h2 id="the-paper">Old fixes have no guarantees</h2>
-        <p>The starting point is the most popular objective in the field: the <strong>average loss</strong> over all tasks. The authors' first observation is that even when the average loss is exactly what you want to minimize, optimizing it directly can go badly: the optimizer stalls, and performance degrades compared to training the tasks separately. The known cause is <em>conflicting gradients</em>: task gradients come in different scales, so the loudest dominates the update, and they point in different directions, so the average step can actively hurt a specific task.</p>
-    <p>People had tried to fix this two ways: reweight the task losses with heuristics, or manipulate the gradients to find a better update direction. The authors' complaint is that these fixes rarely come with guarantees: they either have no convergence proof at all, or they only provably converge to <em>any</em> point on the Pareto set, which means where you end up depends on where you started. One objective can be over-optimized while the others are ignored, and the theory still smiles.</p>
-    <p><strong>CAGrad</strong> is their answer to that complaint. Keep the average loss as the objective, but pick the update that maximizes the worst local improvement of any task, inside a small neighborhood of the average gradient. That balances the objectives automatically and, <em>crucially, still provably converges to a minimum of the average loss</em>. Plain gradient descent and MGDA turn out to be the two ends of the same dial.</p>
-
     <h2 id="intuition">Spend your freedom on the worst-off task</h2>
-    <p>Here is how I think about CAGrad: it is a <em>diplomat on a leash</em>. The leash is a circle drawn around the average gradient, with a radius set to a chosen fraction of that gradient's own length. The update is not allowed to stray farther than that from the consensus direction, because staying close is what keeps the convergence proof alive. Inside the circle, the diplomat spends all of its limited freedom on a single goal: help the worst-off task as much as possible.</p>
-    <p>Turn the knob to <code>0</code> and the circle shrinks to a point, which is <em>plain gradient descent</em>. Let the knob grow very large and the leash comes off, which is <em>MGDA</em>. The useful range is in between.</p>
+    <p>Here is how I think about CAGrad: it is a <em>diplomat on a leash</em>.</p>
+    <p>The leash is a ball drawn around the <strong>average gradient</strong>, with a radius set to a chosen fraction of that gradient's own length. The update is not allowed to stray farther than that from the consensus direction.</p>
+    <p>Staying close is what keeps the convergence proof alive.</p>
+    <p>Inside the ball, the diplomat spends all of its limited freedom on a single goal: help the worst-off task as much as possible.</p>
+    <p>Turn the knob to <code>0</code> and the ball shrinks to a point, which is <em>plain gradient descent</em>. Let the knob grow very large and the leash comes off, which is <em>MGDA</em>.</p>
+    <p>The useful range is in between.</p>
 
     <h2 id="the-problem">The leash: stay inside a ball around the average</h2>
-    <p>Remember the scoring rule: the dot product of a task's gradient with a candidate step scores how much that step helps the task. Positive means the task's loss goes down. CAGrad judges a step by its <strong>worst</strong> score across all tasks, then picks the step whose worst score is the best. The step must stay on a leash: inside a ball around the average gradient, whose radius is set by the knob. At <code>0</code> the leash has zero length and you get plain gradient descent; a large knob setting lets the step roam, which is MGDA.</p>
+    <p>Even when the <strong>average loss</strong> is exactly what you want to minimize, optimizing it directly can stall.</p>
+    <p>The cause is <em>conflicting gradients</em>: task gradients come in different scales, so the loudest dominates the update; they also point in different directions, so the average step can actively hurt a specific task.</p>
+    <p>Remember the scoring rule: the dot product of a task's gradient with a candidate step scores how much that step helps the task. Positive means the task's loss goes down.</p>
+    <p>CAGrad judges a step by its <strong>worst</strong> score across all tasks, then picks the step whose worst score is the best.</p>
+    <p>The step must stay on a leash: inside a ball around the average gradient, whose radius is set by the knob.</p>
+    <p>At <code>0</code> the leash has zero length and you get plain gradient descent; a large knob setting lets the step roam, which is MGDA.</p>
     <p class="caption">Inside a ball around the average gradient, find the direction that helps the least-helped task the most.</p>
     <style>
         #cgBallDemo .cg-ball-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
@@ -717,9 +708,9 @@
         <div class="cap-card">
           <strong>How to play</strong>
           <ul>
-            <li><strong>The point:</strong> this tool draws the key equation as geometry. The shaded disc is the trust region around the average gradient, and the best direction is the one whose worst task score is highest. Each task scores <code>d</code> with the dot product, drawn as a dashed projection of <code>d</code> onto that task's arrow.</li>
+            <li><strong>The point:</strong> this tool draws the key equation as geometry. The shaded disc is the ball around the average gradient, and the best direction is the one whose worst task score is highest. Each task scores <code>d</code> with the dot product, drawn as a dashed projection of <code>d</code> onto that task's arrow.</li>
             <li>The red ring marks the currently worst-helped task, the badge names it, and the big number is the worst score CAGrad maximizes. The dashed ring marks where the direction started: the average gradient.</li>
-            <li class="try-it">Toward task <code>2</code>'s arrow, its bar grows while task <code>1</code>'s shrinks. Where the two bars meet near <code>4.0</code> is the max-min update, and it sits on the disc's edge. Outside the disc, the handle stays on the boundary, because <code>d</code> may not leave the ball.</li>
+            <li>The max-min point sits where the two task bars meet, on the disc's edge. The update cannot leave the ball.</li>
           </ul>
         </div>
     </div>
@@ -940,7 +931,9 @@
         update(false);
     })();
     </script>
-    <p>Read it from the inside out. Pick any candidate <code>d</code>. Let every task score it and keep only the lowest score. Choose the <code>d</code> with the highest lowest score. And one restriction: the direction must stay inside a ball around the average gradient, with a radius set to a fraction of that gradient's length. If a step exists that helps every task, the best worst score is positive and every task improves.</p>
+    <p>Read it from the inside out. Pick any candidate <code>d</code>. Let every task score it and keep only the lowest score. Choose the <code>d</code> with the highest lowest score.</p>
+    <p>And one restriction: the direction must stay inside a ball around the average gradient, with a radius set to a fraction of that gradient's length.</p>
+    <p>If a step exists that helps every task, the best worst score is positive and every task improves.</p>
 
     <h2 id="four-choices">The four moving parts inside one CAGrad step</h2>
     <p>Every piece of that problem statement is doing a job:</p>
@@ -948,19 +941,238 @@
         <li><strong>Why judge a step by its worst task?</strong> The average score is exactly what betrays a quiet task: a loud task can outvote a hurt one and the average never notices. Taking the minimum is a weakest-link rule. Betrayal has nowhere to hide.</li>
         <li><strong>Why the ball around the average gradient?</strong> Without it the rule turns into MGDA, which wanders as far from the average as it takes to keep the peace, with no promise about where it ends up. The ball is what buys the proof: any step within the leash of the average gradient keeps a positive fraction of that gradient's downward push on the average loss.</li>
         <li><strong>Why a radius tied to the gradient's own length, not a fixed number?</strong> So the leash grows and shrinks with the terrain. Early in training gradients are large and a fixed radius would be uselessly tight; late in training it would be uselessly loose. A fixed fraction keeps the diplomat's freedom constant in the only units that matter, and it makes the knob unit-free, so no rescaling of the losses can game it.</li>
-        <li><strong>Why solve the dual?</strong> The primal searches over d in the full parameter space, millions of dimensions, at every step. The dual searches over <code>K</code> blend weights, and <code>K</code> is <code>2</code> to <code>50</code>. Same answer, vastly less work: the solve is negligible next to a backward pass for small K.</li>
+        <li><strong>Why solve the dual?</strong> The primal searches over <code>d</code> in the full parameter space, millions of dimensions, at every step. The dual searches over <code>K</code> blend weights, and <code>K</code> is <code>2</code> to <code>50</code>. Same answer, vastly less work: the solve is negligible next to a backward pass for small K.</li>
     </ol>
 
     <h2 id="the-dual">The update: average gradient plus one bounded nudge toward the worst task</h2>
-    <p><em>Searching over every possible update directly is hopeless</em>: it lives in the full parameter space, millions of dimensions. But the answer has a simple shape. The best update is the <strong>average gradient plus one bounded nudge</strong>: the consensus direction, plus one step of fixed length toward the compromise that helps the worst-off task most. The step length is exactly the leash length, so the update always lands on the ball's boundary.</p>
-    <p>One honest footnote. The reference implementation's toy example divides the update by one plus the knob setting. That rescale is a toy-code convention, <em>not part of the method itself</em>. The race below uses it so the numbers match the reference code.</p>
+    <p><em>Searching over every possible update directly is hopeless</em>: it lives in the full parameter space, millions of dimensions.</p>
+    <p>But the answer has a simple shape. The best update is the <strong>average gradient plus one bounded nudge</strong>: the consensus direction, plus one step of fixed length toward the compromise that helps the worst-off task most.</p>
+    <p>The step length is exactly the leash length, so the update always lands on the ball's boundary.</p>
+    <p>The reference implementation's toy example divides the update by one plus the knob setting: a toy-code convention, <em>not part of the method itself</em>.</p>
+    <p>The race below uses it so the numbers match the reference code.</p>
 
     <h2 id="the-algorithm">One CAGrad update, step by step</h2>
-    <p>One training step is five things: a forward pass, each task's loss and gradient, a small solve over blend weights for the winning blend, the update formed from that blend, and the step itself. The code is the honest version:</p>
+    <p>A training step is the usual machinery: forward pass, task losses, gradients, then the step. The CAGrad-specific part sits between the gradients and the update, and it is four decisions. Step through them on the same two task gradients the ball demo uses:</p>
+    <div class="demo" id="cgStep">
+        <style>
+        #cgStep .cg-stepdots{display:flex;gap:10px;justify-content:center;margin:0 0 0.6rem}
+        #cgStep .cg-stepdot{width:34px;height:34px;border-radius:50%;border:2px solid #1f6fb5;background:#fff;color:#1f6fb5;font-weight:700;font-size:15px;cursor:pointer;line-height:1;padding:0}
+        #cgStep .cg-stepdot.active{background:#1f6fb5;color:#fff}
+        #cgStep .cg-stepdot:focus-visible{outline:2px solid #2c3e50;outline-offset:2px}
+        #cgStep .play-btn:disabled{opacity:.35;cursor:default}
+        #cgStep #cgStepOutcome{min-height:3.2em;margin:0.5rem 0 0}
+        #cgStepSvg text{font-family:inherit;paint-order:stroke;stroke:#fbfcfd;stroke-width:3px}
+        </style>
+        <svg id="cgStepSvg" viewBox="0 0 420 400" role="img" aria-label="Step-through of one CAGrad update on two task gradients" style="width:100%;max-width:520px;height:auto;display:block;margin:0 auto;"></svg>
+        <div class="cg-stepdots">
+            <button type="button" class="cg-stepdot active" data-s="0" aria-label="Step 1: compute the gradients">1</button>
+            <button type="button" class="cg-stepdot" data-s="1" aria-label="Step 2: draw the leash">2</button>
+            <button type="button" class="cg-stepdot" data-s="2" aria-label="Step 3: solve the dual">3</button>
+            <button type="button" class="cg-stepdot" data-s="3" aria-label="Step 4: nudge from the average">4</button>
+        </div>
+        <div class="demo-controls">
+            <button type="button" class="play-btn" id="cgStepPrev">Prev</button>
+            <button type="button" class="play-btn" id="cgStepNext">Next</button>
+        </div>
+        <p id="cgStepOutcome" aria-live="polite"></p>
+        <div class="cap-card">
+            <strong>What this shows</strong>
+            <ul>
+                <li><strong>The point:</strong> one CAGrad update on two task gradients, in four steps. Compute the gradients, draw the leash around their average, solve the dual for the blend weights, then nudge from the average to the ball's edge toward the worst-off task.</li>
+                <li>The purple arrow is task <code>1</code>'s gradient <code>g1</code>, the orange arrow is task <code>2</code>'s gradient <code>g2</code>, and the gray dashed arrow is their average <code>g0</code>. The shaded disc is the ball of radius <code>0.90</code> around the average. The bars are the blend weights <code>w1</code> and <code>w2</code> with their values; the big number is the worst-task score CAGrad maximizes. The dark arrow is the final update, landing exactly on the ball's edge. The amber ring marks each step's new element.</li>
+                <li>Watch the gray average in step <code>1</code>, the ball in step <code>2</code>, the bars and the climbing score in step <code>3</code>, and the dark arrow landing on the edge in step <code>4</code>.</li>
+            </ul>
+        </div>
+    </div>
+    <script>
+    (function () {
+        "use strict";
+        var NS = "http://www.w3.org/2000/svg";
+        var svg = document.getElementById("cgStepSvg");
+        var out = document.getElementById("cgStepOutcome");
+        var prev = document.getElementById("cgStepPrev");
+        var next = document.getElementById("cgStepNext");
+        var dots = Array.prototype.slice.call(document.querySelectorAll("#cgStep .cg-stepdot"));
+        if (!svg || !out || !prev || !next) return;
+
+        /* One CAGrad update on two task gradients. The ball radius and the
+           final update are computed from the dual, never hardcoded. */
+        var g1 = [3, 1], g2 = [-1, 2], CC = 0.5;
+        var g0 = [(g1[0] + g2[0]) / 2, (g1[1] + g2[1]) / 2];
+        var R = CC * Math.hypot(g0[0], g0[1]);
+        var n2 = Math.hypot(g2[0], g2[1]);
+        var ds = [g0[0] + R * g2[0] / n2, g0[1] + R * g2[1] / n2];
+        function tscore(d) {
+            return Math.min(g1[0] * d[0] + g1[1] * d[1], g2[0] * d[0] + g2[1] * d[1]);
+        }
+        var scoreStart = tscore(g0), scoreEnd = tscore(ds);
+
+        var T1 = "#9b59b6", T2 = "#e67e22", G0C = "#7f8c8d",
+            BALLC = "#3498db", DC = "#2c3e50", MUT = "#5d6d7e", AMBER = "#f39c12";
+
+        /* Plane: SVG origin (140,250), 64 px per unit. */
+        var OX = 140, OY = 250, S = 64;
+        function X(x) { return OX + S * x; }
+        function Y(y) { return OY - S * y; }
+        var g0x = X(g0[0]), g0y = Y(g0[1]), br = S * R;
+        var dsx = X(ds[0]), dsy = Y(ds[1]);
+
+        var titles = ["1 \u00b7 Compute the gradients", "2 \u00b7 Draw the leash",
+                      "3 \u00b7 Solve the dual", "4 \u00b7 Nudge from the average"];
+        var outcomes = [
+            "g1 and g2 are the two task gradients; g0 is their average, the consensus direction plain descent would follow.",
+            "The shaded ball is the leash: every candidate update must land inside it. Its radius is " +
+                R.toFixed(2) + ", half the average gradient's own length.",
+            "The dual solve hands all the weight to the worst-off task: w1 = 0, w2 = 1. The worst-task score climbs from " +
+                scoreStart.toFixed(2) + " to " + scoreEnd.toFixed(2) + ".",
+            "The update starts at the average and nudges one ball radius toward task 2, landing exactly on the ball's edge. " +
+                "Step along it; the next training step re-solves. That is the leash doing its job."
+        ];
+
+        function el(t, a, p) {
+            var e = document.createElementNS(NS, t);
+            for (var k in a) e.setAttribute(k, a[k]);
+            (p || svg).appendChild(e);
+            return e;
+        }
+        function tx(x, y, s, size, anchor, fill, weight) {
+            var t = el("text", { x: x, y: y, "font-size": size || 16,
+                "text-anchor": anchor || "start", fill: fill || DC });
+            if (weight) t.setAttribute("font-weight", weight);
+            t.textContent = s;
+            return t;
+        }
+        function arrow(x1, y1, x2, y2, color, width, dash, ah) {
+            var a = { x1: x1, y1: y1, x2: x2, y2: y2, stroke: color,
+                "stroke-width": width, "marker-end": "url(#" + ah + ")",
+                "stroke-linecap": "round" };
+            if (dash) a["stroke-dasharray"] = dash;
+            return el("line", a);
+        }
+
+        /* Blend-weight bars (steps 3 and 4). */
+        var BARX = 70, BARW = 200, BARH = 20, ROW1 = 318, ROW2 = 350;
+        var wFill1, wFill2, wVal1, wVal2, scoreNum;
+        function fmtW(v) { return String(Math.round(v * 100) / 100); }
+        function drawBars() {
+            tx(8, 300, "blend weights", 16, "start", MUT);
+            tx(8, ROW1 + 16, "w1", 16, "start", MUT, 700);
+            el("rect", { x: BARX, y: ROW1, width: BARW, height: BARH, rx: 6, fill: "#eef1f4" });
+            wFill1 = el("rect", { x: BARX, y: ROW1, width: 0, height: BARH, rx: 6, fill: T1 });
+            wVal1 = tx(BARX + 8, ROW1 + 16, "", 16);
+            tx(8, ROW2 + 16, "w2", 16, "start", MUT, 700);
+            el("rect", { x: BARX, y: ROW2, width: BARW, height: BARH, rx: 6, fill: "#eef1f4" });
+            wFill2 = el("rect", { x: BARX, y: ROW2, width: 0, height: BARH, rx: 6, fill: T2 });
+            wVal2 = tx(BARX + 8, ROW2 + 16, "", 16);
+            tx(412, 300, "worst-task score", 16, "end", MUT);
+            scoreNum = tx(412, 348, "", 30, "end", DC, 700);
+        }
+        function setBars(w1, w2, sc) {
+            wFill1.setAttribute("width", (BARW * w1).toFixed(1));
+            wFill2.setAttribute("width", (BARW * w2).toFixed(1));
+            wVal1.setAttribute("x", BARX + BARW * w1 + 8);
+            wVal2.setAttribute("x", BARX + BARW * w2 + 8);
+            wVal1.textContent = fmtW(w1);
+            wVal2.textContent = fmtW(w2);
+            scoreNum.textContent = sc.toFixed(2);
+        }
+        var tweenId = 0;
+        function tweenBars() {
+            if (tweenId) cancelAnimationFrame(tweenId);
+            setBars(0.5, 0.5, scoreStart);
+            var t0 = performance.now(), MS = 700;
+            function fr(now) {
+                var t = Math.min(1, (now - t0) / MS);
+                setBars(0.5 * (1 - t), 0.5 + 0.5 * t,
+                    scoreStart + (scoreEnd - scoreStart) * t);
+                if (t < 1) tweenId = requestAnimationFrame(fr);
+                else tweenId = 0;
+            }
+            tweenId = requestAnimationFrame(fr);
+        }
+
+        function render(k) {
+            if (tweenId) { cancelAnimationFrame(tweenId); tweenId = 0; }
+            while (svg.firstChild) svg.removeChild(svg.firstChild);
+            tx(210, 26, titles[k], 18, "middle", DC, 700);
+
+            var defs = el("defs", {});
+            function mk(id, color) {
+                var m = el("marker", { id: id, viewBox: "0 0 10 10", refX: 8.5,
+                    refY: 5, markerWidth: 6.5, markerHeight: 6.5, orient: "auto" }, defs);
+                el("path", { d: "M 0.5 1 L 9 5 L 0.5 9 z", fill: color }, m);
+            }
+            mk("cgStepAh1", T1); mk("cgStepAh2", T2);
+            mk("cgStepAh0", G0C); mk("cgStepAhd", DC);
+
+            /* Step 1: the gradients. */
+            el("circle", { cx: OX, cy: OY, r: 3, fill: "#adb5bd" });
+            arrow(OX, OY, X(g1[0]), Y(g1[1]), T1, 3, null, "cgStepAh1");
+            arrow(OX, OY, X(g2[0]), Y(g2[1]), T2, 3, null, "cgStepAh2");
+            arrow(OX, OY, g0x, g0y, G0C, 2.5, "7,5", "cgStepAh0");
+            tx(X(g1[0]) + 14, Y(g1[1]) + 6, "g1", 16, "start", T1, 700);
+            tx(X(g2[0]) - 14, Y(g2[1]) - 8, "g2", 16, "middle", T2, 700);
+            tx(g0x + 20, g0y - 16, "g0", 16, "start", G0C, 700);
+
+            if (k >= 1) {
+                /* Step 2: the leash. */
+                el("circle", { cx: g0x, cy: g0y, r: br.toFixed(1),
+                    fill: "rgba(52,152,219,0.10)", stroke: BALLC, "stroke-width": 1.5 });
+                el("line", { x1: g0x, y1: g0y, x2: g0x + br, y2: g0y,
+                    stroke: BALLC, "stroke-width": 1.5, "stroke-dasharray": "5,4" });
+                tx(g0x + br / 2, g0y + 26, R.toFixed(2), 16, "middle", BALLC, 700);
+            }
+            if (k >= 2) {
+                /* Step 3: the dual solve. */
+                drawBars();
+                if (k === 2) tweenBars();
+                else setBars(0, 1, scoreEnd);
+            }
+            if (k >= 3) {
+                /* Step 4: the nudge. */
+                arrow(g0x, g0y, dsx, dsy, DC, 3.5, null, "cgStepAhd");
+                tx(dsx - 14, dsy - 18, "d*", 16, "middle", DC, 700);
+            }
+
+            /* Per-step focal highlight on the new element. */
+            if (k === 0) {
+                el("circle", { cx: g0x, cy: g0y, r: 15, fill: "none",
+                    stroke: AMBER, "stroke-width": 3 });
+            } else if (k === 1) {
+                el("circle", { cx: g0x, cy: g0y, r: (br + 9).toFixed(1), fill: "none",
+                    stroke: AMBER, "stroke-width": 3 });
+            } else if (k === 2) {
+                el("rect", { x: 58, y: 306, width: 356, height: 78, rx: 10,
+                    fill: "none", stroke: AMBER, "stroke-width": 3 });
+            } else {
+                el("circle", { cx: dsx, cy: dsy, r: 15, fill: "none",
+                    stroke: AMBER, "stroke-width": 3 });
+            }
+
+            out.textContent = outcomes[k];
+            dots.forEach(function (d, i) { d.classList.toggle("active", i === k); });
+            prev.disabled = (k === 0);
+            next.disabled = (k === 3);
+        }
+
+        var cur = 0;
+        function go(k) {
+            cur = Math.max(0, Math.min(3, k));
+            render(cur);
+        }
+        prev.addEventListener("click", function () { go(cur - 1); });
+        next.addEventListener("click", function () { go(cur + 1); });
+        dots.forEach(function (d) {
+            d.addEventListener("click", function () { go(parseInt(d.getAttribute("data-s"), 10)); });
+        });
+        render(0);
+    })();
+    </script>
+    <p>The code is the honest version:</p>
 <pre><code class="language-python">import numpy as np
 from scipy.optimize import minimize
 
-def cagrad_combine(grads, c=0.4):
+def cagrad_combine(grads, c=0.5):
     G = np.stack(grads); g0 = G.mean(axis=0); K = len(G)
     phi = c**2 * (g0 @ g0)
     def F(w):                       # the dual objective
@@ -969,20 +1181,13 @@ def cagrad_combine(grads, c=0.4):
     w = minimize(F, np.full(K, 1/K), bounds=[(0, 1)] * K,
                  constraints={'type': 'eq', 'fun': lambda w: w.sum() - 1}).x
     gw = w @ G
-    # last line: the reference repo's toy.py convention (not in the published Algorithm 1)
+    # last line: the reference repo's toy.py convention (not part of the method itself)
     return (g0 + c * np.linalg.norm(g0) * gw / np.linalg.norm(gw)) / (1 + c)
 </code></pre>
     <p>The last line is the diplomat on a leash in one expression: the consensus direction, plus one bounded act of independence.</p>
 
-    <h2 id="the-knob">The c knob dials between gradient descent and MGDA</h2>
-    <p>The knob is a <strong>dial between two older methods</strong>. At <code>0</code> the ball shrinks to a point: CAGrad is plain gradient descent. As the knob grows large, the update is dominated by the shortest-blend rule, which is exactly MGDA. The new territory is in between: more careful about conflict than plain descent, more purposeful than MGDA.</p>
-    <p class="small dim"><strong>MGDA</strong> (Sener and Koltun, 2018). The Pareto page walks through its shortest-blend rule step by step.</p>
-    <p><em>How to set the knob:</em> I start at <code>0.2</code> to <code>0.5</code>. If the worst task is still being ignored (its loss flatlines while the others fall), I raise the knob, which buys that task a louder voice. If the average loss improves too slowly, I lower the knob, since I am straying too far from the objective.</p>
-    <p>Too small (near <code>0</code>) and I inherit GD's stalls; too large and I inherit MGDA's scattered landings, and above <code>1</code> the proof is gone.</p>
-    <p>The good news is the sweet spot is wide: on the toy, the knob at <code>0.5</code> and <code>0.8</code> descends from every start, while <code>0.2</code> still stalls from the two hardest starts at <code>20,000</code> steps.</p>
-
     <h2 id="the-guarantee">The guarantee: convergence to a stationary point of the average loss</h2>
-    <p>The paper proves convergence to a stationary point of the average loss. the squared steepness of the average loss, added over all steps, never exceeds a fixed budget. So the steepness must shrink to zero.</p>
+    <p>CAGrad provably converges to a stationary point of the average loss. The squared steepness of the average loss, added over all steps, never exceeds a fixed budget, so the steepness must shrink to zero.</p>
     <p class="caption">The budget makes sense: the numerator is how far above the floor you start, and the denominator says bigger steps buy progress while a bigger knob setting costs you some.</p>
     <p>The assumptions <strong>H-Lipschitz gradients</strong> means the landscape never curves too sharply (a smoothness budget). <strong>Bounded below</strong> means the loss has a floor it cannot fall under. <strong>Small enough steps</strong> means steps sized for that curvature.</p>
     <ol>
@@ -993,10 +1198,10 @@ def cagrad_combine(grads, c=0.4):
 
 
     <h2 id="the-racer">The race: four methods, five starts, one toy landscape</h2>
-    <p>This is the real toy landscape from the paper's Section 5.1, replaying in your browser. The toy model has exactly two adjustable numbers, so every possible model is a point on the map; the shading shows the average loss as height. The gray bar is the Pareto set; the star is its best point. Four methods walk downhill from the same start, using only what they can feel under their feet.</p>
+    <p>This toy landscape has exactly two adjustable numbers, so every possible model is a point on the map; the shading shows the average loss as height. The gray bar is the Pareto set; the star is its best point. Four methods walk downhill from the same start, using only what they can feel under their feet.</p>
 
     <div class="demo" id="cgDemo">
-        <p style="margin-top:0;">Four methods, five starts, one trust region around the average. The trails are real <code>20,000</code>-step Adam runs (learning rate <code>2e-3</code>), precomputed and baked into this page. Nothing runs on page load; replay the <code>20,000</code>-step race and watch the trails.</p>
+        <p style="margin-top:0;">Four methods, five starts, one trust-region ball around the average. The trails are real <code>20,000</code>-step Adam runs (learning rate <code>2e-3</code>), precomputed and baked into this page. Nothing runs on page load; replay the <code>20,000</code>-step race and watch the trails.</p>
         <div class="demo-controls" role="group" aria-label="Starting point">
             <span class="cg-clabel">Start:</span>
             <button type="button" class="cg-start" data-s="0">(-8.5, 7.5)</button>
@@ -1012,35 +1217,20 @@ def cagrad_combine(grads, c=0.4):
         </div>
         <div class="cg-grid">
           <div class="cg-col">
-            <div class="demo-controls cg-crow">
-                <label for="cgC" class="cg-clabel">c: how far CAGrad may stray from the average</label>
-                <input type="range" id="cgC" min="0" max="2" step="0.01" value="0.5" style="flex:1;min-width:160px;" aria-label="CAGrad c value">
-                <span class="cg-cval mono" id="cgCVal">0.50</span>
-            </div>
-            <div class="cg-progwrap" id="cgProgWrap" hidden>
-                <div class="cg-progbar"><div class="cg-progfill" id="cgProgFill"></div></div>
-                <span class="small dim" id="cgProgText">recomputing...</span>
-            </div>
             <canvas id="cgMap" width="480" height="480" style="width:100%;height:auto;display:block;border-radius:8px;" aria-label="Trajectory map of the four methods"></canvas>
             <div class="cg-legend" id="cgLegend" aria-label="Map legend"></div>
-            <p class="caption">The paper's Section 5.1 toy landscape. Shading is average loss as height; the gray bar is the Pareto set, the star its best point (<code>-15.09</code>). Trails are real <code>20,000</code>-step Adam runs; the ringed dot is your start. Release the slider to recompute CAGrad live at your knob setting.</p>
-            <div id="cgConflict" aria-label="Conflict fraction readout"></div>
-            <p class="caption"><strong>What this plot is:</strong> a fight count. The bars show the fraction of the <code>20,000</code> steps where the two task gradients pointed against each other, for the selected start. <strong>What it shows:</strong> tall bars mean the tasks fought most of training. <strong>What it means:</strong> where GD stalls, the fight never stops, on about half of all steps.</p>
+            <p class="caption">The toy landscape. Shading is average loss as height; the gray bar is the Pareto set, the star its best point (<code>-15.09</code>). Trails are real <code>20,000</code>-step Adam runs; the ringed dot is your start.</p>
           </div>
           <div class="cg-col">
             <svg id="cgCurves" viewBox="0 0 400 200" style="width:100%;height:auto;display:block;" role="img" aria-label="Average loss against training step"></svg>
             <p class="caption"><strong>What this plot is:</strong> a scoreboard over time. Horizontal axis: training steps, <code>0 to 20,000</code>. Vertical axis: average loss, lower is better. <strong>What it shows:</strong> one curve per method. GD's curve flattens out high; CAGrad's keeps falling. <strong>What it means:</strong> a flat curve is a stuck method, a falling curve is still learning.</p>
-            <svg id="cgFront" viewBox="0 0 400 240" style="width:100%;height:auto;display:block;" role="img" aria-label="Landing points in loss space"></svg>
-            <div class="cg-legend" id="cgFrontLegend" aria-label="Loss-space legend"></div>
-            <p class="caption"><strong>What this plot is:</strong> a trade-off map. Each axis is one task's loss; the good corner is bottom-left. <strong>What it shows:</strong> one dot per method per start, where <code>20,000</code> steps ended up. The gray curve is the Pareto front; the gold ring is a fresh CAGrad run at your c. <strong>What it means:</strong> dots scattered along the curve were placed by luck of the start; dots near the tip found the best compromise on purpose.</p>
           </div>
         </div>
         <div class="cap-card">
           <strong>How to play</strong>
           <ul>
-            <li><strong>The point:</strong> replay the race on the paper's toy landscape. Four methods start from the same point and minimize the same average loss; the only difference is how each one picks its update direction. The trails are real <code>20,000</code>-step Adam runs baked into the page, so nothing computes when it loads. (The paper ran <code>100,000</code> steps at a smaller step size; this replay uses <code>20,000</code> so it finishes while you watch.)</li>
-            <li><strong>What you'll see:</strong> The map carries the trails and each plot below carries its own plain explanation: the scoreboard over time, the trade-off map of landing spots, and the fight count.</li>
-            <li class="try-it">The gold ring is a fresh CAGrad run at your c: small c hugs the average and can stall in the ravine; large c strays and scatters along the front.</li>
+            <li><strong>The point:</strong> replay the race. Four methods start from the same point and minimize the same average loss; the only difference is how each one picks its update direction. The trails are real <code>20,000</code>-step Adam runs baked into the page, so nothing computes when it loads. (Longer published runs used <code>100,000</code> steps at a smaller step size; this replay uses <code>20,000</code> so it finishes while you watch.)</li>
+            <li><strong>What you'll see:</strong> the map carries the trails; the scoreboard below shows each method's average loss falling over time.</li>
           </ul>
         </div>
     </div>
@@ -1050,22 +1240,23 @@ def cagrad_combine(grads, c=0.4):
         <li><strong>GD stalls.</strong> Its trail dies in the ravine on three of five starts, with final average losses of <code>2.49</code>, <code>1.69</code>, and <code>3.50</code>, miles above the minimum <code>-15.09</code>. On the trapped runs the two task gradients fight on about half of all steps and never stop: conflict is not a passing storm, it is the climate of the trap.</li>
         <li><strong>MGDA and PCGrad escape.</strong> MGDA reaches the low-loss region on all five runs, PCGrad on four of five. But they stop wherever they first touch the Pareto set, with final average losses anywhere from about <code>-10</code> to <code>-15.1</code>, decided by the start, not by the task.</li>
         <li><strong>CAGrad (knob at <code>0.5</code>) keeps descending.</strong> Two of five runs land exactly on the star (<code>-15.09</code>); the other three are still on their way down, at <code>-12.7</code> to <code>-15.0</code>, when the <code>20,000</code> steps run out.</li>
-        <li><strong>The knob dial confirmed.</strong> At <code>0</code> it reproduces GD's runs exactly, at <code>10</code> it behaves like MGDA with scattered landings, and at <code>0.2</code> it still stalls on the two hardest starts at <code>20,000</code> steps. The middle of the dial is the new territory.</li>
     </ol>
 
     <h2 id="practical">When to use CAGrad, and what it costs</h2>
     <ol>
         <li><strong>Reach for it when</strong> you want PCGrad-style conflict handling and a real objective to stand behind, especially when runs from different starting points need to behave the same way.</li>
         <li><strong>Costs:</strong> <code>K</code> backward passes plus one tiny solve per step. With many tasks, CAGrad-Fast works on a random handful of tasks per step and the guarantee survives: about <code>2x</code> and <code>5x</code> faster than PCGrad on the <code>10</code>- and <code>50</code>-task Meta-World benchmarks, with similar results.</li>
-        <li><strong>Keep in mind:</strong> the proof assumes smooth losses and small steps. Real networks are messier, so treat c as a knob you tune even though it has a theoretical meaning.</li>
-        <li><strong>The hidden knob: how many tasks per step.</strong> With many tasks, the K backward passes are the real cost. Treat the CAGrad-Fast subset size like a batch size: bigger is steadier and costlier, smaller is noisier and faster.</li>
+        <li><strong>Keep in mind:</strong> the proof assumes smooth losses and small steps. Real networks are messier, so treat <code>c</code> as a knob you tune even though it has a theoretical meaning.</li>
+        <li><strong>The hidden knob: how many tasks per step.</strong> With many tasks, the <code>K</code> backward passes are the real cost. Treat the CAGrad-Fast subset size like a batch size: bigger is steadier and costlier, smaller is noisier and faster.</li>
+        <li><strong>How I set the knob:</strong> I start at <code>0.2</code> to <code>0.5</code>. If the worst task is still being ignored (its loss flatlines while the others fall), I raise the knob, which buys that task a louder voice. If the average loss improves too slowly, I lower the knob, since I am straying too far from the objective.</li>
+        <li><strong>The sweet spot is wide:</strong> on the toy (panels <code>5</code> and <code>6</code> of the figure below), the knob at <code>0.5</code> and <code>0.8</code> descends from every start, while <code>0.2</code> still stalls from the two hardest starts at <code>20,000</code> steps.</li>
     </ol>
 
     <h2 id="paper-figure">CAGrad lands on the Pareto front; the others fall short</h2>
     <figure class="figure" id="cgFig3" style="margin:0;">
       <div class="cg-static-fig">
-        <h3 style="margin-top:0;">Panel by panel: where GD, MGDA, and PCGrad stall</h3>
-        <p style="margin-top:0;">The paper tests every method on the same tiny setup from Section 5.1: a model with just two knobs to turn, and two losses pulling in different directions. Because there are only two knobs, the authors can draw the whole story as six pictures. Here is how to read them.</p>
+        <h3 style="margin-top:0;">How to read the six panels</h3>
+        <p style="margin-top:0;">The setup is tiny on purpose: a model with just two knobs to turn, and two losses pulling in different directions. With only two knobs, the whole story fits in six pictures. Here is how to read them.</p>
         <p><strong>What the plots are:</strong> each panel is drawn in loss space, not knob space. The horizontal axis is task <code>1</code>'s loss, the vertical axis is task <code>2</code>'s loss, so every point is one whole model: bottom-left means both tasks happy, top-right means both suffering. The curve in each panel is the Pareto front, the models where one task can only improve if the other gets worse. Nothing can live below and left of it.</p>
         <p><strong>What the trails are:</strong> one colored trail is one training run from one starting point, painted red at the start and fading to yellow as training goes on. Five trails per panel, five different starts. Panels <code>1 to 4</code> give GD, MGDA, PCGrad, and CAGrad (c = <code>0.5</code>) the same five starts; panels <code>5 and 6</code> rerun CAGrad with different leash lengths.</p>
         <p><strong>How to read them:</strong> a run that stalls stops up and to the right, both losses still high, going nowhere. A run that works bends down and left, hugging toward the front. Compare panel <code>1</code> with panel <code>4</code> and the difference is the whole paper: GD's runs die in the valley, CAGrad's bend down and left toward the Pareto front.</p>
@@ -1076,7 +1267,7 @@ def cagrad_combine(grads, c=0.4):
           </div>
         </div>
         <ol class="cg-readlist">
-          <li><strong>Panel <code>1</code>, GD:</strong> the paper's own runs (<code>100,000</code> steps) stall in the valley on <code>2</code> of <code>5</code> starts. My replay above (<code>20,000</code> steps) stalls on <code>3</code> of <code>5</code>. Same valley, same story.</li>
+          <li><strong>Panel <code>1</code>, GD:</strong> Longer published runs (<code>100,000</code> steps) stall in the valley on <code>2</code> of <code>5</code> starts. My replay above (<code>20,000</code> steps) stalls on <code>3</code> of <code>5</code>. Same valley, same story.</li>
           <li><strong>Panel <code>2</code>, MGDA:</strong> every run reaches the Pareto set, but each stops wherever it first touches it. The landing is decided by the start, not by the tasks.</li>
           <li><strong>Panel <code>3</code>, PCGrad:</strong> surgery escapes the valley too, but it also parks on the front wherever it arrives. One run is still short of the set.</li>
           <li><strong>Panel <code>4</code>, CAGrad at <code>0.5</code>:</strong> all five runs bend toward the star. The leash keeps pulling toward the average while the diplomat spends its freedom on the worst-off task.</li>
@@ -1089,7 +1280,12 @@ def cagrad_combine(grads, c=0.4):
     </figure>
 
     <hr>
-    <p>Every method in this series has been surgery: cut a shadow, nudge an angle, or leash the step. The series ends here, with the full toolbox on the table: <em>reweight the losses when the tasks are loud, reshape the update when they fight, and protect the worst-off task when you need a guarantee</em>. Diagnose with gradient norms and cosines, then pick your medicine.</p>
+    <p>Every method in this series reshapes the update: reweight the losses, fix the angles, or leash the step. The series ends here, with the full toolbox on the table: <em>reweight the losses when the tasks are loud, reshape the update when they fight, and protect the worst-off task when you need a guarantee</em>. Diagnose with gradient norms and cosines, then pick your medicine.</p>
+
+    <h2 id="references">References</h2>
+    <ol class="brefs">
+        <li>Liu, B., et al. (2021). Conflict-Averse Gradient Descent for Multi-task Learning. NeurIPS. arXiv:2110.14048.</li>
+    </ol>
 
     <script>
     /* Baked 20k-step trajectories: precomputed with the same math this page ships
@@ -1099,8 +1295,7 @@ def cagrad_combine(grads, c=0.4):
     <script>
     (function () {
         "use strict";
-        /* ---- The paper's Section 5.1 toy landscape: same formulas as the precompute script ---- */
-        var EPS = 1e-4;
+        /* ---- Toy landscape: same formulas as the precompute script ---- */
         function f1(t) { return Math.log(Math.max(Math.abs(0.5 * (-t[0] - 7) - Math.tanh(-t[1])), 5e-6)) + 6; }
         function f2(t) { return Math.log(Math.max(Math.abs(0.5 * (-t[0] + 3) + Math.tanh(-t[1]) + 2), 5e-6)) + 6; }
         function gg1(t) { return ((-t[0] + 7) * (-t[0] + 7) + 0.1 * (-t[1] - 8) * (-t[1] - 8)) / 10 - 20; }
@@ -1108,33 +1303,6 @@ def cagrad_combine(grads, c=0.4):
         function losses(t) {
             var c1 = Math.max(Math.tanh(0.5 * t[1]), 0), c2 = Math.max(Math.tanh(-0.5 * t[1]), 0);
             return [c1 * f1(t) + c2 * gg1(t), c1 * f2(t) + c2 * gg2(t)];
-        }
-        function dot(a, b) { return a[0] * b[0] + a[1] * b[1]; }
-        function nrm(a) { return Math.hypot(a[0], a[1]); } /* Math.hypot, not sqrt(x*x+y*y): bit-identical with the precompute script */
-        function grads(t) {
-            var l1 = function (u) { return losses(u)[0]; }, l2 = function (u) { return losses(u)[1]; };
-            return [
-                [(l1([t[0] + EPS, t[1]]) - l1([t[0] - EPS, t[1]])) / (2 * EPS),
-                 (l1([t[0], t[1] + EPS]) - l1([t[0], t[1] - EPS])) / (2 * EPS)],
-                [(l2([t[0] + EPS, t[1]]) - l2([t[0] - EPS, t[1]])) / (2 * EPS),
-                 (l2([t[0], t[1] + EPS]) - l2([t[0], t[1] - EPS])) / (2 * EPS)]
-            ];
-        }
-        /* CAGrad update. The /(1+c) is the reference repo's toy.py convention, not the published Algorithm 1. */
-        function cagradStep(a, b, c) {
-            var g0 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], n0 = nrm(g0);
-            if (n0 < 1e-12) return g0;
-            var bestW = 0.5, bestF = Infinity, i, w, gw, F;
-            for (i = 0; i <= 200; i++) {
-                w = i / 200;
-                gw = [w * a[0] + (1 - w) * b[0], w * a[1] + (1 - w) * b[1]];
-                F = dot(gw, g0) + c * n0 * nrm(gw);
-                if (F < bestF) { bestF = F; bestW = w; }
-            }
-            gw = [bestW * a[0] + (1 - bestW) * b[0], bestW * a[1] + (1 - bestW) * b[1]];
-            var ng = nrm(gw);
-            if (ng < 1e-12) return g0;
-            return [(g0[0] + c * n0 * gw[0] / ng) / (1 + c), (g0[1] + c * n0 * gw[1] / ng) / (1 + c)];
         }
 
         /* ---- Config ---- */
@@ -1150,16 +1318,12 @@ def cagrad_combine(grads, c=0.4):
 
         /* ---- State ---- */
         var startIdx = 1, progress = 0, playing = false, rafId = 0;
-        var liveC = null;            /* live CAGrad run after a slider recompute */
-        var recomputing = false, recomputeToken = 0;
         var lastStatusAt = 0;
 
         /* ---- DOM ---- */
         function $(id) { return document.getElementById(id); }
-        var mapCv = $("cgMap"), curvesSvg = $("cgCurves"), frontSvg = $("cgFront");
-        var statusEl = $("cgStatus"), legendEl = $("cgLegend"), frontLegendEl = $("cgFrontLegend");
-        var conflictEl = $("cgConflict"), cSlider = $("cgC"), cValEl = $("cgCVal");
-        var progWrap = $("cgProgWrap"), progFill = $("cgProgFill"), progText = $("cgProgText");
+        var mapCv = $("cgMap"), curvesSvg = $("cgCurves");
+        var statusEl = $("cgStatus"), legendEl = $("cgLegend");
         var replayBtn = $("cgReplay"), resetBtn = $("cgReset");
 
         function setStatus(t) { statusEl.textContent = t; }
@@ -1189,22 +1353,9 @@ def cagrad_combine(grads, c=0.4):
             ctx.putImageData(img, 0, 0);
         })();
 
-        function pathFor(key) {
-            if (key === "cagrad" && liveC) return liveC.path;
-            return CG_BAKED.methods[key].starts[startIdx].path;
-        }
-        function lossHistFor(key) {
-            if (key === "cagrad" && liveC) return liveC.lossHist;
-            return CG_BAKED.methods[key].starts[startIdx].lossHist;
-        }
-        function conflictFor(key) {
-            if (key === "cagrad" && liveC) return liveC.conflictFrac;
-            return CG_BAKED.methods[key].starts[startIdx].conflictFrac;
-        }
-        function finalLossFor(key) {
-            if (key === "cagrad" && liveC) return liveC.finalLoss;
-            return CG_BAKED.methods[key].starts[startIdx].finalLoss;
-        }
+        function pathFor(key) { return CG_BAKED.methods[key].starts[startIdx].path; }
+        function lossHistFor(key) { return CG_BAKED.methods[key].starts[startIdx].lossHist; }
+        function finalLossFor(key) { return CG_BAKED.methods[key].starts[startIdx].finalLoss; }
 
         /* ---- Trajectory map ---- */
         function drawMap() {
@@ -1255,7 +1406,7 @@ def cagrad_combine(grads, c=0.4):
                 var d = document.createElement("span");
                 d.className = "cg-dot"; d.style.background = rest ? "#adb5bd" : m.color;
                 chip.appendChild(d);
-                var label = m.key === "cagrad" && liveC ? "CAGrad c=" + liveC.c.toFixed(2) + " (live)" : m.label;
+                var label = m.label;
                 chip.appendChild(document.createTextNode(label + (done ? "  " + finalLossFor(m.key).toFixed(2) : "")));
                 legendEl.appendChild(chip);
             });
@@ -1323,116 +1474,7 @@ def cagrad_combine(grads, c=0.4):
             }
         }
 
-        /* ---- Loss-space front ---- */
-        var frontPts = (function () {
-            var pts = [], x;
-            for (x = -7; x <= 7.001; x += 0.05) {
-                var L = losses([x, PARETO_Y]);
-                pts.push([L[0], L[1]]);
-            }
-            return pts;
-        })();
-        function drawFront() {
-            while (frontSvg.firstChild) frontSvg.removeChild(frontSvg.firstChild);
-            var W = 400, H = 240, P = { l: 50, r: 14, t: 14, b: 38 };
-            var rest = progress === 0;
-            var xs = [], ys = [], i, m, s;
-            frontPts.forEach(function (p) { xs.push(p[0]); ys.push(p[1]); });
-            METHODS.forEach(function (mm) {
-                CG_BAKED.methods[mm.key].starts.forEach(function (st) {
-                    xs.push(st.finalL1); ys.push(st.finalL2);
-                });
-            });
-            if (liveC) { xs.push(liveC.finalL1); ys.push(liveC.finalL2); }
-            var x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs);
-            var y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
-            function X(v) { return P.l + (W - P.l - P.r) * (v - x0) / ((x1 - x0) || 1); }
-            function Y(v) { return H - P.b - (H - P.t - P.b) * (v - y0) / ((y1 - y0) || 1); }
-            var f, vx;
-            for (f = 0; f <= 3; f++) {
-                vx = x0 + (x1 - x0) * f / 3;
-                svgEl("line", { x1: X(vx), x2: X(vx), y1: P.t, y2: H - P.b, stroke: GRID }, frontSvg);
-                /* Corner tick: left-align so it never sits on the y-axis corner tick. */
-                if (f === 0) svgText(frontSvg, X(vx) + 6, H - P.b + 20, vx.toFixed(0), { "text-anchor": "start", "font-size": 15, fill: TICK_FILL });
-                else svgText(frontSvg, X(vx), H - P.b + 20, vx.toFixed(0), { "text-anchor": "middle", "font-size": 15, fill: TICK_FILL });
-            }
-            for (f = 0; f <= 3; f++) {
-                var vy = y0 + (y1 - y0) * f / 3;
-                svgEl("line", { x1: P.l, x2: W - P.r, y1: Y(vy), y2: Y(vy), stroke: GRID }, frontSvg);
-                svgText(frontSvg, P.l - 8, Y(vy) + 5, vy.toFixed(0), { "text-anchor": "end", "font-size": 15, fill: TICK_FILL });
-            }
-            svgText(frontSvg, (P.l + W - P.r) / 2, H - 7, "task 1 loss", { "text-anchor": "middle", "font-size": 15, fill: TICK_FILL });
-            var ylab = svgText(frontSvg, 15, (P.t + H - P.b) / 2, "task 2 loss",
-                { "text-anchor": "middle", "font-size": 15, fill: TICK_FILL });
-            ylab.setAttribute("transform", "rotate(-90 15 " + ((P.t + H - P.b) / 2) + ")");
-            svgEl("polyline", {
-                points: frontPts.map(function (p) { return X(p[0]).toFixed(1) + "," + Y(p[1]).toFixed(1); }).join(" "),
-                fill: "none", stroke: "#8a8f96", "stroke-width": 2.5, "stroke-linecap": "round"
-            }, frontSvg);
-            METHODS.forEach(function (mm) {
-                CG_BAKED.methods[mm.key].starts.forEach(function (st) {
-                    svgEl("circle", { cx: X(st.finalL1).toFixed(1), cy: Y(st.finalL2).toFixed(1), r: 5, fill: rest ? "#adb5bd" : mm.color, stroke: "#ffffff", "stroke-width": 1 }, frontSvg);
-                });
-            });
-            if (liveC) {
-                svgEl("circle", {
-                    cx: X(liveC.finalL1).toFixed(1), cy: Y(liveC.finalL2).toFixed(1), r: 8,
-                    fill: "none", stroke: "#b8860b", "stroke-width": 2.5
-                }, frontSvg);
-            }
-            frontLegendEl.innerHTML = "";
-            function chip(txt, swatch) {
-                var c = document.createElement("span");
-                c.className = "cg-chip";
-                var d = document.createElement("span");
-                d.className = "cg-dot"; d.style.background = swatch;
-                c.appendChild(d); c.appendChild(document.createTextNode(txt));
-                frontLegendEl.appendChild(c);
-            }
-            chip("gray curve: the Pareto front", "#8a8f96");
-            chip("dots: 20 baked landings (4 methods x 5 starts)", "#adb5bd");
-            chip(liveC ? "gold ring: CAGrad at your c = " + liveC.c.toFixed(2) : "gold ring: your c (appears after the slider recompute)", "#b8860b");
-        }
-
-        /* ---- Conflict-fraction readout ---- */
-        function drawConflict() {
-            conflictEl.innerHTML = "";
-            var rest = progress === 0, done = progress >= 1;
-            METHODS.forEach(function (m) {
-                var row = document.createElement("div");
-                row.className = "cg-confrow";
-                var lab = document.createElement("span");
-                lab.className = "cg-conflabel";
-                var d = document.createElement("span");
-                d.className = "cg-dot"; d.style.background = rest ? "#adb5bd" : m.color;
-                lab.appendChild(d);
-                var label = m.key === "cagrad" && liveC ? "CAGrad c=" + liveC.c.toFixed(2) : m.label;
-                lab.appendChild(document.createTextNode(label));
-                var bar = document.createElement("div");
-                bar.className = "cg-confbar";
-                var fill = document.createElement("div");
-                fill.className = "cg-conffill";
-                fill.style.background = rest ? "#ced4da" : m.color;
-                var frac = conflictFor(m.key);
-                fill.style.width = rest ? "0%" : (frac * 100).toFixed(1) + "%";
-                bar.appendChild(fill);
-                var val = document.createElement("span");
-                val.className = "cg-confval mono";
-                val.textContent = done ? (frac * 100).toFixed(1) + "%" : (rest ? "-" : "\u2026");
-                row.appendChild(lab); row.appendChild(bar); row.appendChild(val);
-                conflictEl.appendChild(row);
-            });
-            /* Same height-reservation as the legend: the hint paragraph stays in the
-               DOM with visibility toggled so the readout never changes height
-               on phase change. */
-            var chint = document.createElement("p");
-            chint.className = "cg-hint";
-            chint.textContent = "No race yet: bars and percentages appear once the methods run.";
-            chint.style.visibility = rest ? "visible" : "hidden";
-            conflictEl.appendChild(chint);
-        }
-
-        function drawAll() { drawMap(); drawLegend(); drawCurves(); drawFront(); drawConflict(); }
+        function drawAll() { drawMap(); drawLegend(); drawCurves(); }
 
         /* ---- Replay ---- */
         function stopRace() {
@@ -1445,10 +1487,8 @@ def cagrad_combine(grads, c=0.4):
             return METHODS.map(function (m) { return m.label.split(" ")[0] + " " + finalLossFor(m.key).toFixed(2); }).join(", ");
         }
         function startRace() {
-            if (recomputing) { setStatus("Recomputing CAGrad, one moment, then press Replay."); return; }
             stopRace();
             progress = 0;
-            drawFront();
             playing = true;
             replayBtn.classList.add("playing");
             replayBtn.textContent = "Walking\u2026";
@@ -1458,7 +1498,7 @@ def cagrad_combine(grads, c=0.4):
                 if (!playing) return;
                 progress = Math.min(1, (now - t0) / RACE_MS);
                 var phase = progress >= 1 ? "done" : "playing";
-                if (phase !== lastPhase) { lastPhase = phase; drawLegend(); drawConflict(); drawFront(); }
+                if (phase !== lastPhase) { lastPhase = phase; drawLegend(); }
                 drawMap(); drawCurves();
                 if (now - lastStatusAt > 250 || progress >= 1) {
                     lastStatusAt = now;
@@ -1474,67 +1514,9 @@ def cagrad_combine(grads, c=0.4):
         /* ---- Reset ---- */
         function resetAll() {
             stopRace();
-            recomputeToken++;
-            recomputing = false;
-            progWrap.hidden = true;
             progress = 0;
-            liveC = null;
-            cSlider.value = "0.5";
-            cValEl.textContent = "0.50";
             drawAll();
             setStatus("Ready. Press Replay.");
-        }
-
-        /* ---- Chunked live CAGrad recompute (never blocks the main thread) ---- */
-        function recomputeLive(cVal) {
-            if (playing) { setStatus("Wait for the race to finish, then move the slider."); return; }
-            if (recomputing) return;
-            recomputing = true;
-            var token = ++recomputeToken;
-            progWrap.hidden = false;
-            progFill.style.width = "0%";
-            progText.textContent = "recomputing CAGrad at c=" + cVal.toFixed(2) + "\u2026";
-            setStatus("Recomputing CAGrad at c=" + cVal.toFixed(2) + " (20,000 steps, chunked)\u2026");
-            var t0 = performance.now();
-            var start = STARTS[startIdx];
-            var t = [start[0], start[1]], m = [0, 0], v = [0, 0];
-            var b1 = 0.9, b2 = 0.999, lr = 2e-3;
-            var path = [[t[0], t[1]]], lossHist = [], conflicts = 0, i = 0;
-            function chunk() {
-                if (token !== recomputeToken) return;
-                var end = Math.min(i + 2000, STEPS), step, ab, a, b, d, mh, vh, L;
-                for (; i < end; i++) {
-                    step = i + 1;
-                    ab = grads(t); a = ab[0]; b = ab[1];
-                    if (dot(a, b) < 0) conflicts++;
-                    d = cagradStep(a, b, cVal);
-                    m = [b1 * m[0] + (1 - b1) * d[0], b1 * m[1] + (1 - b1) * d[1]];
-                    v = [b2 * v[0] + (1 - b2) * d[0] * d[0], b2 * v[1] + (1 - b2) * d[1] * d[1]];
-                    mh = [m[0] / (1 - Math.pow(b1, step)), m[1] / (1 - Math.pow(b1, step))];
-                    vh = [v[0] / (1 - Math.pow(b2, step)), v[1] / (1 - Math.pow(b2, step))];
-                    t = [t[0] - lr * mh[0] / (Math.sqrt(vh[0]) + 1e-8),
-                         t[1] - lr * mh[1] / (Math.sqrt(vh[1]) + 1e-8)];
-                    if (step % 16 === 0) path.push([t[0], t[1]]);
-                    if (step % 100 === 0) { L = losses(t); lossHist.push([step, (L[0] + L[1]) / 2]); }
-                }
-                progFill.style.width = (i / STEPS * 100).toFixed(0) + "%";
-                if (i < STEPS) { setTimeout(chunk, 0); return; }
-                if (token !== recomputeToken) return;
-                var Lf = losses(t);
-                liveC = {
-                    c: cVal, path: path, lossHist: lossHist,
-                    conflictFrac: conflicts / STEPS,
-                    end: [t[0], t[1]],
-                    finalL1: Lf[0], finalL2: Lf[1], finalLoss: (Lf[0] + Lf[1]) / 2
-                };
-                recomputing = false;
-                progWrap.hidden = true;
-                var secs = ((performance.now() - t0) / 1000).toFixed(1);
-                drawAll();
-                setStatus("Recomputed CAGrad c=" + cVal.toFixed(2) + " in " + secs + "s: final avg loss " +
-                    liveC.finalLoss.toFixed(2) + ". Press Replay to watch the new trail.");
-            }
-            setTimeout(chunk, 0);
         }
 
         /* ---- Wiring ---- */
@@ -1548,12 +1530,6 @@ def cagrad_combine(grads, c=0.4):
         });
         replayBtn.addEventListener("click", startRace);
         resetBtn.addEventListener("click", resetAll);
-        cSlider.addEventListener("input", function () {
-            cValEl.textContent = parseFloat(cSlider.value).toFixed(2);
-        });
-        cSlider.addEventListener("change", function () {
-            recomputeLive(parseFloat(cSlider.value));
-        });
 
         /* ---- Init: rest state. No autoplay, no trails, no curves, no panel
            selected: the figure tour starts neutral. ---- */

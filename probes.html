@@ -765,19 +765,19 @@
 
 <p class="dek">Tiny classifiers that read a model's internal activations to flag harmful prompts, before it answers.</p>
 
-<h2>How they work, and how they do damage</h2>
+<h2>The threat: hidden instructions inside innocent prompts</h2>
 <p>What if you could catch a jailbreak before the model writes a single word? A large language model reads your prompt, turns it into numbers, processes those numbers through dozens of layers, and writes back one piece at a time. Its core skill is following instructions in the prompt: answer this, summarize that, write code that does X. That is what makes it useful.</p>
 <p>It is also what makes it dangerous. The model cannot tell which instructions deserve to be followed. An attacker can hide malicious instructions inside an innocent-looking prompt, a <strong>jailbreak</strong>: "help me debug this code" where the code is malware, or a long story that gradually steers the model into explaining how to break into a system. The model follows along because following instructions is what it does. The damage is concrete: phishing campaigns, vulnerability hunting, step-by-step help with attacks, all produced by a helpful assistant doing exactly what it was told.</p>
 <p>The first instinct is to teach the model to refuse bad requests. It does not hold against determined attackers: the paper cites Nasr et al., 2025 on refusal training failing under pressure. So instead of relying on the model to behave, the paper watches prompts at deployment time.</p>
 <p>This tutorial follows the paper in which Google DeepMind made probes production-ready: its findings informed the deployment of misuse-mitigation probes in user-facing Gemini.</p>
 
-<h2>Why not just ask another AI to check?</h2>
+<h2>An LLM judge doubles the bill; a probe reads numbers that already exist</h2>
 <p>The obvious defense is a monitor: a second system that reads every prompt and judges whether it is an attack. The simplest monitor is another large language model asked exactly that question. It works, but it roughly doubles the bill, because every user request now costs two giant model runs instead of one.</p>
 <p>An activation probe is the cheaper answer. It does not read the prompt's words, and it does not run a second giant model. It reads the first model's own internal understanding of the prompt, which the model already computed during its normal forward pass, and turns it into one suspiciousness score. The extra cost is tiny: one small classifier running on numbers that already exist.</p>
 <p>But cheap is not the paper's real story. Probes already existed, and they broke in production: a probe trained on short prompts falls apart on long documents, because one malicious sentence's score gets averaged away by a million innocent ones. Training directly on long documents is far too expensive, so the paper engineers the probes to generalize instead. Cost is the enabler; surviving production is the story.</p>
 <p>Two terms, glossed once here and used everywhere below. A <strong>token</strong> is a word-piece, the chunk the model actually reads ("injection" might be one token, "unbelievable" might be three). An <strong>activation</strong> is a list of numbers inside the model describing what it has understood so far.</p>
 
-<h2>Listening to the model's thoughts</h2>
+<h2>Probes: tiny classifiers that listen to one layer</h2>
 <p>Neural networks have a reputation as black boxes: millions of numbers with no labels saying what any of them mean. Scientists have wanted to look inside for years, and the standard trick comes from neuroscience. Brain researchers attach small classifiers to recordings from a brain region and ask: from this region's activity alone, can you tell what the subject is seeing? If yes, that information is present in that region.</p>
 <p>Machine learning borrowed the trick. In 2016, Alain and Bengio attached tiny linear classifiers, which they called <strong>probes</strong>, to the intermediate layers of neural networks. A probe is deliberately too simple to learn anything on its own. It just listens to one layer's numbers and answers one question about them. If it answers well, the knowledge was already in the layer. And crucially, the probe never changes the model: it is attached after training and only reads.</p>
 <p>This paper points that listening trick at safety. Instead of asking "does this layer know French grammar," the probe asks "does this layer think the prompt is an attack?" Everything that follows is that one idea, engineered until it works in production.</p>
@@ -791,14 +791,14 @@
 <p>This thing has a name: an <strong>activation probe</strong>.</p>
 <p>In plain words: tap a middle layer of the model, check every part of the prompt, keep the most suspicious part, compare it to a threshold. The precise meaning of "part" arrives in two steps below.</p>
 
-<h2>Lists of numbers</h2>
+<h2>Every prompt slice is a list of numbers</h2>
 <p>Each part of the prompt that the model processes is represented as a list of numbers. "Hidden size" is just the length of that list: how many dials the model gets for describing what it understood. The toy's full list is <code>768</code> numbers long; I only show <code>8</code> of them here, so the arithmetic stays visible. In the paper's setting the lists are thousands of numbers long, and the same arithmetic runs over all of them.</p>
 
 <h2>Positions, not words</h2>
 <p>By the middle of the model, those lists are no longer word lists. Every block lets each slice of the prompt look at the other slices and mix their information in, so by block <code>8</code> the list sitting where "injection" was has absorbed the whole sentence around it. Call each slice a <strong>position</strong>: a slot in the prompt whose list of numbers sees the entire prompt, not just its own word.</p>
 <p>The probe scores positions, not words. Here is the proof, in the toy numbers below: the word "SQL" appears in both demo prompts, but its list of numbers is different each time, so its score is different too, <code>2.84</code> in the attack prompt and <code>0.75</code> in the benign one. Same word, different situation, different score. The probe is not detecting the word "SQL." It is detecting the situation the word sits in, as the model understood it. That is the entire reason for tapping the middle of the model instead of scanning the raw text.</p>
 
-<h2>Where in the model?</h2>
+<h2>Tap the middle layers, where meaning builds</h2>
 <p>Think of the model's layers as an assembly line. The early layers handle raw word pieces. The middle layers build meaning: this is where each position's list absorbs the whole prompt and the model forms its understanding of what is being asked, including whether something is off. The late layers spend that understanding on planning the next word of the answer.</p>
 <div class="diagram eml-layers">
 <div class="eml-band eml-late"><b>Late layers</b><span>planning the next word</span></div>
@@ -821,7 +821,7 @@
 <p>One thing to lock in now, because it is true for every probe below: the tap is identical. One fixed middle layer, one list of numbers per position. Every probe then scores each position, combines those scores into one number, and compares it to a threshold. The paper's whole argument lives in the combine step, so that is the step to watch.</p>
 <p>This is also why the probe works at all. The probe is not detecting attacks from scratch. By the middle of the model, the model itself has already done the hard work of understanding the prompt. The probe is just a cheap reader of that understanding, trained to report one thing: does this understanding look like an attack?</p>
 
-<h2>The concrete machine</h2>
+<h2>The toy model: 12 blocks, hidden size 768, tap block 8</h2>
 <p>The toy model on this page is a GPT-style transformer: <code>12</code> blocks, hidden size <code>768</code> (<code>8</code> of the <code>768</code> numbers are shown, so the arithmetic stays visible), <code>12</code> attention heads, meaning <code>12</code> independent scorers reading the prompt in parallel. The probe taps block <code>8</code> and copies every position's list of numbers. In the paper, the same setup watches Gemini 2.5 Flash; the toy stands in for it, and you will meet Flash properly in the cascade section below.</p>
 
 <div class="demo" id="probeDemoA">
@@ -1257,7 +1257,7 @@
 <p>The decision threshold is picked on a validation set with false alarms weighted heaviest: overtriggering on benign traffic counts <code>50</code> against <code>5</code> for a missed attack and <code>2</code> for a hard-negative false alarm.</p>
 <p>A smoke detector that cries wolf gets ripped off the wall.</p>
 
-<h2>The cascade</h2>
+<h2>Cheap triage, expensive second opinion: the unsure middle goes to Flash</h2>
 <p>The probe is cheap and the big model is not, so the paper pairs them. The probe scores every prompt. Clear cases are decided by the probe alone. The unsure middle, scores too close to call, goes to Gemini 2.5 Flash for a second opinion.</p>
 <div class="diagram">
 <svg class="defer-svg" viewBox="0 0 600 130" role="img" aria-label="Cascade deferral band diagram">
@@ -1294,7 +1294,7 @@
 </div>
 
 
-<h2>Where do they work?</h2>
+<h2>Results: 3% missed attacks at 1/50th of the cost</h2>
 <p>The paper tests the probes where it matters: short prompts, long documents, multi-turn chats, and real jailbreaks. Here is what held up.</p>
 <p>The cost story, stated once with both denominators. A probe alone costs a tiny fraction of an LLM judge: over <code>10,000</code> times cheaper at better error, because the probe is a small classifier running on numbers the model already computed (Figure 1 above). The probe-plus-Flash cascade is a different comparison: versus Flash alone it costs about <code>1/50th</code> at inference, defers <code>8%</code> of prompts, and scores lower error than Flash by itself. Two denominators, two claims; do not mix them.</p>
 <p>The central test of the paper is long-context generalization: probes trained only on short prompts, evaluated on long contexts they never saw. Each group below is one probe. The solid bars are FNR, the fraction of real attacks missed (left axis). The hatched bars are FPR, the fraction of benign prompts falsely flagged (right axis). Lower is better on both.</p>
@@ -1307,14 +1307,14 @@
 
 <p>Three more findings round it out. No single probe wins on every distribution shift: the best architecture for long contexts is not the best for multi-turn, so production means choosing per deployment. The receipts: on long contexts, MultiMax variants can miss <code>0%</code> of attacks while false-alarming on up to <code>82%</code> of long benign traffic; the rolling probe balances both at <code>3.0%</code> missed and <code>1.2%</code> false alarms. With no distribution shift at all, plain attention is already near-optimal. The automatic search worked: starting from a plain attention probe, AlphaEvolve evaluated about <code>2,500</code> architectures and rediscovered max-style combining on its own. And the findings informed real deployment: misuse-mitigation probes built on this work now run in user-facing Gemini.</p>
 
-<h2>Caveats</h2>
+<h2>The catches: adaptive attackers, inputs only, diverse training</h2>
 <ul>
 <li><strong>Adaptive attackers still get through.</strong> Every method tested leaves at least <code>1%</code> attack success on the jailbreak set, and the authors note some of that may be dataset labeling error. A probe is a speed bump for a determined adversary, not a wall.</li>
 <li><strong>Inputs only.</strong> Everything in the paper watches the prompt going in. Watching the model's answer is listed as future work.</li>
 <li><strong>Architecture was not enough alone.</strong> The new designs fixed the context-length problem, but broad generalization still required training on diverse distributions too.</li>
 </ul>
 
-<h2>What is next</h2>
+<h2>Next: probes that watch the answer</h2>
 <p>The probe watches the prompt. Who watches the answer? That is the next question, and a future tutorial.</p>
 
         <p>Background: the DeepMind team needed misuse protection for Gemini that survives production distribution shifts, especially the jump from short to very long contexts, without paying for an LLM judge on every request. Probes were promising but fragile. This paper is the engineering story of making them production-ready. The probing idea itself is older: linear classifier probes were introduced by Alain and Bengio in 2016 to study what information lives in a network's intermediate layers, borrowing the concept from neuroscience.</p>

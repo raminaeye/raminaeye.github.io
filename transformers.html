@@ -780,7 +780,7 @@
     and each token just looks up its row.
   </p>
   <p>
-    The <strong>query and key projections</strong> have to land in the same dimension <code>d<sub>k</sub></code>, because we are
+    The <strong>query and key projections</strong> have to land in the same dimension, because we are
     about to dot them against each other. Values usually live there too. Shapes, so you
     can see the plumbing (with <code>6</code> tokens, model width <code>512</code>, head dimension <code>64</code>):
   </p>
@@ -1163,11 +1163,11 @@
     semantically. <em>One head can't do both well.</em>
   </p>
   <p>
-    <strong>Multi-head attention</strong> runs <code>h</code> attention heads in parallel, each with its own learned
+    <strong>Multi-head attention</strong> runs 8 attention heads in parallel, each with its own learned
     projections into a smaller subspace. Take a model width of <code>512</code> and <code>8</code> heads: each
     head works in <code>64</code> dimensions, like eight specialists each looking at
     the sentence through their own lens. Their outputs get concatenated and re-mixed with
-    one final projection <code>W<sub>O</sub></code>.
+    one final projection.
   </p>
 <pre><code class="language-python">import math
 import torch
@@ -1200,7 +1200,7 @@ class MultiHeadAttention(nn.Module):
   <p>
     Written per head, each head gets <strong>its own projections</strong> of the queries, keys, and values,
     computes its own attention output, and then all head outputs get concatenated and re-mixed
-    with one final projection <code>W<sub>O</sub></code>. In pictures, with
+    with one final projection. In pictures, with
     model width <code>512</code> and <code>8</code> heads:
   </p>
   <div class="diagram">
@@ -1244,12 +1244,12 @@ class MultiHeadAttention(nn.Module):
   </div>
   <p class="caption">
     <em>Nothing is learned in the split itself; it's just a reshape.</em> The learning lives in the
-    per-head <code>W<sub>Q</sub><sup>i</sup>, W<sub>K</sub><sup>i</sup>, W<sub>V</sub><sup>i</sup></code> and in <code>W<sub>O</sub></code>, which decides how to mix the eight
+    per-head query, key, and value projections and in the output projection, which decides how to mix the eight
     specialists back together.
   </p>
   <p>
-    The <code>W<sub>O</sub></code> projection matters more than it looks. <em>Without it, the output would just be
-    a weighted average of values.</em> <code>W<sub>O</sub></code> lets the model combine what the different heads
+    The output projection matters more than it looks. <em>Without it, the output would just be
+    a weighted average of values.</em> The output projection lets the model combine what the different heads
     found, back in the model's main feature space.
   </p>
   <p>
@@ -1453,7 +1453,7 @@ class MultiHeadAttention(nn.Module):
   <p>
     Now the part people get wrong about multihead. <em>More heads sounds like more parameters,
     right? It isn't.</em> Watch: fix the model width at <code>512</code> and change only the head count. The query-key-value projections keep the same total size no matter how you slice the
-    <code>512</code> dimensions afterward, and the output projection is <code>d<sub>model</sub> × d<sub>model</sub></code>.
+    <code>512</code> dimensions afterward, and the output projection is model-width by model-width.
     The total never moves. Heads are a free axis: more specialists, same <strong>parameter bill</strong>.
   </p>
 
@@ -1648,7 +1648,7 @@ class MultiHeadAttention(nn.Module):
   </svg>
   </div>
   <p class="caption">
-    Two of the <code>d<sub>model</sub></code> frequency bands. The fastest band (period <code>2π</code>) flips
+    Two of the model's frequency bands. The fastest band flips
     sign between neighboring positions, so it is great at local order. The slow band
     barely moves over the same span, so it carries long-range position. Every position
     <code>t</code> gets a unique chord played across all the bands at once.
@@ -1700,8 +1700,8 @@ pe = positional_encoding(seq_len=8, d_model=16)
     a <strong>mask matrix</strong> <code>M</code> to the scores before the softmax.
   </p>
   <p>
-    Pairs that may attend get <code>0</code>, pairs that may not get <code>-∞</code>. And
-    <code>-∞</code> plus anything is still <code>-∞</code>, so the softmax hands that cell exactly
+    Pairs that may attend get zero, pairs that may not get negative infinity. And
+    negative infinity plus anything is still negative infinity, so the softmax hands that cell exactly
     zero. <em>No parameters, no learning, just arithmetic.</em>
   </p>
   <h3>Padding mask</h3>
@@ -1717,8 +1717,8 @@ pe = positional_encoding(seq_len=8, d_model=16)
   </p>
   <h3>Causal (look-ahead) mask</h3>
   <p>
-    In a decoder that generates left to right, token <code>t</code> must not peek at tokens after
-    <code>t</code>. We block the future with an <strong>upper-triangular mask</strong>, zeros on and below the diagonal and <code>-∞</code> above it:
+    In a decoder that generates left to right, each token must not peek at tokens that come
+    later. We block the future with an <strong>upper-triangular mask</strong>, zeros on and below the diagonal and negative infinity above it:
   </p>
   <p>
     At position <code>1</code>, a token sees only itself. At position <code>2</code>, itself and token <code>1</code>. And so on.
@@ -1960,7 +1960,7 @@ pe = positional_encoding(seq_len=8, d_model=16)
     <div class="howto capcard" id="causalHowto"><strong class="cap-title">How to play</strong>
       <ul>
         <li><strong>The point:</strong> A decoder writes one token at a time, so each new word may only listen to the words already on the page. This is the causal mask with real words on it: the upper triangle of the attention grid stays dark because those keys do not exist yet.</li>
-        <li>On the heatmap, every cell above the diagonal reads <code>0.00</code> in red: the mask turned those scores into nothing. Watch "sat" get built from "cat" (0.52) and itself (0.40) while "on" is still masked, then "mat" looking all the way back to "sat" (0.30).</li>
+        <li>On the heatmap, every cell above the diagonal reads <code>0.00</code> in red: the mask turned those scores into nothing. Watch "sat" get built from "cat" <code>(0.52)</code> and itself <code>(0.40)</code> while "on" is still masked, then "mat" looking all the way back to "sat" <code>(0.30)</code>.</li>
         <li><strong>Word buttons:</strong> jump to any position. Try "mat" and count how many words it can see versus how many are masked, then try "the&#8321;" and see what a first word has to work with: only itself.</li>
       </ul>
     </div>
@@ -2274,7 +2274,7 @@ masked = np.where(causal_mask(4), scores, -1e9)
     decoder's query for "pishi" (kitten) asks the encoder: <em>which English words matter for
     this step?</em> The encoder's keys answer "cat", and the decoder pulls in "cat"'s value.
     Each decoder position distributes its attention over all encoder positions, and the
-    score matrix has shape <code>n<sub>target</sub> × n<sub>source</sub></code>.
+    score matrix has one row per decoder position and one column per encoder position.
   </p>
   <div class="diagram">
   <svg width="860" height="330" viewBox="0 0 860 330" font-family="sans-serif" font-size="13">
@@ -2409,7 +2409,7 @@ masked = np.where(causal_mask(4), scores, -1e9)
   <p>The paper drew the whole thing in one diagram, and it is worth looking at the original before we move on. Below is Figure 1 of "Attention Is All You Need", with a guide to reading it.</p>
 
   <div class="demo" id="transFigStatic">
-    <h3 style="margin-top: 0;">Figure 1 of the paper, read bottom to top</h3>
+    <h3 style="margin-top: 0;">A guided tour of the full architecture diagram</h3>
     <img src="figures/papers/transformer-fig1.png" alt="Figure 1 of the Attention Is All You Need paper: the Transformer model architecture" style="width:100%;max-width:640px;height:auto;display:block;border:1px solid #d5dbdb;border-radius:8px;background:#fff;margin:0 auto;">
     <div class="capcard" style="margin-top:1rem;">
       <strong class="cap-title">What this shows</strong>
@@ -2419,7 +2419,8 @@ masked = np.where(causal_mask(4), scores, -1e9)
         <li class="tryit"><strong>Try this:</strong> read the figure bottom to top, left stack first. Find the plus circle where positions get added back in. Then find the masked box at the bottom of the decoder stack: that is the causal mask, so position <code>i</code> only sees positions before <code>i</code>. Then find the arrow crossing from the encoder stack into the decoder's middle box: that is cross-attention, every generated token looking back at the whole input. The top label is the next-token distribution, argmaxed and fed back in as the next input.</li>
       </ul>
     </div>
-    <p class="caption">Rebuilt from Figure 1 of Vaswani et al. (NeurIPS 2017). Verbatim caption: "The Transformer - model architecture." <a href="https://arxiv.org/abs/1706.03762">arXiv:1706.03762</a></p>
+    <p class="caption">Rebuilt from Figure 1 of Vaswani et al. (NeurIPS 2017). <a href="https://arxiv.org/abs/1706.03762">arXiv:1706.03762</a></p>
+    <p class="caption">Verbatim caption: "The Transformer - model architecture."</p>
   </div>
 
   <hr>
@@ -2748,7 +2749,7 @@ def generate(model, idx, max_new_tokens, temperature=1.0):
     model can't see the whole sequence, because <em>the future hasn't been spoken yet.</em> Instead
     of full causal attention, you use <strong>windowed attention</strong>: each query only
     looks back a fixed number of frames, enforced by masking everything outside the window
-    to <code>-∞</code>.
+    to negative infinity.
   </p>
 <pre><code class="language-python"># windowed causal mask: each query sees the last `window_size` frames
 mask = torch.full((n, n), float("-inf"))
@@ -2956,13 +2957,20 @@ for i in range(n):
     fully parallel, but with a limited receptive field.
   </p>
   <p>
-    In attention, the expensive part is the <strong>score matrix</strong>. Multiplying <code>Q</code> (<code>n × d</code>)
-    by the transposed key matrix costs the square of the sequence length times the model width,
-    and applying the weights to <code>V</code> costs another the square of the sequence length times the model width.
-    Counting a multiply-add as <code>2</code> FLOPs, that's about four times the square of the sequence length times the model
-    width per layer for the attention terms. The FFN's two matmuls (up to <code>4d</code> and back) cost about
-    sixteen times the sequence length times the square of the model width per layer. I'm ignoring the QKV projections, softmax, and norms here to
-    keep the comparison clean; they don't change the story.
+    In attention, the expensive part is the <strong>score matrix</strong>. Multiplying the query
+    table (one row per token, one column per feature) by the transposed key matrix costs the
+    square of the sequence length times the model width, and applying the weights to the value
+    table costs another the square of the sequence length times the model width. Counting a
+    multiply-add as <code>2</code> FLOPs, that's about four times the square of the sequence length
+    times the model width per layer for the attention terms.
+  </p>
+  <p>
+    The FFN's two matmuls (up to <code>4d</code> and back) cost about sixteen times the sequence length
+    times the square of the model width per layer.
+  </p>
+  <p>
+    I'm ignoring the QKV projections, softmax, and norms here to keep the comparison clean; they
+    don't change the story.
   </p>
   <p>
     The story: attention grows with the square of the sequence length, the FFN only linearly. For short sequences the FFN
@@ -3306,7 +3314,7 @@ for i in range(n):
 
   <hr>
 
-  <h2 id="four-ways-this-bites-you">Four ways this bites you</h2>
+  <h2 id="four-ways-this-bites-you">When a transformer is the wrong tool: four failure modes</h2>
   <ul>
     <li>
       <strong>Quadratic cost.</strong> The score matrix is <code>n × n</code> per head, so the

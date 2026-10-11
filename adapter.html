@@ -694,13 +694,9 @@
 
     <h2 id="lora-shrink-the-update-not-the-model">LoRA: shrink the update, not the model</h2>
 
-    <p><strong>LoRA</strong> (low-rank adaptation) asks a different question. Instead of adding new modules, look at what fine-tuning actually does to a weight matrix. You start with <code>W</code> and you end with <code>W + Δ W</code>. The update <code>Δ W</code> is a big dense matrix, but <em>it turns out the useful part of it lives in a tiny subspace.</em> So instead of learning the full <code>Δ W</code>, you learn it as two skinny matrices multiplied together:</p>
+    <p><strong>LoRA</strong> (low-rank adaptation) asks a different question. Instead of adding new modules, look at what fine-tuning actually does to a weight matrix. You start with the pretrained weight <code>W</code> and you end with <code>W</code> plus an update. The update is a big dense matrix, but <em>it turns out the useful part of it lives in a tiny subspace.</em> So instead of learning the full update, you learn it as two skinny matrices multiplied together:</p>
 
-    <div class="math-display">
-    $$ W_{\text{LoRA}} = W + B \cdot A $$
-    </div>
-
-    <p>The equation says: freeze what the model already knows (<code>W</code>) and learn only the change, as a detour through a tiny bottleneck. <code>A</code> squeezes the signal down to rank <code>r</code>, <code>B</code> lifts it back up, and the two together add a small learned nudge on top of the frozen weight. <em>The rank <code>r</code> is the whole budget:</em> a smaller <code>r</code> means far fewer new parameters and a coarser approximation of the update.</p>
+    <p>The idea is: freeze what the model already knows (<code>W</code>) and learn only the change, as a detour through a tiny bottleneck. <code>A</code> squeezes the signal down to rank <code>r</code>, <code>B</code> lifts it back up, and the two together add a small learned nudge on top of the frozen weight. <em>The rank <code>r</code> is the whole budget:</em> a smaller <code>r</code> means far fewer new parameters and a coarser approximation of the update.</p>
 
     <p>This is the actual diagram from the LoRA paper. Not my redrawing, the authors' own Figure 1. <em>The whole method is in this one picture:</em> the blue box is the weight you already have, frozen solid, and the two orange slabs are the only thing you train. The reading guide below walks through it piece by piece, bottom to top, like the signal travels.</p>
 
@@ -722,7 +718,7 @@
 
 
 
-    <p>Now the numbers. Take a <code>768 × 768</code> attention projection, rank <code>r = 8</code>: <code>A</code> is <code>8 × 768 = 6,144</code> parameters and <code>B</code> is <code>768 × 8 = 6,144</code>, so the whole update is 12,288 parameters instead of 589,824 for the full matrix, about 2 percent of the matrix it modifies. <em>The update is a shadow of the original weight, and a shadow is all you need.</em></p>
+    <p>Now the numbers. Take a <code>768 × 768</code> attention projection at rank 8: <code>A</code> holds <code>6,144</code> parameters and <code>B</code> holds <code>6,144</code>, so the whole update is <code>12,288</code> parameters instead of <code>589,824</code> for the full matrix, about 2 percent of the matrix it modifies. <em>The update is a shadow of the original weight, and a shadow is all you need.</em></p>
 
     <p>The code wraps a frozen linear layer and adds the low-rank path alongside it:</p>
 
@@ -1274,7 +1270,7 @@
 
     <p>A quarter of one percent of the model, and it usually lands within a point of full fine-tuning on classification-style tasks. <em>That is stupid easy and gives you a fast win.</em></p>
 
-    <p>One more thing, and it matters at serving time: <code>W + B ⋅ A</code> is just a matrix again. After training you can bake the update into <code>W</code> permanently and <em>the model runs exactly as fast as the original.</em> No extra layers in the graph, no latency cost. Bottleneck adapters cannot do this (their nonlinearity blocks the merge), so they stay in the graph forever.</p>
+    <p>One more thing, and it matters at serving time: the frozen weight plus the learned update is just a matrix again. After training you can bake the update into <code>W</code> permanently and <em>the model runs exactly as fast as the original.</em> No extra layers in the graph, no latency cost. Bottleneck adapters cannot do this (their nonlinearity blocks the merge), so they stay in the graph forever.</p>
 
     <h2 id="compacter-cheaper-matrices-inside-the-adapter">Compacter: cheaper matrices inside the adapter</h2>
 
@@ -1289,7 +1285,7 @@
       <p class="pc-venue">NeurIPS 2021 &middot; <a href="https://arxiv.org/abs/2106.04647">arXiv:2106.04647</a></p>
     </div>
     <p>The authors were chasing a better trade-off than adapters alone could offer. Fine-tuning giant language models is sample inefficient, unstable in low-resource settings, and wasteful, since it stores a full copy per task. Existing parameter-efficient methods either still used a relatively large number of parameters or underperformed full fine-tuning. Compacter builds on adapters, low-rank optimization, and parameterized hypercomplex multiplication: each adapter weight matrix becomes a sum of Kronecker products between shared "slow" weights and per-layer "fast" rank-one matrices. <em>Training only 0.047% of the model's parameters, it matches full fine-tuning on GLUE and beats it on SuperGLUE and in low-resource settings.</em></p>
-    <p>An <code>8 × 8</code> factor plus a <code>96 × 8</code> factor expands to a <code>768 × 64</code> adapter matrix, but <em>you only store <code>64 + 768 = 832</code> numbers instead of 49,152.</em></p>
+    <p>An <code>8 × 8</code> factor plus a <code>96 × 8</code> factor expands to a <code>768 × 64</code> adapter matrix, but <em>you only store <code>832</code> numbers instead of <code>49,152</code>.</em></p>
     <p><em>You never build the big matrix;</em> you apply it with a reshape and two small multiplications:</p>
 
 <pre><code class="language-python">def kron_linear(x, A, B):
@@ -1364,7 +1360,7 @@ class CompacterAdapter(nn.Module):
 
     <ul>
       <li>Unmerged adapters cost latency. Two extra matmuls per block, every token, forever. Merge LoRA into <code>W</code> before serving. Bottleneck adapters cannot merge, so they stay in the graph.</li>
-      <li>Rank is a dial, not a free lunch. <code>r = 4</code> underfits hard tasks, <code>r = 64</code> trains nearly a dense matrix with extra steps. Start at 8, go up only if the loss says so.</li>
+      <li>Rank is a dial, not a free lunch. rank 4 underfits hard tasks, rank 64 trains nearly a dense matrix with extra steps. Start at 8, go up only if the loss says so.</li>
       <li>On big datasets, full fine-tuning still wins sometimes. Adapters shine when data or compute is scarce, not when you have both in abundance.</li>
       <li>Adapt query and value first, skip the rest. Most of the gain comes from the attention projections; adapters on the feed-forward layers add parameters for less return on many tasks.</li>
       <li>Soft prompts look sad on small models. Prompt and prefix tuning need a big frozen model to steer. On base-size models, LoRA beats them cleanly.</li>

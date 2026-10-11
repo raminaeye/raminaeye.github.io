@@ -675,20 +675,8 @@
     <p>Turn <code>c</code> to 0 and the circle shrinks to a point, which is <em>plain gradient descent</em>. Let <code>c</code> grow very large and the leash comes off, which is <em>MGDA</em>. The useful range is in between.</p>
 
     <h2 id="the-problem">The problem</h2>
-    <p>Remember the scoring rule: the dot product <code>⟨ g<sub>i</sub>, d ⟩</code> scores a candidate step <code>d</code>. Positive means task <code>i</code>'s loss goes down. CAGrad judges a step by its <strong>worst</strong> score across all tasks, then picks the step whose worst score is the best:</p>
-    <div class="math-display">\[\max_d \min_i \langle g_i, d \rangle \quad \text{subject to} \quad \|d - g_0\| \le c\|g_0\|\]</div>
+    <p>Remember the scoring rule: the dot product of a task's gradient with a candidate step scores how much that step helps the task. Positive means the task's loss goes down. CAGrad judges a step by its <strong>worst</strong> score across all tasks, then picks the step whose worst score is the best. The step must stay on a leash: inside a ball around the average gradient, whose radius is controlled by a number <code>c</code>. At <code>c = 0</code> the leash is zero and you get plain gradient descent; large <code>c</code> lets the step roam, which is MGDA.</p>
     <p class="caption">Inside a ball around the average gradient, find the direction that helps the least-helped task the most.</p>
-    <p>Every symbol, one at a time:</p>
-    <ul>
-        <li><strong><code>d</code></strong> is the update we are choosing, the step the optimizer will actually take.</li>
-        <li><strong><code>i</code></strong> ranges over the tasks, <code>i = 1, …, K</code>.</li>
-        <li><strong><code>⟨ g<sub>i</sub>, d ⟩</code></strong> measures how much the update <code>d</code> helps task <code>i</code>: the dot product of task <code>i</code>'s gradient <code>g<sub>i</sub></code> with <code>d</code>. Positive means task <code>i</code>'s loss goes down.</li>
-        <li><strong><code>min<sub>i</sub></code></strong> takes the worst score across all tasks, so the inner minimum is the least-helped task's score.</li>
-        <li><strong><code>max<sub>d</sub></code></strong> picks the update whose worst score is the largest: the direction that helps the least-helped task the most.</li>
-        <li><strong><code>g<sub>0</sub></code></strong> is the average gradient, the plain gradient-descent direction.</li>
-        <li><strong><code>‖ d - g<sub>0</sub> ‖ ≤ c‖ g<sub>0</sub> ‖</code></strong> is the leash: <code>d</code> must stay inside a ball of radius <code>c‖ g<sub>0</sub> ‖</code> centered on the average gradient.</li>
-        <li><strong><code>c</code></strong> controls the leash length. <code>c = 0</code> pins <code>d</code> to <code>g<sub>0</sub></code>, which is plain gradient descent. Large <code>c</code> lets <code>d</code> roam, which is MGDA.</li>
-    </ul>
     <style>
         #cgBallDemo .cg-ball-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
         #cgBallDemo .cg-ball-swatch { flex: 0 0 14px; height: 14px; border-radius: 4px; }
@@ -711,7 +699,7 @@
     </style>
     <div class="demo" id="cgBallDemo">
         <h3 style="margin-top:0;">Drag the update inside the ball</h3>
-        <p style="margin-top:0;">A flat sketch of the key equation: two task gradients, <code>g<sub>1</sub> = (3, 1)</code> and <code>g<sub>2</sub> = (-1, 2)</code>, the average gradient g0, and the shaded trust-region ball CAGrad may search. Grab the dark handle d and drag it anywhere inside the ball. Each task scores d with the dot product, and the readout tracks the worst score live.</p>
+        <p style="margin-top:0;">A flat sketch of the idea: two task gradients, <code>g₁ = (3, 1)</code> and <code>g₂ = (-1, 2)</code>, the average gradient, and the shaded trust-region ball CAGrad may search. Grab the dark handle and drag it anywhere inside the ball. Each task scores the step with the dot product, and the readout tracks the worst score live.</p>
         <div class="demo-controls">
             <button type="button" class="play-btn" id="cgBallReset">Reset</button>
             <span class="cg-status" id="cgBallStatus" aria-live="polite">d starts at the average gradient g0. Drag the handle.</span>
@@ -971,11 +959,9 @@
     </ol>
 
     <h2 id="the-dual">The update, in plain words</h2>
-    <p><em>Searching over every possible d directly is hopeless</em>: d lives in the full parameter space, millions of dimensions. But the answer has a simple shape. The best update is the <strong>average gradient plus one bounded nudge</strong>:</p>
-    \[d^* = g_0 + \frac{\sqrt{\phi}}{\lVert g_w^*\rVert}\, g_w^*\]
-    <p>Term by term, in plain words. <code>g<sub>0</sub></code> is the consensus: the plain average of the task gradients. The nudge has a direction and a length. The direction is <code>g<sub>w</sub><sup>*</sup>/‖ g<sub>w</sub><sup>*</sup>‖</code>, the best blend of task gradients scaled to length 1: it points at the compromise that helps the worst-off task most. The length is <code>√(φ) = c‖ g<sub>0</sub>‖</code>, exactly the leash length. So the update is the consensus plus one step of fixed length <code>c‖ g<sub>0</sub>‖</code> toward the best compromise, and it always lands exactly on the ball's boundary.</p>
-    <p class="small dim"><strong>For the curious: where the formula comes from.</strong> Judging a step by its worst task is the same as judging it by its worst blend of tasks, because a blend can never score below its worst ingredient. That turns the inner minimum over tasks into a minimum over blend weights, and standard duality lets the min and the max swap places. The inner problem over d then solves exactly, leaving a small problem over the K blend weights: <code>w<sup>*</sup> = argmin<sub>w</sub> F(w)</code> with <code>F(w) = g<sub>w</sub><sup>T</sup> g<sub>0</sub> + √(φ)‖ g<sub>w</sub>‖</code> and <code>φ = c<sup>2</sup>‖ g<sub>0</sub>‖<sup>2</sup></code>. Since K is 2 to 50, this solve is negligible next to a backward pass, and it is exactly what the code below computes.</p>
-    <p>One honest footnote on the formula. The published Algorithm 1 stops at the d* above. The reference implementation's toy example (github.com/Cranial-XIX/CAGrad, toy.py) then divides by (1 + c), returning d*/(1 + c). That rescale is a toy.py convention, <em>not part of the published algorithm</em>. The race below uses it, so the numbers match the reference code; when you read the paper, expect the unrescaled d*.</p>
+    <p><em>Searching over every possible update directly is hopeless</em>: it lives in the full parameter space, millions of dimensions. But the answer has a simple shape. The best update is the <strong>average gradient plus one bounded nudge</strong>: the consensus direction, plus one step of fixed length toward the compromise that helps the worst-off task most. The step length is exactly the leash length, so the update always lands on the ball's boundary.</p>
+    <p class="small dim"><strong>For the curious: where the update comes from.</strong> Judging a step by its worst task is the same as judging it by its worst blend of tasks, because a blend can never score below its worst ingredient. That turns the problem into a small search over blend weights, and since the number of tasks is small, the solve is negligible next to a backward pass. It is exactly what the code below computes.</p>
+    <p>One honest footnote. The published Algorithm 1 gives the unrescaled update. The reference implementation's toy example (github.com/Cranial-XIX/CAGrad, toy.py) then divides by <code>(1 + c)</code>. That rescale is a toy.py convention, <em>not part of the published algorithm</em>. The race below uses it, so the numbers match the reference code; when you read the paper, expect the unrescaled update.</p>
 
     <h2 id="the-algorithm">One training step</h2>
     <p>One training step is five things: a forward pass, each task's loss and gradient, a small solve over blend weights for the winning blend, the update formed from that blend, and the step itself. The code is the honest version:</p>
@@ -997,18 +983,18 @@ def cagrad_combine(grads, c=0.4):
     <p>The last line is the diplomat on a leash in one expression: the consensus direction, plus one bounded act of independence.</p>
 
     <h2 id="the-knob">One knob, two classics</h2>
-    <p>The knob <code>c</code> is a <strong>dial between two older methods</strong>. At c = 0 the ball shrinks to a point: CAGrad is plain gradient descent. As c grows large, the dual is dominated by the <code>‖ g<sub>w</sub>‖</code> term, which is exactly MGDA's shortest-blend rule. The new territory is in between: more careful about conflict than plain descent, more purposeful than MGDA.</p>
+    <p>The knob <code>c</code> is a <strong>dial between two older methods</strong>. At <code>c = 0</code> the ball shrinks to a point: CAGrad is plain gradient descent. As <code>c</code> grows large, the update is dominated by the shortest-blend rule, which is exactly MGDA. The new territory is in between: more careful about conflict than plain descent, more purposeful than MGDA.</p>
     <p class="small dim">MGDA is Ozan Sener and Vladlen Koltun's method: <em>Multi-Task Learning as Multi-Objective Optimization</em>, NeurIPS 2018, <a href="https://arxiv.org/abs/1810.04650">arXiv:1810.04650</a>. The Pareto page walks through its shortest-blend rule step by step.</p>
-    <p><em>How to set c:</em> I start at 0.2 to 0.5. If the worst task is still being ignored (its loss flatlines while the others fall), I raise c, which buys that task a louder voice. If the average loss improves too slowly, I lower c, since I am straying too far from the objective. Too small (c near 0) and I inherit GD's stalls; too large and I inherit MGDA's scattered landings, and above c = 1 the proof is gone. The good news is the sweet spot is wide: on the toy, c = 0.5 and c = 0.8 descend from every start, while c = 0.2 still stalls from the two hardest starts at 20,000 steps.</p>
+    <p><em>How to set c:</em> I start at <code>0.2</code> to <code>0.5</code>. If the worst task is still being ignored (its loss flatlines while the others fall), I raise <code>c</code>, which buys that task a louder voice. If the average loss improves too slowly, I lower <code>c</code>, since I am straying too far from the objective. Too small (<code>c</code> near <code>0</code>) and I inherit GD's stalls; too large and I inherit MGDA's scattered landings, and above <code>c = 1</code> the proof is gone. The good news is the sweet spot is wide: on the toy, <code>c = 0.5</code> and <code>c = 0.8</code> descend from every start, while <code>c = 0.2</code> still stalls from the two hardest starts at <code>20,000</code> steps.</p>
 
     <h2 id="the-guarantee">The guarantee, translated</h2>
-    <div class="math-display">\[\sum_t \lVert \nabla L_0(\theta_t) \rVert^2 \le \frac{2(L_0(\theta_0) - L_0^*)}{\alpha(1-c^2)}\]</div>
-    <p class="caption">The squared steepness of the average loss, added over all steps, never exceeds a fixed budget. So the steepness must shrink to zero: a stationary point of <code>L<sub>0</sub></code>.</p>
-    <p>The assumptions in plain words: <strong>H-Lipschitz gradients</strong> means the landscape never curves too sharply (a smoothness budget). <strong>Bounded below</strong> means the loss has a floor it cannot fall under. <strong>Step size <code>α ≤ 1/H</code></strong> means steps small enough for that curvature. The budget makes sense too: the numerator is how far above the floor you start, and the denominator says bigger steps buy progress while a bigger c costs you some.</p>
+    <p>The paper proves convergence to a stationary point of the average loss. In plain words: the squared steepness of the average loss, added over all steps, never exceeds a fixed budget. So the steepness must shrink to zero.</p>
+    <p class="caption">The budget makes sense: the numerator is how far above the floor you start, and the denominator says bigger steps buy progress while a bigger <code>c</code> costs you some.</p>
+    <p>The assumptions in plain words: <strong>H-Lipschitz gradients</strong> means the landscape never curves too sharply (a smoothness budget). <strong>Bounded below</strong> means the loss has a floor it cannot fall under. <strong>Small enough steps</strong> means steps sized for that curvature.</p>
     <ol>
-        <li><strong>You keep your objective.</strong> Unlike MGDA or PCGrad, the proven destination is a stationary point of <code>L<sub>0</sub></code> itself, not some arbitrary trade-off chosen by the starting point.</li>
-        <li><strong>Balancing has a price.</strong> The guarantee weakens by <code>1 - c<sup>2</sup></code>: more conflict-avoidance, slower worst-case progress.</li>
-        <li><strong>The guarantee only holds for <code>c &lt; 1</code></strong>, which is why the recommended range sits comfortably below 1 (c = 0.4 on NYUv2, 0.2 on Cityscapes).</li>
+        <li><strong>You keep your objective.</strong> Unlike MGDA or PCGrad, the proven destination is a stationary point of the average loss itself, not some arbitrary trade-off chosen by the starting point.</li>
+        <li><strong>Balancing has a price.</strong> The guarantee weakens as <code>c</code> grows: more conflict-avoidance, slower worst-case progress.</li>
+        <li><strong>The guarantee only holds for <code>c &lt; 1</code></strong>, which is why the recommended range sits comfortably below <code>1</code> (<code>c = 0.4</code> on NYUv2, <code>0.2</code> on Cityscapes).</li>
     </ol>
 
 

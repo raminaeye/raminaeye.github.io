@@ -763,9 +763,9 @@
     Each token gets projected into three vectors:
   </p>
   <ul>
-    <li><strong>Query (Q)</strong>: what a token is looking for. Each word effectively asks a "question."</li>
-    <li><strong>Key (K)</strong>: what a token contains or offers. It "answers" the questions posed by other words.</li>
-    <li><strong>Value (V)</strong>: the actual content of a token. This is the information that gets pulled in by other tokens that find it relevant.</li>
+    <li><strong>Query (<code>Q</code>)</strong>: what a token is looking for. Each word effectively asks a "question."</li>
+    <li><strong>Key (<code>K</code>)</strong>: what a token contains or offers. It "answers" the questions posed by other words.</li>
+    <li><strong>Value (<code>V</code>)</strong>: the actual content of a token. This is the information that gets pulled in by other tokens that find it relevant.</li>
   </ul>
   <p>
     Think of it like this. <strong>Queries</strong> are the listeners, <strong>keys</strong> are the speakers. A listener
@@ -872,7 +872,8 @@
     listen to their nouns, "cat" at <code>0.62</code> and "mat" at <code>0.64</code>. "Cat" checks its verb "sat"
     at <code>0.58</code>, and "sat" checks back at its subject "cat" at <code>0.58</code>. "On" checks its object
     "mat" at <code>0.56</code>, while "mat" listens back to the verb and preposition acting on it,
-    "sat" at <code>0.32</code> and "on" at <code>0.30</code>. If the bright diagonal looks suspicious, it should not:
+    "sat" at <code>0.32</code> and "on" at <code>0.30</code>.</p>
+    <p class="caption">If the bright diagonal looks suspicious, it should not:
     heavy <strong>self-attention</strong> is the norm in real models. Each token rebuilds itself as a mix,
     and "mostly myself with a dash of context" is the most common mix there is.
     <em>Nobody told the model to split the job this way. It learned it.</em></p>
@@ -1124,16 +1125,13 @@
     into a probability distribution over the tokens.
   </p>
   <p>
-    For one query token, the score against each key is their <strong>dot product</strong>, a measure of how aligned the two are; the whole <code>n × n</code> score matrix is <code>QK<sup>T</sup></code>. The output for each token is then a <strong>weighted mix</strong> of the value vectors, weighted by the softmaxed row. <em>Every token rebuilds itself out of all the tokens, weighted by relevance.</em>
+    For one query token, the score against each key is their <strong>dot product</strong>, a measure of how aligned the two are; the whole n-by-n score matrix comes from multiplying the queries by the keys. The output for each token is then a <strong>weighted mix</strong> of the value vectors, weighted by the softmaxed row. <em>Every token rebuilds itself out of all the tokens, weighted by relevance.</em>
   </p>
   <p>
-    Let's understand why we divide by the square root of the head dimension. If you assume the components of <code>Q</code>
-    and <code>K</code> are roughly normal with mean <code>0</code> and variance <code>1</code>, then their dot product has mean
-    <code>0</code> and variance <code>d<sub>k</sub></code>. So the raw scores grow with the dimension. Say the head dimension is <code>64</code>: the
-    scores have a spread on the order of <code>8</code>. Feed scores that large into a
+    We divide by the square root of the head dimension to keep the scores in a range where the softmax stays sensitive. Feed unscaled scores into a
     softmax and it collapses into a <strong>one-hot</strong>: one weight becomes <code>1</code>, everything else <code>0</code>.
     The query latches onto a single token, ignores all other context, and the gradients
-    vanish because tiny changes in extreme values barely move the output. Dividing by the square root of the head dimension <em>keeps the softmax in its smooth, trainable zone</em>. Same three scores,
+    vanish because tiny changes in extreme values barely move the output. Same three scores,
     with and without the scaling (here the scaling factor is <code>4</code>):
   </p>
   <div class="diagram">
@@ -1454,8 +1452,7 @@ class MultiHeadAttention(nn.Module):
 
   <p>
     Now the part people get wrong about multihead. <em>More heads sounds like more parameters,
-    right? It isn't.</em> Watch: fix the model width at <code>512</code> and change only the head count. The
-    QKV projections are <code>3 × d<sub>model</sub> × d<sub>model</sub></code> no matter how you slice the
+    right? It isn't.</em> Watch: fix the model width at <code>512</code> and change only the head count. The query-key-value projections keep the same total size no matter how you slice the
     <code>512</code> dimensions afterward, and the output projection is <code>d<sub>model</sub> × d<sub>model</sub></code>.
     The total never moves. Heads are a free axis: more specialists, same <strong>parameter bill</strong>.
   </p>
@@ -1792,7 +1789,7 @@ pe = positional_encoding(seq_len=8, d_model=16)
   <rect x="302" y="236" width="46" height="46" fill="#d5f5e3" stroke="#7f8c8d" stroke-width="1"/>
   <text x="325.0" y="265.5" text-anchor="middle" font-size="15" font-weight="bold" fill="#1e8449">0</text>
   </svg>
-  <figcaption style="font-size:0.9em; color:#555; margin-top:0.5em; max-width:640px; margin-left:auto; margin-right:auto;"><strong>Figure:</strong> The causal mask for a 5-token sequence. Green cells (0) let the query attend, red cells (<code>-∞</code>) block it. Each token can look at itself and the tokens before it, but never into the future.</figcaption>
+  <figcaption style="font-size:0.9em; color:#555; margin-top:0.5em; max-width:640px; margin-left:auto; margin-right:auto;"><strong>Figure:</strong> The causal mask for a 5-token sequence. Green cells (0) let the query attend, red cells (masked out) block it. Each token can look at itself and the tokens before it, but never into the future.</figcaption>
   </figure>
 
   <div class="demo" id="maskDemo">
@@ -2341,8 +2338,7 @@ masked = np.where(causal_mask(4), scores, -1e9)
         return x
 </code></pre>
   <p>
-    Two things worth noticing. The <strong>FFN</strong> expands <code>d<sub>model</sub></code> up to <code>d<sub>ff</sub></code> (usually
-    <code>4 × d<sub>model</sub></code>) and projects back down. The non-linearity is more expressive in
+    Two things worth noticing. The <strong>FFN</strong> expands the model width up to the feed-forward width (usually four times the model width) and projects back down. The non-linearity is more expressive in
     the higher dimension, so the model does its heavy per-token thinking there.
   </p>
   <p>
@@ -2418,9 +2414,9 @@ masked = np.where(causal_mask(4), scores, -1e9)
     <div class="capcard" style="margin-top:1rem;">
       <strong class="cap-title">What this shows</strong>
       <ul>
-        <li><strong>The point:</strong> the whole tutorial in one picture, with data flowing bottom to top. Tokens enter at the bottom left, become vectors at Input Embedding, and get their order back at the little plus circle, because attention itself has no idea about sequence. Then they climb the encoder stack on the left: N identical layers of multi-head self-attention plus feed-forward, each wrapped in Add and Norm, with Nx meaning the same block repeated.</li>
+        <li><strong>The point:</strong> the whole tutorial in one picture, with data flowing bottom to top. Tokens enter at the bottom left, become vectors at Input Embedding, and get their order back at the little plus circle, because attention itself has no idea about sequence. Then they climb the encoder stack on the left: <code>N</code> identical layers of multi-head self-attention plus feed-forward, each wrapped in Add and Norm, with <code>Nx</code> meaning the same block repeated.</li>
         <li><strong>The decoder</strong> on the right has the same skeleton with one extra box in the middle, and that middle box is the point of the paper: its queries come from the decoder while its keys and values come from the encoder stack, the arrow crossing over from the left. Linear and Softmax at the top turn the decoder output into next-token probabilities.</li>
-        <li class="tryit"><strong>Try this:</strong> read the figure bottom to top, left stack first. Find the plus circle where positions get added back in. Then find the masked box at the bottom of the decoder stack: that is the causal mask, so position i only sees positions before i. Then find the arrow crossing from the encoder stack into the decoder's middle box: that is cross-attention, every generated token looking back at the whole input. The top label is the next-token distribution, argmaxed and fed back in as the next input.</li>
+        <li class="tryit"><strong>Try this:</strong> read the figure bottom to top, left stack first. Find the plus circle where positions get added back in. Then find the masked box at the bottom of the decoder stack: that is the causal mask, so position <code>i</code> only sees positions before <code>i</code>. Then find the arrow crossing from the encoder stack into the decoder's middle box: that is cross-attention, every generated token looking back at the whole input. The top label is the next-token distribution, argmaxed and fed back in as the next input.</li>
       </ul>
     </div>
     <p class="caption">Rebuilt from Figure 1 of Vaswani et al. (NeurIPS 2017). Verbatim caption: "The Transformer - model architecture." <a href="https://arxiv.org/abs/1706.03762">arXiv:1706.03762</a></p>
@@ -2541,8 +2537,7 @@ class MiniGPT(nn.Module):
         return self.head(self.ln(self.blocks(x)))   # (B, T, vocab)
 </code></pre>
   <p>
-    Two details in there. <strong>Weight tying</strong>: the output projection
-    (<code>d<sub>model</sub> × |V|</code>) and the input embedding (<code>|V| × d<sub>model</sub></code>) are the same
+    Two details in there. <strong>Weight tying</strong>: the output projection (model width by vocabulary size) and the input embedding (vocabulary size by model width) are the same
     matrix. The model doesn't need to learn twice that similar embeddings should decode
     similarly, and you save a big chunk of parameters. (In translation you wouldn't tie to
     the encoder's embeddings, since those are a different language; you'd tie to the
@@ -2589,7 +2584,7 @@ def generate(model, idx, max_new_tokens, temperature=1.0):
     <p><strong>The KV cache payoff.</strong> Generating <code>T</code> tokens, one step at a time.
     Without a cache, step <code>t</code> recomputes attention over all <code>t</code> tokens so far. With a
     cache, step <code>t</code> reuses the stored keys and values and only touches the new token.
-    Numbers are per layer with width <code>512</code>, counting the <code>QK<sup>T</sup></code> and weighted-sum terms.</p>
+    Numbers are per layer with width <code>512</code>, counting the query-key scores and weighted-sum terms.</p>
     
     <div class="play-row"><button type="button" class="play-btn" id="kvPlay">Play</button><button type="button" class="play-btn" id="kvReset">Reset</button></div>
     <div class="demo-controls">
@@ -2962,7 +2957,7 @@ for i in range(n):
   </p>
   <p>
     In attention, the expensive part is the <strong>score matrix</strong>. Multiplying <code>Q</code> (<code>n × d</code>)
-    by <code>K<sup>T</sup></code> (<code>d × n</code>) costs the square of the sequence length times the model width,
+    by the transposed key matrix costs the square of the sequence length times the model width,
     and applying the weights to <code>V</code> costs another the square of the sequence length times the model width.
     Counting a multiply-add as <code>2</code> FLOPs, that's about four times the square of the sequence length times the model
     width per layer for the attention terms. The FFN's two matmuls (up to <code>4d</code> and back) cost about

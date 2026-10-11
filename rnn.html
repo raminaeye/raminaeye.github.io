@@ -640,38 +640,13 @@
         With <strong>recurrence</strong>, instead of processing all input at once, you process one input at a time and carry forward <em>some memory</em>.
     </p>
 
-    <h3>The Core RNN Equations</h3>
-    <p><strong>Hidden State:</strong></p>
+    <h3>The core RNN equation</h3>
+    <p>
+        The current <strong>hidden state</strong> depends on the previous hidden state. <em>That is what gives it memory:</em> at each step the cell mixes today's input with yesterday's memory, squashes the mix, and carries it forward.
+    </p>
     $$h_t = \tanh(W_{xh} x_t + W_{hh} h_{t-1} + b_h)$$
-    <p><strong>Output:</strong></p>
-    $$y_t = W_{hy} h_t + b_y$$
-    <ul>
-        <li><code>x<sub>t</sub></code>: input at time <code>t</code></li>
-        <li><code>h<sub>t</sub></code>: hidden state at time <code>t</code></li>
-        <li><code>h<sub>t-1</sub></code>: hidden state from the previous step</li>
-        <li><code>y<sub>t</sub></code>: output at time <code>t</code></li>
-        <li><code>W<sub>xh</sub></code>: input-to-hidden weight matrix (projects inputs into the latent space)</li>
-        <li><code>W<sub>hh</sub></code>: hidden-to-hidden weight matrix (carries memory forward in time)</li>
-        <li><code>W<sub>hy</sub></code>: hidden-to-output weight matrix (transforms the hidden state to an output)</li>
-    </ul>
-
     <p>
-        The current <strong>hidden state</strong> depends on the previous hidden state. <em>That's what gives it memory.</em>
-    </p>
-
-    <p>
-        Let's take it one step at a time. At each timestep <code>t</code>:
-    </p>
-
-    <ol>
-        <li>We take the input vector <code>x<sub>t</sub></code> and apply the transformation <code>W<sub>xh</sub> x<sub>t</sub></code>. This is what today's input contributes to the memory.</li>
-        <li>We take the previous hidden state <code>h<sub>t-1</sub></code> and transform it using <code>W<sub>hh</sub> h<sub>t-1</sub></code>. This is what we remember from yesterday.</li>
-        <li>We combine these, add a bias, and apply a <code>tanh</code> non-linearity. That's <code>h<sub>t</sub></code>, the memory at time <code>t</code>. It has today's input and past memory.</li>
-        <li>We then use another matrix <code>W<sub>hy</sub></code> to turn the hidden state into the output: <code>y<sub>t</sub> = W<sub>hy</sub> h<sub>t</sub> + b<sub>y</sub></code>. Based on my memory now, what should my prediction be?</li>
-    </ol>
-
-    <p>
-        The recurrence, in plain words: <code>h<sub>t</sub> = tanh(W<sub>xh</sub> x<sub>t</sub> + W<sub>hh</sub> h<sub>t-1</sub> + b<sub>h</sub>)</code>. Today's memory is a squashed mix of today's input and yesterday's memory. <code>W<sub>xh</sub> x<sub>t</sub></code> is what today shouts; <code>W<sub>hh</sub> h<sub>t-1</sub></code> is what still echoes from yesterday. Add them, add the bias, and <code>tanh</code> squeezes the sum into <code>(-1, 1)</code>. That squeeze is the whole tragedy of the <strong>vanilla RNN</strong>: it keeps the numbers sane, and <em>it slowly erases the past</em>. Here is the same equation as dataflow:
+        In plain words: today's memory <code>h<sub>t</sub></code> is a squashed mix of today's input <code>x<sub>t</sub></code> and yesterday's memory <code>h<sub>t-1</sub></code>. <code>W<sub>xh</sub> x<sub>t</sub></code> is what today shouts; <code>W<sub>hh</sub> h<sub>t-1</sub></code> is what still echoes from yesterday. Add them, add the bias <code>b<sub>h</sub></code>, and <code>tanh</code> squeezes the sum into <code>(-1, 1)</code>. That squeeze is the whole tragedy of the <strong>vanilla RNN</strong>: it keeps the numbers sane, and <em>it slowly erases the past</em>. One more matrix turns the hidden state into the output prediction. Here is the same equation as dataflow:
     </p>
 
     <figure>
@@ -778,7 +753,7 @@
         Unlike backpropagation that flows layer by layer, in an RNN we have <em>time as well as depth</em>. This is called <strong>backpropagation through time (BPTT)</strong>.
     </p>
     <p>
-        Say the loss is cross-entropy: <code>L = ∑<sub>t=1</sub><sup>T</sup> L<sub>t</sub>(y<sub>t</sub>, ŷ<sub>t</sub>)</code>
+        Say the loss is cross-entropy, summed over all timesteps.
     </p>
     <p>
         When we <strong>unroll</strong> the RNN for <code>T</code> timesteps, it looks like a deep forward network of depth <code>T</code>, where each layer <em>reuses the same weights</em> (<code>W<sub>xh</sub>, W<sub>hh</sub>, W<sub>hy</sub></code>). During backprop, gradients flow through the sequence of hidden states. Since parameters are shared, their gradients accumulate across timesteps.
@@ -852,39 +827,31 @@
     </p>
     $$h_t = (1-z_t) \odot h_{t-1} + z_t \odot \tilde{h}_t$$
     <p>
-        Where <code>z<sub>t</sub></code> is the update gate. If <code>z<sub>t</sub>=0</code>, then <code>h<sub>t</sub> = h<sub>t-1</sub></code>. The memory is copied directly from one step to the next. No multiplication, no <code>tanh</code>, just an <strong>identity connection</strong>. During backprop, <em>the gradients flow through this same path, unchanged</em>. This is a shortcut path or linear highway for memory.
+        Where <code>z<sub>t</sub></code> is the update gate. If the gate is closed, the memory is copied directly from one step to the next. No multiplication, no <code>tanh</code>, just an <strong>identity connection</strong>. During backprop, <em>the gradients flow through this same path, unchanged</em>. This is a shortcut path or linear highway for memory.
     </p>
 
-    <h3>GRU Equations</h3>
+    <h3>The gates</h3>
     <p>
         There are 2 gates, both are little feedforward networks with a <strong>sigmoid activation</strong>, so their outputs are <em>between 0 and 1</em>.
     </p>
-    <ol>
+    <ul>
         <li>
-            <strong>Update Gate (<code>z<sub>t</sub></code>)</strong>: <em>Keep the old hidden state or update it?</em>
-            $$z_t = \sigma(W_z x_t + U_z h_{t-1} + b_z)$$
+            <strong>Update gate</strong> <code>z<sub>t</sub></code>: <em>keep the old hidden state or update it?</em>
             The sigmoid squashes the result to a number between 0 and 1, interpreted as a switch. 0 means keep old memory, 1 means overwrite with new memory.
         </li>
         <li>
-            <strong>Reset Gate (<code>r<sub>t</sub></code>)</strong>: <em>When computing new candidate memory, how much of the old memory should I ignore?</em>
-            $$r_t = \sigma(W_r x_t + U_r h_{t-1} + b_r)$$
+            <strong>Reset gate</strong> <code>r<sub>t</sub></code>: <em>when computing new candidate memory, how much of the old memory should I ignore?</em>
         </li>
         <li>
-            <strong>Candidate Hidden State (<code>h̃<sub>t</sub></code>)</strong>: <em>A proposal for new memory.</em> The reset gate <code>r<sub>t</sub></code> decides how much of the previous state <code>h<sub>t-1</sub></code> is allowed in. If <code>r<sub>t</sub></code> is zero, the candidate ignores past memory and depends only on the input.
-            $$\tilde{h}_t = \tanh(W_h x_t + U_h (r_t \odot h_{t-1}) + b_h)$$
+            <strong>Candidate hidden state</strong> <code>h̃<sub>t</sub></code>: <em>a proposal for new memory.</em> The reset gate <code>r<sub>t</sub></code> decides how much of the previous state <code>h<sub>t-1</sub></code> is allowed in. If <code>r<sub>t</sub></code> is zero, the candidate ignores past memory and depends only on the input.
         </li>
-        <li>
-            <strong>Final Hidden State (<code>h<sub>t</sub></code>)</strong>: <em>The actual memory we carry forward.</em> It's a blend between the old hidden state and the candidate, controlled by the update gate. If <code>z<sub>t</sub></code> is 0, it keeps the old memory (<code>h<sub>t</sub> = h<sub>t-1</sub></code>), and if <code>z<sub>t</sub></code> is 1, it replaces it (<code>h<sub>t</sub> = h̃<sub>t</sub></code>).
-            $$h_t = (1-z_t) \odot h_{t-1} + z_t \odot \tilde{h}_t$$
-        </li>
-    </ol>
+    </ul>
     <p>
-        Finally, the output is computed from the hidden state:
+        Finally, one more matrix turns the hidden state into the output prediction.
     </p>
-    $$y_t = W_{hy} h_t + b_y$$
 
     <p>
-        Read the four equations as one story. The <strong>update gate</strong> <code>z<sub>t</sub></code> asks: of the past, how much do I throw away? The <strong>reset gate</strong> <code>r<sub>t</sub></code> asks: when I imagine new candidate memory, how much of the past do I let into the room? The candidate <code>h̃<sub>t</sub></code> is the proposal. And the last line is the deal being closed: <code>h<sub>t</sub> = (1-z<sub>t</sub>) ⋅ h<sub>t-1</sub> + z<sub>t</sub> ⋅ h̃<sub>t</sub></code>. Old memory times <code>(1-z<sub>t</sub>)</code>, plus the new proposal times <code>z<sub>t</sub></code>. It is a <em>weighted average, a blend</em>. <code>z<sub>t</sub> = 0</code> keeps everything, <code>z<sub>t</sub> = 1</code> replaces everything, and the network learns <code>z<sub>t</sub></code> from data, per step, per neuron. Here is that last line as dataflow:
+        The <strong>update gate</strong> asks: of the past, how much do I throw away? The <strong>reset gate</strong> asks: when I imagine new candidate memory, how much of the past do I let into the room? The candidate is the proposal, and the blend closes the deal. It is a <em>weighted average</em>: <code>z<sub>t</sub> = 0</code> keeps everything, <code>z<sub>t</sub> = 1</code> replaces everything, and the network learns <code>z<sub>t</sub></code> from data, per step, per neuron. Here is that blend as dataflow:
     </p>
 
     <figure>
@@ -978,7 +945,7 @@ class GRUCell(nn.Module):
         <p class="demo-readout" id="gruReadout"></p>
         <p class="demo-takeaway" id="gruTake"></p>
         <p class="demo-note">
-            Weights are folded to 1 here (candidate <code>= tanh(r ⋅ h<sub>t-1</sub> + x<sub>t</sub>)</code>), so the two gates are the only moving parts. A real GRU learns the <code>W</code> and <code>U</code> matrices too.
+            Weights are folded to 1 here (the candidate is just the tanh of the gated old memory plus the input), so the two gates are the only moving parts. A real GRU learns the <code>W</code> and <code>U</code> matrices too.
         </p>
         <div class="caption-card" id="gruCap">
             <p class="cc-head">How to play</p>
@@ -1362,7 +1329,7 @@ class GRUCell(nn.Module):
         <figcaption><strong>Figure 2.</strong> An illustration of the proposed hidden activation function. The update gate <code>z</code> selects whether the hidden state is to be updated with a new hidden state <code>h̃</code>. The reset gate <code>r</code> decides whether the previous hidden state is ignored. See Eqs. (5)-(8) for the detailed equations of <code>r</code>, <code>z</code>, <code>h</code> and <code>h̃</code>. Rebuilt from Figure 2 of Cho et al., "Learning Phrase Representations using RNN Encoder-Decoder for Statistical Machine Translation," <em>EMNLP</em> 2014. <a href="https://arxiv.org/abs/1406.1078">arXiv:1406.1078</a></figcaption>
     </figure>
     <p>
-        One quirk worth knowing: the paper writes the blend as <code>h<sub>j</sub><sup>t</sup> = z<sub>j</sub> h<sub>j</sub><sup>t-1</sup> + (1 - z<sub>j</sub>) h̃<sub>j</sub><sup>t</sup></code>, with <code>z</code> weighting the <em>old</em> state. The field later flipped the <strong>convention</strong> to the one this page uses (<code>z = 1</code> replaces). Same idea, mirrored knob. If you read the original and <code>z</code> feels backwards, that is why.
+        One quirk worth knowing: the paper writes the blend with <code>z</code> weighting the <em>old</em> state. The field later flipped the <strong>convention</strong> to the one this page uses (<code>z = 1</code> replaces). Same idea, mirrored knob. If you read the original and <code>z</code> feels backwards, that is why.
     </p>
 
     <hr>
@@ -1422,35 +1389,10 @@ class GRUCell(nn.Module):
         </figcaption>
     </figure>
 
-    <h3>LSTM Equations</h3>
-    <p><strong>Cell State Update (Long-Term Memory):</strong></p>
+    <h3>The LSTM update</h3>
     <p>The new <strong>long-term memory</strong> is formed by keeping some of the old memory and adding some new information.</p>
     $$c_t = f_t \odot c_{t-1} + i_t \odot \tilde{c}_t$$
-    <p>Where <code>f<sub>t</sub></code> is the <strong>forget gate</strong>, <code>i<sub>t</sub></code> is the <strong>input gate</strong>, and <code>c̃<sub>t</sub></code> is the candidate memory.</p>
-
-    <p><strong>Candidate Cell State:</strong></p>
-    <p>This is a proposal for what new information could be written into <strong>long-term memory</strong>.</p>
-    $$\tilde{c}_t = \tanh(W_c x_t + U_c h_{t-1} + b_c)$$
-
-    <p><strong>Hidden State Update (Short-Term Memory):</strong></p>
-    <p>The <strong>short-term working memory</strong> is a <em>filtered view</em> of the long-term memory.</p>
-    $$h_t = o_t \odot \tanh(c_t)$$
-    <p>Where <code>o<sub>t</sub></code> is the <strong>output gate</strong>.</p>
-
-    <p><strong>The Gates:</strong></p>
-    <p>All gates are a mix of the input (<code>x<sub>t</sub></code>) and the previous hidden state (<code>h<sub>t-1</sub></code>), passed through a <strong>sigmoid</strong> function.</p>
-    <ul>
-        <li><strong>Forget Gate (<code>f<sub>t</sub></code>)</strong>: <em>Should I forget this old info?</em>
-            $$f_t = \sigma(W_f x_t + U_f h_{t-1} + b_f)$$</li>
-        <li><strong>Input Gate (<code>i<sub>t</sub></code>)</strong>: <em>Should I add this new info?</em>
-            $$i_t = \sigma(W_i x_t + U_i h_{t-1} + b_i)$$</li>
-        <li><strong>Output Gate (<code>o<sub>t</sub></code>)</strong>: <em>What part of memory should I expose right now?</em>
-            $$o_t = \sigma(W_o x_t + U_o h_{t-1} + b_o)$$</li>
-    </ul>
-
-    <p>
-        The cell update as a bank ledger: <code>c<sub>t</sub> = f<sub>t</sub> ⋅ c<sub>t-1</sub> + i<sub>t</sub> ⋅ c̃<sub>t</sub></code>. The forget gate <code>f<sub>t</sub></code> decides what fraction of yesterday's balance survives. The input gate <code>i<sub>t</sub></code> decides how much of today's deposit gets added. Notice what is missing: there is no <code>tanh</code> on this line. The <strong>cell state</strong> is only ever scaled and added, <em>never squashed</em>, which is why gradients walk straight back down the highway instead of vanishing. Then <code>h<sub>t</sub> = o<sub>t</sub> ⋅ tanh(c<sub>t</sub>)</code>: the output gate decides how much of the (squashed) balance to show the world right now. Here is the ledger as dataflow:
-    </p>
+    <p>The <strong>forget gate</strong> <code>f<sub>t</sub></code> decides what fraction of yesterday's balance survives; the <strong>input gate</strong> <code>i<sub>t</sub></code> decides how much of today's deposit, the candidate <code>c̃<sub>t</sub></code>, gets added. Notice what is missing: there is no <code>tanh</code> on this line. The <strong>cell state</strong> is only ever scaled and added, <em>never squashed</em>, which is why gradients walk straight back down the highway instead of vanishing. The <strong>short-term working memory</strong> is a <em>filtered view</em> of the long-term memory: the <strong>output gate</strong> <code>o<sub>t</sub></code> decides how much of the (squashed) balance to show the world right now. Each gate is a mix of the input <code>x<sub>t</sub></code> and the previous hidden state <code>h<sub>t-1</sub></code>, passed through a <strong>sigmoid</strong> function. Here is the ledger as dataflow:</p>
 
     <figure>
         <svg width="100%" height="225" viewBox="0 0 640 225" style="max-width:640px; height:auto;" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Dataflow of the LSTM cell update">
@@ -1521,7 +1463,7 @@ class GRUCell(nn.Module):
         <p class="demo-readout" id="lstmReadout"></p>
         <p class="demo-takeaway" id="lstmTake"></p>
         <p class="demo-note">
-            Simplification, stated up front: the candidate <code>c̃<sub>t</sub></code> is pinned to the raw input <code>x<sub>t</sub></code>, so every number you see is the gates' doing alone. A real LSTM learns <code>c̃<sub>t</sub> = tanh(W<sub>c</sub> x<sub>t</sub> + U<sub>c</sub> h<sub>t-1</sub> + b<sub>c</sub>)</code>.
+            Simplification, stated up front: the candidate <code>c̃<sub>t</sub></code> is pinned to the raw input <code>x<sub>t</sub></code>, so every number you see is the gates' doing alone. A real LSTM learns the candidate from the input and the old hidden state through its own weight matrices.
         </p>
         <div class="caption-card" id="lstmCap">
             <p class="cc-head">How to play</p>

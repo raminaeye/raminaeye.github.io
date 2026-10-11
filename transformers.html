@@ -776,14 +776,13 @@
   <p>
     We get these vectors by multiplying the <strong>input embedding matrix</strong> <code>X</code> by learned weight
     matrices. The embeddings themselves come from a big lookup table: with a vocabulary of
-    30,000 tokens and <code>d<sub>model</sub> = 512</code>, the embedding matrix is <code>30,000 × 512</code>,
+    30,000 tokens and a model width of 512, the embedding matrix is <code>30,000 × 512</code>,
     and each token just looks up its row.
   </p>
-  <div class="dmath">$$ Q = X W_Q, \quad K = X W_K, \quad V = X W_V $$</div>
   <p>
     The <strong>query and key projections</strong> have to land in the same dimension <code>d<sub>k</sub></code>, because we are
     about to dot them against each other. Values usually live there too. Shapes, so you
-    can see the plumbing (with <code>n = 6</code> tokens, <code>d<sub>model</sub> = 512</code>, <code>d<sub>k</sub> = 64</code>):
+    can see the plumbing (with 6 tokens, model width 512, head dimension 64):
   </p>
   <div class="diagram">
   <svg width="860" height="290" viewBox="0 0 860 290" font-family="sans-serif" font-size="13">
@@ -1130,22 +1129,18 @@
     into a probability distribution over the tokens.
   </p>
   <p>
-    Term by term, for one query token <code>i</code>: the score against key <code>j</code> is
-    <code>score(i,j) = Q<sub>i</sub> ⋅ K<sub>j</sub></code>, a <strong>dot product</strong> that measures how aligned the two
-    are. The whole <code>n × n</code> score matrix is <code>QK<sup>T</sup></code>. Then the output for token <code>i</code> is
-    a <strong>weighted sum</strong>, <code>Output<sub>i</sub> = ∑<sub>j</sub> α<sub>ij</sub> V<sub>j</sub></code>, where the <code>α</code> are the
-    softmaxed row. <em>Every token rebuilds itself out of all the tokens, weighted by relevance.</em>
+    For one query token, the score against each key is their <strong>dot product</strong>, a measure of how aligned the two are; the whole <code>n × n</code> score matrix is <code>QK<sup>T</sup></code>. The output for each token is then a <strong>weighted mix</strong> of the value vectors, weighted by the softmaxed row. <em>Every token rebuilds itself out of all the tokens, weighted by relevance.</em>
   </p>
   <p>
-    Let's understand why we divide by <code>√(d<sub>k</sub>)</code>. If you assume the components of <code>Q</code>
+    Let's understand why we divide by the square root of the head dimension. If you assume the components of <code>Q</code>
     and <code>K</code> are roughly normal with mean 0 and variance 1, then their dot product has mean
-    0 and variance <code>d<sub>k</sub></code>. So the raw scores grow with the dimension. Say <code>d<sub>k</sub> = 64</code>: the
-    scores have a spread on the order of <code>√(64) = 8</code>. Feed scores that large into a
+    0 and variance <code>d<sub>k</sub></code>. So the raw scores grow with the dimension. Say the head dimension is 64: the
+    scores have a spread on the order of 8. Feed scores that large into a
     softmax and it collapses into a <strong>one-hot</strong>: one weight becomes 1, everything else 0.
     The query latches onto a single token, ignores all other context, and the gradients
     vanish because tiny changes in extreme values barely move the output. Dividing by
-    <code>√(d<sub>k</sub>)</code> <em>keeps the softmax in its smooth, trainable zone</em>. Same three scores,
-    with and without the scaling (here <code>√(d<sub>k</sub>) = 4</code>):
+    Dividing by the square root of the head dimension <em>keeps the softmax in its smooth, trainable zone</em>. Same three scores,
+    with and without the scaling (here the scaling factor is 4):
   </p>
   <div class="diagram">
     <p style="margin:0 0 0.4em; font-size:0.9em; color:#555;">Raw scores <strong>[8, 2, -3]</strong>: the 8 eats everything.</p>
@@ -1177,8 +1172,8 @@
   </p>
   <p>
     <strong>Multi-head attention</strong> runs <code>h</code> attention heads in parallel, each with its own learned
-    projections into a smaller subspace. Take <code>d<sub>model</sub> = 512</code> and <code>h = 8</code> heads: each
-    head works in <code>d<sub>k</sub> = 512 / 8 = 64</code> dimensions, like eight specialists each looking at
+    projections into a smaller subspace. Take a model width of 512 and 8 heads: each
+    head works in 64 dimensions, like eight specialists each looking at
     the sentence through their own lens. Their outputs get concatenated and re-mixed with
     one final projection <code>W<sub>O</sub></code>.
   </p>
@@ -1211,10 +1206,10 @@ class MultiHeadAttention(nn.Module):
         return self.W_o(concat)
 </code></pre>
   <p>
-    Written per head <code>i</code>, each head gets <strong>its own projections</strong>
-    <code>Q<sup>i</sup> = X W<sub>Q</sub><sup>i</sup></code>, <code>K<sup>i</sup> = X W<sub>K</sub><sup>i</sup></code>, <code>V<sup>i</sup> = X W<sub>V</sub><sup>i</sup></code>, computes its own output <code>Z<sup>i</sup></code>,
-    and then <code>Z = concat(Z<sup>1</sup>, …, Z<sup>h</sup>)</code> and <code>O = Z W<sub>O</sub></code>. In pictures, with
-    <code>d<sub>model</sub> = 512</code> and <code>h = 8</code>:
+    Written per head, each head gets <strong>its own projections</strong> of the queries, keys, and values,
+    computes its own attention output, and then all head outputs get concatenated and re-mixed
+    with one final projection <code>W<sub>O</sub></code>. In pictures, with
+    model width 512 and 8 heads:
   </p>
   <div class="diagram">
   <svg width="860" height="230" viewBox="0 0 860 230" font-family="sans-serif" font-size="13">
@@ -1466,7 +1461,7 @@ class MultiHeadAttention(nn.Module):
 
   <p>
     Now the part people get wrong about multihead. <em>More heads sounds like more parameters,
-    right? It isn't.</em> Watch: fix <code>d<sub>model</sub> = 512</code> and change only the head count. The
+    right? It isn't.</em> Watch: fix the model width at 512 and change only the head count. The
     QKV projections are <code>3 × d<sub>model</sub> × d<sub>model</sub></code> no matter how you slice the
     512 dimensions afterward, and the output projection is <code>d<sub>model</sub> × d<sub>model</sub></code>.
     The total never moves. Heads are a free axis: more specialists, same <strong>parameter bill</strong>.
@@ -1474,7 +1469,7 @@ class MultiHeadAttention(nn.Module):
 
   <div class="demo" id="headParams">
     <p><strong>Multihead costs nothing (in params).</strong>
-    <code>d<sub>model</sub> = 512</code> is fixed. Move the head slider and watch the parameter total.</p>
+    The model width is fixed at 512. Move the head slider and watch the parameter total.</p>
     
     <div class="play-row"><button type="button" class="play-btn" id="hpPlay">Play</button><button type="button" class="play-btn" id="hpReset">Reset</button></div>
     <div class="demo-controls">
@@ -1641,10 +1636,8 @@ class MultiHeadAttention(nn.Module):
   <p>
     The fix: add a <strong>position vector</strong> <code>P(t)</code> to each token embedding, so a token knows both
     its meaning and its place. The original paper used fixed sine and cosine waves of
-    different frequencies:
+    different frequencies, one sine-cosine pair per dimension pair.
   </p>
-  <div class="dmath">$$ P_{t,2i} = \sin\left(t / 10000^{2i/d_{model}}\right), \quad
-     P_{t,2i+1} = \cos\left(t / 10000^{2i/d_{model}}\right) $$</div>
   <p>
     As <code>i</code> grows, the waves get slower and slower. So every
     token's position gets encoded in multiple frequency bands: a unique <strong>multi-frequency
@@ -1666,7 +1659,7 @@ class MultiHeadAttention(nn.Module):
   </svg>
   </div>
   <p class="caption">
-    Two of the <code>d<sub>model</sub></code> frequency bands. The fast band (<code>i = 0</code>, period <code>2π</code>) flips
+    Two of the <code>d<sub>model</sub></code> frequency bands. The fastest band (period <code>2π</code>) flips
     sign between neighboring positions, so it is great at local order. The slow band
     barely moves over the same span, so it carries long-range position. Every position
     <code>t</code> gets a unique chord played across all the bands at once.
@@ -1717,9 +1710,8 @@ pe = positional_encoding(seq_len=8, d_model=16)
     to forbid that. There are two reasons, and both are enforced the same way: by adding
     a <strong>mask matrix</strong> <code>M</code> to the scores before the softmax.
   </p>
-  <div class="dmath">$$ S' = S + M $$</div>
   <p>
-    <code>M<sub>ij</sub> = 0</code> for pairs that may attend, <code>-∞</code> for pairs that may not. And
+    Pairs that may attend get <code>0</code>, pairs that may not get <code>-∞</code>. And
     <code>-∞</code> plus anything is still <code>-∞</code>, so the softmax hands that cell exactly
     zero. <em>No parameters, no learning, just arithmetic.</em>
   </p>
@@ -1729,7 +1721,6 @@ pe = positional_encoding(seq_len=8, d_model=16)
     tokens. <em>You don't want real tokens attending to dummies,</em> so you mask out the padding
     <strong>keys</strong>: if key <code>j</code> is padding, every query <code>i</code> ignores it.
   </p>
-  <div class="dmath">$$ M_{bij} = \begin{cases} 0 & \text{if key } j \text{ is real} \\ -\infty & \text{if key } j \text{ is padding} \end{cases} $$</div>
   <p>
     Think of queries as listeners and keys as speakers. <em>A padding token as a speaker is
     dangerous: a real listener might hear it and get confused.</em> A padding token as a
@@ -1738,9 +1729,8 @@ pe = positional_encoding(seq_len=8, d_model=16)
   <h3>Causal (look-ahead) mask</h3>
   <p>
     In a decoder that generates left to right, token <code>t</code> must not peek at tokens after
-    <code>t</code>. We block the future with an <strong>upper-triangular mask</strong>:
+    <code>t</code>. We block the future with an <strong>upper-triangular mask</strong>, zeros on and below the diagonal and <code>-∞</code> above it:
   </p>
-  <div class="dmath">$$ M_{ij} = \begin{cases} 0 & \text{if } j \le i \\ -\infty & \text{if } j > i \end{cases} $$</div>
   <p>
     At position 1, a token sees only itself. At position 2, itself and token 1. And so on.
     <em>That is what makes the model autoregressive.</em>
@@ -2367,8 +2357,8 @@ masked = np.where(causal_mask(4), scores, -1e9)
   </p>
   <p>
     And the residuals. Why do this? Deep networks suffer from <strong>vanishing gradients</strong>, and the
-    residual path gives gradients a shortcut straight back. With <code>H = X + f(X)</code>, the
-    gradient is <code>I + df/dX</code>: <em>the identity term means the gradient always has a clean road
+    residual path gives gradients a shortcut straight back. With a residual connection, the
+    gradient is the identity plus the sublayer's gradient: <em>the identity term means the gradient always has a clean road
     home.</em> We always try to hold on to the original information using residual connections.
     (This snippet uses Pre-LN, layer norm before the sublayer, which keeps that residual
     path clean. The original paper used Post-LN. Both work; Pre-LN trains more stably at
@@ -2376,15 +2366,12 @@ masked = np.where(causal_mask(4), scores, -1e9)
   </p>
   <h3>Pre-LN vs Post-LN</h3>
   <p>
-    In the original paper, LayerNorm sat after the residual add (<strong>Post-LN</strong>):
-    <code>H<sub>1</sub> = LayerNorm(X + MHA(X))</code>, then the FFN with another add and norm,
-    <code>H<sub>2</sub> = LayerNorm(H<sub>1</sub> + FFN(H<sub>1</sub>))</code>. Modern practice moves the norm inside
-    the branch, before the sublayer (<strong>Pre-LN</strong>): <code>H = X + MHA(LayerNorm(X))</code>.
+    In the original paper, LayerNorm sat after the residual add (<strong>Post-LN</strong>): attention output added back to the input, then normalized, then the same for the FFN. Modern practice moves the norm inside
+    the branch, before the sublayer (<strong>Pre-LN</strong>): normalize first, then attend, then add back.
   </p>
   <p>
-    This ordering matters. With a clean residual path <code>H = X + f(X)</code>, the gradient is
-    <code>dH/dX = I + df/dX</code>: the identity matrix rides through untouched. With Post-LN,
-    <code>H = LayerNorm(X + f(X))</code>, the gradient has to squeeze through the LayerNorm's
+    This ordering matters. With a clean residual path, the gradient is the identity plus the sublayer's gradient: the identity matrix rides through untouched. With Post-LN,
+    the gradient has to squeeze through the LayerNorm's
     Jacobian. <em>Pre-LN leaves the shortcut clean, which is why deep transformers train more
     stably with it.</em>
   </p>
@@ -2411,8 +2398,7 @@ masked = np.where(causal_mask(4), scores, -1e9)
   </figure>
   <h3>Why LayerNorm and not BatchNorm?</h3>
   <p>
-    <strong>LayerNorm</strong> normalizes each token's own feature vector:
-    <code>LayerNorm(x) = γ (x - μ)/σ + β</code>. <em>No mixing across tokens,
+    <strong>LayerNorm</strong> normalizes each token's own feature vector. <em>No mixing across tokens,
     no mixing across the batch.</em> <strong>BatchNorm</strong> needs big consistent batches to be accurate,
     and at inference an autoregressive model generates one token at a time, so batch
     statistics would be meaningless. LayerNorm doesn't care about any of that.
@@ -2425,14 +2411,11 @@ masked = np.where(causal_mask(4), scores, -1e9)
   <p>
     A <strong>decoder block</strong> is the same idea with one more sublayer in the middle: masked
     self-attention, then cross-attention against the encoder output, then the FFN, each
-    wrapped in add and norm. In Pre-LN form:
+    wrapped in add and norm.
   </p>
-  <div class="dmath">$$ H_1 = Y_{in} + \text{MHA}_{causal}(\text{LayerNorm}(Y_{in})) $$
-  $$ H_2 = H_1 + \text{MHA}_{cross}(Q=\text{LayerNorm}(H_1), K=H_{enc}, V=H_{enc}) $$
-  $$ H_3 = H_2 + \text{FFN}(\text{LayerNorm}(H_2)) $$</div>
   <p>
-    Notice the cross-attention queries come from <code>H<sub>1</sub></code>, <em>right after self-attention, not
-    after the FFN</em>. <code>H<sub>1</sub></code> already integrated the past target tokens; the FFN is just a
+    Notice the cross-attention queries come <em>right after self-attention, not
+    after the FFN</em>. The self-attention output already integrated the past target tokens; the FFN is just a
     position-wise MLP that adds no new cross-token context, so it wouldn't make the
     queries any smarter about what to ask the encoder.
   </p>
@@ -2594,7 +2577,7 @@ for x, y in train_loader:            # x, y: (B, T), y = x shifted by one
     <em>At inference nothing learns.</em> You feed a prompt, take the logits at the last position,
     sample one token, append it, and repeat. The <strong>temperature</strong> controls how wild the
     sampling gets: <code>T &gt; 1</code> flattens the distribution (more random), <code>T &lt; 1</code>
-    sharpens it (closer to greedy), <code>T = 1</code> is plain softmax.
+    sharpens it (closer to greedy), temperature <code>1</code> is plain softmax.
   </p>
 <pre><code class="language-python">@torch.no_grad()
 def generate(model, idx, max_new_tokens, temperature=1.0):
@@ -2616,7 +2599,7 @@ def generate(model, idx, max_new_tokens, temperature=1.0):
     <p><strong>The KV cache payoff.</strong> Generating <code>T</code> tokens, one step at a time.
     Without a cache, step <code>t</code> recomputes attention over all <code>t</code> tokens so far. With a
     cache, step <code>t</code> reuses the stored keys and values and only touches the new token.
-    Numbers are per layer with <code>d = 512</code>, counting the <code>QK<sup>T</sup></code> and weighted-sum terms.</p>
+    Numbers are per layer with width 512, counting the <code>QK<sup>T</sup></code> and weighted-sum terms.</p>
     
     <div class="play-row"><button type="button" class="play-btn" id="kvPlay">Play</button><button type="button" class="play-btn" id="kvReset">Reset</button></div>
     <div class="demo-controls">
@@ -2997,13 +2980,13 @@ for i in range(n):
   <p>
     The story: attention grows with <code>n<sup>2</sup></code>, the FFN with <code>n</code>. For short sequences the FFN
     dominates; for long ones attention eats everything. Set the two equal and the
-    crossover lands at <code>n = 4d</code>. <em>Double the sequence length and the attention bill
+    crossover lands where the sequence length is four times the model width. <em>Double the sequence length and the attention bill
     quadruples.</em> Move the sliders:
   </p>
 
   <div class="demo" id="flopBill">
     <p><strong>The quadratic bill.</strong> Attention FLOPs grow as <code>n<sup>2</sup></code>, FFN FLOPs as <code>n</code>.
-    The curves cross exactly at <code>n = 4d</code>.</p>
+    The curves cross exactly where the sequence length is four times the model width.</p>
     
     <div class="play-row"><button type="button" class="play-btn" id="flopPlay">Play</button><button type="button" class="play-btn" id="flopReset">Reset</button></div>
     <div class="chart-legend">
@@ -3036,8 +3019,7 @@ for i in range(n):
       </ul>
     </div>
     <p class="caption">Counting only the <code>n<sup>2</sup></code> score/weighted-sum terms for attention and the
-    two FFN matmuls; projections, softmax, and norms ignored. At <code>n = 100,000</code> and
-    <code>d = 512</code>, one head's attention matrix alone holds 10 billion entries, 80 billion across 8 heads. <em>That is why
+    two FFN matmuls; projections, softmax, and norms ignored. At 100,000 tokens and width 512, one head's attention matrix alone holds 10 billion entries, 80 billion across 8 heads. <em>That is why
     long-context models need sparse, windowed, or linear attention.</em></p>
   </div>
   <script>
@@ -3309,11 +3291,7 @@ for i in range(n):
     Read that again: the base model beat the previous best system, which was an ensemble,
     <em>with a single model trained in half a day.</em> The training recipe was <strong>Adam</strong>
     (<code>β<sub>1</sub> = 0.9</code>, <code>β<sub>2</sub> = 0.98</code>, <code>ε = 10<sup>-9</sup></code>) with a warmup of 4000 steps
-    and dropout 0.1:
-  </p>
-  <div class="dmath">$$ \text{lrate} = d_{model}^{-0.5} \cdot \min(step^{-0.5},\; step \cdot warmup^{-1.5}) $$</div>
-  <p>
-    In words: ramp the learning rate up linearly for the first 4000 steps, then decay it
+    and dropout 0.1. The schedule: ramp the learning rate up linearly for the first 4000 steps, then decay it
     proportionally to the inverse square root of the step. The warmup matters. <em>Transformers
     are twitchy at the start of training,</em> and hitting them with a full learning rate on
     step one is a good way to get NaNs.

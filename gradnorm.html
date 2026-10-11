@@ -744,17 +744,17 @@
     <div class="tab-strip">
         <a class="tab-link" href="#loudness">The quiet task stalls without rebalancing</a>
         <a class="tab-link" href="#gn-paper">Task imbalance is gradient imbalance</a>
-        <a class="tab-link" href="#gn-moderator">The moderator</a>
-        <a class="tab-link" href="#gn-measurements">Three measurements, one balancing rule</a>
-        <a class="tab-link" href="#gn-thermostat">Each task gets a target loudness</a>
-        <a class="tab-link" href="#gn-replay">Watch it work</a>
-        <a class="tab-link" href="#gn-loop">Sense, compare, correct, renormalize</a>
-        <a class="tab-link" href="#gn-fig2">GradNorm replayed on the 100x toy</a>
-        <a class="tab-link" href="#gn-knobs">The knobs</a>
+        <a class="tab-link" href="#gn-moderator">Turn down the loud, turn up the behind</a>
+        <a class="tab-link" href="#gn-measurements">Measure where the tasks fight</a>
+        <a class="tab-link" href="#gn-thermostat">Behind tasks get a louder target</a>
+        <a class="tab-link" href="#gn-replay">Watch the weights rebalance</a>
+        <a class="tab-link" href="#gn-loop">Four steps, every batch</a>
+        <a class="tab-link" href="#gn-fig2">The quiet task catches up</a>
+        <a class="tab-link" href="#gn-knobs">Two knobs</a>
         <a class="tab-link" href="#gn-when">When GradNorm helps and when it does not</a>
     </div>
 
-<h2 id="loudness">The quiet task stalls without rebalancing</h2>
+<h2 id="loudness">One loud task drowns out the rest</h2>
 
     <p>Picture several tasks sharing one <strong>trunk</strong>. Each task reports a loss, but the losses live on different planets: a depth loss near <code>800</code>, a classification loss near <code>2</code>. Add them up as-is and <em>the big one shouts while the others whisper</em>. And even after you fix the scales, one task can still dominate: its <strong>gradients</strong> are simply louder, so the shared weights move mostly for it. Hand-tuning a weight per task works, until the tasks' fortunes change mid-training and your tuned weights go stale.</p>
 
@@ -767,12 +767,12 @@
     <p>So they attacked the root instead of the architecture: tune the gradient magnitudes directly, through the <strong>loss weights</strong>. Each weight couples linearly into its task's backpropagated gradients, which makes the weights a clean lever. The catch is that the right setting changes at every training step, and finding it by hand is what they call, in the abstract, a tedious search process that incurred exponentially more compute for each task added. GradNorm is their answer: balance training automatically, match the accuracy of exhaustive grid search, and only ever tune one knob.</p>
 
     
-<h2 id="gn-moderator">How GradNorm rebalances the tasks during training</h2>
+<h2 id="gn-moderator">Turn down the loud tasks, turn up the behind ones</h2>
 
     <p>I picture K coaches all shouting advice at one athlete, the shared trunk. The loudest coach, the one with the biggest gradient, is the only one the athlete hears, and the coach whose part of the training is nearly done keeps shouting anyway. <strong>GradNorm</strong> is the moderator in the room. It puts a volume knob in front of each coach and keeps turning the knobs so that (a) everyone is equally easy to hear, and (b) a coach whose part of the job is <em>falling behind gets turned up</em> for a while. There is even a strength dial for how hard the moderator pushes for equal progress.</p>
 
     
-<h2 id="gn-measurements">Three measurements, one balancing rule</h2>
+<h2 id="gn-measurements">Measure loudness where the tasks fight</h2>
 
     <p>Every training step, each task produces a <strong>gradient</strong>: a to-do list of changes to the shared weights that would help that task. If task <code>1</code>'s list is full of small numbers and task <code>2</code>'s is full of huge ones, <em>the sum looks like task <code>2</code>'s list</em>. GradNorm's answer: adjust the knobs a little every step using two measurements, taken at the last shared layer <code>W</code>, the spot where the fight actually happens (about <code>5%</code> extra training cost on NYUv2).</p>
 
@@ -789,7 +789,7 @@
     <p>Each task's progress ratio divided by the group average. A value of <code>1</code> means on pace; <code>0.5</code> means ahead; <code>1.5</code> means behind and needing attention. The ratio by itself does not tell you who needs help: if every task sits at <code>0.75</code>, nobody is behind. The problem is tasks falling <em>out of sync</em>, and you only spot that by comparing each task to the group. Nice side effect: if all tasks move at the same speed, every value stays at <code>1</code> and GradNorm does nothing. It only acts when tasks drift apart.</p>
 
     
-<h2 id="gn-thermostat">Each task gets a target loudness, and a thermostat chases it</h2>
+<h2 id="gn-thermostat">Behind tasks get a louder target</h2>
 
     <p>Each task gets a target loudness: the average loudness across tasks, boosted for whoever is behind. Two fixes in one rule. The average pulls everyone toward the same volume, curing the scale problem. The boost turns the volume up for tasks that are behind, curing the speed problem. A strength dial sets <em>how hard the boost pushes</em>.</p>
 
@@ -824,7 +824,7 @@ w = w * K / sum(w)                    # fixed budget: one task up, another down<
 
     <p>The thermostat in one step: a task sitting below its <strong>target</strong> gets its weight raised, a task sitting above gets its weight lowered. The scale term pulls everyone toward the same average loudness while the rate term boosts whoever is falling behind.</p>
 
-<h2 id="gn-replay">GradNorm rebalances task loudness over training</h2>
+<h2 id="gn-replay">Watch the weights rebalance themselves</h2>
 
     <p>This is a schematic replay of the paper's Figure 2 toy: one shared trunk, two tasks, the second task starting much louder. (The paper uses a <code>100</code>&times; output scale and reports curves; the replay exaggerates the gap so it shows.) Three runs race in every panel: <em>each task trained alone</em> (gray, the best it could hope for), <em>both with fixed equal weights</em> (red), and <em>both with GradNorm</em> (purple).</p>
 
@@ -879,7 +879,7 @@ w = w * K / sum(w)                    # fixed budget: one task up, another down<
     </div>
 
     
-<h2 id="gn-loop">One training step: sense, compare, correct, renormalize</h2>
+<h2 id="gn-loop">Four steps, repeated every batch</h2>
 
     <p>GradNorm runs as a loop every training step: sense, compare, correct, renormalize, then re-measure. The diagram below shows one full turn and what the strength dial does to it.</p>
 
@@ -950,7 +950,7 @@ w = w * K / sum(w)                    # fixed budget: one task up, another down<
     </div>
 
     
-<h2 id="gn-fig2">GradNorm replayed on the 100x toy</h2>
+<h2 id="gn-fig2">The quiet task catches up</h2>
 
     <p>The paper's own version of this toy uses a <code>100</code>&times; output scale and reports curves rather than single numbers. With fixed equal weights, the quiet task stalls far short of its solo run while the loud task is hurt too: <em>the interference is not zero-sum</em>. GradNorm turns the loud task's weight down and the quiet one's up.</p>
     <p>In this replay the gap does not drift into triple digits: it starts there, at <code>300</code>:<code>1</code> with the default scale, in both runs. The difference is how fast it collapses. GradNorm has it down to <code>16</code>:<code>1</code> by step <code>50</code> while equal weights still sits at <code>112</code>:<code>1</code>, and that early rebalancing is what frees the quiet task: by step <code>100</code> its loss is <code>0.653</code> with GradNorm while it is still stalled at <code>0.979</code> under equal weights.</p>
@@ -970,7 +970,7 @@ w = w * K / sum(w)                    # fixed budget: one task up, another down<
     </div>
 
     
-<h2 id="gn-knobs">GradNorm hyperparameters</h2>
+<h2 id="gn-knobs">Two knobs: how loud, how hard to push</h2>
 
     <div class="gn-table-wrap">
     <table class="gn-table">

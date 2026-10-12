@@ -591,7 +591,7 @@
 
    <p>That <strong>asymmetry</strong> is the entire personality of this loss: <em>being confident and right is cheap, being confident and wrong is ruinous.</em></p>
 
-   <p>Here <code>p_i</code> is the predicted probability, the logit squashed through a sigmoid, and <code>y_i</code> is the ground truth: <code>1</code> if the class is present, <code>0</code> if not.</p>
+   <p>Here <code>p_i</code> is the predicted probability, the logit squashed through a sigmoid, and <code>y_i</code> is the ground truth: <code>1</code> if the class is present, <code>0</code> if not. <code>L</code> is the total loss, <code>Σ<sub>i</sub></code> means add over every example, and <code>log</code> is the punisher: confident wrong bets cost more. The first term scores the yes side: if the true answer is yes, punish how far the model's confidence was from 1. The <code>(1 − y<sub>i</sub>) log(1 − p<sub>i</sub>)</code> branch scores the no side: if no, punish how far from 0.</p>
 
    <p>Two steps. First, squash each logit through a sigmoid to get a probability. Then score it with BCE against the ground truth. Each class is its own independent yes-or-no bet, so nothing stops you from running this on multi-label data: sigmoid every logit, BCE per class, average over classes. That is how you model <strong>multiple classes co-occurring</strong>.</p>
    
@@ -627,6 +627,14 @@
    <h3>What the loss sees: cross-entropy vs MSE</h3>
 
    <p><em>Why not just use mean squared error for classification?</em> Here is one datapoint, true label <code>1</code>, and a slider for the predicted probability <code>p</code>. Two losses, two gradients, live:</p>
+
+   <div class="math-display">$$ \mathrm{BCE} = -\log(p), \qquad \mathrm{MSE} = (1-p)^2 $$</div>
+
+   <div class="math-display">$$ |\mathrm{grad\ BCE}| = \frac{1}{p}, \qquad |\mathrm{grad\ MSE}| = 2(1-p) $$</div>
+
+   <p>These are the single-example case of the BCE equation above, for one datapoint with true label <code>1</code>: here <code>p</code> is the predicted probability. The two grad lines are the losses' gradients: cross-entropy's gradient stays huge when the model is confidently wrong, while MSE's gradient goes quiet there.</p>
+
+   <p>At <code>0.01</code> (confident and wrong), BCE explodes and its gradient screams, while MSE barely shrugs. That is why classification uses cross-entropy: the gradient stays alive exactly where the model needs the strongest correction.</p>
 
    <div class="demo" id="bceMseDemo">
      <div class="demo-legend">
@@ -858,6 +866,14 @@
    <h3>Squash and compete: what softmax and sigmoid actually do</h3>
 
    <p>Softmax is a competition with a fixed prize. There is exactly <code>1.0</code> probability to hand out, so when class <code>0</code> gets more confident, classes <code>1</code> and <code>2</code> must get less. The blue bar grows by taking height from the others. <em>That stealing is the whole reason cross-entropy works for classification.</em> Now flip to sigmoid mode: same logits, but the bars stop caring about each other. Three separate coin flips. That is BCE, and it is why you use it when labels can co-occur.</p>
+
+   <div class="math-display">$$ \mathrm{sigmoid:} \quad p = \frac{1}{1 + \exp(-\mathrm{logit})} $$</div>
+
+   <div class="math-display">$$ \mathrm{softmax:} \quad p_i = \frac{\exp(\mathrm{logit}_i)}{\sum_c \exp(\mathrm{logit}_c)} $$</div>
+
+   <div class="math-display">$$ \mathrm{categorical\ loss:} \quad L = -\log(p_{\mathrm{correct}}) $$</div>
+
+   <p>These three lines are the page's own code blocks, written as formulas. A logit is the model's raw score. The sigmoid squashes one logit into a probability on its own. The softmax exponentiates every logit and divides by their sum, giving a probability over <code>C</code> classes that share exactly <code>1.0</code> probability to hand out, so when class <code>0</code> gets more confident, classes <code>1</code> and <code>2</code> must get less. The categorical loss only looks at the correct class's probability: it is the negative log of that one probability, averaged over examples.</p>
 
 
    <div class="demo canvas-wrap" id="squashDemo">
@@ -1115,7 +1131,15 @@
 
    <h3>The scoring pipeline, end to end</h3>
 
-   <p>One prediction, five moves: raw score, squash, probability, compare to target, loss.</p>
+   <ol>
+     <li><strong>Logit:</strong> The model's raw score for one class. Any number, no limits, no meaning yet.</li>
+     <li><strong>Squash:</strong> Squeezed into the 0-to-1 range. Now the number reads as a probability.</li>
+     <li><strong>Probability:</strong> The model's bet: this class, this likely.</li>
+     <li><strong>Compare to target:</strong> The target says this class is certain. The gap between the bet and the target is the mistake.</li>
+     <li><strong>Loss:</strong> The loss is the size of the gap. Small gap, small loss. Big gap, big loss.</li>
+   </ol>
+
+   <p>Score one yes-or-no bet: if the true answer is yes, punish how far the model's confidence was from 1; if no, punish how far from 0. Add up over every example. That scoring is the BCE equation from the top of the page, applied one bet at a time.</p>
 
    <div class="demo" id="pipeDemo">
      <div class="pipe-flow">

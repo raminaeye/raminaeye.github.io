@@ -558,6 +558,20 @@
       #tsnePrev:disabled, #tsneNext:disabled { background: #95a5a6; cursor: default; }
       .tsne-steps-stepcap { min-height: 4.6em; font-size: 0.95em; color: #2c3e50; margin: 0.7rem 0 0; }
       .tsne-steps-readout { min-height: 1.5em; font-size: 0.82em; color: #7f8c8d; margin: 0.2rem 0 0; }
+      /* Shared walkthrough equation-card contract (verbatim, all pages) */
+      .eq-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+        padding:.55rem .8rem;margin:.6rem auto;max-width:640px;overflow-x:auto}
+      .eq-line{white-space:nowrap;opacity:.38;padding:.15rem .1rem;
+        border-left:3px solid transparent}
+      .eq-line.eq-active{opacity:1;border-left-color:#2c3e50}
+      .eqt{font-weight:600;padding:0 .1em;border-radius:3px}
+      .eqt.eqt-active{text-decoration:underline;text-underline-offset:2px}
+      .eq-legend{font-size:.78rem;color:#475569;margin-top:.35rem}
+      .eq-sw{display:inline-block;width:.7em;height:.7em;border-radius:2px;
+        margin:0 .25em 0 .6em;vertical-align:baseline}
+      /* diagram-side dim/highlight (SVG/DOM). Do NOT use .hl/.dim: taken. */
+      .eq-dim{opacity:.32}
+      .eq-hl{filter:drop-shadow(0 0 3px currentColor)}
     </style>
 </head>
 <body>
@@ -631,6 +645,14 @@
          <button type="button" class="step-dot" id="tsneDot5">5</button>
        </span>
        <button id="tsneReplay" type="button" style="visibility:hidden">Replay</button>
+     </div>
+     <div class="eq-card" id="tsneStepsEq">
+       <div class="eq-line" data-eqline="0"><span class="eqt" data-k="p" style="color:#34495e">p<sub>j|i</sub></span> = exp(−d²/2<span class="eqt" data-k="sig" style="color:#b3541e">σ<sub>i</sub></span>²) / Σ<sub>k</sub> exp(−d²/2σ<sub>k</sub>²)</div>
+       <div class="eq-line" data-eqline="1"><span class="eqt" data-k="sig" style="color:#b3541e">σ<sub>i</sub></span> ← set by perplexity</div>
+       <div class="eq-line" data-eqline="2"><span class="eqt" data-k="qij" style="color:#2a7fbf">q<sub>ij</sub></span> = <span class="eqt" data-k="tail" style="color:#c0392b">(1+d²)<sup>−1</sup></span> / Σ<sub>k≠l</sub>(1+d²<sub>kl</sub>)<sup>−1</sup></div>
+       <div class="eq-line" data-eqline="3"><span class="eqt" data-k="C" style="color:#c0392b">C</span> = KL(<span class="eqt" data-k="P" style="color:#34495e">P</span>‖<span class="eqt" data-k="Q" style="color:#2a7fbf">Q</span>)</div>
+       <div class="eq-line" data-eqline="4">∇C: <span class="eqt" data-k="pull" style="color:#1e8449">pull</span> true neighbors, <span class="eqt" data-k="push" style="color:#7d3c98">push</span> the crowded</div>
+       <div class="eq-legend"><span class="eq-sw" style="background:#34495e"></span>neighbor probability (links on the roll)<span class="eq-sw" style="background:#b3541e"></span>kernel width (dashed rings)<span class="eq-sw" style="background:#2a7fbf"></span>map weights (dots on the map)<span class="eq-sw" style="background:#c0392b"></span>Student-t tail, KL cost<span class="eq-sw" style="background:#1e8449"></span>spring pull<span class="eq-sw" style="background:#7d3c98"></span>spring push</div>
      </div>
      <svg id="tsneStepsSvg" viewBox="0 0 640 440" role="img" aria-label="Five-step t-SNE walkthrough on a Swiss roll toy"></svg>
      <p class="tsne-steps-stepcap" id="tsneStepsStepCap"></p>
@@ -1464,7 +1486,7 @@
      (function () {
        var xs = [], ys = [], i;
        for (i = 0; i < S_N; i++) { xs.push(sPts[i].x3); ys.push(sPts[i].z3); }
-       var f = sFit(xs, ys, 24, 16, 616, 372);
+       var f = sFit(xs, ys, 24, 48, 344, 372);
        sFlatScale = f.s;
        for (i = 0; i < S_N; i++) { sFlatPx[i] = f.X(sPts[i].x3); sFlatPy[i] = f.Y(sPts[i].z3); }
      })();
@@ -1587,7 +1609,7 @@
        for (t2 = 0; t2 < traj.length; t2++) {
          for (m = 0; m < S_N; m++) { xs.push(traj[t2][2 * m]); ys.push(traj[t2][2 * m + 1]); }
        }
-       var f2 = sFit(xs, ys, 24, 16, 616, 372);
+       var f2 = sFit(xs, ys, 384, 48, 620, 368);
        for (t2 = 0; t2 < traj.length; t2++) {
          var P = new Float64Array(2 * S_N);
          for (m2 = 0; m2 < S_N; m2++) {
@@ -1604,6 +1626,25 @@
        for (i = 0; i < S_N; i++) {
          var f = (sPts[i].t - T0) / (T1 - T0);
          sTColor.push('hsl(212,65%,' + Math.round(74 - 40 * f) + '%)');
+       }
+     })();
+     /* Step-1 neighbor-link pairs, shared by the roll overlay (step 1) and the
+        map springs (step 5). Width is normalized per marked point, as before. */
+     var sLinkPairs = [];
+     (function () {
+       var seen = {}, m, k, j, nb;
+       for (m = 0; m < sMark1.length; m++) {
+         var mi = sMark1[m]; nb = [];
+         for (j = 0; j < S_N; j++) { if (j !== mi) nb.push(j); }
+         nb.sort(function (a, b) { return sPcond[mi * S_N + b] - sPcond[mi * S_N + a]; });
+         var pmax = sPcond[mi * S_N + nb[0]] || 1;
+         for (k = 0; k < 8 && k < nb.length; k++) {
+           var a = Math.min(mi, nb[k]), b = Math.max(mi, nb[k]);
+           if (seen[a + '_' + b]) continue;
+           seen[a + '_' + b] = 1;
+           sLinkPairs.push({ i: mi, j: nb[k],
+             w: (0.8 + 5.2 * (sPcond[mi * S_N + nb[k]] / pmax)).toFixed(1) });
+         }
        }
      })();
      /* MATH-END */
@@ -1633,102 +1674,8 @@
      }
      function sText(x, y, size, fill, anchor, content) {
        return '<text x="' + x + '" y="' + y + '" font-size="' + size + '" fill="' + fill +
-         '" text-anchor="' + anchor + '" font-family="sans-serif">' + content + '</text>';
+         '\" text-anchor=\"' + anchor + '\" font-family=\"sans-serif\">' + content + '</text>';
      }
-     function sFlatLabel() {
-       return sText(320, 408, 24, '#5d6d7e', 'middle', 'high-D, drawn flat for illustration');
-     }
-
-     function svgStep1() {
-       var s = '', m, k, j, i;
-       for (m = 0; m < sMark1.length; m++) {
-         var mi = sMark1[m], nb = [];
-         for (j = 0; j < S_N; j++) { if (j !== mi) nb.push(j); }
-         nb.sort(function (a, b) { return sPcond[mi * S_N + b] - sPcond[mi * S_N + a]; });
-         var pmax = sPcond[mi * S_N + nb[0]] || 1;
-         for (k = 0; k < 8 && k < nb.length; k++) {
-           var p = sPcond[mi * S_N + nb[k]];
-           var w = (0.8 + 5.2 * (p / pmax)).toFixed(1);
-           s += sLine(sFlatPx[mi], sFlatPy[mi], sFlatPx[nb[k]], sFlatPy[nb[k]],
-             '#34495e', w, ' stroke-linecap="round" opacity="0.75"');
-         }
-       }
-       for (i = 0; i < S_N; i++) {
-         var isMark = sMark1.indexOf(i) >= 0;
-         s += sCircle(sFlatPx[i], sFlatPy[i], isMark ? 6.5 : 5,
-           isMark ? '#e67e22' : '#8b98a5',
-           isMark ? ' stroke="#2c3e50" stroke-width="2"' : '');
-       }
-       return s + sFlatLabel();
-     }
-
-     function svgStep2() {
-       var s = sCircle(sFlatPx[sDense], sFlatPy[sDense], (sSig[sDense] * sFlatScale).toFixed(1),
-           'none', ' stroke="#e67e22" stroke-width="3" stroke-dasharray="9 7"') +
-         sCircle(sFlatPx[sSparse], sFlatPy[sSparse], (sSig[sSparse] * sFlatScale).toFixed(1),
-           'none', ' stroke="#16a085" stroke-width="3" stroke-dasharray="9 7"');
-       for (var i = 0; i < S_N; i++) {
-         var c = '#8b98a5', r = 5, ex = '';
-         if (i === sDense) { c = '#e67e22'; r = 6.5; ex = ' stroke="#2c3e50" stroke-width="2"'; }
-         else if (i === sSparse) { c = '#16a085'; r = 6.5; ex = ' stroke="#2c3e50" stroke-width="2"'; }
-         s += sCircle(sFlatPx[i], sFlatPy[i], r, c, ex);
-       }
-       return s + sFlatLabel();
-     }
-
-     function tailPath(fn) {
-       var d = '', x, v;
-       for (x = 0; x <= 4.0001; x += 0.1) {
-         v = fn(x);
-         var px = 412 + x * 37.5, py = 348 - v * 96;
-         d += (x === 0 ? 'M' : 'L') + px.toFixed(1) + ' ' + py.toFixed(1);
-       }
-       return d;
-     }
-     function svgStep3() {
-       var s = '', i;
-       var Y = sFramesPx[0];
-       for (i = 0; i < S_N; i++) s += sCircle(Y[2 * i], Y[2 * i + 1], 5, sTColor[i], '');
-       s += '<rect x="396" y="204" width="220" height="160" rx="10" fill="#ffffff" stroke="#bdc3c7" stroke-width="1.5"/>';
-       s += sText(506, 232, 24, '#2c3e50', 'middle', 'Tail comparison');
-       s += sLine(412, 348, 562, 348, '#bdc3c7', 2, '');
-       s += sLine(412, 348, 412, 252, '#bdc3c7', 2, '');
-       s += '<path d="' + tailPath(function (x) { return Math.exp(-x * x / 2); }) +
-         '" fill="none" stroke="#7f8c8d" stroke-width="4.5"/>';
-       s += '<path d="' + tailPath(function (x) { return 1 / (1 + x * x); }) +
-         '" fill="none" stroke="#e74c3c" stroke-width="4.5"/>';
-       return s;
-     }
-
-     function svgStep4() {
-       var s = '', k, i;
-       var Y = sFramesPx[0];
-       for (k = 0; k < sMismatch.crowded.length; k++) {
-         var c = sMismatch.crowded[k];
-         s += sLine(Y[2 * c.i], Y[2 * c.i + 1], Y[2 * c.j], Y[2 * c.j + 1],
-           '#8e44ad', 3, ' stroke-linecap="round" opacity="0.8"');
-       }
-       for (k = 0; k < sMismatch.stretched.length; k++) {
-         var st = sMismatch.stretched[k];
-         s += sLine(Y[2 * st.i], Y[2 * st.i + 1], Y[2 * st.j], Y[2 * st.j + 1],
-           '#e74c3c', 3, ' stroke-linecap="round" opacity="0.8"');
-       }
-       for (i = 0; i < S_N; i++) s += sCircle(Y[2 * i], Y[2 * i + 1], 5, sTColor[i], '');
-       s += '<rect x="14" y="14" width="440" height="96" rx="10" fill="#ffffff" stroke="#bdc3c7" stroke-width="1.5"/>';
-       s += sLine(30, 46, 62, 46, '#e74c3c', 5, ' stroke-linecap="round"');
-       s += sText(74, 55, 24, '#2c3e50', 'start', 'true neighbors, torn apart');
-       s += sLine(30, 86, 62, 86, '#8e44ad', 5, ' stroke-linecap="round"');
-       s += sText(74, 95, 24, '#2c3e50', 'start', 'strangers, too close');
-       return s;
-     }
-
-     function svgStep5(f) {
-       var s = '', i;
-       var Y = sFramesPx[f];
-       for (i = 0; i < S_N; i++) s += sCircle(Y[2 * i], Y[2 * i + 1], 5, sTColor[i], '');
-       return s;
-     }
-
      var STEP_CAPS = [
        '',
        'Each point spreads its neighbor probability over its neighbors: near points get most of it, far points almost none. Link width is the probability.',
@@ -1740,18 +1687,162 @@
 
      var step = 1, animTimer = null, animToken = 0, animFrame = 0;
 
+     /* ---- Persistent two-panel scene (walkthrough standard) ----
+        Left: the high-D Swiss roll. Right: the low-D map. The tails inset
+        has a permanent home at the roll panel's bottom-right. All three are
+        drawn every step; per-step overlays (links, rings, mistakes, springs)
+        appear on their step only. */
+     var EQMAP = [
+       { lines: [0], terms: ['p'],          groups: ['links', 'rollDots'],                hl: ['links'] },
+       { lines: [1], terms: ['sig'],       groups: ['rings', 'rollDots'],                hl: ['rings'] },
+       { lines: [2], terms: ['qij','tail'], groups: ['inset', 'mapDots'],               hl: ['inset', 'mapDots'] },
+       { lines: [3], terms: ['C','P','Q'], groups: ['mistakes', 'mapDots', 'rollDots'], hl: ['mistakes'] },
+       { lines: [4], terms: ['pull','push'], groups: ['springs', 'mapDots'],            hl: ['springs'] }
+     ];
+
+     function syncEq(cardId, lines, terms) {
+       var card = document.getElementById(cardId);
+       if (!card) return;
+       var ls = card.querySelectorAll('.eq-line');
+       for (var i = 0; i < ls.length; i++)
+         ls[i].classList.toggle('eq-active', lines.indexOf(i) >= 0);
+       var ts = card.querySelectorAll('.eqt');
+       for (var j = 0; j < ts.length; j++)
+         ts[j].classList.toggle('eqt-active',
+           terms.indexOf(ts[j].getAttribute('data-k')) >= 0);
+     }
+
+     function sGroup(key, content) {
+       var m = EQMAP[step - 1];
+       var cls = (m.hl.indexOf(key) >= 0) ? 'eq-hl' :
+                 (m.groups.indexOf(key) >= 0) ? '' : 'eq-dim';
+       return '<g data-eqk="' + key + '" class="' + cls + '">' + content + '</g>';
+     }
+
+     function panelsSvg() {
+       var s = '';
+       s += '<defs><clipPath id="tsneRollClip"><rect x="10" y="10" width="344" height="372" rx="10"/></clipPath></defs>';
+       s += '<rect x="8" y="8" width="348" height="376" rx="12" fill="none" stroke="#dfe6ec" stroke-width="2"/>';
+       s += '<rect x="368" y="8" width="264" height="376" rx="12" fill="none" stroke="#dfe6ec" stroke-width="2"/>';
+       s += sText(24, 33, 21, '#2c3e50', 'start', 'high-D: the Swiss roll');
+       s += sText(384, 33, 21, '#2c3e50', 'start', 'low-D: the map');
+       s += sText(182, 414, 19, '#5d6d7e', 'middle', 'high-D, drawn flat for illustration');
+       return s;
+     }
+
+     function rollDotsSvg() {
+       var s = '', i;
+       var colored = step >= 3;
+       for (i = 0; i < S_N; i++) {
+         var fill = colored ? sTColor[i] : '#8b98a5', r = 5, ex = '';
+         if (step === 1 && sMark1.indexOf(i) >= 0) {
+           fill = '#e67e22'; r = 6.5; ex = ' stroke="#2c3e50" stroke-width="2"';
+         } else if (step === 2 && i === sDense) {
+           fill = '#e67e22'; r = 6.5; ex = ' stroke="#2c3e50" stroke-width="2"';
+         } else if (step === 2 && i === sSparse) {
+           fill = '#16a085'; r = 6.5; ex = ' stroke="#2c3e50" stroke-width="2"';
+         }
+         s += sCircle(sFlatPx[i], sFlatPy[i], r, fill, ex);
+       }
+       return s;
+     }
+
+     function linksSvg() {
+       var s = '', k, L;
+       for (k = 0; k < sLinkPairs.length; k++) {
+         L = sLinkPairs[k];
+         s += sLine(sFlatPx[L.i], sFlatPy[L.i], sFlatPx[L.j], sFlatPy[L.j],
+           '#34495e', L.w, ' stroke-linecap="round" opacity="0.75"');
+       }
+       return s;
+     }
+
+     function ringsSvg() {
+       return '<g clip-path="url(#tsneRollClip)">' +
+         sCircle(sFlatPx[sDense], sFlatPy[sDense],
+           (sSig[sDense] * sFlatScale).toFixed(1), 'none',
+           ' stroke="#e67e22" stroke-width="3" stroke-dasharray="9 7"') +
+         sCircle(sFlatPx[sSparse], sFlatPy[sSparse],
+           (sSig[sSparse] * sFlatScale).toFixed(1), 'none',
+           ' stroke="#16a085" stroke-width="3" stroke-dasharray="9 7"') +
+         '</g>';
+     }
+
+     function mapDotsSvg(Y) {
+       var s = '', i;
+       for (i = 0; i < S_N; i++) s += sCircle(Y[2 * i], Y[2 * i + 1], 5, sTColor[i], '');
+       return s;
+     }
+
+     function insetSvg() {
+       var s = '<rect x="240" y="252" width="108" height="114" rx="10" fill="#ffffff" stroke="#bdc3c7" stroke-width="1.5"/>';
+       s += sText(294, 272, 15, '#2c3e50', 'middle', 'tails');
+       s += sLine(252, 348, 336, 348, '#bdc3c7', 2, '');
+       s += sLine(252, 348, 252, 282, '#bdc3c7', 2, '');
+       function curve(fn, color) {
+         var d = '', x, v;
+         for (x = 0; x <= 4.0001; x += 0.1) {
+           v = fn(x);
+           d += (x === 0 ? 'M' : 'L') + (252 + x * 21).toFixed(1) + ' ' + (348 - v * 62).toFixed(1);
+         }
+         return '<path d="' + d + '" fill="none" stroke="' + color + '" stroke-width="3"/>';
+       }
+       s += curve(function (x) { return Math.exp(-x * x / 2); }, '#7f8c8d');
+       s += curve(function (x) { return 1 / (1 + x * x); }, '#e74c3c');
+       return s;
+     }
+
+     function mistakesSvg(Y) {
+       var s = '', k, c, st;
+       for (k = 0; k < sMismatch.crowded.length; k++) {
+         c = sMismatch.crowded[k];
+         s += sLine(Y[2 * c.i], Y[2 * c.i + 1], Y[2 * c.j], Y[2 * c.j + 1],
+           '#8e44ad', 3, ' stroke-linecap="round" opacity="0.8"');
+       }
+       for (k = 0; k < sMismatch.stretched.length; k++) {
+         st = sMismatch.stretched[k];
+         s += sLine(Y[2 * st.i], Y[2 * st.i + 1], Y[2 * st.j], Y[2 * st.j + 1],
+           '#e74c3c', 3, ' stroke-linecap="round" opacity="0.8"');
+       }
+       s += sLine(392, 400, 420, 400, '#e74c3c', 4, ' stroke-linecap="round"');
+       s += sText(428, 407, 17, '#2c3e50', 'start', 'true neighbors, torn apart');
+       s += sLine(392, 420, 420, 420, '#8e44ad', 4, ' stroke-linecap="round"');
+       s += sText(428, 427, 17, '#2c3e50', 'start', 'strangers, too close');
+       return s;
+     }
+
+     function springsSvg(Y) {
+       var s = '', k, L, c;
+       for (k = 0; k < sLinkPairs.length; k++) {
+         L = sLinkPairs[k];
+         s += sLine(Y[2 * L.i], Y[2 * L.i + 1], Y[2 * L.j], Y[2 * L.j + 1],
+           '#16a085', 2, ' stroke-linecap="round" opacity="0.7"');
+       }
+       for (k = 0; k < sMismatch.crowded.length && k < 10; k++) {
+         c = sMismatch.crowded[k];
+         s += sLine(Y[2 * c.i], Y[2 * c.i + 1], Y[2 * c.j], Y[2 * c.j + 1],
+           '#8e44ad', 2, ' stroke-dasharray="5 4" stroke-linecap="round" opacity="0.7"');
+       }
+       return s;
+     }
+
+     function draw() {
+       var Y = (step === 5) ? sFramesPx[animFrame] : sFramesPx[0];
+       var s = panelsSvg();
+       s += sGroup('rollDots', rollDotsSvg());
+       if (step === 1) s += sGroup('links', linksSvg());
+       if (step === 2) s += sGroup('rings', ringsSvg());
+       s += sGroup('mapDots', mapDotsSvg(Y));
+       s += sGroup('inset', insetSvg());
+       if (step === 4) s += sGroup('mistakes', mistakesSvg(Y));
+       if (step === 5) s += sGroup('springs', springsSvg(Y));
+       svgEl.innerHTML = s;
+       var m = EQMAP[step - 1];
+       syncEq('tsneStepsEq', m.lines, m.terms);
+     }
      function stopAnim() {
        animToken++;
        if (animTimer) { clearInterval(animTimer); animTimer = null; }
-     }
-     function draw() {
-       var s;
-       if (step === 1) s = svgStep1();
-       else if (step === 2) s = svgStep2();
-       else if (step === 3) s = svgStep3();
-       else if (step === 4) s = svgStep4();
-       else s = svgStep5(animFrame);
-       svgEl.innerHTML = s;
      }
      function playSettle() {
        stopAnim();

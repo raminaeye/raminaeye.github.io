@@ -642,6 +642,20 @@
 
   <p>Here is the mental picture. Imagine every image is a point on the surface of a ball. Two views of the same photo should sit right next to each other. Different photos should spread out. After training, photos of similar things end up clustered together on that ball, <em>and you never once showed the model a label</em>.</p>
 
+    <p class="caption">
+      This is the whole contrastive mechanism. The loss falls as the twin is dragged toward the anchor and the strangers are shoved away, and the top-1 check flips to yes once the twin is the anchor's nearest neighbor. Every point lives on this disk because embeddings are L2 normalized, so similarity is just cosine similarity and the model cannot cheat by making vectors huge.
+    </p>
+
+  <h3>The NT-Xent Loss</h3>
+
+  <p>SimCLR's loss is called <strong>NT-Xent</strong>: normalized temperature-scaled cross entropy. Fancy name, simple idea. For one positive pair, the loss is:</p>
+
+  <div class="math-display">
+  $$ \ell_{i,j} = -\log \frac{\exp(\text{sim}(z_i, z_j)/\tau)}{\sum_{k=1}^{2N} \mathbb{1}_{[k\ne i]} \exp(\text{sim}(z_i, z_k)/\tau)} $$
+  </div>
+
+  <p>The numerator asks: how similar is my view to its true partner? The denominator asks: how similar is my view to every other view in the batch, including the partner? The loss is the negative log of that fraction. Reading the symbols: <code>ℓ<sub>i,j</sub></code> is the loss for one pair, view <code>i</code> and its twin view <code>j</code>; the <code>z</code>'s are the views themselves and <code>sim</code> is the cosine similarity between two views; the sum runs over all <code>2N</code> views in the batch (<code>N</code> images, two views apiece), and the <code>1<sub>[k≠i]</sub></code> indicator counts every view except view <code>i</code> itself, so a view never competes with itself. <em>It is just cross entropy where the "correct class" is the positive pair.</em> The temperature <code>τ</code> sharpens or softens the comparison: a low temperature obsesses over the hardest negative, a high temperature spreads the vote. SimCLR sets it to <code>0.5</code>, the useful middle.</p>
+
   <p>Here is the actual mechanism. A toy embedding disk: the blue dot is one photo of a cat, the anchor. The green dot is an augmented twin of that same photo. The red dots are twelve other photos. Training pulls the twin toward the anchor and shoves the strangers out to fill the disk, and the loss falls as the twin becomes the anchor's nearest neighbor.</p>
 
   <div class="demo">
@@ -668,9 +682,6 @@
         <li>As training runs, the green twin slides onto the blue anchor while the red strangers spread out, and the loss falls until the twin is the anchor's nearest neighbor.</li>
       </ul>
     </div>
-    <p class="caption">
-      This is the whole contrastive mechanism with no formula required. The loss falls as the twin is dragged toward the anchor and the strangers are shoved away, and the top-1 check flips to yes once the twin is the anchor's nearest neighbor. Every point lives on this disk because embeddings are L2 normalized, so similarity is just cosine similarity and the model cannot cheat by making vectors huge.
-    </p>
   </div>
 
   <script>
@@ -916,6 +927,10 @@
 
   <p>The <strong>augmentations</strong> do the heavy lifting. Random crop, flip, color jitter, blur. The model cannot match the views by pixel statistics because the augmentations destroy those, so it has to learn actual content. <em>Weak augmentations, weak features. Remember that.</em></p>
 
+    <p class="caption">
+      The positive pair is a promise: "these two are the same thing." Weak distortion keeps the promise but teaches nothing, because matching pixels is enough. Strong distortion forces the model to learn real content, <em>until the promise breaks and the views are strangers wearing the same nametag</em>. Designing that middle ground for your own data is the job.
+    </p>
+
   <p>The augmentations do the heavy lifting, so here is the tradeoff made concrete. A toy image distorted by random crop, rotation, and color jitter, with two fresh views side by side and their cosine similarity underneath. With no distortion the views are identical and the task is trivial. With too much the views stop being the same thing. The whole method lives in the middle.</p>
 
   <div class="demo">
@@ -939,9 +954,7 @@
         <li>Weak distortion keeps the two views near-identical and the task trivial; strong distortion turns them into strangers. The method lives in the middle, where matching the views forces the model to learn real content.</li>
       </ul>
     </div>
-    <p class="caption">
-      The positive pair is a promise: "these two are the same thing." Weak distortion keeps the promise but teaches nothing, because matching pixels is enough. Strong distortion forces the model to learn real content, <em>until the promise breaks and the views are strangers wearing the same nametag</em>. Designing that middle ground for your own data is the job.
-    </p>
+
   </div>
 
   <script>
@@ -1100,19 +1113,6 @@
     def forward(self, x):
         return self.net(x)  # trained with contrastive loss, discarded after</code></pre>
 
-  <h3>The NT-Xent Loss</h3>
-
-  <p>SimCLR's loss is called <strong>NT-Xent</strong>: normalized temperature-scaled cross entropy. Fancy name, simple idea. For one positive pair, the loss is:</p>
-
-  <div class="math-display">
-  $$ \ell_{i,j} = -\log \frac{\exp(\text{sim}(z_i, z_j)/\tau)}{\sum_{k=1}^{2N} \mathbb{1}_{[k\ne i]} \exp(\text{sim}(z_i, z_k)/\tau)} $$
-  </div>
-
-  <p>The numerator asks: how similar is my view to its true partner? The denominator asks: how similar is my view to every other view in the batch, including the partner? The loss is the negative log of that fraction. Reading the symbols: <code>ℓ<sub>i,j</sub></code> is the loss for one pair, view <code>i</code> and its twin view <code>j</code>; the <code>z</code>'s are the views themselves and <code>sim</code> is the cosine similarity between two views; the sum runs over all <code>2N</code> views in the batch (<code>N</code> images, two views apiece), and the <code>1<sub>[k≠i]</sub></code> indicator counts every view except view <code>i</code> itself, so a view never competes with itself. <em>It is just cross entropy where the "correct class" is the positive pair.</em> The temperature <code>τ</code> sharpens or softens the comparison: a low temperature obsesses over the hardest negative, a high temperature spreads the vote. SimCLR sets it to <code>0.5</code>, the useful middle.</p>
-
-
-
-
   <p>One subtle detail in the code: <em>you must exclude <strong>self-similarity</strong></em>. Every vector is perfectly similar to itself, similarity <code>1.0</code>, and that would dominate the softmax. The standard trick is to mask the diagonal of the similarity matrix with a huge negative number before the softmax.</p>
 
 <pre><code class="language-python">def nt_xent_loss(z1, z2, temperature=0.5):
@@ -1131,6 +1131,12 @@
   <p>The NT-Xent code in &lsquo;The NT-Xent Loss&rsquo; is only the loss. The method is bigger than the loss, so here is the paper's own drawing of the whole pipeline.</p>
 
   <p>Read it bottom to top. At the bottom, one image becomes two augmented views. In the middle, the same encoder turns each view into a representation, and the same projection head maps it one step further. At the top, the loss pulls the twin vectors together and pushes every other pair apart.</p>
+
+  <div>
+      <img src="figures/papers/simclr-fig1.png" alt="Figure 2 of the SimCLR paper: the contrastive learning framework, read bottom to top" style="width:100%;height:auto;display:block;">
+    <p class="caption">Rebuilt from Figure 2 of Chen et al. (ICML 2020). <a href="https://arxiv.org/abs/2002.05709">arXiv:2002.05709</a></p>
+    <p class="caption">Figure 2, verbatim caption: "A simple framework for contrastive learning of visual representations. Two separate data augmentation operators are sampled from the same family of augmentations (<code>t ~ T</code> and <code>t&#39; ~ T</code>) and applied to each data example to obtain two correlated views. A base encoder network <code>f(⋅)</code> and a projection head <code>g(⋅)</code> are trained to maximize agreement using a contrastive loss. After training is completed, we throw away the projection head <code>g(⋅)</code> and use encoder <code>f(⋅)</code> and representation <code>h</code> for downstream tasks."</p>
+  </div>
 
 
   <div class="demo" id="simclrWalk">
@@ -1740,6 +1746,10 @@
 
   <p><em>But there is a catch.</em> Embeddings from ten batches ago were made by an older encoder, so they are <strong>stale</strong>. MoCo's answer is a second encoder for the keys, updated with a slow <strong>exponential moving average</strong> of the query encoder:</p>
 
+  <div class="math-display">
+  $$ p_k \leftarrow m\,p_k + (1-m)\,p_q $$
+  </div>
+
   <p>The <strong>momentum</strong> is a knob set to <code>0.999</code> in practice. It barely moves the key encoder each step, so the queued embeddings stay consistent with each other. The query encoder learns normally by gradient descent. Three lines of code:</p>
 
 <pre><code class="language-python">@torch.no_grad()
@@ -1754,6 +1764,44 @@ def momentum_update(query_encoder, key_encoder, m=0.999):
   <p>Okay, here is where it gets weird. BYOL asks: <em>what if we drop the negatives entirely?</em> Just pull the two views together and never push anything apart. Sounds like it should collapse instantly, every image mapping to the same point. It does not.</p>
 
   <p>BYOL uses two networks. The <strong>online network</strong> has an encoder, a projector, and a predictor. The <strong>target network</strong> has just an encoder and a projector. The online network tries to predict the target network's representation of the other view. <em>The target network is never trained by gradients.</em> It is a slow moving average of the online network, updated with the same EMA rule as MoCo. Gradients flow only through the online path.</p>
+
+  <p>The loss is cosine similarity between the online prediction of one view and the target projection of the other view. Since both are normalized, it simplifies to squared distance on the sphere.</p>
+
+  <p>Call the online network's output the <strong>prediction</strong> and the target network's output the <strong>target</strong>. the loss is just squared distance between two unit vectors, and it is computed in both directions: view <code>1</code> predicts view <code>2</code>'s target, and view <code>2</code> predicts view <code>1</code>'s target.</p>
+
+  <div class="math-display">
+  $$ \text{loss} = 2 - 2 \cdot \frac{\cos(q_1, z_2) + \cos(q_2, z_1)}{2} $$
+  </div>
+  <p>Here <code>q1</code> and <code>q2</code> are the online predictions for the two views: the online path is encoder, then projector, then predictor, and it gets gradients. <code>z1</code> and <code>z2</code> are the target projections for the two views: the target path is frozen, with no gradients. In the display, <code>cos</code> stands for the code's <code>F.cosine_similarity</code>. The two cosine terms are the two directions: <code>q1</code> predicts <code>z2</code>, and <code>q2</code> predicts <code>z1</code>, the symmetric loss. The outer form is the code's own form of the squared distance between two unit vectors stated in the paragraphs before this line.</p>
+
+  <p>Now the real question. <em>Why does this not collapse?</em> If there are no negatives, why does the model not just output the same vector for everything and get zero loss? Three things conspire to stop it.</p>
+
+  <ol>
+    <li><strong>Stop-gradient.</strong> The target network never receives gradients. If both networks were trained, they could happily walk together to a constant output. The target is anchored in the past, so the online network has to chase a moving but real target.</li>
+    <li><strong>The predictor.</strong> The online path has an extra MLP the target path does not have. This asymmetry matters. The predictor has to map the online representation to the target representation, which is a nontrivial function. A constant output cannot be predicted well across different views, so collapse is not actually a minimum the optimizer can reach.</li>
+    <li><strong>The EMA target.</strong> The target network changes slower than the online network, so it provides a stable bootstrap signal. The online network improves, the target absorbs the improvement slowly, the online network chases it again. Bootstrap your own latent. The name is literal.</li>
+  </ol>
+
+  <p>Here is one BYOL training step, the whole thing:</p>
+
+<pre><code class="language-python">def byol_step(x1, x2, online, target, m=0.99):
+    # online path: encoder -> projector -> predictor (gets gradients)
+    q1 = online.predictor(online.projector(online.encoder(x1)))
+    q2 = online.predictor(online.projector(online.encoder(x2)))
+
+    with torch.no_grad():  # target path: frozen, no gradients
+        z1 = target.projector(target.encoder(x1))
+        z2 = target.projector(target.encoder(x2))
+
+    # symmetric loss: q1 predicts z2, q2 predicts z1
+    loss = 2 - 2 * (F.cosine_similarity(q1, z2).mean()
+                    + F.cosine_similarity(q2, z1).mean()) / 2
+
+    loss.backward()  # only online weights move
+    with torch.no_grad():  # then the target slowly follows
+        for p_o, p_t in zip(online.parameters(), target.parameters()):
+            p_t.data = m * p_t.data + (1 - m) * p_o.data
+    return loss</code></pre>
 
   <p>Now watch the phenomenon that setup exists to prevent. Twenty embeddings on a disk, one hundred training steps. The naive version, gradients flowing everywhere, drains every dot into one: zero loss, nothing learned. BYOL's stop-gradient plus predictor keeps the dots spread.</p>
 
@@ -1987,39 +2035,6 @@ def momentum_update(query_encoder, key_encoder, m=0.999):
     draw();
   })();
   </script>
-
-  <p>The loss is cosine similarity between the online prediction of one view and the target projection of the other view. Since both are normalized, it simplifies to squared distance on the sphere.</p>
-
-  <p>Call the online network's output the <strong>prediction</strong> and the target network's output the <strong>target</strong>. the loss is just squared distance between two unit vectors, and it is computed in both directions: view <code>1</code> predicts view <code>2</code>'s target, and view <code>2</code> predicts view <code>1</code>'s target.</p>
-
-  <p>Now the real question. <em>Why does this not collapse?</em> If there are no negatives, why does the model not just output the same vector for everything and get zero loss? Three things conspire to stop it.</p>
-
-  <ol>
-    <li><strong>Stop-gradient.</strong> The target network never receives gradients. If both networks were trained, they could happily walk together to a constant output. The target is anchored in the past, so the online network has to chase a moving but real target.</li>
-    <li><strong>The predictor.</strong> The online path has an extra MLP the target path does not have. This asymmetry matters. The predictor has to map the online representation to the target representation, which is a nontrivial function. A constant output cannot be predicted well across different views, so collapse is not actually a minimum the optimizer can reach.</li>
-    <li><strong>The EMA target.</strong> The target network changes slower than the online network, so it provides a stable bootstrap signal. The online network improves, the target absorbs the improvement slowly, the online network chases it again. Bootstrap your own latent. The name is literal.</li>
-  </ol>
-
-  <p>Here is one BYOL training step, the whole thing:</p>
-
-<pre><code class="language-python">def byol_step(x1, x2, online, target, m=0.99):
-    # online path: encoder -> projector -> predictor (gets gradients)
-    q1 = online.predictor(online.projector(online.encoder(x1)))
-    q2 = online.predictor(online.projector(online.encoder(x2)))
-
-    with torch.no_grad():  # target path: frozen, no gradients
-        z1 = target.projector(target.encoder(x1))
-        z2 = target.projector(target.encoder(x2))
-
-    # symmetric loss: q1 predicts z2, q2 predicts z1
-    loss = 2 - 2 * (F.cosine_similarity(q1, z2).mean()
-                    + F.cosine_similarity(q2, z1).mean()) / 2
-
-    loss.backward()  # only online weights move
-    with torch.no_grad():  # then the target slowly follows
-        for p_o, p_t in zip(online.parameters(), target.parameters()):
-            p_t.data = m * p_t.data + (1 - m) * p_o.data
-    return loss</code></pre>
 
   <p>Notice what is missing. No negatives, no queue, no giant batch requirement. BYOL works fine at batch size <code>256</code>. That alone makes it the practical choice when you do not have a GPU cluster.</p>
 

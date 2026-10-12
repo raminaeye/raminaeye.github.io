@@ -587,10 +587,10 @@
         <a class="tab-link" href="#the-dual">The update: average gradient plus one bounded nudge toward the worst task</a>
         <a class="tab-link" href="#the-algorithm">One CAGrad update, step by step</a>
         <a class="tab-link" href="#the-guarantee">The guarantee: convergence to a stationary point of the average loss</a>
+        <a class="tab-link" href="#paper-figure">CAGrad lands on the Pareto front; the others fall short</a>
         <a class="tab-link" href="#the-racer">The race: four methods, five starts, one toy landscape</a>
         <a class="tab-link" href="#what-it-shows">CAGrad keeps descending where gradient descent stalls</a>
         <a class="tab-link" href="#practical">When to use CAGrad, and what it costs</a>
-        <a class="tab-link" href="#paper-figure">CAGrad lands on the Pareto front; the others fall short</a>
         <a class="tab-link" href="#references">References</a>
     </div>
 
@@ -649,6 +649,43 @@
     <p>The step must stay on a leash: inside a ball around the average gradient, whose radius is set by the knob.</p>
     <p>At <code>0</code> the leash has zero length and you get plain gradient descent; a large knob setting lets the step roam, which is MGDA.</p>
     <p class="caption">Inside a ball around the average gradient, find the direction that helps the least-helped task the most.</p>
+    <p>Here is that problem statement as equations, before any tool draws it. State the goal: pick the direction that helps the worst-off task the most, while staying on a short leash around the average gradient.</p>
+    <div class="math-display">$$\max_d \min_i \langle g_i, d \rangle \quad \text{s.t.} \quad \|d - g_0\| \le c \cdot \|g_0\|$$</div>
+    <p>Here <code>d</code> is any candidate direction, <code>g<sub>i</sub></code> is any task's gradient, <code>max</code> and <code>min</code> pick the largest and smallest values, <code>⟨⟩</code> are angle brackets for the alignment score of the two vectors, <code>∥∥</code> is the norm, the length of a vector, <code>s.t.</code> means subject to, the constraint, <code>·</code> is the dot product, how aligned two vectors are, and <code>≤</code> means at most.</p>
+    <p>Solve for the blend weights: choose how much of each task's gradient to mix so the blend helps the worst-off task as much as possible.</p>
+    <div class="math-display">$$w^* = \operatorname{argmin}_{w \in \Delta} \left( g_w \cdot g_0 + \sqrt{\varphi} \cdot \|g_w\| \right), \qquad g_w = w_1 g_1 + w_2 g_2$$</div>
+    <p>Here <code>w*</code> is the solved blend weights, <code>argmin</code> is the choice giving the smallest value, <code>∈</code> means is a member of, <code>Δ</code> is every legal blend, where the weights sum to 1, <code>g<sub>w</sub></code> is the blended gradient, <code>w<sub>1</sub></code> and <code>g<sub>1</sub></code> are task 1's blend weight and gradient, <code>w<sub>2</sub></code> and <code>g<sub>2</sub></code> are task 2's, and <code>√</code> is the square root of.</p>
+    <p>Build the final update: start at the average gradient, then step toward the worst task's direction, limited by the leash length.</p>
+    <div class="math-display">$$d^* = g_0 + c \cdot \|g_0\| \cdot \left( \frac{g_w}{\|g_w\|} \right)$$</div>
+    <p>Here <code>d*</code> is the final update, the direction that maximizes the worst task's score, <code>g<sub>0</sub></code> is the average gradient, and <code>c</code> is the leash, how far the update may stray, as a fraction of the average's length.</p>
+    <p>One symbol in the second line needs its own sentence, because the tool's legend calls <code>φ</code> only the confidence knob. In the app code and its worked block, <code>φ</code> is <code>c</code> squared times the squared length of the average gradient:</p>
+    <div class="math-display">$$\varphi = c^2 \|g_0\|^2$$</div>
+    <h2 id="four-choices">The four moving parts inside one CAGrad step</h2>
+    <p>Every piece of that problem statement is doing a job:</p>
+    <ol>
+        <li><strong>Why judge a step by its worst task?</strong> The average score is exactly what betrays a quiet task: a loud task can outvote a hurt one and the average never notices. Taking the minimum is a weakest-link rule. Betrayal has nowhere to hide.</li>
+        <li><strong>Why the ball around the average gradient?</strong> Without it the rule turns into MGDA, which wanders as far from the average as it takes to keep the peace, with no promise about where it ends up. The ball is what buys the proof: any step within the leash of the average gradient keeps a positive fraction of that gradient's downward push on the average loss.</li>
+        <li><strong>Why a radius tied to the gradient's own length, not a fixed number?</strong> So the leash grows and shrinks with the terrain. Early in training gradients are large and a fixed radius would be uselessly tight; late in training it would be uselessly loose. A fixed fraction keeps the diplomat's freedom constant in the only units that matter, and it makes the knob unit-free, so no rescaling of the losses can game it.</li>
+        <li><strong>Why solve the dual?</strong> The primal searches over <code>d</code> in the full parameter space, millions of dimensions, at every step. The dual searches over <code>K</code> blend weights, and <code>K</code> is <code>2</code> to <code>50</code>. Same answer, vastly less work: the solve is negligible next to a backward pass for small K.</li>
+    </ol>
+
+    <h2 id="the-dual">The update: average gradient plus one bounded nudge toward the worst task</h2>
+    <p><em>Searching over every possible update directly is hopeless</em>: it lives in the full parameter space, millions of dimensions.</p>
+    <p>But the answer has a simple shape. The best update is the <strong>average gradient plus one bounded nudge</strong>: the consensus direction, plus one step of fixed length toward the compromise that helps the worst-off task most.</p>
+    <p>The step length is exactly the leash length, so the update always lands on the ball's boundary.</p>
+    <p>The reference implementation's toy example divides the update by one plus the knob setting: a toy-code convention, <em>not part of the method itself</em>.</p>
+    <p>The race below uses it so the numbers match the reference code.</p>
+
+    <p>The app lists the steps of one CAGrad update in order:</p>
+    <ol>
+        <li>Forward pass; compute each task loss L<sub>i</sub>.</li>
+        <li>Compute each task gradient g<sub>i</sub> = ∇<sub>θsh</sub> L<sub>i</sub> and their average g<sub>0</sub> = (1/K)Σg<sub>i</sub>.</li>
+        <li>Solve the dual: over all blends w in the simplex, minimize F(w) = g<sub>w</sub><sup>T</sup>g<sub>0</sub> + c∥g<sub>0</sub>∥∥g<sub>w</sub>∥, where g<sub>w</sub> = Σw<sub>i</sub>g<sub>i</sub>.</li>
+        <li>Form the update d = (1/(1+c))(g<sub>0</sub> + c∥g<sub>0</sub>∥·g<sub>w</sub>*/∥g<sub>w</sub>*∥) from the winning blend w*.</li>
+        <li>Step the network with d as usual.</li>
+    </ol>
+    <p>The reference implementation's toy example divides the update by one plus the knob setting: a toy-code convention, <em>not part of the method itself</em>.</p>
+    <p>Read the ball geometry from the inside out. Pick any candidate <code>d</code>. Let every task score it and keep only the lowest score. Choose the <code>d</code> with the highest lowest score. The best worst-task score is found by hunting on the disc's edge. The update cannot leave the ball.</p>
     <style>
         #cgBallDemo .cg-ball-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
         #cgBallDemo .cg-ball-swatch { flex: 0 0 14px; height: 14px; border-radius: 4px; }
@@ -922,24 +959,8 @@
     <p>And one restriction: the direction must stay inside a ball around the average gradient, with a radius set to a fraction of that gradient's length.</p>
     <p>If a step exists that helps every task, the best worst score is positive and every task improves.</p>
 
-    <h2 id="four-choices">The four moving parts inside one CAGrad step</h2>
-    <p>Every piece of that problem statement is doing a job:</p>
-    <ol>
-        <li><strong>Why judge a step by its worst task?</strong> The average score is exactly what betrays a quiet task: a loud task can outvote a hurt one and the average never notices. Taking the minimum is a weakest-link rule. Betrayal has nowhere to hide.</li>
-        <li><strong>Why the ball around the average gradient?</strong> Without it the rule turns into MGDA, which wanders as far from the average as it takes to keep the peace, with no promise about where it ends up. The ball is what buys the proof: any step within the leash of the average gradient keeps a positive fraction of that gradient's downward push on the average loss.</li>
-        <li><strong>Why a radius tied to the gradient's own length, not a fixed number?</strong> So the leash grows and shrinks with the terrain. Early in training gradients are large and a fixed radius would be uselessly tight; late in training it would be uselessly loose. A fixed fraction keeps the diplomat's freedom constant in the only units that matter, and it makes the knob unit-free, so no rescaling of the losses can game it.</li>
-        <li><strong>Why solve the dual?</strong> The primal searches over <code>d</code> in the full parameter space, millions of dimensions, at every step. The dual searches over <code>K</code> blend weights, and <code>K</code> is <code>2</code> to <code>50</code>. Same answer, vastly less work: the solve is negligible next to a backward pass for small K.</li>
-    </ol>
-
-    <h2 id="the-dual">The update: average gradient plus one bounded nudge toward the worst task</h2>
-    <p><em>Searching over every possible update directly is hopeless</em>: it lives in the full parameter space, millions of dimensions.</p>
-    <p>But the answer has a simple shape. The best update is the <strong>average gradient plus one bounded nudge</strong>: the consensus direction, plus one step of fixed length toward the compromise that helps the worst-off task most.</p>
-    <p>The step length is exactly the leash length, so the update always lands on the ball's boundary.</p>
-    <p>The reference implementation's toy example divides the update by one plus the knob setting: a toy-code convention, <em>not part of the method itself</em>.</p>
-    <p>The race below uses it so the numbers match the reference code.</p>
-
     <h2 id="the-algorithm">One CAGrad update, step by step</h2>
-    <p>A training step is the usual machinery: forward pass, task losses, gradients, then the step. The CAGrad-specific part sits between the gradients and the update, and it is four decisions. Step through them on the same two task gradients the ball demo uses:</p>
+    <p>Step through one CAGrad update on the same two task gradients the ball demo uses:</p>
     <div class="demo" id="cgStep">
         <style>
         #cgStep .cg-stepdots{display:flex;gap:10px;justify-content:center;margin:0 0 0.6rem}
@@ -1296,8 +1317,36 @@ def cagrad_combine(grads, c=0.5):
     </ol>
 
 
+    <h2 id="paper-figure">CAGrad lands on the Pareto front; the others fall short</h2>
+    <figure class="figure" id="cgFig3" style="margin:0;">
+      <div class="cg-static-fig">
+        <h3 style="margin-top:0;">How to read the six panels</h3>
+        <p style="margin-top:0;">The setup is tiny on purpose: a model with just two knobs to turn, and two losses pulling in different directions. With only two knobs, the whole story fits in six pictures. Here is how to read them.</p>
+        <p><strong>What the plots are:</strong> each panel is drawn in loss space, not knob space. The horizontal axis is task <code>1</code>'s loss, the vertical axis is task <code>2</code>'s loss, so every point is one whole model: bottom-left means both tasks happy, top-right means both suffering. The curve in each panel is the Pareto front, the models where one task can only improve if the other gets worse. Nothing can live below and left of it.</p>
+        <p><strong>What the trails are:</strong> one colored trail is one training run from one starting point, painted red at the start and fading to yellow as training goes on. Five trails per panel, five different starts. Panels <code>1 to 4</code> give GD, MGDA, PCGrad, and CAGrad (c = <code>0.5</code>) the same five starts; panels <code>5 and 6</code> rerun CAGrad with different leash lengths.</p>
+        <p><strong>How to read them:</strong> a run that stalls stops up and to the right, both losses still high, going nowhere. A run that works bends down and left, hugging toward the front. Compare panel <code>1</code> with panel <code>4</code> and the difference is the whole method: GD's runs die in the valley, CAGrad's bend down and left toward the Pareto front.</p>
+        <p style="margin-top:0;">This is the actual figure from the CAGrad paper's toy experiment (Section 5.1), not a redraw.</p>
+        <div class="cg-figwrap">
+          <div class="cg-figinner">
+          <img src="figures/papers/cagrad-fig3.png" alt="Figure 3 of the CAGrad paper: six loss-space plots showing optimization trajectories of GD, MGDA, PCGrad, and CAGrad with varying c on the 2D toy example" id="cgFigImg" style="width:100%;height:auto;display:block;">
+          </div>
+        </div>
+        <ol class="cg-readlist">
+          <li><strong>Panel <code>1</code>, GD:</strong> Longer published runs (<code>100,000</code> steps) stall in the valley on <code>2</code> of <code>5</code> starts. My replay below (<code>20,000</code> steps) stalls on <code>3</code> of <code>5</code>. Same valley, same story.</li>
+          <li><strong>Panel <code>2</code>, MGDA:</strong> every run reaches the Pareto set, but each stops wherever it first touches it. The landing is decided by the start, not by the tasks.</li>
+          <li><strong>Panel <code>3</code>, PCGrad:</strong> surgery escapes the valley too, but it also parks on the front wherever it arrives. One run is still short of the set.</li>
+          <li><strong>Panel <code>4</code>, CAGrad at <code>0.5</code>:</strong> all five runs bend toward the star. The leash keeps pulling toward the average while the diplomat spends its freedom on the worst-off task.</li>
+          <li><strong>Panel <code>5</code>, knob at <code>0</code> and <code>10</code>:</strong> at <code>0</code> it reproduces GD's stalls exactly; at <code>10</code> it scatters like MGDA. The dial really does span the two classics.</li>
+          <li><strong>Panel <code>6</code>, knob at <code>0.2</code>, <code>0.5</code>, <code>0.8</code>:</strong> the mid-range values all bend toward the star. The sweet spot is wide, not a knife edge.</li>
+        </ol>
+        <p class="caption">Figure 3 of Liu et al. (NeurIPS 2021). <a href="https://arxiv.org/abs/2110.14048">arXiv:2110.14048</a></p>
+        <p class="caption">Verbatim caption: "The left four plots are <code>5</code> runs of each algorithms from <code>5</code> different initial parameter vectors, where trajectories are colored from red to yellow. The right two plots are CAGrad's results with a varying c in {<code>0</code>, <code>0.2</code>, <code>0.5</code>, <code>0.8</code>, <code>10</code>}."</p>
+      </div>
+    </figure>
+
     <h2 id="the-racer">The race: four methods, five starts, one toy landscape</h2>
     <p>This toy landscape has exactly two adjustable numbers, so every possible model is a point on the map; the shading shows the average loss as height. The gray bar is the Pareto set; the star is its best point. Four methods walk downhill from the same start, using only what they can feel under their feet. CAGrad is not trying to reach the star: it trades the lowest average for protecting the worst-off task, so expect its trail to settle short of the star on some starts. That is the deal, not a failure.</p>
+    <p>The second plot in the race is a scoreboard over time. Horizontal axis: training steps, <code>0 to 20,000</code>. Vertical axis: average loss, lower is better. A flat curve is a stuck method, a falling curve is still learning.</p>
 
     <div class="demo" id="cgDemo">
         <p style="margin-top:0;">Four methods, five starts, one toy landscape. The trails are real <code>20,000</code>-step Adam runs (learning rate <code>2e-3</code>), precomputed and baked into this page. Nothing runs on page load; the replay animates all four methods at once.</p>
@@ -1348,35 +1397,9 @@ def cagrad_combine(grads, c=0.5):
         <li><strong>Keep in mind:</strong> the proof assumes smooth losses and small steps. Real networks are messier, so treat <code>c</code> as a knob you tune even though it has a theoretical meaning.</li>
         <li><strong>The hidden knob: how many tasks per step.</strong> With many tasks, the <code>K</code> backward passes are the real cost. Treat the CAGrad-Fast subset size like a batch size: bigger is steadier and costlier, smaller is noisier and faster.</li>
         <li><strong>How I set the knob:</strong> I start at <code>0.2</code> to <code>0.5</code>. If the worst task is still being ignored (its loss flatlines while the others fall), I raise the knob, which buys that task a louder voice. If the average loss improves too slowly, I lower the knob, since I am straying too far from the objective.</li>
-        <li><strong>The sweet spot is wide:</strong> on the toy (panels <code>5</code> and <code>6</code> of Figure 3 below), the knob at <code>0.5</code> and <code>0.8</code> descends from every start, while <code>0.2</code> still stalls from the two hardest starts at <code>20,000</code> steps.</li>
+        <li><strong>The sweet spot is wide:</strong> on the toy (panels <code>5</code> and <code>6</code> of Figure 3 above), the knob at <code>0.5</code> and <code>0.8</code> descends from every start, while <code>0.2</code> still stalls from the two hardest starts at <code>20,000</code> steps.</li>
     </ol>
 
-    <h2 id="paper-figure">CAGrad lands on the Pareto front; the others fall short</h2>
-    <figure class="figure" id="cgFig3" style="margin:0;">
-      <div class="cg-static-fig">
-        <h3 style="margin-top:0;">How to read the six panels</h3>
-        <p style="margin-top:0;">The setup is tiny on purpose: a model with just two knobs to turn, and two losses pulling in different directions. With only two knobs, the whole story fits in six pictures. Here is how to read them.</p>
-        <p><strong>What the plots are:</strong> each panel is drawn in loss space, not knob space. The horizontal axis is task <code>1</code>'s loss, the vertical axis is task <code>2</code>'s loss, so every point is one whole model: bottom-left means both tasks happy, top-right means both suffering. The curve in each panel is the Pareto front, the models where one task can only improve if the other gets worse. Nothing can live below and left of it.</p>
-        <p><strong>What the trails are:</strong> one colored trail is one training run from one starting point, painted red at the start and fading to yellow as training goes on. Five trails per panel, five different starts. Panels <code>1 to 4</code> give GD, MGDA, PCGrad, and CAGrad (c = <code>0.5</code>) the same five starts; panels <code>5 and 6</code> rerun CAGrad with different leash lengths.</p>
-        <p><strong>How to read them:</strong> a run that stalls stops up and to the right, both losses still high, going nowhere. A run that works bends down and left, hugging toward the front. Compare panel <code>1</code> with panel <code>4</code> and the difference is the whole method: GD's runs die in the valley, CAGrad's bend down and left toward the Pareto front.</p>
-        <p style="margin-top:0;">This is the actual figure from the CAGrad paper's toy experiment (Section 5.1), not a redraw.</p>
-        <div class="cg-figwrap">
-          <div class="cg-figinner">
-          <img src="figures/papers/cagrad-fig3.png" alt="Figure 3 of the CAGrad paper: six loss-space plots showing optimization trajectories of GD, MGDA, PCGrad, and CAGrad with varying c on the 2D toy example" id="cgFigImg" style="width:100%;height:auto;display:block;">
-          </div>
-        </div>
-        <ol class="cg-readlist">
-          <li><strong>Panel <code>1</code>, GD:</strong> Longer published runs (<code>100,000</code> steps) stall in the valley on <code>2</code> of <code>5</code> starts. My replay above (<code>20,000</code> steps) stalls on <code>3</code> of <code>5</code>. Same valley, same story.</li>
-          <li><strong>Panel <code>2</code>, MGDA:</strong> every run reaches the Pareto set, but each stops wherever it first touches it. The landing is decided by the start, not by the tasks.</li>
-          <li><strong>Panel <code>3</code>, PCGrad:</strong> surgery escapes the valley too, but it also parks on the front wherever it arrives. One run is still short of the set.</li>
-          <li><strong>Panel <code>4</code>, CAGrad at <code>0.5</code>:</strong> all five runs bend toward the star. The leash keeps pulling toward the average while the diplomat spends its freedom on the worst-off task.</li>
-          <li><strong>Panel <code>5</code>, knob at <code>0</code> and <code>10</code>:</strong> at <code>0</code> it reproduces GD's stalls exactly; at <code>10</code> it scatters like MGDA. The dial really does span the two classics.</li>
-          <li><strong>Panel <code>6</code>, knob at <code>0.2</code>, <code>0.5</code>, <code>0.8</code>:</strong> the mid-range values all bend toward the star. The sweet spot is wide, not a knife edge.</li>
-        </ol>
-        <p class="caption">Figure 3 of Liu et al. (NeurIPS 2021). <a href="https://arxiv.org/abs/2110.14048">arXiv:2110.14048</a></p>
-        <p class="caption">Verbatim caption: "The left four plots are <code>5</code> runs of each algorithms from <code>5</code> different initial parameter vectors, where trajectories are colored from red to yellow. The right two plots are CAGrad's results with a varying c in {<code>0</code>, <code>0.2</code>, <code>0.5</code>, <code>0.8</code>, <code>10</code>}."</p>
-      </div>
-    </figure>
 
     <hr>
     <p>Every method in this series reshapes the update: reweight the losses, fix the angles, or leash the step. The series ends here, with the full toolbox on the table: <em>reweight the losses when the tasks are loud, reshape the update when they fight, and protect the worst-off task when you need a guarantee</em>. Diagnose with gradient norms and cosines, then pick your medicine.</p>

@@ -668,6 +668,58 @@
         return x + self.up_proj(self.relu(self.down_proj(x)))
 </code></pre>
 
+    <p style="text-align:center">$$h = W_{up} \cdot \sigma(W_{down} \cdot x), \qquad y = x + h$$</p>
+    <p>Squeeze the input down to a small bottleneck, bend it with a nonlinearity, then lift it back up to full size. In those two lines: <code>x</code> the frozen input, untouched; <code>W<sub>down</sub></code> the squeeze: <code>768</code> numbers down to <code>64</code>; <code>σ</code> the ReLU bend; <code>W<sub>up</sub></code> the lift: <code>64</code> numbers back to <code>768</code>; <code>h</code> the learned nudge; <code>y</code> the output: frozen input plus the nudge.</p>
+
+    <p><em>Where do these things actually plug in?</em> Here is one transformer block:</p>
+
+    <div class="diagram">
+      <div class="box frozen">Input hidden states</div>
+      <div class="arrow">&#8595;</div>
+      <div class="box frozen">Self-attention <span style="font-weight:normal">(frozen)</span></div>
+      <div class="arrow">&#8595;</div>
+      <div class="box trainable">Adapter 1 (trainable)</div>
+      <div class="arrow">&#8595;</div>
+      <div class="box frozen">Feed-forward <span style="font-weight:normal">(frozen)</span></div>
+      <div class="arrow">&#8595;</div>
+      <div class="box trainable">Adapter 2 (trainable)</div>
+      <div class="arrow">&#8595;</div>
+      <div class="box frozen">Output to next block</div>
+      <div class="legend">
+        <span><span class="swatch blue"></span>frozen, never updated</span>
+        <span><span class="swatch orange"></span>trainable adapter</span>
+      </div>
+    </div>
+    <p class="caption">The big frozen blocks never change. Only the small adapters between them learn anything, so one backbone can host a different adapter per task.</p>
+
+    <p>Let me count the parameters out loud, because <em>the numbers are the point.</em> With a hidden size of <code>768</code> and a bottleneck of <code>64</code>:</p>
+
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-num">98,304 <span class="stat-unit">params</span></div>
+        <div class="stat-label">Per adapter</div>
+        <div class="stat-note">Down + up projections: 49,152 + 49,152</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">2,359,296 <span class="stat-unit">params</span></div>
+        <div class="stat-label">12 layers x 2 adapters</div>
+        <div class="stat-note">Total trainable for the whole model</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">2.1<span class="stat-unit">%</span></div>
+        <div class="stat-label">Share of a 110M param model</div>
+        <div class="stat-note">The other 98% stays frozen</div>
+      </div>
+    </div>
+
+    <p>Two percent. You train two percent of the model and leave the other <code>98</code> percent exactly where pretraining put it. <em>That is why the model does not forget:</em> the old knowledge is still sitting there, frozen, untouched.</p>
+
+    <p>And the training loop is <em>one loop with a filter.</em> Everything frozen except the adapters:</p>
+
+<pre><code class="language-python">for name, param in model.named_parameters():
+    param.requires_grad = 'adapter' in name
+</code></pre>
+
     <div class="demo" id="stepDemo">
       <style>
       /* Shared walkthrough equation-card contract (verbatim, all pages) */
@@ -872,54 +924,8 @@
     })();
     </script>
 
-    <p>Let me count the parameters out loud, because <em>the numbers are the point.</em> With a hidden size of <code>768</code> and a bottleneck of <code>64</code>:</p>
 
-    <div class="stat-grid">
-      <div class="stat-card">
-        <div class="stat-num">98,304 <span class="stat-unit">params</span></div>
-        <div class="stat-label">Per adapter</div>
-        <div class="stat-note">Down + up projections: 49,152 + 49,152</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-num">2,359,296 <span class="stat-unit">params</span></div>
-        <div class="stat-label">12 layers x 2 adapters</div>
-        <div class="stat-note">Total trainable for the whole model</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-num">2.1<span class="stat-unit">%</span></div>
-        <div class="stat-label">Share of a 110M param model</div>
-        <div class="stat-note">The other 98% stays frozen</div>
-      </div>
-    </div>
 
-    <p>Two percent. You train two percent of the model and leave the other <code>98</code> percent exactly where pretraining put it. <em>That is why the model does not forget:</em> the old knowledge is still sitting there, frozen, untouched.</p>
-
-    <p><em>Where do these things actually plug in?</em> Here is one transformer block:</p>
-
-    <div class="diagram">
-      <div class="box frozen">Input hidden states</div>
-      <div class="arrow">&#8595;</div>
-      <div class="box frozen">Self-attention <span style="font-weight:normal">(frozen)</span></div>
-      <div class="arrow">&#8595;</div>
-      <div class="box trainable">Adapter 1 (trainable)</div>
-      <div class="arrow">&#8595;</div>
-      <div class="box frozen">Feed-forward <span style="font-weight:normal">(frozen)</span></div>
-      <div class="arrow">&#8595;</div>
-      <div class="box trainable">Adapter 2 (trainable)</div>
-      <div class="arrow">&#8595;</div>
-      <div class="box frozen">Output to next block</div>
-      <div class="legend">
-        <span><span class="swatch blue"></span>frozen, never updated</span>
-        <span><span class="swatch orange"></span>trainable adapter</span>
-      </div>
-    </div>
-    <p class="caption">The big frozen blocks never change. Only the small adapters between them learn anything, so one backbone can host a different adapter per task.</p>
-
-    <p>And the training loop is <em>one loop with a filter.</em> Everything frozen except the adapters:</p>
-
-<pre><code class="language-python">for name, param in model.named_parameters():
-    param.requires_grad = 'adapter' in name
-</code></pre>
 
     <h2 id="lora-shrink-the-update-not-the-model">LoRA: shrink the update, not the model</h2>
 
@@ -927,12 +933,28 @@
 
     <p>The idea is: freeze what the model already knows (<code>W</code>) and learn only the change, as a detour through a tiny bottleneck. <code>A</code> squeezes the signal down to rank <code>r</code>, <code>B</code> lifts it back up, and the two together add a small learned nudge on top of the frozen weight. <em>The rank <code>r</code> is the whole budget:</em> a smaller <code>r</code> means far fewer new parameters and a coarser approximation of the update.</p>
 
-    <p>Rebuilt from the LoRA paper's Figure 1, this picture holds the whole method: the blue box is your frozen weight, the two orange slabs are all you train.</p>
+    <p>Rebuilt from the LoRA paper's Figure 1, this picture holds the whole method.</p>
+
+    <div>
+    <div style="position:relative;max-width:640px;margin:0 auto;">
+      <img src="figures/papers/lora-fig1.png" alt="Figure 1 from the LoRA paper: input x at the bottom feeds a frozen blue box of pretrained weights W on the left and two stacked orange parallelograms labeled A and B on the right, with a rank r brace between them; both paths combine at a plus sign into output h at the top." style="width:100%;height:auto;display:block;">
+    </div>
+    </div>
+    <p class="paper-caption"><strong>Figure 1.</strong> Our reparametrization. We only train <code>A</code> and <code>B</code>. Rebuilt from Figure 1 of Hu et al. (ICLR 2022). <a href="https://arxiv.org/abs/2106.09685">arXiv:2106.09685</a></p>
+
+    <p style="text-align:center">$$W + BA$$</p>
+    <p>The update is the frozen weight plus the side path: <code>W</code> is the pretrained weight, <code>A</code> is the down-projection: it squeezes the input into the bottleneck, and <code>B</code> is the up-projection.</p>
+    <ol>
+      <li><code>A</code> starts from a random Gaussian, the <code>N(0, σ²)</code> written on the slab: each entry drawn from a bell curve centered at <code>0</code> with spread <code>σ</code>.</li>
+      <li><code>B</code> is initialized to exact zeros: so at step one the side path contributes nothing.</li>
+      <li>The plus at the top is the merge: both paths adding coordinate by coordinate.</li>
+      <li>Before serving you fold <code>BA</code> into <code>W</code> once.</li>
+    </ol>
+
+    <p>The <code>r</code> brace between the slabs is the rank, the entire budget of new parameters: <code>r</code> times (<code>d</code> + <code>k</code>) numbers against <code>d</code> times <code>k</code> in the full weight, where <code>d</code> is the size of the input and <code>k</code> the size of the output.</p>
+    <p>Now the numbers. Take a <code>768 × 768</code> attention projection at rank <code>8</code>: <code>A</code> holds <code>6,144</code> parameters and <code>B</code> holds <code>6,144</code>, so the whole update is <code>12,288</code> parameters instead of <code>589,824</code> for the full matrix, about <code>2</code> percent of the matrix it modifies. <em>The update is a shadow of the original weight, and a shadow is all you need.</em></p>
 
     <div class="demo" id="loraFigStatic">
-      <div style="position:relative;max-width:640px;margin:0 auto;">
-        <img src="figures/papers/lora-fig1.png" alt="Figure 1 from the LoRA paper: input x at the bottom feeds a frozen blue box of pretrained weights W on the left and two stacked orange parallelograms labeled A and B on the right, with a rank r brace between them; both paths combine at a plus sign into output h at the top." style="width:100%;height:auto;display:block;">
-      </div>
       <div class="cap-card" style="margin-top:1rem;">
         <strong>What this shows</strong>
         <ul>
@@ -940,17 +962,14 @@
           <li><strong><code>2</code>.</strong> The blue box on the left is the pretrained weight <code>W</code>: input <code>x</code> feeds straight through it, exactly as it did before fine-tuning.</li>
           <li><strong><code>3</code>.</strong> The lower orange slab is <code>A</code>, the down-projection: it squeezes the input into the bottleneck. It starts from a random Gaussian, the <code>N(0, σ²)</code> written on the slab: each entry drawn from a bell curve centered at <code>0</code> with spread <code>σ</code>. That <code>σ</code> is the spread of the draw, a different <code>σ</code> from the adapter card above, where <code>σ</code> is the ReLU bend. The random start would be a problem except <code>B</code> fixes it.</li>
           <li><strong><code>4</code>.</strong> The upper orange slab is <code>B</code>, the up-projection, initialized to exact zeros: so at step one the side path contributes nothing and the model behaves exactly like the pretrained model.</li>
-          <li><strong><code>5</code>.</strong> The <code>r</code> brace between the slabs is the rank, the entire budget of new parameters: <code>r</code> times (<code>d</code> + <code>k</code>) numbers against <code>d</code> times <code>k</code> in the full weight, where <code>d</code> is the size of the input and <code>k</code> the size of the output.</li>
           <li><strong><code>6</code>.</strong> The plus at the top is the merge: both paths adding coordinate by coordinate.</li>
           <li><strong><code>7</code>.</strong> Training wakes the side path up from zero: <code>B</code> leaves zero, the loss falls as it learns, and before serving you fold <code>BA</code> into <code>W</code> once, so inference runs like a normally fine-tuned model with no extra latency.</li>
         </ul>
       </div>
-      <p class="paper-caption"><strong>Figure 1.</strong> Our reparametrization. We only train <code>A</code> and <code>B</code>. Rebuilt from Figure 1 of Hu et al. (ICLR 2022). <a href="https://arxiv.org/abs/2106.09685">arXiv:2106.09685</a></p>
     </div>
 
 
 
-    <p>Now the numbers. Take a <code>768 × 768</code> attention projection at rank <code>8</code>: <code>A</code> holds <code>6,144</code> parameters and <code>B</code> holds <code>6,144</code>, so the whole update is <code>12,288</code> parameters instead of <code>589,824</code> for the full matrix, about <code>2</code> percent of the matrix it modifies. <em>The update is a shadow of the original weight, and a shadow is all you need.</em></p>
 
     <p>The code wraps a frozen linear layer and adds the low-rank path alongside it:</p>
 
@@ -989,6 +1008,27 @@
     </div>
 
     <p>Rank is the dial that sets those numbers.</p>
+
+    <p>Here is the sweep, in words first. Pick a rank: rank is the dial that sets those numbers. Count its parameters with the count formula above. Then compare the two task curves across ranks: as rank grows from <code>1</code> to <code>64</code>, the easy and hard curves separate.</p>
+
+    <div class="diagram">
+      <svg viewBox="0 0 640 380" role="img" aria-label="Static accuracy versus LoRA rank plot: easy task curve flat after rank 4, hard task curve keeps climbing to rank 64">
+        <line x1="70" y1="40" x2="70" y2="340" stroke="#555" stroke-width="1"/>
+        <line x1="70" y1="340" x2="598" y2="340" stroke="#555" stroke-width="1"/>
+        <line x1="70" y1="57" x2="598" y2="57" stroke="#95a5a6" stroke-width="1" stroke-dasharray="6,4"/>
+        <line x1="70" y1="69" x2="598" y2="69" stroke="#95a5a6" stroke-width="1" stroke-dasharray="6,4"/>
+        <polyline points="70,109 158,80 246,63 334,62 422,62 510,62 598,62" fill="none" stroke="#2a7fbf" stroke-width="3"/>
+        <polyline points="70,317 158,271 246,213 334,155 422,115 510,92 598,80" fill="none" stroke="#e67e22" stroke-width="3"/>
+        <text x="300" y="368" font-family="sans-serif" font-size="14" fill="#555" text-anchor="middle">rank r: 1, 2, 4, 8, 16, 32, 64</text>
+        <text x="80" y="60" font-family="sans-serif" font-size="14" fill="#2a7fbf">Easy task</text>
+        <text x="470" y="150" font-family="sans-serif" font-size="14" fill="#e67e22">Hard task</text>
+        <text x="480" y="51" font-family="sans-serif" font-size="12" fill="#7f8c8d">full fine-tune 92.5 / 91.5</text>
+      </svg>
+      <p class="caption">Accuracy versus rank, drawn from the same illustrative curves the tool below sweeps. Honest labeling: these curves are illustrative, not measured runs.</p>
+    </div>
+
+    <p class="caption">Rank is a dial, not a magic number. The easy task is done at <code>r</code> = <code>4</code> and never looks back. The hard task keeps buying accuracy with every notch, and at r = <code>64</code> you are training as many parameters as a bottleneck adapter, which is nearly a dense matrix with extra steps. Pick the rank your task needs, not the biggest one that fits.</p>
+    <p>Rank is a dial, not a free lunch. rank <code>4</code> underfits hard tasks, rank <code>64</code> trains nearly a dense matrix with extra steps. Start at <code>8</code>, go up only if the loss says so.</p>
 
     <div class="demo" id="rankDemo">
       <div class="demo-controls">
@@ -1031,7 +1071,6 @@
         </ul>
       </div>
     </div>
-    <p class="caption">Rank is a dial, not a magic number. The easy task is done at <code>r</code> = <code>4</code> and never looks back. The hard task keeps buying accuracy with every notch, and at r = <code>64</code> you are training as many parameters as a bottleneck adapter, which is nearly a dense matrix with extra steps. Pick the rank your task needs, not the biggest one that fits.</p>
 
     <script>
     (function() {
@@ -1576,7 +1615,6 @@ class CompacterAdapter(nn.Module):
 
     <ul>
       <li>Unmerged adapters cost latency. Two extra matmuls per block, every token, forever. Merge LoRA into <code>W</code> before serving. Bottleneck adapters cannot merge, so they stay in the graph.</li>
-      <li>Rank is a dial, not a free lunch. rank <code>4</code> underfits hard tasks, rank <code>64</code> trains nearly a dense matrix with extra steps. Start at <code>8</code>, go up only if the loss says so.</li>
       <li>On big datasets, full fine-tuning still wins sometimes. Adapters shine when data or compute is scarce, not when you have both in abundance.</li>
       <li>Adapt query and value first, skip the rest. Most of the gain comes from the attention projections; adapters on the feed-forward layers add parameters for less return on many tasks.</li>
       <li>Soft prompts look sad on small models. Prompt and prefix tuning need a big frozen model to steer. On base-size models, LoRA beats them cleanly.</li>

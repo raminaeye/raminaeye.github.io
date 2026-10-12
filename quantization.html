@@ -481,6 +481,9 @@
     .datatable tr:nth-child(even) td{background:#f7f9fb}
     .table-scroll{overflow-x:auto;max-width:100%;-webkit-overflow-scrolling:touch;margin:1.2em 0}
     .table-scroll .datatable{margin:0}
+    /* References (last section on tutorial pages) */
+    .brefs { line-height: 1.7; }
+    .brefs li { margin: 0.35em 0; }
     /* Display math (matches other tutorial pages) */
     .math-display {
         text-align: center;
@@ -608,6 +611,7 @@
      <a class="tab-chip" href="#a-real-histogram-from-a-real-model">A real histogram from a real MNIST model</a>
      <a class="tab-chip" href="#where-should-the-range-end">The clipping range</a>
      <a class="tab-chip" href="#quick-refresher-scale-and-zero-point">Scale and zero-point</a>
+     <a class="tab-chip" href="#quantize-one-tensor">Quantize one tensor, step by step</a>
      <a class="tab-chip" href="#calibration-matters">Your quantization is only as good as your calibration data</a>
      <a class="tab-chip" href="#be-smart-about-quant-boundaries">Quant boundaries</a>
      <a class="tab-chip" href="#visualize-with-fx">See what quantization did to your model with FX</a>
@@ -617,6 +621,7 @@
      <a class="tab-chip" href="#quantization-bugs">Quantization bugs</a>
      <a class="tab-chip" href="#how-do-i-trace-these-bugs">Debugging recipes</a>
      <a class="tab-chip" href="#wrapping-up">The checklist</a>
+     <a class="tab-chip" href="#references">References</a>
    </div>
 
 
@@ -823,7 +828,7 @@ model.qconfig = qconfig_hist
    <section>
      <h2 id="where-should-the-range-end">The clipping range decides the whole error tradeoff</h2>
      <p>Here is the decision that makes or breaks low-bit quantization, and it is embarrassingly simple: <em>where do you cut the range?</em> Every weight outside your clipping range gets clipped, and every weight inside gets rounded to a <code>4-bit</code> grid. <em>Cut wide and the outliers are safe but the bins get fat. Cut tight and the bins get fine but the outliers get beheaded.</em></p>
-     <p>Nagel and co.'s whitepaper frames it as two named strategies. <strong>Min-max</strong> (Eq. 14-15): set the range to the weight tensor's actual minimum and maximum. Zero clipping error by construction, but one loud outlier stretches the bins for everyone. <strong>MSE</strong> (Eq. 16): search the range that minimizes the <strong>Frobenius norm</strong> between the weights and their quantized version, outliers be damned. A third trick from Nagel et al. (2019): when a layer has batch norm, set the range from the batch-norm parameters so only large outliers get clipped.</p>
+     <p>There are two named strategies for setting the clipping range. <strong>Min-max</strong> sets the range to the tensor's actual minimum and maximum: zero clipping error by construction, but one loud outlier stretches the bins for everyone. <strong>MSE</strong> searches for the range that minimizes the <strong>Frobenius norm</strong> between the weights and their quantized version, outliers be damned: tight bins, but the outliers get clipped. A third trick (Nagel et al., 2019): when a layer has batch norm, set the range from the batch-norm parameters so only large outliers get clipped. (Nagel et al., 2021)</p>
      <div class="figure">
        <img src="figures/papers/quant-fig5-channel-ranges.png" alt="Figure 5 from the quantization whitepaper: boxplots of per-channel weight ranges for the first depthwise-separable layer of MobileNetV2 after BN folding. Most channels are tiny, a few span huge ranges." style="max-width:100%;height:auto;">
        <p class="caption">Rebuilt from Figure 5 of Nagel et al. (arXiv 2021). <a href="https://arxiv.org/abs/2106.08295">arXiv:2106.08295</a></p>
@@ -1236,10 +1241,6 @@ model.qconfig = qconfig_hist
    })();
    </script>
 
-   <style>
-
-   </style>
-
    <script>
    (function () {
      "use strict";
@@ -1560,7 +1561,7 @@ model.qconfig = qconfig_hist
 
    <section>
      <h2 id="quick-refresher-scale-and-zero-point">Quick Refresher: Scale and Zero-Point</h2>
-     <p>When you quantize a float, the recipe is two steps: squeeze each value onto the integer grid, then map it back. dividing by the scale shrinks the float range down to the integer grid, rounding snaps each value to the nearest integer, and the zero-point shifts the grid so float zero lands exactly on an integer.</p>
+     <p>When you quantize a float, the recipe is two steps: squeeze each value onto the integer grid, then map it back. Dividing by the scale shrinks the float range down to the integer grid, rounding snaps each value to the nearest integer, and the zero-point shifts the grid so float zero lands exactly on an integer.</p>
      
      <p>To dequantize, run it backward: undo the zero-point shift, then multiply back up by the scale.</p>
      <h3>Symmetric: zero stays at zero, for weights</h3>
@@ -1825,6 +1826,153 @@ model.qconfig = qconfig_hist
          draw(parseInt(slider.value, 10) || 8);
        });
        update();
+     })();
+     </script>
+   </section>
+
+   <section>
+     <h2 id="quantize-one-tensor">Quantize one tensor, step by step</h2>
+     <p>Here is the recipe above, run on one tiny tensor: six floats, quantized to <code>8</code> bits.</p>
+     <div class="bw-demo" id="qswStep">
+       <style>
+       .qsw-dots { display: flex; gap: 10px; justify-content: center; margin: 0 0 0.6rem; }
+       .qsw-dot { width: 34px; height: 34px; border-radius: 50%; border: 2px solid #3498db; background: #fff; color: #1a6fa8; font-weight: 700; font-size: 15px; cursor: pointer; line-height: 1; padding: 0; }
+       .qsw-dot.active { background: #3498db; color: #fff; }
+       .qsw-dot:focus-visible { outline: 2px solid #2c3e50; outline-offset: 2px; }
+       .qsw-controls { display: flex; gap: 0.8rem; justify-content: center; margin: 0 0 0.4rem; }
+       #qswStep .play-btn:disabled { opacity: .35; cursor: default; }
+       #qswOutcome { min-height: 2.8em; margin: 0.5rem 0 0; text-align: center; }
+       #qswSvg { width: 100%; max-width: 520px; height: auto; display: block; margin: 0 auto; }
+       </style>
+       <svg id="qswSvg" viewBox="0 0 420 310" role="img" aria-label="Step-through of quantizing one six-value tensor to 8 bits"></svg>
+       <div class="qsw-dots">
+         <button type="button" class="qsw-dot active" data-s="0" aria-label="Step 1: find min and max">1</button>
+         <button type="button" class="qsw-dot" data-s="1" aria-label="Step 2: split into 256 buckets">2</button>
+         <button type="button" class="qsw-dot" data-s="2" aria-label="Step 3: snap floats to bucket centers">3</button>
+         <button type="button" class="qsw-dot" data-s="3" aria-label="Step 4: measure the rounding error">4</button>
+       </div>
+       <div class="qsw-controls">
+         <button type="button" class="play-btn" id="qswPrev">Prev</button>
+         <button type="button" class="play-btn" id="qswNext">Next</button>
+       </div>
+       <p id="qswOutcome" aria-live="polite"></p>
+       <div class="cap-card" id="qswCaption">
+         <strong>What this shows</strong>
+         <ul>
+           <li><strong>The point:</strong> One scale squeezes six floats into <code>256</code> buckets, and each value rounds to within half a bucket.</li>
+         </ul>
+       </div>
+     </div>
+     <script>
+     (function () {
+       "use strict";
+       var NS = 'http://www.w3.org/2000/svg';
+       var svg = document.getElementById('qswSvg');
+       var out = document.getElementById('qswOutcome');
+       var prev = document.getElementById('qswPrev');
+       var next = document.getElementById('qswNext');
+       var dots = Array.prototype.slice.call(document.querySelectorAll('#qswStep .qsw-dot'));
+       if (!svg || !out || !prev || !next) return;
+
+       /* Fixed toy tensor; every number on the panel is computed from it. */
+       var vals = [0.05, 0.19, 0.34, 0.52, 0.63, 0.77];
+       var lo = vals[0], hi = vals[vals.length - 1];
+       var scale = (hi - lo) / 255; /* 8-bit asymmetric: 256 buckets */
+       var MAG = 40; /* gap arrows are magnified; real offsets are sub-pixel */
+       var qi = vals.map(function (x) { return Math.round((x - lo) / scale); });
+       var xhat = qi.map(function (q) { return lo + q * scale; });
+       var totalErr = vals.reduce(function (a, x, i) { return a + Math.abs(xhat[i] - x); }, 0);
+       var scaleTxt = 'scale = ' + scale.toFixed(5) + ' (bucket width)';
+       var errTxt = 'total rounding error = ' + totalErr.toFixed(4);
+
+       var BLUE = '#3498db', PURPLE = '#8e44ad', INK = '#2c3e50', MUT = '#5d6d7e';
+
+       var outcomes = [
+         'The tensor\u2019s range runs from 0.05 to 0.77. One scale will cover the whole range.',
+         'The range splits into 256 equal buckets. The scale is the bucket width: 0.00282.',
+         'Each float rounds to its nearest bucket center. The arrows show where each value landed.',
+         'The red gaps are the rounding error: 0.0045 in total. Every gap is at most half a bucket wide.'
+       ];
+
+       function el(t, a) {
+         var e = document.createElementNS(NS, t);
+         for (var k in a) e.setAttribute(k, a[k]);
+         return e;
+       }
+       function tx(x, y, s, size, anchor, fill, weight) {
+         var t = el('text', { x: x, y: y, 'text-anchor': anchor || 'start', 'font-size': size || 16, fill: fill || INK });
+         if (weight) t.setAttribute('font-weight', weight);
+         t.textContent = s;
+         return t;
+       }
+       function xPx(v) { return 30 + (v - lo) / (hi - lo) * 360; }
+
+       function render(k) {
+         while (svg.firstChild) svg.removeChild(svg.firstChild);
+         /* Step 2: dense tick strip over the range (ticks, not rects). */
+         if (k >= 1) {
+           for (var i = 0; i < 256; i++) {
+             var gx = 30 + i * (360 / 255);
+             svg.appendChild(el('line', { x1: gx, x2: gx, y1: 100, y2: 122, stroke: BLUE, 'stroke-width': 1 }));
+           }
+         }
+         /* Steps 3-4: magnified gap arrows to the snapped bucket centers. */
+         if (k >= 2) {
+           svg.appendChild(tx(210, 60, 'gap arrows magnified 40x', 16, 'middle', MUT));
+           var color = (k === 3) ? '#c0392b' : '#e67e22';
+           for (var j = 0; j < vals.length; j++) {
+             var x0 = xPx(vals[j]);
+             var dx = (xhat[j] - vals[j]) * MAG * 500;
+             var x1 = x0 + dx, y0 = 158, y1 = 88;
+             if (Math.abs(dx) > 1) {
+               var ang = Math.atan2(y1 - y0, x1 - x0);
+               svg.appendChild(el('line', { x1: x0, x2: x1, y1: y0, y2: y1, stroke: color, 'stroke-width': 2 }));
+               var s = 6;
+               svg.appendChild(el('polygon', {
+                 points: x1 + ',' + y1 + ' ' +
+                   (x1 - s * Math.cos(ang - 0.42)) + ',' + (y1 - s * Math.sin(ang - 0.42)) + ' ' +
+                   (x1 - s * Math.cos(ang + 0.42)) + ',' + (y1 - s * Math.sin(ang + 0.42)),
+                 fill: color
+               }));
+             } else {
+               /* Zero gap: the value sits exactly on its bucket center. */
+               svg.appendChild(el('line', { x1: x0, x2: x0, y1: y0, y2: y1, stroke: color, 'stroke-width': 1, 'stroke-dasharray': '4 3' }));
+             }
+             svg.appendChild(el('rect', { x: x1 - 4, y: y1 - 4, width: 8, height: 8, fill: color, stroke: '#fff', 'stroke-width': 1.5 }));
+           }
+         }
+         /* Always: the number line with the six floats. */
+         svg.appendChild(el('line', { x1: 18, x2: 402, y1: 170, y2: 170, stroke: INK, 'stroke-width': 2 }));
+         for (var j = 0; j < vals.length; j++) {
+           var xp = xPx(vals[j]);
+           svg.appendChild(el('circle', { cx: xp, cy: 170, r: 8, fill: BLUE, stroke: '#fff', 'stroke-width': 2 }));
+           svg.appendChild(tx(xp, 196, vals[j].toFixed(2), 16, 'middle', INK));
+         }
+         /* Step 1: the min-max bracket. */
+         if (k >= 0) {
+           svg.appendChild(el('line', { x1: 30, x2: 390, y1: 212, y2: 212, stroke: PURPLE, 'stroke-width': 2 }));
+           svg.appendChild(el('line', { x1: 30, x2: 30, y1: 212, y2: 222, stroke: PURPLE, 'stroke-width': 2 }));
+           svg.appendChild(el('line', { x1: 390, x2: 390, y1: 212, y2: 222, stroke: PURPLE, 'stroke-width': 2 }));
+           svg.appendChild(tx(210, 242, 'min 0.05, max 0.77', 16, 'middle', PURPLE));
+         }
+         /* Panel readouts. */
+         if (k >= 1) svg.appendChild(tx(20, 272, scaleTxt, 16, 'start', INK, 700));
+         if (k >= 3) svg.appendChild(tx(20, 298, errTxt, 16, 'start', INK, 700));
+
+         out.textContent = outcomes[k];
+         dots.forEach(function (d, i) { d.classList.toggle('active', i === k); });
+         prev.disabled = (k === 0);
+         next.disabled = (k === 3);
+       }
+
+       var cur = 0;
+       function go(k) { cur = Math.max(0, Math.min(3, k)); render(cur); }
+       prev.addEventListener('click', function () { go(cur - 1); });
+       next.addEventListener('click', function () { go(cur + 1); });
+       dots.forEach(function (d) {
+         d.addEventListener('click', function () { go(parseInt(d.getAttribute('data-s'), 10)); });
+       });
+       render(0);
      })();
      </script>
    </section>
@@ -2145,6 +2293,14 @@ plt.show()
             <li>FX is your friend.</li>
             <li>Don’t use <code>MovingAverageMinMaxObserver</code> for PTQ. That’s a QAT thing. PTQ wants <code>MinMaxObserver</code> or <code>HistogramObserver</code>, one shot and done.</li>
         </ul>
+    </section>
+
+    <section>
+        <h2 id="references">References</h2>
+        <ol class="brefs">
+            <li>Nagel, M., et al. (2021). A White Paper on Neural Network Quantization. arXiv:2106.08295. (figure 5, table data, min-max/MSE strategies cited on-page)</li>
+            <li>Jacob, B., et al. (2018). Quantization and Training of Neural Networks for Efficient Integer-Arithmetic-Only Inference. arXiv:1712.05877. (int8/uint8, zero-point, fused ops taught on-page)</li>
+        </ol>
     </section>
 
             <script>

@@ -310,7 +310,7 @@
     code {
       font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
     }
-    p > code, li > code, table td > code {
+    p > code, li > code, table td > code, .demo-stats code {
       background: #f0f4f8;
       color: #1a1a1a;
       padding: 2px 6px;
@@ -528,6 +528,32 @@
     .paper-card .pc-authors { font-weight: 600; color: #212529; }
     .paper-card .pc-title { color: #212529; }
     .paper-card .pc-venue { font-size: 0.92em; color: #495057; }
+    /* Step-through tool: the prune-and-finetune loop */
+    #cycleSvg { display: block; margin: 0 auto; max-width: 640px; width: 100%; height: auto; }
+    .cycle-stepcap {
+      min-height: 3.3em; font-size: 0.95em; color: #2c3e50;
+      text-align: center; margin: 0.6rem 0 0.2rem;
+    }
+    .cycle-controls {
+      display: flex; align-items: center; justify-content: center;
+      gap: 0.6rem; margin: 0.9rem 0 0; flex-wrap: wrap;
+    }
+    .cycle-btn {
+      border: 1px solid #3498db; background: #3498db; color: #fff;
+      padding: 0.45em 1.1em; border-radius: 6px; cursor: pointer;
+      font-size: 0.9em; font-weight: bold;
+    }
+    .cycle-btn:hover:not(:disabled) { background: #2980b9; }
+    .cycle-btn:disabled { opacity: 0.35; cursor: default; }
+    .cycle-dots { display: inline-flex; gap: 0.45rem; }
+    .cycle-dot {
+      width: 34px; height: 34px; border-radius: 50%;
+      border: 1px solid #bdc3c7; background: #fff; color: #2c3e50;
+      font-weight: bold; cursor: pointer; font-size: 0.9em; padding: 0;
+    }
+    .cycle-dot.active { background: #3498db; border-color: #3498db; color: #fff; }
+    /* References */
+    ol.brefs { padding-left: 22px; line-height: 1.8; font-size: 0.9em; color: #555; }
   </style>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
@@ -576,8 +602,11 @@
      <a class="tab-chip" href="#how-pytorch-actually-does-it">How PyTorch does it</a>
      <a class="tab-chip" href="#what-happens-when-you-prune-half-a-resnet">Pruning half a ResNet</a>
      <a class="tab-chip" href="#getting-it-back-with-fine-tuning">Fine-tuning it back</a>
+     <a class="tab-chip" href="#prune-and-finetune-loop">The prune-and-finetune loop, step by step</a>
+     <a class="tab-chip" href="#one-big-cut-or-many-small-ones">One big cut or many small ones</a>
      <a class="tab-chip" href="#caveats">The catches</a>
      <a class="tab-chip" href="#what-is-next">Next: quantization</a>
+     <a class="tab-chip" href="#references">References</a>
    </div>
 
    <p>Pruning in one paragraph:</p>
@@ -612,8 +641,6 @@
          <button id="btnUnstructured" class="active">Unstructured</button>
          <button id="btnStructured">Structured</button>
        </div>
-       <button id="playBtn" class="play-btn" type="button">Play</button>
-       <button id="pruneReset" class="play-btn" type="button" title="Stop the sweep and restore the 0% starting view">Reset</button>
      </div>
      <div class="prune-grid">
      <div class="prune-col">
@@ -627,23 +654,18 @@
      <div class="demo-stats" id="demoStats"></div>
      </div>
      <div class="prune-col">
-     <p class="acc-curve-label"><strong>Toy accuracy vs sparsity.</strong> The marker rides the curve as you drag the slider. Shaded bands mark the <code>85%</code> and <code>50%</code> thresholds used by the readout.</p>
+     <p class="acc-curve-label"><strong>Toy accuracy vs sparsity.</strong> Shaded bands mark the <code>85%</code> and <code>50%</code> thresholds the readout uses.</p>
      <canvas id="accCanvas" width="512" height="240"></canvas>
      </div>
      </div>
      <div class="cap-card" id="pruneCaption">
        <strong>How to play</strong>
        <ul>
-         <li><strong>The point:</strong> Unstructured pruning just zeros weights, so the matrix stays <code>16 by 16</code> and the zeros are not free unless your backend skips them. Structured pruning deletes whole rows, so the layer physically shrinks inside its old footprint. Accuracy declines steadily: <code>80.3%</code> at <code>30%</code>, <code>66.25%</code> at <code>50%</code>, <code>48.96%</code> at <code>70%</code>.</li>
-         <li><strong>Sparsity (<code>0</code> to <code>95%</code>):</strong> sets how many weights go. Try <code>70%</code> and watch the marker sit at <code>48.96%</code>. Flip to structured mode and the marker moves to the actual pruned fraction, because whole rows cannot be subdivided.</li>
-         <li><strong>Unstructured / Structured:</strong> flips between scattering X's and killing whole rows. Try the same sparsity in both and read the shape line.</li>
+         <li><strong>The point:</strong> Unstructured pruning just zeros weights, so the matrix stays <code>16 by 16</code> and the zeros are not free unless your backend skips them. Structured pruning deletes whole rows, so the layer physically shrinks inside its old footprint. Accuracy falls steadily as sparsity rises: <code>80.3%</code> at <code>30%</code>, <code>66.25%</code> at <code>50%</code>, <code>48.96%</code> at <code>70%</code>.</li>
+         <li><strong>Sparsity (<code>0</code> to <code>95%</code>):</strong> sets how many weights go. In structured mode the readout reports the actual pruned fraction, because whole rows cannot be subdivided.</li>
+         <li><strong>Unstructured / Structured:</strong> switches between scattering X's across the grid and deleting whole rows at a time.</li>
       </ul>
     </div>
-    <p class="caption">
-      Unstructured pruning just zeros weights. Those zeros are still multiplied at inference time, so the
-      model is not actually faster unless your backend has sparse kernels that skip them. Structured pruning
-      removes whole rows, so the layer genuinely gets smaller and every backend benefits. The accuracy curve
-      declines steadily: <code>80.3%</code> at <code>30%</code> sparsity, <code>66.25%</code> at <code>50%</code>, under <code>49%</code> by <code>70%</code>.</p>
    </div>
 
    <script>
@@ -675,8 +697,6 @@
      var stats = document.getElementById('demoStats');
      var bU = document.getElementById('btnUnstructured');
      var bS = document.getElementById('btnStructured');
-     var playBtn = document.getElementById('playBtn');
-     var playTimer = null;
 
      // Toy accuracy model fitted to the real numbers reported on this page:
      // 92.58% at full size, 66.25% at 50% sparsity. Accuracy falls faster
@@ -684,14 +704,6 @@
      function toyAccuracy(sparsityPct) {
        var acc = 92.58 - 26.33 * Math.pow(sparsityPct / 50, 1.5);
        return Math.max(acc, 10);
-     }
-
-     function stopPlay() {
-       if (playTimer) {
-         clearTimeout(playTimer);
-         playTimer = null;
-         playBtn.textContent = 'Play';
-       }
      }
 
      // Weakest-first pruning. Returns the prune mask plus, in structured mode,
@@ -919,35 +931,6 @@
        mode = 'structured';
        bS.classList.add('active'); bU.classList.remove('active'); draw();
      });
-     playBtn.addEventListener('click', function() {
-       if (playTimer) { stopPlay(); return; }
-       playBtn.textContent = 'Stop';
-       var s = 0;
-       slider.value = 0;
-       draw();
-       var demo = playBtn.closest('.demo');
-       if (demo) playScrollEnsure(demo);
-       /* Chained timeout: one pruning tick every 2200ms. */
-       function pruneSchedule(){
-         playTimer = setTimeout(function(){
-           s += 5;
-           if (s > 95) { stopPlay(); return; }
-           slider.value = s;
-           draw();
-           pruneSchedule();
-         }, 2200);
-       }
-       pruneSchedule();
-     });
-     /* Reset: stop the sweep and restore the page-load state. */
-     document.getElementById('pruneReset').addEventListener('click', function() {
-       stopPlay();
-       mode = 'unstructured';
-       bU.classList.add('active'); bS.classList.remove('active');
-       slider.value = 0;
-       draw();
-     });
-     slider.addEventListener('input', function() { stopPlay(); });
      draw();
    })();
    </script>
@@ -1040,6 +1023,276 @@ for epoch in range(15):
      model even further.
    </p>
 
+   <h2 id="prune-and-finetune-loop">The prune-and-finetune loop, step by step</h2>
+   <p>
+     The whole recipe on one tiny <code>6 by 6</code> grid, using this page's real accuracy numbers.
+     Score every weight, cut the weakest half, measure the damage, then retrain the survivors:
+   </p>
+
+   <div class="demo">
+     <svg id="cycleSvg" viewBox="0 0 640 360" role="img" aria-label="Step by step prune and finetune walkthrough"></svg>
+     <div class="prune-legend">
+       <span class="legend-item"><span class="legend-gradient"></span>cell shade is weight magnitude</span>
+       <span class="legend-item"><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><rect x="2" y="2" width="14" height="14" fill="none" stroke="#d97706" stroke-width="2.5" stroke-dasharray="4 3"/></svg>weakest half</span>
+       <span class="legend-item"><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><rect x="1" y="1" width="16" height="16" fill="#eef1f4" stroke="#c3ccd4"/><path d="M5 5 L13 13 M13 5 L5 13" stroke="#8b98a5" stroke-width="1.6"/></svg>pruned</span>
+     </div>
+     <p class="cycle-stepcap" id="cycleStepcap"></p>
+     <div class="demo-stats" id="cycleReadout"></div>
+     <div class="cycle-controls">
+       <button class="cycle-btn" id="cyclePrev" type="button">Prev</button>
+       <div class="cycle-dots" role="group" aria-label="Walkthrough steps">
+         <button class="cycle-dot active" type="button" aria-label="Step 1">1</button>
+         <button class="cycle-dot" type="button" aria-label="Step 2">2</button>
+         <button class="cycle-dot" type="button" aria-label="Step 3">3</button>
+         <button class="cycle-dot" type="button" aria-label="Step 4">4</button>
+         <button class="cycle-dot" type="button" aria-label="Step 5">5</button>
+       </div>
+       <button class="cycle-btn" id="cycleNext" type="button">Next</button>
+     </div>
+     <div class="cap-card">
+       <strong>How to play</strong>
+       <ul>
+         <li><strong>The point:</strong> Pruning is a loop: score every weight, cut the weakest, measure how much accuracy the cut cost, retrain the survivors until the accuracy comes back.</li>
+         <li><strong>Step 1:</strong> every weight gets a magnitude score; the weakest half is outlined.</li>
+         <li><strong>Step 2:</strong> the outlined half is set to zero. The cut stays reversible: the mask notes exactly which weights went, so they can be restored or baked in later.</li>
+         <li><strong>Step 3:</strong> accuracy falls <code>92.58%</code> to <code>66.25%</code>; the survivors expected help that is gone.</li>
+         <li><strong>Step 4:</strong> fifteen epochs retraining just the final layer; survivors shift, the bar climbs.</li>
+         <li><strong>Step 5:</strong> <code>5.6 million</code> weights doing no work, accuracy at <code>92.74%</code>. Repeat the loop for more sparsity.</li>
+       </ul>
+     </div>
+   </div>
+
+   <script>
+   (function() {
+     var NS = 'http://www.w3.org/2000/svg';
+     var svg = document.getElementById('cycleSvg');
+
+     // Fixed seeded weights: 36 values, weakest 18 determined by sort.
+     var seed = 20261011;
+     function rand() { seed = (seed * 16807) % 2147483647; return seed / 2147483647; }
+     var vals = [], i;
+     for (i = 0; i < 36; i++) vals.push(rand());
+     var order = vals.map(function(v, idx) { return idx; });
+     order.sort(function(a, b) { return vals[a] - vals[b]; });
+     var prunedSet = {};
+     for (i = 0; i < 18; i++) prunedSet[order[i]] = true;
+     // "Healed" survivor values after fine-tuning: seeded deltas.
+     var seed2 = 777;
+     function rand2() { seed2 = (seed2 * 16807) % 2147483647; return seed2 / 2147483647; }
+     var healed = vals.map(function(v, idx) {
+       if (prunedSet[idx]) return v;
+       var nv = v + (rand2() - 0.42) * 0.5;
+       if (nv < 0.03) nv = 0.03;
+       if (nv > 1) nv = 1;
+       return nv;
+     });
+
+     // Same teal gradient as the flavors tool.
+     function weightFill(v) {
+       return 'rgb(52, ' + Math.floor(120 + v * 60) + ', ' + Math.floor(120 + v * 135) + ')';
+     }
+
+     var GX = 20, GY = 52, CELL = 46;           // 6x6 weight grid
+     var BX = 486, BW = 54, YT = 56, YB = 328;  // accuracy bar
+     function barY(v) { return YB - (v / 100) * (YB - YT); }
+
+     function svgText(x, y, str, anchor) {
+       var t = document.createElementNS(NS, 'text');
+       t.setAttribute('x', x); t.setAttribute('y', y);
+       t.setAttribute('text-anchor', anchor || 'middle');
+       t.setAttribute('font-size', '20');
+       t.setAttribute('fill', '#555');
+       t.setAttribute('font-family', 'sans-serif');
+       t.textContent = str;
+       svg.appendChild(t);
+     }
+     svgText(513, 20, 'ResNet-18 accuracy');
+     svgText(513, 42, 'on STL-10');
+
+     // Bar track, then tick gridlines and tick labels on top.
+     var track = document.createElementNS(NS, 'rect');
+     track.setAttribute('x', BX); track.setAttribute('y', YT);
+     track.setAttribute('width', BW); track.setAttribute('height', YB - YT);
+     track.setAttribute('fill', '#eef1f4'); track.setAttribute('stroke', '#bdc3c7');
+     svg.appendChild(track);
+     [0, 25, 50, 75, 100].forEach(function(v) {
+       var y = barY(v);
+       var ln = document.createElementNS(NS, 'line');
+       ln.setAttribute('x1', BX); ln.setAttribute('x2', BX + BW);
+       ln.setAttribute('y1', y); ln.setAttribute('y2', y);
+       ln.setAttribute('stroke', '#dfe5ea'); ln.setAttribute('stroke-width', '1');
+       svg.appendChild(ln);
+       svgText(BX - 8, y + 7, v + '%', 'end');
+     });
+
+     // Grid cells: fill rect, dashed outline overlay, X group.
+     var fills = [], outlines = [], xs = [];
+     for (i = 0; i < 36; i++) {
+       var r = Math.floor(i / 6), c = i % 6;
+       var x = GX + c * CELL, y = GY + r * CELL;
+       var rect = document.createElementNS(NS, 'rect');
+       rect.setAttribute('x', x + 1); rect.setAttribute('y', y + 1);
+       rect.setAttribute('width', CELL - 2); rect.setAttribute('height', CELL - 2);
+       rect.setAttribute('rx', '4');
+       svg.appendChild(rect); fills.push(rect);
+       var ol = document.createElementNS(NS, 'rect');
+       ol.setAttribute('x', x + 3); ol.setAttribute('y', y + 3);
+       ol.setAttribute('width', CELL - 6); ol.setAttribute('height', CELL - 6);
+       ol.setAttribute('rx', '3');
+       ol.setAttribute('fill', 'none');
+       ol.setAttribute('stroke', '#d97706'); ol.setAttribute('stroke-width', '3');
+       ol.setAttribute('stroke-dasharray', '7 5');
+       ol.style.display = 'none';
+       svg.appendChild(ol); outlines.push(ol);
+       var xg = document.createElementNS(NS, 'g');
+       var xr = document.createElementNS(NS, 'rect');
+       xr.setAttribute('x', x + 1); xr.setAttribute('y', y + 1);
+       xr.setAttribute('width', CELL - 2); xr.setAttribute('height', CELL - 2);
+       xr.setAttribute('rx', '4');
+       xr.setAttribute('fill', '#eef1f4'); xr.setAttribute('stroke', '#c3ccd4');
+       xg.appendChild(xr);
+       var xp = document.createElementNS(NS, 'path');
+       xp.setAttribute('d', 'M ' + (x + 13) + ' ' + (y + 13) + ' L ' + (x + CELL - 13) + ' ' + (y + CELL - 13) +
+         ' M ' + (x + CELL - 13) + ' ' + (y + 13) + ' L ' + (x + 13) + ' ' + (y + CELL - 13));
+       xp.setAttribute('stroke', '#8b98a5'); xp.setAttribute('stroke-width', '3');
+       xp.setAttribute('stroke-linecap', 'round');
+       xg.appendChild(xp);
+       xg.style.display = 'none';
+       svg.appendChild(xg); xs.push(xg);
+     }
+
+     // The accuracy bar.
+     var bar = document.createElementNS(NS, 'rect');
+     bar.setAttribute('x', BX + 2); bar.setAttribute('width', BW - 4);
+     bar.setAttribute('rx', '3');
+     svg.appendChild(bar);
+
+     var NEUTRAL = '#3498db', RED = '#dc2626', GREEN = '#16a34a';
+     var stepcaps = [
+       'Every weight gets a magnitude score; the weakest half is outlined.',
+       'The outlined half is set to zero; the rest is untouched.',
+       'Accuracy falls from <code>92.58%</code> to <code>66.25%</code>; the survivors expected help that is gone.',
+       'Fifteen epochs retraining just the final layer; survivors shift, the bar climbs.',
+       '<code>5.6 million</code> weights doing no work, accuracy at <code>92.74%</code>.'
+     ];
+     var readouts = [
+       'Scoring <code>36</code> weights by magnitude. The weakest <code>18</code> are outlined. Accuracy: <code>92.58%</code>.',
+       '<code>18</code> of <code>36</code> weights set to zero. Accuracy: <code>92.58%</code> (not yet measured).',
+       'Measuring the damage. Accuracy: <code>{v}%</code>. The survivors expected help that is gone.',
+       'Fine-tuning the final layer, epoch <code>{e}</code> of <code>15</code>. Accuracy: <code>{v}%</code>.',
+       '<code>5.6 million</code> weights doing no work. Accuracy: <code>92.74%</code>.'
+     ];
+
+     var stepcap = document.getElementById('cycleStepcap');
+     var readout = document.getElementById('cycleReadout');
+     var prevBtn = document.getElementById('cyclePrev');
+     var nextBtn = document.getElementById('cycleNext');
+     var dots = Array.prototype.slice.call(document.querySelectorAll('.cycle-dot'));
+
+     var current = 1, raf = null, animating = false, shownValue = 92.58;
+
+     function setBar(v, color) {
+       shownValue = v;
+       bar.setAttribute('y', barY(v));
+       bar.setAttribute('height', Math.max(0, YB - barY(v)));
+       bar.setAttribute('fill', color);
+     }
+
+     function renderGrid(step, healP) {
+       for (var k = 0; k < 36; k++) {
+         var isPruned = !!prunedSet[k];
+         if (step === 1) {
+           xs[k].style.display = 'none';
+           fills[k].style.display = '';
+           fills[k].setAttribute('fill', weightFill(vals[k]));
+           outlines[k].style.display = isPruned ? '' : 'none';
+         } else {
+           outlines[k].style.display = 'none';
+           if (isPruned) {
+             fills[k].style.display = 'none';
+             xs[k].style.display = '';
+           } else {
+             xs[k].style.display = 'none';
+             fills[k].style.display = '';
+             var v = vals[k];
+             if (step === 4 && healP != null) v = vals[k] + (healed[k] - vals[k]) * healP;
+             else if (step === 5) v = healed[k];
+             fills[k].setAttribute('fill', weightFill(v));
+           }
+         }
+       }
+     }
+
+     function setStep(n) {
+       var wasAnimating = animating;
+       if (raf) { cancelAnimationFrame(raf); raf = null; animating = false; }
+       current = n;
+       dots.forEach(function(d, idx) { d.classList.toggle('active', idx === n - 1); });
+       prevBtn.disabled = (n === 1);
+       nextBtn.disabled = (n === 5);
+       stepcap.innerHTML = stepcaps[n - 1];
+
+       var target, color, dur = 0;
+       if (n === 1) { target = 92.58; color = NEUTRAL; }
+       else if (n === 2) { target = 92.58; color = NEUTRAL; }
+       else if (n === 3) { target = 66.25; color = RED; dur = 600; }
+       else if (n === 4) { target = 92.74; color = GREEN; dur = 1000; }
+       else { target = 92.74; color = GREEN; }
+
+       if (wasAnimating || dur === 0) {
+         // Mid-tween step change: land the new step's end state directly.
+         setBar(target, color);
+         renderGrid(n, n === 4 ? 1 : null);
+         readout.innerHTML = readouts[n - 1].split('{e}').join('15').split('{v}').join(target.toFixed(2));
+         return;
+       }
+       // Tween the bar, the readout value, and (step 4) the epoch counter and
+       // survivor shades from the current visual state to the new targets.
+       var startVal = shownValue, startT = null;
+       bar.setAttribute('fill', color);
+       renderGrid(4, 0);
+       animating = true;
+       function frame(t) {
+         if (startT === null) startT = t;
+         var p = Math.min(1, (t - startT) / dur);
+         var e = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+         var v = startVal + (target - startVal) * e;
+         setBar(v, color);
+         var html = readouts[n - 1];
+         if (n === 4) {
+           renderGrid(4, e);
+           html = html.split('{e}').join(String(1 + Math.floor(e * 14)));
+         }
+         readout.innerHTML = html.split('{v}').join(v.toFixed(2));
+         if (p < 1) { raf = requestAnimationFrame(frame); }
+         else {
+           animating = false; raf = null;
+           setBar(target, color); // snap exact: never 92.73 from float rounding
+           if (n === 4) renderGrid(4, 1);
+           readout.innerHTML = readouts[n - 1].split('{e}').join('15').split('{v}').join(target.toFixed(2));
+         }
+       }
+       raf = requestAnimationFrame(frame);
+     }
+
+     dots.forEach(function(d, idx) {
+       d.addEventListener('click', function() { setStep(idx + 1); });
+     });
+     prevBtn.addEventListener('click', function() { if (current > 1) setStep(current - 1); });
+     nextBtn.addEventListener('click', function() { if (current < 5) setStep(current + 1); });
+     setStep(1); // rest state is step 1, never the end state
+   })();
+   </script>
+
+   <h2 id="one-big-cut-or-many-small-ones">One big cut or many small ones</h2>
+   <p>
+     <strong>One-shot</strong> pruning is this page's recipe: cut the weights once, then heal the survivors.
+     <strong>Iterative</strong> pruning cuts a little, heals, and repeats, and the gentler schedule usually reaches
+     higher sparsity before accuracy starts to bend. <strong>Gradual</strong> pruning folds the same idea into
+     training itself, raising sparsity a little at a time while the network is still learning. Whichever schedule
+     you pick, the loop is the same: score, cut, measure, retrain.
+   </p>
+
    <h2 id="caveats">Pruning pitfalls: batch norm, residuals, and sparse speed</h2>
    <ul>
      <li>Do not prune batch norm layers. They keep training stable and cost almost nothing.</li>
@@ -1052,6 +1305,11 @@ for epoch in range(15):
      Pruning pairs naturally with quantization: first remove the weights you do not need, then shrink the
      ones that remain. The <a href="quantization.html">quantization tutorial</a> picks up where this one ends.
    </p>
+
+   <h2 id="references">References</h2>
+   <ol class="brefs">
+     <li>Han, S., et al. (2016). Deep Compression: Compressing Deep Neural Networks with Pruning, Trained Quantization and Huffman Coding. ICLR. arXiv:1510.00149.</li>
+   </ol>
 
             <script>
         (function () {
@@ -1139,44 +1397,22 @@ for epoch in range(15):
   }
   </script>
   <script> /* r7reflow-reserve */
-  /* Scroll-stability (2026-10-09, Round 7 reflow sweep): Play-button label swaps
-     ("Play"/"Pause"/"Stop", "Playing...") widened or narrowed these buttons and
-     shifted their Reset siblings (up to 13px; 71px on streamPlay; 168px on obPlay).
-     Reserve each button's width to its widest label variant so the control rows
-     never reflow. Buttons are border-box in this UA stylesheet, so minWidth floors
-     the measured border-box width directly. Follows the r4scroll reserve pattern. */
+  /* Scroll-stability (2026-10-09, Round 7 reflow sweep): the sparsity readout is an
+     unpinned inline span; its text grows 0->95 mid-drag (8.9->17.8px). Pin it to
+     its widest value (inline-block so min-width applies). Follows the r7reflow
+     span pattern. (2026-10-11: Play/Reset removed from this tool; the pinning
+     stays for the slider readout.) */
   (function () {
-    var sets = {
-      'playBtn': ['Play', 'Pause', 'Stop']
-    };
-    Object.keys(sets).forEach(function (id) {
-      var btn = document.getElementById(id);
-      if (!btn) return;
-      var prev = btn.textContent, max = 0;
-      sets[id].forEach(function (t) {
-        btn.textContent = t;
-        var w = btn.getBoundingClientRect().width;
-        if (w > max) max = w;
-      });
-      btn.textContent = prev;
-      btn.style.minWidth = Math.ceil(max) + 'px';
-    });
-    /* Readout reserve (2026-10-09, Round 8): the sparsity readout is an
-       unpinned inline span; its text grows 0->95 mid-Play (8.9->17.8px),
-       shifting Play and Reset +8.89px at 1280. Pin it to its widest value
-       (inline-block so min-width applies). Follows the r7reflow span pattern. */
-    (function () {
-      var el = document.getElementById('sparsityVal');
-      if (!el) return;
-      var prev = el.textContent, max = 0, v;
-      for (v = 0; v <= 95; v += 5) {
-        el.textContent = String(v);
-        max = Math.max(max, el.getBoundingClientRect().width);
-      }
-      el.textContent = prev;
-      el.style.display = 'inline-block';
-      el.style.minWidth = Math.ceil(max) + 'px';
-    })();
+    var el = document.getElementById('sparsityVal');
+    if (!el) return;
+    var prev = el.textContent, max = 0, v;
+    for (v = 0; v <= 95; v += 5) {
+      el.textContent = String(v);
+      max = Math.max(max, el.getBoundingClientRect().width);
+    }
+    el.textContent = prev;
+    el.style.display = 'inline-block';
+    el.style.minWidth = Math.ceil(max) + 'px';
   })();
   </script>
 </body>

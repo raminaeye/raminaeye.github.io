@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>The Conformer ASR Model</title>
+  <title>Conformer</title>
   <style>
     body {
       font-family: sans-serif;
@@ -498,8 +498,6 @@
     /* ---- Figure 1 static paper figure ---- */
     /* Static paper-figure citation */
     .fig-cite { border-left: 3px solid #bdc3c7; margin: 1em 0; padding: 0.4em 0 0.4em 1em; color: #555; font-size: 0.9em; }
-    #cf1WerDemo .cf1-model { margin: 0.6rem 0 0.9rem; }
-    #cf1WerDemo .cf1-model.cf1-dim { opacity: 0.55; }
     #cf1Static .cf1-fig2 { margin: 0.8rem 0; text-align: center; }
     #cf1Static .cf1-fig2-scroll { overflow-x: auto; max-width: 100%; text-align: left; }
     #cf1Static .cf1-fig2-scroll img { display: block; width: 100%; min-width: 720px; max-width: none; height: auto; }
@@ -627,6 +625,45 @@
     #headsDemo .qband { position: absolute; top: -2px; bottom: -2px; width: 4.2%; background: rgba(52,152,219,0.25); border-radius: 3px; pointer-events: none; }
     #streamDemo .mask-lab { font-size: 0.78em; color: #777; text-align: center; align-self: center; line-height: 1.2; }
     #streamDemo .mask-corner { font-size: max(0.72em, 12px); color: #999; text-align: center; align-self: center; }
+    /* Page subtitle under the h1 */
+    .subtitle { font-size: 1.15em; color: #555; margin: -0.5em 0 1.4em; }
+    /* Step-through tool (frame walk) */
+    .step-dots { display: flex; gap: 0.35rem; align-items: center; }
+    .step-dot {
+      width: 38px; height: 38px; border-radius: 50%;
+      border: 1px solid #dee2e6; background: #fff; color: #2c3e50;
+      font-weight: 700; font-size: 0.95rem; cursor: pointer; padding: 0;
+    }
+    .step-dot.active { background: #3498db; border-color: #3498db; color: #fff; }
+    .step-dot:disabled { opacity: 0.45; cursor: default; }
+    .step-stage { margin: 0.8rem 0 0.2rem; }
+    .step-arcs { height: 64px; visibility: hidden; }
+    .step-arcs.on { visibility: visible; }
+    .step-arcs svg { width: 100%; height: 100%; display: block; }
+    .step-strip-wrap { position: relative; }
+    .step-bracket {
+      position: absolute; top: -3px; bottom: -3px; left: 37.5%; width: 29.166%;
+      border: 2px solid #27ae60; border-radius: 8px; pointer-events: none;
+      display: none;
+    }
+    .step-bracket.on { display: block; }
+    .step-frame.probe { border-color: #3498db; box-shadow: 0 0 0 2px #3498db; }
+    .step-axis { display: flex; justify-content: space-between; font-size: 0.8rem; color: #777; margin-top: 0.25rem; }
+    .step-bar-row { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.7rem; }
+    .step-bar-lab { flex: 0 0 auto; font-size: 0.9em; font-weight: 700; color: #2c3e50; }
+    .step-bar-track { flex: 1 1 auto; background: #eef1f4; border-radius: 6px; height: 120px; position: relative; overflow: hidden; }
+    .step-bar { position: absolute; bottom: 0; left: 0; right: 0; background: #3498db; opacity: 0.35; transition: height 0.35s ease, opacity 0.35s ease; }
+    .step-step-line { min-height: 4.6em; }
+    @media (max-width: 480px) {
+      .step-step-line { min-height: 6.6em; }
+      .step-bar-track { height: 110px; }
+    }
+    /* Variants mini diagrams */
+    .blk-parallel { display: flex; gap: 0.3rem; }
+    .blk-parallel .blk-step { flex: 1 1 0; min-width: 0; }
+    .blk-one { font-size: 0.82rem; color: #5d6d7e; text-align: center; margin: 0.5rem 0 0; line-height: 1.5; }
+    .brefs { font-size: 0.92em; color: #555; }
+    .brefs li { margin-bottom: 0.4em; }
   </style>
 
   <script type="text/javascript" async
@@ -681,12 +718,15 @@
 
     <p class="tabs-label">On this page</p>
     <div class="tab-strip">
-        <a class="tab-link" href="#architecture">Feed-forward, attention, convolution, feed-forward</a>
+        <a class="tab-link" href="#architecture">The block</a>
         <a class="tab-link" href="#implementation">The block in PyTorch</a>
         <a class="tab-link" href="#streaming">Streaming</a>
+        <a class="tab-link" href="#variants">Variants</a>
+        <a class="tab-link" href="#references">References</a>
     </div>
 
-    <h1 id="introduction">The Conformer Model for ASR</h1>
+    <h1 id="introduction">Conformer</h1>
+    <p class="subtitle">Convolution-augmented transformers for speech recognition</p>
     
     <h2>Conformer blends CNNs and transformers</h2>
     <p>Here is the question: <em>how do you build an ASR model that hears both the phoneme edge and the whole sentence?</em> Vanilla transformers are great at global context but clumsy with local detail like phoneme edges and formants. CNNs nail local structure but miss global dependencies. The <strong>Conformer</strong>, a "convolution-augmented transformer," takes both. <em>And unlike most hybrids, this one actually worked.</em></p>
@@ -720,12 +760,10 @@
       <p class="statline" id="subStats"></p>
       <div class="howto capcard" id="subHowto"><strong class="cap-title">How to play</strong>
         <ul>
-          <li><strong>The point:</strong> strided subsampling folds neighboring frames together before the first block. Stride <code>2</code> quarters the T-squared attention cost, stride <code>4</code> cuts it <code>16x</code>, but each surviving frame gets wider, and a <code>30</code> ms phoneme can die inside a single frame.</li>
-          <li><strong>Stride buttons (<code>1</code>, <code>2</code>, <code>4</code>):</strong> at <code>4</code>, the output strip halves from <code>20</code> frames to <code>10</code>, the cost readout drops from <code>4x</code> cheaper to <code>16x</code> cheaper, and the frame shift doubles to <code>40</code> ms.</li>
-          <li>With stride at <code>4</code> only <code>10</code> frames land in the output strip.</li>
+          <li><strong>The point:</strong> strided subsampling folds neighboring frames together before the first block. Stride <code>2</code> quarters the <code>T<sup>2</sup></code> attention cost, stride <code>4</code> cuts it <code>16x</code>, but each surviving frame gets wider, and a <code>30</code> ms phoneme can die inside a single frame.</li>
         </ul>
       </div>
-      <p class="caption">Attention costs T squared, and T is <code>100</code> frames a second. Merging neighbors before the first block is the cheapest speedup in ASR: stride <code>2</code> quarters the attention bill. <em>The price is resolution, and you pay it in phonemes.</em></p>
+      <p class="caption">Attention costs <code>T<sup>2</sup></code>, and <code>T</code> is <code>100</code> frames a second. Merging neighbors before the first block is the cheapest speedup in ASR: stride <code>2</code> quarters the attention bill. <em>The price is resolution, and you pay it in phonemes.</em></p>
     </div>
     <script>
     (function () {
@@ -886,6 +924,138 @@
 
     <p>The Conformer block calls these two feed-forward networks a <strong>macaron-style feed-forward network</strong>, so named because the main attention and convolution modules are sandwiched between two FFNs, like the filling in a macaron. They add capacity and non-linearity but don&rsquo;t mix information across time steps. They scale the FFN by half to match the contribution of one FFN in a vanilla transformer.</p>
 
+    <div class="demo" id="stepDemo">
+      <h3 style="margin-top: 0;">Walk one frame through the block</h3>
+      <div class="btn-row">
+        <button type="button" class="mode-btn" id="stepPrev">Prev</button>
+        <div class="step-dots" id="stepDots" role="group" aria-label="Steps"></div>
+        <button type="button" class="mode-btn" id="stepNext">Next</button>
+        <button type="button" class="play-btn" id="stepPlay">Play</button>
+        <button type="button" class="play-btn" id="stepReset">Reset</button>
+      </div>
+      <div class="step-stage">
+        <div class="step-arcs" id="stepArcs" aria-hidden="true">
+          <svg viewBox="0 0 2400 90" preserveAspectRatio="none">
+            <path d="M 350,86 Q 800,10 1250,86" fill="none" stroke="#5d6d7e" stroke-width="3" vector-effect="non-scaling-stroke"/>
+            <path d="M 750,86 Q 1000,22 1250,86" fill="none" stroke="#5d6d7e" stroke-width="3" vector-effect="non-scaling-stroke"/>
+            <path d="M 1750,86 Q 1500,22 1250,86" fill="none" stroke="#5d6d7e" stroke-width="3" vector-effect="non-scaling-stroke"/>
+            <path d="M 2150,86 Q 1700,10 1250,86" fill="none" stroke="#5d6d7e" stroke-width="3" vector-effect="non-scaling-stroke"/>
+            <line x1="1250" y1="66" x2="1250" y2="90" stroke="#5d6d7e" stroke-width="5" vector-effect="non-scaling-stroke"/>
+          </svg>
+        </div>
+        <div class="step-strip-wrap">
+          <div class="frame-strip static" id="stepStrip"></div>
+          <div class="step-bracket" id="stepBracket"></div>
+        </div>
+        <div class="step-axis" aria-hidden="true"><span>frame 0</span><span>frame 12 (ae)</span><span>frame 23</span></div>
+        <div class="step-bar-row">
+          <span class="step-bar-lab">frame vector</span>
+          <div class="step-bar-track"><div class="step-bar" id="stepBar"></div></div>
+        </div>
+      </div>
+      <p class="statline step-step-line" id="stepText" aria-live="polite"></p>
+      <div class="howto capcard" id="stepHowto"><strong class="cap-title">How to play</strong>
+        <ul>
+          <li><strong>The point:</strong> each module adds one thing to the frame, and the frame leaves the block the same shape it entered.</li>
+        </ul>
+      </div>
+    </div>
+    <script>
+    (function () {
+      var NF = 24, PROBE = 12;
+      var SEGS = [
+        [0, 5, 'sil', '#95a5a6'], [6, 9, 'k', '#3498db'], [10, 14, 'ae', '#27ae60'],
+        [15, 19, 't', '#e67e22'], [20, 23, 'sil', '#95a5a6']
+      ];
+      function segOf(t) {
+        for (var k = 0; k < SEGS.length; k++) {
+          if (t >= SEGS[k][0] && t <= SEGS[k][1]) return SEGS[k];
+        }
+        return SEGS[0];
+      }
+      var STEPS = [
+        { title: 'The frame arrives', text: 'One frame, one vector. Frame <code>12</code>, the "ae" frame from the k-ae-t example, enters the block.', barH: 34, barO: 0.35, arcs: false, bracket: false },
+        { title: 'Half feed-forward boosts it', text: 'The frame gets richer on its own. Nothing mixes across time yet.', barH: 56, barO: 0.6, arcs: false, bracket: false },
+        { title: 'Attention borrows from far away', text: 'The frame now carries context from across the utterance.', barH: 56, barO: 0.6, arcs: true, bracket: false },
+        { title: 'Convolution sharpens the edge', text: 'Local edges get crisper. Only the <code>3</code> neighbors on each side are involved.', barH: 56, barO: 0.6, arcs: false, bracket: true },
+        { title: 'Second half feed-forward boosts again', text: 'Two halves add up to one full feed-forward worth of capacity.', barH: 76, barO: 0.85, arcs: false, bracket: false },
+        { title: 'Layer norm steadies it', text: 'Same shape out as in. The frame is ready for the next block.', barH: 48, barO: 0.5, arcs: false, bracket: false }
+      ];
+      var step = 0, playing = false, timers = [];
+      var stripEl = document.getElementById('stepStrip');
+      var arcsEl = document.getElementById('stepArcs');
+      var bracketEl = document.getElementById('stepBracket');
+      var barEl = document.getElementById('stepBar');
+      var textEl = document.getElementById('stepText');
+      var prevBtn = document.getElementById('stepPrev');
+      var nextBtn = document.getElementById('stepNext');
+      var playBtn = document.getElementById('stepPlay');
+      var resetBtn = document.getElementById('stepReset');
+      var dotsEl = document.getElementById('stepDots');
+      var cells = [], dots = [];
+      (function build() {
+        var html = '', dh = '';
+        for (var t = 0; t < NF; t++) {
+          html += '<div class="frame-cell step-frame' + (t === PROBE ? ' probe' : '') + '" style="background:' + segOf(t)[3] + ';" title="frame ' + t + ' (' + segOf(t)[2] + ')"></div>';
+        }
+        stripEl.innerHTML = html;
+        cells = stripEl.children;
+        for (var i = 0; i < STEPS.length; i++) {
+          dh += '<button type="button" class="step-dot" data-n="' + i + '" aria-label="Step ' + (i + 1) + '">' + (i + 1) + '</button>';
+        }
+        dotsEl.innerHTML = dh;
+        var dd = dotsEl.children;
+        for (var j = 0; j < dd.length; j++) {
+          dots.push(dd[j]);
+          (function (jj) {
+            dd[jj].addEventListener('click', function () { stopPlay(); step = jj; render(); });
+          })(j);
+        }
+      })();
+      function render() {
+        var s = STEPS[step];
+        for (var i = 0; i < dots.length; i++) {
+          dots[i].classList.toggle('active', i === step);
+        }
+        prevBtn.disabled = (step === 0);
+        nextBtn.disabled = (step === STEPS.length - 1);
+        arcsEl.classList.toggle('on', s.arcs);
+        bracketEl.classList.toggle('on', s.bracket);
+        barEl.style.height = s.barH + '%';
+        barEl.style.opacity = s.barO;
+        textEl.innerHTML = '<strong>' + s.title + '.</strong> ' + s.text;
+      }
+      function later(fn, ms) { timers.push(setTimeout(fn, ms)); }
+      function stopPlay() {
+        playing = false;
+        timers.forEach(function (t) { clearTimeout(t); });
+        timers = [];
+        playBtn.textContent = 'Play';
+      }
+      prevBtn.addEventListener('click', function () { stopPlay(); if (step > 0) { step--; render(); } });
+      nextBtn.addEventListener('click', function () { stopPlay(); if (step < STEPS.length - 1) { step++; render(); } });
+      /* Play walks the six steps, one 2200ms beat each: every step's outcome
+         line is text-bearing, so each beat holds a full 2000ms of reading. */
+      playBtn.addEventListener('click', function () {
+        if (playing) { stopPlay(); return; }
+        playing = true; playBtn.textContent = 'Stop';
+        step = 0; render();
+        for (var i = 1; i < STEPS.length; i++) {
+          (function (n) {
+            later(function () {
+              if (!playing) return;
+              step = n; render();
+            }, n * 2200);
+          })(i);
+        }
+        later(function () { if (playing) stopPlay(); }, STEPS.length * 2200 + 400);
+      });
+      /* ---- Reset: stop the walk, back to step 1 ---- */
+      resetBtn.addEventListener('click', function () { stopPlay(); step = 0; render(); });
+      render();
+    })();
+    </script>
+
     <figure class="figure" id="fig1Tool">
       <div class="demo" id="cf1Static">
         <img src="figures/papers/conformer-fig1.png" alt="Figure 1 of the Conformer paper: the Conformer encoder block diagram, read bottom to top" style="width:100%;max-width:620px;height:auto;display:block;border:1px solid #d5dbdb;border-radius:8px;background:#fff;margin:0 auto;">
@@ -902,7 +1072,7 @@
           </div>
           <p class="cf1-fig2-hint">Scroll sideways to read the stage labels.</p>
           <p class="caption">Rebuilt from Figure 2 of Gulati et al. (Interspeech 2020). <a href="https://arxiv.org/abs/2005.08100">arXiv:2005.08100</a></p>
-          <p class="caption">Figure 2 of the paper, for the curious: "<strong>Convolution module.</strong> The convolution module contains a pointwise convolution with an expansion factor of <code>2</code> projecting the number of channels with a GLU activation layer, followed by a <code>1</code>-D Depthwise convolution. The <code>1</code>-D depthwise conv is followed by a Batchnorm and then a swish activation layer."</p>
+          <p class="caption">Figure 2 of the paper: "<strong>Convolution module.</strong> The convolution module contains a pointwise convolution with an expansion factor of <code>2</code> projecting the number of channels with a GLU activation layer, followed by a <code>1</code>-D Depthwise convolution. The <code>1</code>-D depthwise conv is followed by a Batchnorm and then a swish activation layer."</p>
         </div>
         <p class="caption">Rebuilt from Figure 1 of Gulati et al. (Interspeech 2020). <a href="https://arxiv.org/abs/2005.08100">arXiv:2005.08100</a></p>
         <p class="caption">Figure 1, verbatim caption: "<strong>Conformer encoder model architecture.</strong> Conformer comprises of two macaron-like feed-forward layers with half-step residual connections sandwiching the multi-headed self-attention and convolution modules. This is followed by a post layernorm."</p>
@@ -910,142 +1080,12 @@
       </div>
     </figure>
 
-    <div class="demo" id="cf1WerDemo">
-      <h3 style="margin-top: 0;">A language model lowers the error on every bar</h3>
-      <div class="btn-row">
-        <button type="button" class="play-btn" id="cf1WerPlay">Play</button>
-        <button type="button" class="play-btn" id="cf1WerReset">Reset</button>
-      </div>
-      <div class="cf1-wer">
-        <div class="bar-title">LibriSpeech WER, test-clean and test-other. Lower is better. From the paper, Table 2.</div>
-        <div class="btn-row">
-          <button type="button" class="seg-btn active" id="cf1Lm0" data-lm="0">No LM</button>
-          <button type="button" class="seg-btn" id="cf1Lm1" data-lm="1">With LM</button>
-        </div>
-        <div class="canvas-wrap">
-          <div id="cf1Bars"></div>
-        </div>
-        <p class="demo-note">The large model without a language model (<code>2.1</code> / <code>4.3</code>) is dimmed because the page already reports it above. The new numbers here are the with-LM rows and the small model.</p>
-      </div>
-      <div class="howto capcard" id="cf1WerHowto"><strong class="cap-title">How to play</strong>
-        <ul>
-          <li><strong>The point:</strong> a language model cleans up the transcript, so word error rate drops on every test set. The small model with an LM nearly matches the large one without.</li>
-          <li>Each bar shrinks from its no-LM value to its with-LM value; at the end every bar sits at its with-LM number.</li>
-          <li><strong>No LM / With LM:</strong> snaps all six bars between the two conditions instantly, no animation. With LM, the small model's bars fall from <code>2.7 and 6.3</code> to <code>2.1 and 5.0</code>.</li>
-        </ul>
-      </div>
-      <p class="caption">All six shrunk: the language model buys a cleaner transcript on every test set.</p>
-    </div>
-    <script>
-    (function () {
-      /* WER scoreboard. Paper Table 2. */
-      var WER = [
-        { key: 'L', name: 'Conformer (L)', size: '118.8M params', noLM: [2.1, 4.3], withLM: [1.9, 3.9] },
-        { key: 'M', name: 'Conformer (M)', size: '30.7M params', noLM: [2.3, 5.0], withLM: [2.0, 4.3] },
-        { key: 'S', name: 'Conformer (S)', size: '10.3M params', noLM: [2.7, 6.3], withLM: [2.1, 5.0] }
-      ];
-      var MAXW = 6.3;
-      function fmt1(x) { return x.toFixed(1); }
-      function barRow(label, id, colorClass) {
-        return '<div class="bar-row"><span class="bar-label">' + label + '</span>' +
-          '<div class="bar-track"><div class="bar ' + colorClass + '" id="' + id + '" style="width:0%"></div></div>' +
-          '<span class="bar-val" id="' + id + 'v"></span></div>';
-      }
-      var barsBox = document.getElementById('cf1Bars');
-      barsBox.innerHTML = WER.map(function (m) {
-        return '<div class="cf1-model" id="cf1Row' + m.key + '">' +
-          '<div class="bar-title">' + m.name + ' <span class="cf1-size">' + m.size + '</span></div>' +
-          barRow('test-clean', 'cf1B' + m.key + 'c', 'bar-mhsa') +
-          barRow('test-other', 'cf1B' + m.key + 'o', 'bar-conv') +
-          '</div>';
-      }).join('');
-      function setBar(id, v) {
-        var bar = document.getElementById(id);
-        var val = document.getElementById(id + 'v');
-        if (!bar || !val || !isFinite(v)) return;
-        bar.style.width = (100 * v / MAXW).toFixed(2) + '%';
-        val.textContent = fmt1(v);
-      }
-      var lm0 = document.getElementById('cf1Lm0');
-      var lm1 = document.getElementById('cf1Lm1');
-      function setLM(withLM) {
-        WER.forEach(function (m) {
-          var v = withLM ? m.withLM : m.noLM;
-          setBar('cf1B' + m.key + 'c', v[0]);
-          setBar('cf1B' + m.key + 'o', v[1]);
-        });
-        document.getElementById('cf1RowL').classList.toggle('cf1-dim', !withLM);
-        lm0.classList.toggle('active', !withLM);
-        lm1.classList.toggle('active', withLM);
-      }
-      var playBtn = document.getElementById('cf1WerPlay');
-      var timers = [];
-      var playing = false;
-      var STEP_MS = 2200;
-      var order = [];
-      WER.forEach(function (m) {
-        order.push({ id: 'cf1B' + m.key + 'c', from: m.noLM[0], to: m.withLM[0] });
-        order.push({ id: 'cf1B' + m.key + 'o', from: m.noLM[1], to: m.withLM[1] });
-      });
-      function tweenBar(id, from, to, dur) {
-        var t0 = null;
-        function frame(ts) {
-          if (!playing) return;
-          if (t0 === null) t0 = ts;
-          var k = Math.min(1, (ts - t0) / dur);
-          setBar(id, from + (to - from) * k);
-          if (k < 1) requestAnimationFrame(frame);
-        }
-        requestAnimationFrame(frame);
-      }
-      function stopPlay(hideMs) {
-        timers.forEach(function (t) { clearTimeout(t); });
-        timers = [];
-        playing = false;
-        playBtn.textContent = 'Play';
-        setLM(false);
-      }
-      function endPlay() {
-        timers.forEach(function (t) { clearTimeout(t); });
-        timers = [];
-        playing = false;
-        playBtn.textContent = 'Play';
-        setLM(true);
-      }
-      playBtn.addEventListener('click', function () {
-        if (playing) { stopPlay(2000); return; }
-        playing = true;
-        playBtn.textContent = 'Stop';
-        playScrollEnsure(document.getElementById('cf1WerDemo'));
-        setLM(false);
-        /* Pure pacing: cumulative 2200ms offsets, one bar per step. The rAF bar tweens keep base pacing. */
-        var at = [STEP_MS];
-        for (var i = 1; i <= order.length; i++) {
-          at.push(at[i - 1] + STEP_MS);
-        }
-        for (var j = 0; j < order.length; j++) {
-          (function (k) {
-            timers.push(setTimeout(function () {
-              if (!playing) return;
-              tweenBar(order[k].id, order[k].from, order[k].to, STEP_MS - 40);
-            }, at[k]));
-          })(j);
-        }
-        timers.push(setTimeout(function () { if (playing) endPlay(); }, at[order.length]));
-      });
-      lm0.addEventListener('click', function () { stopPlay(600); });
-      lm1.addEventListener('click', function () { stopPlay(600); setLM(true); });
-      /* ---- Reset: stop the tour, every bar back at its no-LM value ---- */
-      var cf1WerResetBtn = document.getElementById('cf1WerReset');
-      cf1WerResetBtn.addEventListener('click', function () { stopPlay(600); });
-      setLM(false);
-    })();
-    </script>
+    
 
 
     <div class="demo" id="convDemo">
       <h3 style="margin-top: 0;">The convolution module costs about 10 percent of the parameters</h3>
-      <p><em>These are the actual models from the paper, with the actual numbers.</em> The tour pulls the conv module out of each model one at a time; or flip the checkbox to yank it from all three at once and watch the orange slices leave together. Either way the conv module's params come out, while the reported WER stays put.</p>
+      <p><em>These are the paper's reported models and parameter counts.</em> The tour pulls the conv module out of each model one at a time; or flip the checkbox to yank it from all three at once and watch the orange slices leave together. Either way the conv module's params come out, while the reported WER stays put.</p>
       <div class="demo-controls">
         <button type="button" id="cfPlay" class="cf-play-btn">Play</button>
         <button type="button" id="cfReset" class="cf-play-btn">Reset</button>
@@ -1063,9 +1103,7 @@
       <p class="demo-note">(The cards show kernel <code>32</code>, the paper's S/M/L config value; the PyTorch code further down uses <code>kernel_size=15</code> as a round working number. The kernel size does not enter this estimate anyway, since the depthwise conv's own params are ignored too.) The WER numbers are the paper's reported results with the conv module in place. The toggle only subtracts its param cost; it does not predict what WER would be without it. That is the point: isolate what local detail costs, and compare it to what it buys.</p>
       <div class="caption capcard" id="convHowto"><strong class="cap-title">How to play</strong>
         <ul>
-          <li><strong>The point:</strong> the convolution module costs only about <code>3M</code> of Conformer (M)'s <code>30.7M</code> parameters, roughly <code>10</code> percent, while that model beats a <code>139M</code> transformer. Local detail, bought cheap.</li>
-          <li>The orange conv slice shrinks millions out of each bar, but the WER next to each bar never moves.</li>
-          <li><strong>Remove the conv module checkbox:</strong> check it and all three orange slices come out at once with the param math spelled out per row; uncheck to put them back.</li>
+          <li><strong>The point:</strong> the conv module costs about <code>10</code> percent of the params, while Conformer (M) beats a <code>139M</code> transformer.</li>
         </ul>
       </div>
       <p class="caption">Conformer (M) is <code>30.7M</code> params and scores <code>5.0</code> on test-other, beating a <code>139M</code> transformer at <code>5.6</code>. The conv module costs only about <code>3.1M</code> of those <code>30.7M</code>. <em>Local detail, bought cheap. That is the whole trick.</em></p>
@@ -1329,9 +1367,6 @@
       <div class="howto capcard" id="attnHowto"><strong class="cap-title">How to play</strong>
         <ul>
           <li><strong>The point:</strong> an attention score is content match plus position bias, and relative positions make the answer depend on distance rather than the clock. Shift the whole utterance and nothing changes.</li>
-          <li>In relative mode the +<code>2</code> shift leaves the bars frozen and the note reads biggest change <code>0.000</code>; in absolute mode the same shift redistributes the bars.</li>
-          <li><strong>Query frame slider (<code>0 to 11</code>):</strong> parking the query on a different frame, or clicking a frame in the strip above the bars, re-splits the blue and orange segments by sound-alike and distance.</li>
-          <li><strong>Relative / Absolute buttons and Shift utterance +<code>2</code> frames:</strong> in Absolute mode, shifting the utterance gives the same sounds but a different answer, just because the clock moved. In relative mode an annotation confirms the attention did not change while the bars stay frozen and the note reads biggest change <code>0.000</code>. That frozen flash is the lesson.</li>
         </ul>
       </div>
       <p class="caption"><em>The score is two questions added together: "do we sound alike" plus "how far apart are we".</em> Relative positions make the second question about distance, so a "ba" is a "ba" at second <code>1</code> or second <code>10</code>. Absolute positions make it about the clock, so shifting the utterance changes the answer.</p>
@@ -1702,8 +1737,6 @@
       <div class="howto capcard" id="locHowto"><strong class="cap-title">How to play</strong>
         <ul>
           <li><strong>The point:</strong> convolution is a rigid local window, a magnifying glass on <code>7</code> frames wherever you put it, while attention redistributes by content across the whole utterance, like gossip. Same probe, two readings: the conv sees the edge and its neighbors, attention remembers the similar edge it heard frames earlier.</li>
-          <li>The conv window moves rigidly with its triangle weight curve while the attention bars jump wherever content matches, including far-away frames.</li>
-          <li><strong>Probe frame slider (<code>0 to 23</code>):</strong> at frame <code>12</code>, on a burst edge, the window boxes the edge while the bars spike on the matching segments too; the note under the left panel names the exact window frames and weights.</li>
         </ul>
       </div>
       <p class="caption"><em>The convolution reads like a magnifying glass</em>: seven frames, seventy milliseconds, wherever you put it. <em>Attention reads like gossip</em>: it asks every frame in the utterance what it has to do with this one. The conv sees the edge and its neighbors; attention sees the edge and remembers the last time it heard one. That is why the block has both.</p>
@@ -1910,19 +1943,9 @@
     </script>
 
     <h3>Normalization Strategy: LayerNorm vs. BatchNorm</h3>
-    <p>Let’s think: <em>would you use <strong>LayerNorm</strong> or <strong>BatchNorm</strong> after this?</em> LayerNorm would normalize per frame across all channels, so it could actually wash away the learned temporal filters. If you use BatchNorm, it normalizes per channel but across time and the batch. This way, each channel keeps its identity and normalization is consistent across time, which helps stabilize the convolution filters.</p>
+    <p>Would <strong>LayerNorm</strong> or <strong>BatchNorm</strong> work better after the depthwise conv? LayerNorm normalizes each frame across its channels, which would wash away the temporal patterns the conv just learned. BatchNorm normalizes per channel across the batch and time instead, so <em>each channel keeps its identity and the normalization is consistent across time</em>, which keeps the convolution filters stable. A <strong>Swish</strong> activation follows, letting small negative values pass through instead of clipping them to zero.</p>
 
-    <p>So, BatchNorm makes more sense here, although it has challenges with running inference. BN would output zero-mean and unit-variance activations, so an activation function would help. <strong>Swish</strong> would let small negative values pass through, which can be crucial in audio processing.</p>
-
-    <p><em>BatchNorm has two personalities</em>, and the difference between them is what makes streaming tricky. During training it normalizes each channel with the mean and variance of the batch and time dimensions you are holding, plus a learnable scale and shift per channel. Meanwhile it quietly keeps a running estimate of that mean and variance. Those running numbers do nothing during the training forward pass; they are just being stockpiled for later. At inference the roles flip: you ignore the test batch's own stats entirely and normalize with the stockpiled running stats, same scale and shift.</p>
-
-    <p>In words: subtract the running mean, divide by the running spread, then let the learned scale and shift re-scale and re-shift each channel. The running stats are frozen from training; the test batch never gets a vote.</p>
-
-    <p>And here is the streaming catch: those frozen stats were measured over the whole training set. A live chunk might have a very different true local mean, but it still gets centered by the global one. <em>That mismatch is the price of not waiting for the future.</em></p>
-
-    <p>Now here is why <strong>streaming ASR</strong> breaks that scheme. Training measured those running stats over long sequences and full batches. In streaming you are normalizing a live local chunk with global averages that do not match it. And you cannot wait for future frames to recompute stats either, <em>so you need a causal or online version of BatchNorm</em>.</p>
-
-    <p>The usual fixes: compute the mean and variance over past and current frames only, updating incrementally as new frames arrive, or use a sliding window over the recent frames. Early in the utterance those statistics are unreliable, so they typically kick in once the state settles. Or you give up on BatchNorm for streaming and use something real-time friendly like LayerNorm.</p>
+    <p>BatchNorm also has two modes. During training it normalizes each channel with the current batch's mean and variance, while quietly stockpiling running estimates of both. At inference it ignores the test batch's own stats and normalizes with those stockpiled running stats instead. In streaming, those frozen global stats do not match a live chunk; the streaming section covers the fallout, and the variants section names the fix.</p>
     
     <h3>Convolution mixes channels, then FFN finishes the block</h3>
     <p>Anyway, the Conformer then applies a BatchNorm and a Swish activation. Finally, another pointwise convolution with dropout is applied, which maps the model dimension back to itself. Lastly, a residual connection is added from the start of the module to its output. <em>Looks redundant, but it is not</em>: the depthwise conv is a per-channel local filter, so it never mixes channels. The pointwise conv after it is where channels finally talk to each other, exactly the cross-channel interaction the depthwise step cannot give you.</p>
@@ -2117,9 +2140,6 @@ class ConformerBlock(nn.Module):
       <div class="howto capcard" id="streamHowto"><strong class="cap-title">How to play</strong>
         <ul>
           <li><strong>The point:</strong> in streaming you rent future frames by the look-ahead <code>L</code>. A token is emitted only after its look-ahead frames arrive, so the emitted cursor trails the audio cursor by exactly <code>L</code> frames, and each look-ahead frame is <code>10</code> ms of latency.</li>
-          <li>The green emitted cursor trails the orange audio cursor by exactly <code>L</code> frames, and the stats line names the latency in milliseconds. Stepping through frame by frame shows exactly when each token becomes emittable.</li>
-          <li><strong>Chunk size buttons (<code>1</code>, <code>2</code>, <code>3</code>, <code>4</code>, <code>6</code>, <code>12</code>):</strong> a bigger chunk grows each frame's visible region in the grid, at the cost of waiting for the whole chunk to arrive.</li>
-          <li><strong>Look-ahead frames slider (<code>0 to 4</code>):</strong> at <code>0</code>, both cursors move together while the grid becomes block-causal; dropping the chunk to <code>1</code> as well makes it a true causal triangle; at <code>4</code> the gap stretches to <code>40</code> ms.</li>
         </ul>
       </div>
       <p class="caption"><em>Offline attention is a luxury.</em> In streaming you do not get the future for free, <em>you rent it by the frame, and the rent is latency</em>. Chunk <code>4</code>, look-ahead <code>2</code>: every frame sees its block plus two frames into the future, and those two frames cost <code>20</code> milliseconds. Make the look-ahead zero and the grid becomes block-causal: each frame sees its own chunk and nothing after it. Drop the chunk to <code>1</code> and you get the true causal triangle: perfectly real-time, flying blind into the future.</p>
@@ -2255,10 +2275,7 @@ class ConformerBlock(nn.Module):
       <p class="statline" id="headsStats"></p>
       <div class="howto capcard" id="headsHowto"><strong class="cap-title">How to play</strong>
         <ul>
-          <li><strong>The point:</strong> give each attention head its own window length, its leash, and one layer covers phoneme edges and word-level context at the same time. Each head's red cells are the frames it can see; the green union strip at the bottom shows every frame at least one head sees.</li>
-          <li>The union strip fills without gaps as the heads stretch to <code>6</code>, <code>12</code>, <code>24</code>; the staircase shows the query walking forward with full coverage intact.</li>
-          <li><strong>Query frame slider (<code>0 to 23</code>):</strong> all four windows move with the query while the union count stays put: the windows are anchored to the query, not to fixed positions.</li>
-          <li><strong>Four span sliders (H1 to H4, <code>1 to 24</code>):</strong> stretching head <code>4</code> up to <code>24</code> fills the union strip into the far past; the stats line counts exactly how many frames are covered.</li>
+          <li><strong>The point:</strong> give each attention head its own window length, its leash, and one layer covers phoneme edges and word context at the same time.</li>
         </ul>
       </div>
       <p class="caption"><em>Why should every head look the same distance?</em> A phoneme is <code>50</code> ms, a word is <code>500</code>. Give head one a short leash and head four the whole pasture. The model gets phoneme edges and word context in the same layer, for free.</p>
@@ -2266,34 +2283,12 @@ class ConformerBlock(nn.Module):
     <script>
     (function () {
       var NF = 24;
-      var spans = [3, 3, 3, 3], q = 15, playing = false, timer = null;
+      /* Fixed spans: phoneme, syllable, word, utterance scale. No sliders. */
+      var spans = [4, 8, 16, 24], q = 15, playing = false;
       var rowsEl = document.getElementById('headsRows');
       var qEl = document.getElementById('headsQ'), qVal = document.getElementById('headsQVal');
       var playBtn = document.getElementById('headsPlay');
-      var howtoEl = document.getElementById('headsHowto');
-      function showHowto() {
-        var demo = document.getElementById('headsDemo');
-        if (demo && demo.scrollIntoView) { try { playScrollEnsure(demo); } catch (e) {} }
-      }
-      /* rAF linear tween of one head's span: it grows, never snaps. The span
-         slider tracks the value so the controls never disagree with the rows. */
-      function tweenSpan(h, to, dur) {
-        var from = spans[h];
-        var slider = document.getElementById('headsS' + h);
-        var start = null;
-        function frame(ts) {
-          if (!playing) return;
-          if (start === null) start = ts;
-          var p = Math.min(1, (ts - start) / dur);
-          spans[h] = Math.round(from + (to - from) * p);
-          if (slider) slider.value = spans[h];
-          render();
-          if (p < 1) requestAnimationFrame(frame);
-        }
-        requestAnimationFrame(frame);
-      }
       var playTimers = [];
-      function later(fn, ms) { playTimers.push(setTimeout(fn, ms)); }
       var statsEl = document.getElementById('headsStats');
       function scaleName(s) {
         if (s <= 4) return 'phoneme-scale';
@@ -2312,8 +2307,7 @@ class ConformerBlock(nn.Module):
         for (var h = 0; h < 4; h++) {
           html += '<div class="head-block"><div class="head-ctl">' +
             '<span class="head-tag">H' + (h + 1) + '</span>' +
-            '<label style="font-weight:normal;">span <input type="range" id="headsS' + h + '" min="1" max="24" step="1" value="' + spans[h] + '"></label>' +
-            '<span class="head-scale" id="headsScale' + h + '"></span></div>' +
+            '<span class="head-scale">span ' + spans[h] + ' (' + scaleName(spans[h]) + ')</span></div>' +
             '<div class="head-row" id="headsRow' + h + '"></div></div>';
         }
         /* Union coverage strip: every frame at least one head can see. */
@@ -2329,15 +2323,6 @@ class ConformerBlock(nn.Module):
           for (var j = 0; j < NF; j++) cells += '<div class="head-cell"></div>';
           document.getElementById(rowIds[r]).innerHTML = cells;
         }
-        for (var h3 = 0; h3 < 4; h3++) {
-          (function (hh) {
-            document.getElementById('headsS' + hh).addEventListener('input', function () {
-              stopPlay(600);
-              spans[hh] = parseInt(document.getElementById('headsS' + hh).value, 10);
-              render();
-            });
-          })(h3);
-        }
       }
       function render() {
         qEl.value = q; qVal.textContent = q;
@@ -2345,7 +2330,6 @@ class ConformerBlock(nn.Module):
         for (h = 0; h < 4; h++) {
           var s = spans[h];
           var col = leashColor(s);
-          document.getElementById('headsScale' + h).textContent = 'span ' + s + ' (' + scaleName(s) + ')';
           var cells = document.getElementById('headsRow' + h).querySelectorAll('.head-cell');
           var lo = Math.max(0, q - s + 1);
           for (j = 0; j < NF; j++) {
@@ -2370,71 +2354,41 @@ class ConformerBlock(nn.Module):
         statsEl.innerHTML = 'Union: <strong>' + keys.length + ' frames</strong> visible across heads' +
           (keys.length ? ' (frames ' + keys[0] + '-' + keys[keys.length - 1] + ')' : '') + '.';
       }
+      function later(fn, ms) { playTimers.push(setTimeout(fn, ms)); }
       function stopPlay(hideMs) {
         playing = false;
         playTimers.forEach(function (t) { clearTimeout(t); });
         playTimers = [];
-        if (timer) { clearInterval(timer); timer = null; }
         playBtn.textContent = 'Play';
       }
       qEl.addEventListener('input', function () { stopPlay(600); q = parseInt(qEl.value, 10); render(); });
-      /* Play builds union coverage 3-6-12-24 in order: four 2.2-second
-         stretch beats, then a four-step query walk at 2.2 seconds per step.
-         The spans stay where they end; only the query slider is restored. */
+      /* Play walks the query through four positions, one 2200ms beat each,
+         then restores the query. */
       playBtn.addEventListener('click', function () {
         if (playing) { stopPlay(2000); return; }
         playing = true; playBtn.textContent = 'Stop';
-        showHowto();
         var savedQ = q;
-        /* Beat 1 needs q >= 2 for a 3-frame union; beat 5 needs 4 frames of
-           headroom to walk forward. */
-        if (q < 2 || q > 19) { q = 15; render(); }
-        /* Pure pacing: cumulative 2200ms offsets. The span tweens and the
-           2.2-second query-walk ticks keep text-bearing steps at 2200ms. */
-        var t1 = 2200;
-        var t2 = t1 + 2200;
-        var t3 = t2 + 2200;
-        var t4 = t3 + 2200;
-        var tEnd = t4 + 4 * 2200 + 2000;
-        /* Beat 1: every head back to span 3, 200ms tweens, no snapping.
-           On a fresh load this is already the rest state, so it is a no-op;
-           on a re-run it visibly resets the build-up's start. */
-        for (var h = 0; h < 4; h++) tweenSpan(h, 3, 200);
-        /* Beats 2-4: heads 2/3/4 grow 6, 12, 24 in order; head 1 keeps its phoneme-scale leash. */
-        later(function () { if (!playing) return; tweenSpan(1, 6, 300); }, t1);
-        later(function () { if (!playing) return; tweenSpan(2, 12, 300); }, t2);
-        later(function () { if (!playing) return; tweenSpan(3, 24, 300); }, t3);
-        /* Beat 5: the query walks 4 frames forward, one every 2200ms. */
-        later(function () {
-          if (!playing) return;
-          for (var s = 1; s <= 4; s++) {
-            (function (stepN) {
-              later(function () {
-                if (!playing) return;
-                q = Math.min(23, q + 1);
-                render();
-              }, stepN * 2200);
-            })(s);
-          }
-        }, t4);
-        /* End: the query slider goes back; the spans stay where they ended. */
+        var stops = [0, 8, 16, 23];
+        for (var i = 0; i < stops.length; i++) {
+          (function (idx) {
+            later(function () {
+              if (!playing) return;
+              q = stops[idx];
+              render();
+            }, idx * 2200);
+          })(i);
+        }
         later(function () {
           if (!playing) return;
           q = savedQ;
           render();
           stopPlay(2000);
-        }, tEnd);
+        }, stops.length * 2200 + 2000);
       });
-      /* ---- Reset: stop the build-up, all spans back at 3, query back on frame 15 ---- */
-      var headsResetBtn = document.getElementById('headsReset');
-      headsResetBtn.addEventListener('click', function () {
+      /* ---- Reset: stop the walk, query back on frame 15 ---- */
+      document.getElementById('headsReset').addEventListener('click', function () {
         stopPlay(600);
-        spans = [3, 3, 3, 3];
         q = 15;
-        for (var h = 0; h < 4; h++) {
-          var sEl = document.getElementById('headsS' + h);
-          if (sEl) sEl.value = spans[h];
-        }
         render();
       });
       build();
@@ -2442,11 +2396,87 @@ class ConformerBlock(nn.Module):
     })();
     </script>
 
+
+
     <p>The convolution module uses "same" padding, which will need to change to causal padding, and the normalization, as we discussed in depth, needs to change as well.</p>
 
     <p>Stack a few of these blocks and you get rich acoustic embeddings, one per frame. <em>Last step: turn frames into words.</em></p>
 
     <p>One linear layer maps each frame from the model dimension to the vocabulary size. That gives you a score for every vocab item at every frame. Softmax over the vocab axis turns those raw scores (logits) into probabilities: exponentiate each frame's scores and divide by the total, so every frame's vocabulary probabilities sum to one. Once you have this, you need to use a <strong>CTC loss</strong> to align the output probabilities with the text.</p>
+
+    <hr>
+
+    <h2 id="variants">What came after the sandwich</h2>
+
+    <h3>Streaming Conformer (causal + dynamic chunks)</h3>
+    <p>The <strong>streaming Conformer</strong> is the live-audio version of the same sandwich. The convolution's "same" padding becomes causal padding, so each frame only looks at the past. BatchNorm becomes <strong>LayerNorm</strong>, because running stats measured over full utterances do not match a live chunk. And the model trains on random chunk sizes, so <em>one model serves any latency budget</em> at decode time. This is the dynamic-chunking line of work behind WeNet's U2 (Zhang et al., 2021), building directly on the streaming attention above.</p>
+
+    <h3>Branchformer: two branches instead of a sandwich</h3>
+    <p>The <strong>Branchformer</strong> (Peng et al., ICML 2022) drops the sandwich for two parallel branches in every layer: self-attention for long range, a conv-gated MLP for local detail, combined by learned merge weights. It matches or beats Conformer on the same benchmarks, and the merge weights are a free diagnostic: they show which layers lean local and which lean global.</p>
+
+    <h3>Squeezeformer: maybe the sandwich is overkill</h3>
+    <p>The <strong>Squeezeformer</strong> (Kim et al., NeurIPS 2022) asks whether the sandwich is overkill. It uses plain attention-then-conv-then-FFN blocks, no macaron, and adds a <strong>Temporal U-Net</strong>: downsample the timeline so attention works on a squeezed sequence, then upsample back. Same accuracy at lower compute, because attention no longer pays full price on the full-length timeline.</p>
+
+    <div class="blk-compare" role="img" aria-label="Three mini block diagrams. Conformer: input, half feed-forward, attention, convolution, half feed-forward, output. Branchformer: input, attention and conv-gated MLP in parallel, learned merge, output. Squeezeformer: input, downsample, attention, upsample, output.">
+      <div class="blk-col">
+        <h4>Conformer (sandwich)</h4>
+        <div class="blk-flow">
+          <div class="blk-step blk-io"><div class="t">input x</div></div>
+          <div class="blk-arrow" aria-hidden="true">&rarr;</div>
+          <div class="blk-step blk-half"><div class="t">Feed-forward &times; &half;</div></div>
+          <div class="blk-arrow" aria-hidden="true">&rarr;</div>
+          <div class="blk-step blk-mhsa"><div class="t">Attention</div></div>
+          <div class="blk-arrow" aria-hidden="true">&rarr;</div>
+          <div class="blk-step blk-conv"><div class="t">Convolution</div></div>
+          <div class="blk-arrow" aria-hidden="true">&rarr;</div>
+          <div class="blk-step blk-half"><div class="t">Feed-forward &times; &half;</div></div>
+          <div class="blk-arrow" aria-hidden="true">&rarr;</div>
+          <div class="blk-step blk-io"><div class="t">out</div></div>
+        </div>
+        <p class="blk-one">The point: the sandwich order is a design choice, not a law.</p>
+      </div>
+      <div class="blk-col">
+        <h4>Branchformer (parallel)</h4>
+        <div class="blk-flow">
+          <div class="blk-step blk-io"><div class="t">input x</div></div>
+          <div class="blk-arrow" aria-hidden="true">&rarr;</div>
+          <div class="blk-parallel">
+            <div class="blk-step blk-mhsa"><div class="t">Attention</div><div class="s">long range</div></div>
+            <div class="blk-step blk-conv"><div class="t">Conv-gated MLP</div><div class="s">local detail</div></div>
+          </div>
+          <div class="blk-arrow" aria-hidden="true">&rarr;</div>
+          <div class="blk-step blk-add"><div class="t">Merge</div><div class="s">learned weights</div></div>
+          <div class="blk-arrow" aria-hidden="true">&rarr;</div>
+          <div class="blk-step blk-io"><div class="t">out</div></div>
+        </div>
+        <p class="blk-one">The point: parallel branches replace the sandwich, and the merge weights reveal each layer's local-vs-global lean.</p>
+      </div>
+      <div class="blk-col">
+        <h4>Squeezeformer (squeeze then expand)</h4>
+        <div class="blk-flow">
+          <div class="blk-step blk-io"><div class="t">input x</div></div>
+          <div class="blk-arrow" aria-hidden="true">&rarr;</div>
+          <div class="blk-step blk-ffn"><div class="t">Downsample</div><div class="s">squeeze the timeline</div></div>
+          <div class="blk-arrow" aria-hidden="true">&rarr;</div>
+          <div class="blk-step blk-mhsa"><div class="t">Attention</div><div class="s">short sequence</div></div>
+          <div class="blk-arrow" aria-hidden="true">&rarr;</div>
+          <div class="blk-step blk-ffn"><div class="t">Upsample</div><div class="s">expand back</div></div>
+          <div class="blk-arrow" aria-hidden="true">&rarr;</div>
+          <div class="blk-step blk-io"><div class="t">out</div></div>
+        </div>
+        <p class="blk-one">The point: squeeze the timeline for attention, expand it back, and skip the macaron.</p>
+      </div>
+    </div>
+
+    <hr>
+
+    <h2 id="references">References</h2>
+    <ol class="brefs">
+        <li>Gulati, A., et al. (2020). Conformer: Convolution-augmented Transformer for Speech Recognition. Interspeech. arXiv:2005.08100.</li>
+        <li>Peng, Y., et al. (2022). Branchformer: Parallel MLP-Attention Architectures to Capture Local and Global Context for Speech Recognition and Understanding. ICML. arXiv:2207.02971.</li>
+        <li>Kim, S., et al. (2022). Squeezeformer: An Efficient Transformer for Automatic Speech Recognition. NeurIPS. arXiv:2206.00888.</li>
+        <li>Zhang, B., et al. (2021). WeNet: Production Oriented Streaming and Non-streaming End-to-End Speech Recognition Toolkit. arXiv:2102.01547.</li>
+    </ol>
 
             <script>
         (function () {
@@ -2543,7 +2573,6 @@ class ConformerBlock(nn.Module):
   (function () {
     var sets = {
       'attnPlay': ['Play', 'Pause', 'Stop'],
-      'cf1WerPlay': ['Play', 'Pause', 'Stop'],
       'cfPlay': ['Play', 'Pause', 'Stop'],
       'headsPlay': ['Play', 'Pause', 'Stop'],
       'locPlay': ['Play', 'Pause', 'Stop'],

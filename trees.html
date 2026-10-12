@@ -827,17 +827,33 @@
        return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
          '" stroke="#7f8c8d" stroke-width="1.5"/>';
      }
+     /* Every box carries a label on every step: blank boxes read as broken. */
+     function splitQ(f, thr) {
+       return (f === 0 ? 'x' : 'y') + ' &#8804; ' + thr.toFixed(2) + '?';
+     }
+     function sideLbl(f, thr, left) {
+       return (f === 0 ? 'x' : 'y') + (left ? ' &#8804; ' : ' &gt; ') + thr.toFixed(2);
+     }
+     function blabel(x, y, str) {
+       return '<text x="' + x + '" y="' + y + '" text-anchor="middle" font-size="17" fill="#2c3e50">' + str + '</text>';
+     }
      function strip(step) {
        var s = '';
        var rootFill = step >= 2 ? '#eaf4fb' : '#ffffff';
        var rootStroke = step >= 2 ? '#3498db' : '#bdc3c7';
        s += box(200, 30, 110, 32, rootFill, rootStroke, 2);
-       if (step === 1)
-         s += '<text x="200" y="36" text-anchor="middle" font-size="17" fill="#2c3e50">all data</text>';
+       s += blabel(200, 36, step === 1 ? 'all data' : splitQ(T.f, thr0));
        if (step >= 3) {
          s += tedge(200, 46, 110, 76) + tedge(200, 46, 290, 76);
          s += box(110, 92, 110, 32, '#ffffff', '#bdc3c7', 1.5);
          s += box(290, 92, 110, 32, '#ffffff', '#bdc3c7', 1.5);
+         if (step === 3) {
+           s += blabel(110, 98, sideLbl(T.f, thr0, true));
+           s += blabel(290, 98, sideLbl(T.f, thr0, false));
+         } else {
+           s += blabel(110, 98, splitQ(T.left.f, thrL));
+           s += blabel(290, 98, splitQ(T.right.f, thrR));
+         }
        }
        if (step >= 4) {
          s += tedge(110, 108, 50, 138) + tedge(110, 108, 150, 138);
@@ -845,8 +861,7 @@
          for (var i = 0; i < 4; i++) {
            var fill = step >= 5 ? (leafVal[i] === 1 ? '#d6eaf8' : '#fdebd0') : '#ffffff';
            s += box(LEAF_X[i], LEAF_CY, 100, 32, fill, '#bdc3c7', 1.5);
-           if (step >= 5)
-             s += '<text x="' + LEAF_X[i] + '" y="160" text-anchor="middle" font-size="17" fill="#2c3e50">class ' + leafVal[i] + '</text>';
+           s += blabel(LEAF_X[i], 160, step >= 5 ? 'class ' + leafVal[i] : '?');
          }
        }
        return s;
@@ -931,9 +946,6 @@
        <p class="cc-head">What this shows</p>
        <ul>
          <li><strong>The point:</strong> One tree memorizes, many trees vote. Growing the forest smooths the jagged boundary and the test accuracy rises while training accuracy stays high.</li>
-         <li><strong>What you'll see:</strong> The plot opens with every point gray: the forest hasn't voted yet. As it grows, points take on the forest's vote color, the boundary smooths, and test accuracy rises.</li>
-         <li><strong>Trees:</strong> <code>0</code> is the gray unclassified start. <code>1</code> against <code>20</code> at full depth shows the boundary relaxing from jagged memorization to a calm vote.</li>
-         <li><strong>Max depth:</strong> At <code>12</code> with a single tree it tiptoes around individual points, then growing the forest lets voting undo the damage. At <code>2</code> the boundary turns into big confident blocks.</li>
        </ul>
      </div>
    </div>
@@ -1214,7 +1226,8 @@
            legend.innerHTML = '<span><span class="sw" style="background:#f08c1a"></span>class 0 (forest vote)</span>' +
              '<span><span class="sw" style="background:#2a7fbf"></span>class 1 (forest vote)</span>' +
              '<span><span class="sw" style="background:#ffffff;border:1px solid #2c3e50"></span>held-out test points</span>' +
-             '<span><span class="ln" style="border-color:#2c3e50"></span>majority-vote boundary</span>';
+             '<span><span class="ln" style="border-color:#2c3e50"></span>majority-vote boundary</span>' +
+             '<span><span class="sw" style="background:linear-gradient(90deg,#f6c58b,#eef4fb)"></span>pale: the trees disagree</span>';
          }
        }
        if (nTrees === 0) {
@@ -1310,8 +1323,6 @@
        <p class="cc-head">What this shows</p>
        <ul>
          <li><strong>The point:</strong> Each boosting round fits the last round's mistakes, so the boundary corrects itself where it is still wrong.</li>
-         <li><strong>What you'll see:</strong> More rounds shrink and fade the red and blue residual halos while the boundary straightens out where the errors were, and the mean residual falls.</li>
-         <li><strong>Rounds:</strong> <code>0</code> is the unrun start. From <code>1</code> upward, each correction lands on the remaining mistakes; back at <code>1</code>, the boundary shrinks to nearly nothing with fat halos everywhere.</li>
        </ul>
      </div>
    </div>
@@ -1510,6 +1521,12 @@
        function xPix(x) { return padL + (x - x0) / (x1 - x0) * pw; }
        function yPix(y) { return H - padB - (y - y0) / (y1 - y0) * ph; }
        ctx.clearRect(0, 0, W, H);
+       /* Audit 2026-10-11: clip points to the plot rect so outlier tails
+          beyond the axis range cannot leave half-drawn glyphs at the edge. */
+       ctx.save();
+       ctx.beginPath();
+       ctx.rect(padL, padT, pw, ph);
+       ctx.clip();
        var r = Math.max(2, Math.round(3.4 * SC));
        if (rounds.length === 0) {
          /* Rest frame: labeled points only, no tint, no halos, no boundary. */
@@ -1522,6 +1539,7 @@
            ctx.lineWidth = Math.max(1, Math.round(1.4 * SC));
            ctx.stroke();
          }
+         ctx.restore();
          return;
        }
        drawTint();
@@ -1553,6 +1571,7 @@
          ctx.lineTo(xPix(segs[s + 2]), yPix(segs[s + 3]));
        }
        ctx.stroke();
+       ctx.restore();
      }
      function update() {
        draw();
@@ -1637,17 +1656,14 @@
 
    <h2 id="paper">Out-of-bag votes make a free test set</h2>
 
-   <p>Each tree in the forest sat out about a third of the data: its bootstrap sample never included those points. Every tree therefore comes with a free test set: the points it never saw. The forest's vote on those held-out points is an honest error estimate that costs nothing extra. Breiman (2001) showed it tracks a real held-out test set almost exactly. Below is the real Figure 1 from that paper, with its original caption: the top panel first, then the bottom. The orange cursor walks the blue out-of-bag curve; watch it hug the green test-set curve as the input set <code>F</code> grows.</p>
+   <p>Each tree in the forest sat out about a third of the data: its bootstrap sample never included those points. Every tree therefore comes with a free test set: the points it never saw. The forest's vote on those held-out points is an honest error estimate that costs nothing extra. Breiman (2001) showed it tracks a real held-out test set almost exactly. Below is the real Figure 1 from that paper, with its original caption: the top panel first, then the bottom. The blue squares are the out-of-bag error; watch them hug the green test-set circles as the input set <code>F</code> grows.</p>
 
    <figure class="diagram" id="breimanFig" style="text-align:center;">
      <div id="breimanFigWrap" style="position:relative;max-width:480px;margin:0 auto;">
        <img src="figures/papers/breiman-2001-fig1.png" alt="Figure 1 from Breiman (2001): top panel plots strength and correlation vs number of inputs, bottom panel plots test set and out-of-bag error vs number of inputs, on sonar data." style="width:100%;height:auto;display:block;">
-       <canvas id="obTrace" width="920" height="1310" style="position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;"></canvas>
      </div>
      <figcaption><strong>FIGURE 1.</strong> EFFECT OF NUMBER OF INPUTS ON SONAR DATA</figcaption>
      <p class="diag-label" style="max-width:640px;margin:6px auto 0;">Rebuilt from Figure 1 of Breiman (Machine Learning 2001). <a href="https://www.stat.berkeley.edu/~breiman/randomforest2001.pdf">PDF</a></p>
-     <div><button type="button" class="pf-play" id="obPlay">Play: trace the OB error curve</button>
-     <button type="button" class="pf-play" id="obReset" style="margin-left:8px;">Reset</button></div>
      <div class="caption-card" id="breimanCap" style="max-width:640px;margin-left:auto;margin-right:auto;text-align:left;">
        <p class="cc-head">What this shows</p>
        <ul>
@@ -1658,89 +1674,6 @@
        </ul>
      </div>
    </figure>
-   <script>
-   /* Paper-figure overlay: OB error curve trace on Breiman (2001) Figure 1. */
-   (function () {
-     /* Blue OB-error curve, sampled from the real figure, in image coordinates (920 x 1310). */
-     var OB = [
-       [139,892],[175,907],[212,907],[249,905],[286,904],[322,905],[359,898],[396,894],
-       [433,892],[469,890],[506,884],[543,886],[580,891],[616,881],[653,885],[690,879],
-       [727,878],[763,879],[800,875],[837,874]
-     ];
-     var STEP_MS = 800;
-     var canvas = document.getElementById('obTrace');
-     var playBtn = document.getElementById('obPlay');
-     var ctx = canvas && canvas.getContext ? canvas.getContext('2d') : null;
-     if (!canvas || !ctx || !playBtn) return;
-     /* Scroll-stability (2026-10-09): the long Play label pushes the Reset button
-        onto a second line at 390px, but "Pause" fits on one; without a reserve
-        the row breathed 86<->43px mid-tour, moving the page. Reserve the
-        tallest label variant's row height. Follows the r4scroll reserve pattern. */
-     (function reserveObPlayRow() {
-       var row = playBtn.parentElement;
-       var prev = playBtn.textContent, max = 0;
-       ['Play: trace the OB error curve', 'Pause'].forEach(function (t) {
-         playBtn.textContent = t;
-         max = Math.max(max, row.getBoundingClientRect().height);
-       });
-       playBtn.textContent = prev;
-       row.style.minHeight = Math.ceil(max) + 'px';
-     })();
-
-     function draw(upto) {
-       ctx.clearRect(0, 0, canvas.width, canvas.height);
-       ctx.save();
-       ctx.strokeStyle = '#e67e22';
-       ctx.lineWidth = 6;
-       ctx.lineJoin = 'round';
-       ctx.lineCap = 'round';
-       ctx.beginPath();
-       ctx.moveTo(OB[0][0], OB[0][1]);
-       for (var i = 1; i <= upto; i++) ctx.lineTo(OB[i][0], OB[i][1]);
-       ctx.stroke();
-       var p = OB[upto];
-       ctx.beginPath();
-       ctx.arc(p[0], p[1], 16, 0, Math.PI * 2);
-       ctx.fillStyle = '#e67e22';
-       ctx.fill();
-       ctx.lineWidth = 4;
-       ctx.strokeStyle = '#ffffff';
-       ctx.stroke();
-       ctx.restore();
-     }
-
-     var timer = null, step = 0;
-     function stop() {
-       if (timer) { clearInterval(timer); timer = null; }
-       playBtn.textContent = 'Play: trace the OB error curve';
-     }
-     function tick() {
-       if (step >= OB.length - 1) { stop(); return; }
-       step++;
-       draw(step);
-     }
-     function start() {
-       var fig = document.getElementById('breimanFig');
-       if (fig) playScrollEnsure(fig);
-       if (step >= OB.length - 1) { step = 0; }
-       draw(step);
-       stop();
-       playBtn.textContent = 'Pause';
-       timer = setInterval(tick, STEP_MS);
-     }
-     playBtn.addEventListener('click', function () {
-       if (timer) { stop(); return; }
-       start();
-     });
-     var obResetBtn = document.getElementById('obReset');
-     function resetTrace() {
-       stop();
-       step = 0;
-       ctx.clearRect(0, 0, canvas.width, canvas.height);
-     }
-     if (obResetBtn) obResetBtn.addEventListener('click', resetTrace);
-   })();
-   </script>
 
    <h2 id="variants">When trees help and when they do not</h2>
 
@@ -1860,7 +1793,6 @@
   (function () {
     var sets = {
       'gbPlay': ['Play', 'Pause', 'Stop'],
-      'obPlay': ['Play: trace the OB error curve', 'Play', 'Pause', 'Stop'],
       'rfPlay': ['Play', 'Pause', 'Stop']
     };
     Object.keys(sets).forEach(function (id) {

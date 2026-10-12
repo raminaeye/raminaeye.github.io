@@ -696,15 +696,14 @@
 
     <p class="tabs-label">On this page</p>
     <div class="tab-strip">
-        <a class="tab-link" href="#the-culprit">Conflicting gradients are the culprit</a>
         <a class="tab-link" href="#the-deal">The deal: drop the part of your pull that fights me</a>
         <a class="tab-link" href="#the-geometry">Conflict is a negative cosine, the fix cuts the interfering part</a>
-        <a class="tab-link" href="#surgery-stepper">PCGrad's four beats</a>
         <a class="tab-link" href="#why-this-cut">Why this exact cut</a>
+        <a class="tab-link" href="#paper-figure">Cutting each gradient's conflicting part</a>
         <a class="tab-link" href="#algorithm">One PCGrad training step</a>
+        <a class="tab-link" href="#surgery-stepper">PCGrad's four beats</a>
         <a class="tab-link" href="#tragic-triad">When the cut actually pays</a>
         <a class="tab-link" href="#betrayal">A case where the plain sum betrays a task</a>
-        <a class="tab-link" href="#paper-figure">Cutting each gradient's conflicting part</a>
         <a class="tab-link" href="#references">References</a>
     </div>
 
@@ -769,14 +768,79 @@
         Everything that agrees, or points sideways, is left alone. Then the same cut is done on the
         other gradient. Pairs that are not fighting are never touched, so cooperation costs nothing.
     </p>
+    <div class="math-display">
+$$ g_i^{PC} = g_i - \frac{g_i \cdot g_j}{\|g_j\|^2} \cdot g_j \qquad \text{when } g_i \cdot g_j < 0 $$
+</div>
+<p>Do the surgery: take task i's gradient and subtract the part that points against task j, leaving only the part that does not fight. In the line, <code>(g<sub>i</sub>&middot;g<sub>j</sub> / &#8214;g<sub>j</sub>&#8214;&sup2;)&middot;g<sub>j</sub></code> is the fighting part, cut away; <code>g<sub>i</sub></code> is task i's gradient and <code>g<sub>j</sub></code> is task j's gradient; <code>g<sub>i</sub>&middot;g<sub>j</sub> &lt; 0</code> is the conflict check: only cut when they fight; <code>g<sub>i</sub><sup>PC</sup></code> is the corrected gradient after surgery; <code>&middot;</code> is the dot product: negative means fighting; and <code>&#8214;g<sub>j</sub>&#8214;&sup2;</code> is the squared length of g<sub>j</sub>: scales the projection. Only operate when they fight: if the dot product is not negative, the gradients agree and nothing needs cutting.</p>
+
     <p>
         Do the same cut on both gradients and each cut arrow lands at a right angle to the other
-        task's original gradient, so the two no longer point against each other. The stepper below
-        shows the four beats of the surgery. The <a href="multitask-intro.html#mathKitDemo">intro's math kit</a>
+        task's original gradient, so the two no longer point against each other. The <a href="multitask-intro.html#mathKitDemo">intro's math kit</a>
         has the same fight with draggable arrows.
     </p>
 
     
+<h2 id="why-this-cut">Why this exact cut</h2>
+    <p>
+        The surgery is three choices, and each one has a reason.
+    </p>
+    <ol>
+        <li>
+            <strong>Why cut exactly the interfering part?</strong> The interfering part is the only part of one task's gradient that the other
+            task can feel: the leftover sits at a right angle to the other gradient, so it cannot move the other
+            task's loss at all. Cutting less would leave some of the fight in place; cutting more would throw
+            away parts of the gradient that were helping its own task for free. The interfering part is the smallest
+            possible edit that makes the two gradients harmless to each other.
+        </li>
+        <li>
+            <strong>Why cut both gradients?</strong> One-sided surgery only moves the problem: the combined
+            step can end up pointing against the un-cut task. Cutting both sides guarantees the final sum
+            contains nothing that fights either task.
+        </li>
+        <li>
+            <strong>Why a random order?</strong> With more than two tasks, each gradient is cut against the
+            others one by one, and a later cut can undo an earlier one. So the answer depends on the
+            order, and whichever task is processed last gets the cleanest gradient. Shuffling every step
+            shares that advantage evenly over training.
+        </li>
+    </ol>
+
+<h2 id="paper-figure">Cutting each gradient's conflicting part</h2>
+    <p>
+        This is the paper's own illustration of the surgery, not a redraw. Panel (a) is the conflict;
+        (b) and (c) are the two cuts; (d) is a non-conflicting pair, left alone.
+    </p>
+
+<div class="demo">
+        <img src="figures/pcgrad-grads.png" alt="PCGrad paper figure: conflicting gradients and the projection surgery in four panels" style="display:block;width:100%;height:auto;border:1px solid #e1e4e8;border-radius:8px;">
+        <p class="pf-cap">
+            Rebuilt from Figure 2 of Yu et al. (NeurIPS 2020). <a href="https://arxiv.org/abs/2001.06782">arXiv:2001.06782</a>
+        </p>
+        <p class="pf-cap">
+            <span class="verbatim">Original caption: "Conflicting gradients and PCGrad. In (a), tasks i and j have conflicting gradient directions, which can lead to destructive interference. In (b) and (c), we illustrate the PCGrad algorithm in the case where gradients are conflicting. PCGrad projects task i's gradient onto the normal vector of task j's gradient, and vice versa. Non-conflicting task gradients (d) are not altered under PCGrad, allowing for constructive interaction."</span>
+            Figure extracted from the arXiv e-print source and shown with its original caption.
+        </p>
+    </div>
+
+<h2 id="algorithm">One PCGrad training step</h2>
+    <p>
+        The full procedure, per training step:
+    </p>
+    <ol>
+        <li>Compute each task's gradient on the shared parameters (one backward pass per task).</li>
+        <li>For each task <code>i</code>: for every other task <code>j</code> in random order, if the two gradients fight, cut the interfering part: subtract the part of this gradient that points along the other task's line.</li>
+        <li>Combine the edited gradients (sum or average) and hand the result to any optimizer: SGD, Adam, anything.</li>
+    </ol>
+    <pre><code class="language-python">import numpy as np
+def pcgrad_combine(grads):
+    # grads: list of per-task gradient vectors on the shared parameters
+    g = [x.copy() for x in grads]
+    for i in range(len(g)):
+        for j in np.random.permutation(len(g)):   # random order, fairness
+            if i != j and g[i] @ g[j] < 0:         # conflict detected
+                g[i] -= (g[i] @ g[j]) / (g[j] @ g[j]) * g[j]  # remove the interfering part
+    return sum(g)</code></pre>
+
 <h2 id="surgery-stepper">PCGrad's four beats</h2>
     <p>
         The surgery runs in four beats: the check, the interfering parts, the cut, and the final add.
@@ -868,52 +932,6 @@
 
     
     
-<h2 id="why-this-cut">Why this exact cut</h2>
-    <p>
-        The surgery is three choices, and each one has a reason.
-    </p>
-    <ol>
-        <li>
-            <strong>Why cut exactly the interfering part?</strong> The interfering part is the only part of one task's gradient that the other
-            task can feel: the leftover sits at a right angle to the other gradient, so it cannot move the other
-            task's loss at all. Cutting less would leave some of the fight in place; cutting more would throw
-            away parts of the gradient that were helping its own task for free. The interfering part is the smallest
-            possible edit that makes the two gradients harmless to each other.
-        </li>
-        <li>
-            <strong>Why cut both gradients?</strong> One-sided surgery only moves the problem: the combined
-            step can end up pointing against the un-cut task. Cutting both sides guarantees the final sum
-            contains nothing that fights either task.
-        </li>
-        <li>
-            <strong>Why a random order?</strong> With more than two tasks, each gradient is cut against the
-            others one by one, and a later cut can undo an earlier one. So the answer depends on the
-            order, and whichever task is processed last gets the cleanest gradient. Shuffling every step
-            shares that advantage evenly over training.
-        </li>
-    </ol>
-
-    
-<h2 id="algorithm">One PCGrad training step</h2>
-    <p>
-        The full procedure, per training step:
-    </p>
-    <ol>
-        <li>Compute each task's gradient on the shared parameters (one backward pass per task).</li>
-        <li>For each task <code>i</code>: for every other task <code>j</code> in random order, if the two gradients fight, cut the interfering part: subtract the part of this gradient that points along the other task's line.</li>
-        <li>Combine the edited gradients (sum or average) and hand the result to any optimizer: SGD, Adam, anything.</li>
-    </ol>
-    <pre><code class="language-python">import numpy as np
-def pcgrad_combine(grads):
-    # grads: list of per-task gradient vectors on the shared parameters
-    g = [x.copy() for x in grads]
-    for i in range(len(g)):
-        for j in np.random.permutation(len(g)):   # random order, fairness
-            if i != j and g[i] @ g[j] < 0:         # conflict detected
-                g[i] -= (g[i] @ g[j]) / (g[j] @ g[j]) * g[j]  # remove the interfering part
-    return sum(g)</code></pre>
-
-    
 <h2 id="tragic-triad">When the cut actually pays</h2>
     <p>
         Conflict alone is not fatal. It only turns destructive when three things come together:
@@ -947,24 +965,7 @@ def pcgrad_combine(grads):
     </p>
 
     
-<h2 id="paper-figure">Cutting each gradient's conflicting part</h2>
-    <p>
-        This is the paper's own illustration of the surgery, not a redraw. Panel (a) is the conflict;
-        (b) and (c) are the two cuts; (d) is a non-conflicting pair, left alone.
-    </p>
 
-<div class="demo">
-        <img src="figures/pcgrad-grads.png" alt="PCGrad paper figure: conflicting gradients and the projection surgery in four panels" style="display:block;width:100%;height:auto;border:1px solid #e1e4e8;border-radius:8px;">
-        <p class="pf-cap">
-            Rebuilt from Figure 2 of Yu et al. (NeurIPS 2020). <a href="https://arxiv.org/abs/2001.06782">arXiv:2001.06782</a>
-        </p>
-        <p class="pf-cap">
-            <span class="verbatim">Original caption: "Conflicting gradients and PCGrad. In (a), tasks i and j have conflicting gradient directions, which can lead to destructive interference. In (b) and (c), we illustrate the PCGrad algorithm in the case where gradients are conflicting. PCGrad projects task i's gradient onto the normal vector of task j's gradient, and vice versa. Non-conflicting task gradients (d) are not altered under PCGrad, allowing for constructive interaction."</span>
-            Figure extracted from the arXiv e-print source and shown with its original caption.
-        </p>
-    </div>
-
-<p>Surgery always cuts to zero: every conflicting pair is projected until nothing fights. But is zero the right target for every pair of tasks? That is <a href="gradvac.html">the GradVac page's question</a>.</p>
 
 
     <p>The two volume knobs and the two steering methods, side by side:</p>
@@ -980,6 +981,8 @@ def pcgrad_combine(grads):
             <tr><td><a href="mgda.html"><strong>MGDA</strong></a></td><td>What direction helps every task at once, and where does the run land on the Pareto frontier?</td></tr>
         </tbody>
     </table>
+
+<p>Surgery always cuts to zero: every conflicting pair is projected until nothing fights. But is zero the right target for every pair of tasks? That is <a href="gradvac.html">the GradVac page's question</a>.</p>
 
 <h2 id="references">References</h2>
 <ol class="brefs"><li>Yu, T., et al. (2020). Gradient Surgery for Multi-Task Learning. NeurIPS. arXiv:2001.06782.</li></ol>

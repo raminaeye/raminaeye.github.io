@@ -660,10 +660,9 @@
         <p class="cc-head">How to play</p>
         <ul>
           <li><strong>The point:</strong> Gradient descent walks the line onto the data one small step at a time, while the closed form teleports to the exact answer. Two routes, same destination.</li>
-          <li><strong>What you'll see:</strong> The blue prediction dots land on the gray ground-truth crosses in both panels while the cost curve falls; at the end the weights land on <code>[5, 2]</code> with the bias at <code>2</code>.</li>
-          <li class="tryit"><strong>Learning rate:</strong> Sets the step size. At <code>0.01</code> the dots crawl; at <code>1.0</code> they sprint; past <code>1.9</code> the diverged badge lights up while the dots bounce off the rails. The dashed line previews where the walk ends before anything moves.</li>
-          <li class="tryit"><strong>Iterations:</strong> How many gradient steps each run takes. At <code>50</code> steps with learning rate <code>0.01</code> it stalls halfway; at <code>400</code> it finishes the job: the dashed end-of-walk line stops short of the data at <code>50</code> and sits on it at <code>400</code>.</li>
-          <li class="tryit"><strong>Snap to closed form:</strong> Skips the walk and solves for the exact answer directly with one matrix inverse. The weights land on exactly <code>[5.0000, 2.0000]</code> with bias <code>2.0000</code> and the cost collapses to about <code>1e-30</code>.</li>
+          <li class="tryit"><strong>Learning rate:</strong> The step size. Tiny steps crawl, oversized steps bounce off the rails and the diverged badge lights up. The dashed line previews where the current settings would land, before anything moves.</li>
+          <li class="tryit"><strong>Iterations:</strong> How long each walk runs. Too few and the dashed line stops short of the data: the walk never arrives.</li>
+          <li class="tryit"><strong>Snap to closed form:</strong> Solves directly with one matrix inverse, no walking. Same destination, reached instantly.</li>
         </ul>
       </div>
     </div>
@@ -824,6 +823,15 @@
       function refreshPreview() {
         if (!S || S.diverged) { if (S) S.prev = null; return; }
         S.prev = simPreview(S.w1, S.w2, S.b, lrFromSlider(), S.iters);
+        /* Near the stability limit the walk oscillates instead of settling:
+           the weights stay bounded so the 1e7 tripwire never fires, but the
+           end cost lands far above the start. Drawing that as a dashed "end
+           of walk" line would show a nonsense line with no warning, so treat
+           it like a divergence and show the badge instead. */
+        if (S.prev && !S.prev.diverged && isFinite(S.prev.cost) &&
+            S.prev.cost > Math.max(1, S.costs[0]) * 4) {
+          S.prev.diverged = true;
+        }
       }
 
       /* ---- Play: 24 ticks, 2250ms each, live GD per tick ---- */
@@ -995,9 +1003,11 @@
           if (i === 0) cctx.moveTo(xx, yy2); else cctx.lineTo(xx, yy2);
         }
         cctx.stroke();
-        cctx.fillStyle = '#2c3e50'; cctx.textAlign = 'center';
+        /* title sits at the plot's top-right so it never collides with the
+           y-axis decade labels on narrow (mobile) canvases */
+        cctx.fillStyle = '#2c3e50'; cctx.textAlign = 'right';
         cctx.font = 'bold ' + FS + 'px sans-serif';
-        cctx.fillText('cost J (log scale)', (padL + CW - padR) / 2, 14 * SC);
+        cctx.fillText('cost J (log scale)', CW - padR, 14 * SC);
         cctx.font = FS + 'px sans-serif'; cctx.fillStyle = '#777';
         cctx.fillText('step', (padL + CW - padR) / 2, CH - 6 * SC);
         /* at-rest preview: dashed level the cost would settle at */
@@ -1029,7 +1039,15 @@
       }
       function fmtJ(v) {
         if (!isFinite(v)) return 'diverged';
+        if (v >= 1e6) return v.toExponential(2);
         return v >= 1e-4 ? v.toFixed(4) : v.toExponential(2);
+      }
+      function fmtW(v) {
+        /* weights can blow up while diverging; raw 16-digit numbers are noise */
+        if (!isFinite(v)) return 'diverged';
+        var a = Math.abs(v);
+        if (a >= 1e6 || (a > 0 && a < 1e-4)) return v.toExponential(2);
+        return v.toFixed(4);
       }
       function updateStats() {
         var h;
@@ -1039,8 +1057,8 @@
         } else {
           var tag = S.closed ? 'closed form' : ('step <strong>' + S.step + '</strong> / ' + S.iters);
           h = tag + ' &nbsp; J = <strong>' + fmtJ(S.costs[S.costs.length - 1]) + '</strong>' +
-              ' &nbsp; w = [<strong>' + S.w1.toFixed(4) + '</strong>, <strong>' + S.w2.toFixed(4) + '</strong>]' +
-              ' &nbsp; b = <strong>' + S.b.toFixed(4) + '</strong>';
+              ' &nbsp; w = [<strong>' + fmtW(S.w1) + '</strong>, <strong>' + fmtW(S.w2) + '</strong>]' +
+              ' &nbsp; b = <strong>' + fmtW(S.b) + '</strong>';
           if (S.prev && !S.timer) {
             if (S.prev.diverged) {
               h += ' &nbsp;|&nbsp; walk preview: <strong style="color:#c0392b">would diverge</strong>';
@@ -1049,8 +1067,8 @@
                  earned. At rest before any walk, only the dashed preview line
                  shows where it ends. */
               h += ' &nbsp;|&nbsp; walk preview: J = <strong>' + fmtJ(S.prev.cost) + '</strong>' +
-                   ' w = [<strong>' + S.prev.w1.toFixed(4) + '</strong>, <strong>' + S.prev.w2.toFixed(4) + '</strong>]' +
-                   ' b = <strong>' + S.prev.b.toFixed(4) + '</strong>';
+                   ' w = [<strong>' + fmtW(S.prev.w1) + '</strong>, <strong>' + fmtW(S.prev.w2) + '</strong>]' +
+                   ' b = <strong>' + fmtW(S.prev.b) + '</strong>';
             } else {
               h += ' &nbsp;|&nbsp; walk preview: see the dashed red line';
             }

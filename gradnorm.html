@@ -740,8 +740,8 @@
         <a class="tab-link" href="#gn-measurements">Measure loudness where the tasks fight</a>
         <a class="tab-link" href="#gn-thermostat">Tasks that are behind get a louder target</a>
         <a class="tab-link" href="#gn-loop">Four steps, repeated every batch</a>
-        <a class="tab-link" href="#gn-replay">Watch the weights rebalance themselves</a>
         <a class="tab-link" href="#gn-fig2">The quiet task catches up</a>
+        <a class="tab-link" href="#gn-replay">Watch the weights rebalance themselves</a>
         <a class="tab-link" href="#gn-when">When GradNorm helps and when it does not</a>
         <a class="tab-link" href="#references">References</a>
     </div>
@@ -766,26 +766,50 @@
 
     <p>Each task's loudness at each step: the length of the gradient of its weighted loss, measured at the last shared layer. The gradient of a weighted loss is just the weight times the gradient of the loss, so loudness is <em>knob times raw gradient length</em>. Turning the knob up makes the task louder by exactly that much. That is the lever GradNorm pulls. The average loudness across tasks is the reference volume everyone is compared against.</p>
 
+    <p>Measure how loud each task is right now: the size of its gradient flowing through the shared weights.</p>
+    <div class="math-display">$$G_w(i) = \|\nabla_W w_i \cdot L_i\|$$</div>
+    <p>Here <code>G<sub>w</sub>(i)</code> is task i's loudness, <code>w<sub>i</sub></code> is the task weight, <code>L<sub>i</sub></code> is task i's loss, <code>∇</code> is the gradient, <code>W</code> is the shared weights, <code>∥∥</code> is the norm, the length of, and <code>·</code> means times.</p>
+
     <h3>How much progress each task has made</h3>
 
     <p>Current loss over initial loss: unit-free progress. The division is the point: a depth loss near <code>800</code> and a classification loss near <code>2</code> cannot be compared directly, but "how much of my journey is left?" means the same thing for both. A small ratio means the task learned fast, hence the name <em>inverse training rate</em>.</p>
+
+    <p>Current loss over initial loss: unit-free progress, written as an equation:</p>
+    <div class="math-display">$$\tilde{L}_i(t) = \frac{L_i(t)}{L_i(0)}$$</div>
+    <p>Here <code>L̃<sub>i</sub></code> is task i's progress ratio, <code>L<sub>i</sub>(t)</code> is its current loss, and <code>L<sub>i</sub>(0)</code> is its initial loss. A small ratio means the task learned fast, which is why this is called the inverse training rate.</p>
 
     <h3>How each task's progress compares with the group</h3>
 
     <p>Each task's progress ratio divided by the group average. A value of <code>1</code> means on pace; <code>0.5</code> means ahead; <code>1.5</code> means behind and needing attention. The problem is tasks falling <em>out of sync</em>, and you only spot that by comparing each task to the group: if all tasks move at the same speed, every value stays at <code>1</code> and GradNorm does nothing. It only acts when tasks drift apart.</p>
 
+    <p>Each task's progress ratio divided by the group average, written as an equation:</p>
+    <div class="math-display">$$r_i(t) = \frac{\tilde{L}_i(t)}{\frac{1}{K} \sum_j \tilde{L}_j(t)}$$</div>
+    <p>Here <code>r<sub>i</sub></code> is how far behind task i is and <code>K</code> is the number of tasks. A value of <code>1</code> means on pace, <code>0.5</code> means ahead, and <code>1.5</code> means behind.</p>
+
 <h2 id="gn-thermostat">Tasks that are behind get a louder target</h2>
 
     <p>Each task gets a target loudness: the average loudness across tasks, boosted for whoever is behind. Two fixes in one rule. The average pulls everyone toward the same volume, curing the scale problem. The boost turns the volume up for tasks that are behind, curing the speed problem. A strength dial sets <em>how hard the boost pushes</em>.</p>
 
+    <p>Set each task's target loudness: start from the average loudness, then scale it up for tasks that are falling behind.</p>
+    <div class="math-display">$$T_i = \bar{G}_w \cdot [r_i]^{\alpha}$$</div>
+    <p>Here <code>T<sub>i</sub></code> is task i's target loudness, <code>Ḡ<sub>w</sub></code> is the mean loudness, <code>r<sub>i</sub></code> is how far behind task i is, as defined by the two ratio equations in the measurements section, and <code>α</code> is how strongly falling behind pulls the target up.</p>
+
     <p>Then a penalty: how far is each task's actual loudness from its target? Ordinary gradient descent on this penalty, but the things being adjusted are the <strong>knobs, not the network</strong>. Two details turn this from a guess into a thermostat:</p>
+
+    <p>Penalize the gap: add up how far each task's actual loudness is from its target. Minimizing this rebalances the tasks.</p>
+    <div class="math-display">$$L_{grad} = \sum_i \left| G_w(i) - \bar{G}_w \cdot [r_i]^{\alpha} \right|$$</div>
+    <p>Here <code>L<sub>grad</sub></code> is the rebalancing loss, <code>Σ<sub>i</sub></code> means add up over every task i, and <code>| |</code> is the absolute value, drop the sign.</p>
 
     <ol class="key-steps">
         <li><strong>Only the weights get updated</strong> (the network is held fixed for this step). Since loudness is knob times raw gradient length, raising a task's knob raises its loudness by the same factor: cheap, one small nudge per step.</li>
         <li><strong>The weights are rescaled to sum to <code>K</code> after every update.</strong> Without this, the penalty has a cheat: shrink all weights and every norm shrinks, so the penalty falls without anything being balanced. The fixed budget stops the cheat: one task can only get louder if another gets quieter, and the overall learning speed stays the same, so comparisons with baselines stay fair.</li>
     </ol>
 
-    <p>GradNorm is a <strong>thermostat, not a guess</strong>. Every step does four things: measure each task's loudness and progress, set target loudness levels, nudge the weights toward those targets, then clamp the total budget. Because it re-measures after every correction, no lucky initial weights are ever needed.</p>
+    <p>Keep the total weight budget fixed: the task weights must always sum to the same constant, so turning one up means turning another down.</p>
+    <div class="math-display">$$\sum_i w_i = \text{const}$$</div>
+    <p>Here <code>Σ<sub>i</sub> w<sub>i</sub> = const</code> is the fixed weight budget.</p>
+
+    <p>GradNorm is a <strong>thermostat, not a guess</strong>. Because it re-measures after every correction, no lucky initial weights are ever needed.</p>
 
     <pre><code class="language-python"># after the forward pass: losses = [L_1..L_K]; w = trainable task weights
 G      = [norm(grad(w[i] * losses[i], W)) for i in range(K)]  # loudness per task
@@ -800,6 +824,44 @@ w = w * K / sum(w)                    # fixed budget: one task up, another down<
 <h2 id="gn-loop">Four steps, repeated every batch</h2>
 
     <p>GradNorm runs as a loop every training step: measure, set targets, nudge the weights, renormalize, then measure again. Walk through one step below.</p>
+
+        <figure class="figure" style="margin:1rem 0;">
+      <svg viewBox="0 0 460 290" role="img" aria-label="The GradNorm loop: sense, compare, correct, renormalize, repeated every training step" style="width:100%;max-width:520px;height:auto;display:block;margin:0 auto;">
+        <defs>
+          <marker id="gnLoopArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0,0 L10,5 L0,10 z" fill="#7f8c8d"></path>
+          </marker>
+        </defs>
+        <line x1="215" y1="70" x2="245" y2="70" stroke="#7f8c8d" stroke-width="1.5" marker-end="url(#gnLoopArrow)"></line>
+        <line x1="390" y1="95" x2="390" y2="165" stroke="#7f8c8d" stroke-width="1.5" marker-end="url(#gnLoopArrow)"></line>
+        <line x1="350" y1="245" x2="215" y2="245" stroke="#7f8c8d" stroke-width="1.5" marker-end="url(#gnLoopArrow)"></line>
+        <line x1="70" y1="215" x2="70" y2="95" stroke="#7f8c8d" stroke-width="1.5" marker-end="url(#gnLoopArrow)"></line>
+        <text x="230" y="150" text-anchor="middle" fill="#6c757d" font-size="11">repeat every training step:</text>
+        <text x="230" y="166" text-anchor="middle" fill="#6c757d" font-size="11">the loop re-measures after every correction,</text>
+        <text x="230" y="182" text-anchor="middle" fill="#6c757d" font-size="11">so no lucky initial weights are needed</text>
+        <g>
+          <rect x="5" y="40" width="210" height="60" rx="12" fill="#8ab2d1" fill-opacity="0.22" stroke="#8ab2d1" stroke-width="1.5"></rect>
+          <text x="110" y="62" text-anchor="middle" fill="#2c3e50" font-size="13" font-weight="700">1 · SENSE</text>
+          <text x="110" y="82" text-anchor="middle" fill="#5d6d7e" font-size="10.5">how loud? how far along?</text>
+        </g>
+        <g>
+          <rect x="245" y="40" width="210" height="60" rx="12" fill="#c0924e" fill-opacity="0.22" stroke="#c0924e" stroke-width="1.5"></rect>
+          <text x="350" y="62" text-anchor="middle" fill="#2c3e50" font-size="13" font-weight="700">2 · COMPARE</text>
+          <text x="350" y="82" text-anchor="middle" fill="#5d6d7e" font-size="10.5">target = avg loudness × boost</text>
+        </g>
+        <g>
+          <rect x="245" y="190" width="210" height="60" rx="12" fill="#8ac1a0" fill-opacity="0.22" stroke="#8ac1a0" stroke-width="1.5"></rect>
+          <text x="350" y="212" text-anchor="middle" fill="#2c3e50" font-size="13" font-weight="700">3 · CORRECT</text>
+          <text x="350" y="232" text-anchor="middle" fill="#5d6d7e" font-size="10.5">nudge the weights</text>
+        </g>
+        <g>
+          <rect x="5" y="190" width="210" height="60" rx="12" fill="#c6a1ce" fill-opacity="0.22" stroke="#c6a1ce" stroke-width="1.5"></rect>
+          <text x="110" y="212" text-anchor="middle" fill="#2c3e50" font-size="13" font-weight="700">4 · RENORMALIZE</text>
+          <text x="110" y="232" text-anchor="middle" fill="#5d6d7e" font-size="10.5">weights sum to K, always</text>
+        </g>
+      </svg>
+      <figcaption class="caption">Every step does four things: measure each task's loudness and progress, set target loudness levels, nudge the weights toward those targets, then clamp the total budget. Station 1 measures each task's gradient norm (how loud is it?) and loss ratio (how far along is it?); station 2 sets the target, average loudness boosted for whichever task is behind; station 3 nudges the weights by gradient descent on the rebalancing loss; station 4 rescales so the weights sum to <code>K</code>.</figcaption>
+    </figure>
 
     <div class="demo" id="gsStep">
       <style>
@@ -883,9 +945,27 @@ w = w * K / sum(w)                    # fixed budget: one task up, another down<
       </div>
     </div>
 
+<h2 id="gn-fig2">The quiet task catches up</h2>
+
+    <p>The experiment: two toy systems, one with <code>2</code> tasks (top row) and one with <code>10</code> (bottom row), each task's loss multiplied by a different scale. Left column: the network diagrams with their loss scales. Middle column: each task's weight over training. Right column: task-normalized test loss, GradNorm in green against equal weights in blue. Read the middle column first: the small-scale tasks' weights rise while the big-scale tasks' fall, exactly the rebalancing the simulation below replays. Then the right column: the green curve finishes below the blue one in both rows. Equalizing loudness is the entire mechanism.</p>
+
+    <div class="demo" id="gnFigStatic">
+      <img src="figures/papers/gradnorm-fig2.png" alt="Figure 2 of the GradNorm paper: toy 2-task and 10-task systems with loss scale diagrams, adaptive weight traces, and task-normalized test loss curves" style="width:100%;max-width:640px;height:auto;display:block;border:1px solid #d5dbdb;border-radius:8px;background:#fff;margin:0 auto;">
+      <div class="cap-card" style="margin-top:1rem;">
+        <strong>What this shows</strong>
+        <ul>
+          <li>In the middle column: in the <code>2</code>-task toy the easy task's weight rises toward <code>1.9</code> while the hard task's falls toward <code>0.1</code>; in the <code>10</code>-task toy every small-scale task's weight rises the same way.</li>
+        </ul>
+      </div>
+      <p class="caption">Rebuilt from Figure 2 of Chen et al. (ICML 2018). <a href="https://arxiv.org/abs/1711.02257">arXiv:1711.02257</a></p>
+      <p class="caption">Figure 2, verbatim caption: "<strong>Gradient Normalization on a toy <code>2</code>-task (top) and <code>10</code>-task (bottom) system.</strong> Diagrams of the network structure with loss scales are on the left, traces of w<sub>i</sub>(t) during training in the middle, and task-normalized test loss curves on the right. &alpha;=<code>0.12</code> for all runs."</p>
+    </div>
+
 <h2 id="gn-replay">Watch the weights rebalance themselves</h2>
 
-    <p>One shared trunk, two tasks, the second starting much louder. Three runs race in both panels: <em>each task trained alone</em> (gray, the best it could hope for), <em>both with fixed equal weights</em> (red), and <em>both with GradNorm</em> (purple).</p>
+    <p>One shared trunk, two tasks, the second starting much louder.</p>
+
+        <p>The gap starts at <code>300</code>:<code>1</code> with the default scale, in both runs. GradNorm rebalances the weights early, and that is what frees the quiet task: by step <code>100</code> its loss is <code>0.653</code> with GradNorm while it is still stalled at <code>0.979</code> under equal weights.</p>
 
     <div class="demo" id="gnSim">
       <div class="demo-controls">
@@ -918,26 +998,8 @@ w = w * K / sum(w)                    # fixed budget: one task up, another down<
       </div>
     </div>
 
-    <p>The gap starts at <code>300</code>:<code>1</code> with the default scale, in both runs. GradNorm rebalances the weights early, and that is what frees the quiet task: by step <code>100</code> its loss is <code>0.653</code> with GradNorm while it is still stalled at <code>0.979</code> under equal weights.</p>
 
-    <h2 id="gn-fig2">The quiet task catches up</h2>
-
-    <p>The experiment: two toy systems, one with <code>2</code> tasks (top row) and one with <code>10</code> (bottom row), each task's loss multiplied by a different scale. Left column: the network diagrams with their loss scales. Middle column: each task's weight over training. Right column: task-normalized test loss, GradNorm in green against equal weights in blue. Read the middle column first: the small-scale tasks' weights rise while the big-scale tasks' fall, exactly the rebalancing the tools above replay. Then the right column: the green curve finishes below the blue one in both rows. Equalizing loudness is the entire mechanism.</p>
-
-    <div class="demo" id="gnFigStatic">
-      <img src="figures/papers/gradnorm-fig2.png" alt="Figure 2 of the GradNorm paper: toy 2-task and 10-task systems with loss scale diagrams, adaptive weight traces, and task-normalized test loss curves" style="width:100%;max-width:640px;height:auto;display:block;border:1px solid #d5dbdb;border-radius:8px;background:#fff;margin:0 auto;">
-      <div class="cap-card" style="margin-top:1rem;">
-        <strong>What this shows</strong>
-        <ul>
-          <li><strong>The point:</strong> this is the experiment the method was tested on. The middle column is the mechanism: small-scale tasks' weights rise while big-scale tasks' fall. The right column is the payoff: GradNorm's green curve finishes below equal weights' blue curve in both rows.</li>
-          <li>In the middle column: in the <code>2</code>-task toy the easy task's weight rises toward <code>1.9</code> while the hard task's falls toward <code>0.1</code>; in the <code>10</code>-task toy every small-scale task's weight rises the same way.</li>
-        </ul>
-      </div>
-      <p class="caption">Rebuilt from Figure 2 of Chen et al. (ICML 2018). <a href="https://arxiv.org/abs/1711.02257">arXiv:1711.02257</a></p>
-      <p class="caption">Figure 2, verbatim caption: "<strong>Gradient Normalization on a toy <code>2</code>-task (top) and <code>10</code>-task (bottom) system.</strong> Diagrams of the network structure with loss scales are on the left, traces of w<sub>i</sub>(t) during training in the middle, and task-normalized test loss curves on the right. &alpha;=<code>0.12</code> for all runs."</p>
-    </div>
-
-<h2 id="gn-when">When GradNorm helps and when it does not</h2>
+    <h2 id="gn-when">When GradNorm helps and when it does not</h2>
 
     <p>Two knobs. <code>α</code> is the strength dial on the behind-task boost: at <code>0</code> the progress meter switches off and only scale gets fixed; Start at <code>0.5</code> for similar tasks, <code>1</code> to <code>1.5</code> for dissimilar ones. <code>λ_w</code> is the learning rate of the weights themselves: <code>10</code> to <code>100</code>&times; smaller than the network's rate. Loudness is measured at <code>W</code>, the last shared layer, by default.</p>
 

@@ -631,7 +631,7 @@
       <a class="tab-chip" href="#lora-shrink-the-update-not-the-model">LoRA: shrink the update, not the model</a>
       <a class="tab-chip" href="#compacter-cheaper-matrices-inside-the-adapter">Compacter: cheaper matrices inside the adapter</a>
       <a class="tab-chip" href="#what-happens-on-a-real-task">Half a point of accuracy from 0.27% of the parameters</a>
-      <a class="tab-chip" href="#caveats">Adapter limitations</a>
+      <a class="tab-chip" href="#caveats">Adapter limitations: latency, rank tuning, and overfitting</a>
       <a class="tab-chip" href="#other-ways-to-shrink-the-update">Other ways to shrink the update</a>
       <a class="tab-chip" href="#what-is-next">Next: quantize the frozen 98%</a>
       <a class="tab-chip" href="#references">References</a>
@@ -682,12 +682,12 @@
         border-left:3px solid transparent;line-height:1.7}
 
       .eq-line.eq-active{opacity:1;border-left-color:#2c3e50}
-      .eq-why{display:none;font-size:.85rem;color:#475569;padding:.15rem .35rem .4rem;line-height:1.55}
-      .eq-why.eq-active{display:block}
-      .eq-card.eq-stepped .eq-line{display:none}
-      .eq-card.eq-stepped .eq-line.eq-active{display:block;opacity:1}
-      .eq-card.eq-stepped .eq-legend .eq-item{display:none}
-      .eq-card.eq-stepped .eq-legend .eq-item.eq-active{display:block}
+      .eq-why{display:none;visibility:hidden;font-size:.85rem;color:#475569;padding:.15rem .35rem .4rem;line-height:1.55}
+      .eq-why.eq-active{display:block;visibility:visible}
+      .eq-card.eq-stepped .eq-line{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-line.eq-active{display:block;opacity:1;visibility:visible}
+      .eq-card.eq-stepped .eq-legend .eq-item{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-legend .eq-item.eq-active{display:block;visibility:visible}
 
       .eqt{font-weight:600;padding:0 .1em;border-radius:3px}
 
@@ -716,7 +716,7 @@
         <div class="eq-why" data-eqline="0">Squeeze the input down to a small bottleneck, bend it with a nonlinearity, then lift it back up to full size.</div>
         <div class="eq-line" data-eqline="1"><span class="eqt" data-k="y" style="color:#2a7fbf">y</span> = <span class="eqt" data-k="x" style="color:#2a7fbf">x</span> + <span class="eqt" data-k="h" style="color:#2c3e50">h</span></div>
         <div class="eq-why" data-eqline="1">Add the adapter's output to the original input, so the frozen model stays intact and the adapter only contributes a correction.</div>
-        <div class="eq-legend"><span class="eq-item" data-lines="0,1"><span class="eq-sw" style="background:#2a7fbf"></span><code>x</code> the frozen input, unt</span><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#b45309"></span><code>W<sub>down</sub></code> the squeeze: <code>768</code> numbers down to <code>64<</span><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#5d6d7e"></span><code>σ</code> the ReL</span><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#b45309"></span><code>W<sub>up</sub></code> the lift: <code>64</code> numbers back to <code>768<</span><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#2c3e50"></span><code>h</code> the learned</span><span class="eq-item" data-lines="1"><span class="eq-sw" style="background:#2a7fbf"></span><code>y</code> the output: frozen input plus the</span><span class="eq-item" data-lines="0"><code>·</code> times: s</span></div>
+        <div class="eq-legend"><span class="eq-item" data-lines="0,1"><span class="eq-sw" style="background:#2a7fbf"></span><code>x</code> the frozen input, untouched</span><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#b45309"></span><code>W<sub>down</sub></code> the squeeze: <code>768</code> numbers down to <code>64</code></span><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#5d6d7e"></span><code>σ</code> the ReLU bend</span><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#b45309"></span><code>W<sub>up</sub></code> the lift: <code>64</code> numbers back to <code>768</code></span><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#2c3e50"></span><code>h</code> the learned nudge</span><span class="eq-item" data-lines="1"><span class="eq-sw" style="background:#2a7fbf"></span><code>y</code> the output: frozen input plus the nudge</span><span class="eq-item" data-lines="0"><code>·</code> times: scaling</span></div>
       </div>
       <div class="stepflow" id="stepFlow">
         <div class="sf-stage wide" data-step="1" data-eqk="x">
@@ -932,9 +932,9 @@
         <ul>
           <li><strong><code>1</code>.</strong> Input goes in at the bottom, both paths feed the plus at the top.</li>
           <li><strong><code>2</code>.</strong> The blue box on the left is the pretrained weight <code>W</code>: input <code>x</code> feeds straight through it, exactly as it did before fine-tuning.</li>
-          <li><strong><code>3</code>.</strong> The lower orange slab is <code>A</code>, the down-projection: it squeezes the input into the bottleneck. It starts from a random Gaussian, which would be a problem except <code>B</code> fixes it.</li>
+          <li><strong><code>3</code>.</strong> The lower orange slab is <code>A</code>, the down-projection: it squeezes the input into the bottleneck. It starts from a random Gaussian, the <code>N(0, σ²)</code> written on the slab: each entry drawn from a bell curve centered at <code>0</code> with spread <code>σ</code>. That <code>σ</code> is the spread of the draw, a different <code>σ</code> from the adapter card above, where <code>σ</code> is the ReLU bend. The random start would be a problem except <code>B</code> fixes it.</li>
           <li><strong><code>4</code>.</strong> The upper orange slab is <code>B</code>, the up-projection, initialized to exact zeros: so at step one the side path contributes nothing and the model behaves exactly like the pretrained model.</li>
-          <li><strong><code>5</code>.</strong> The <code>r</code> brace between the slabs is the rank, the entire budget of new parameters: <code>r</code> times (<code>d</code> + <code>k</code>) numbers against <code>d</code> times <code>k</code> in the full weight.</li>
+          <li><strong><code>5</code>.</strong> The <code>r</code> brace between the slabs is the rank, the entire budget of new parameters: <code>r</code> times (<code>d</code> + <code>k</code>) numbers against <code>d</code> times <code>k</code> in the full weight, where <code>d</code> is the size of the input and <code>k</code> the size of the output.</li>
           <li><strong><code>6</code>.</strong> The plus at the top is the merge: both paths adding coordinate by coordinate.</li>
           <li><strong><code>7</code>.</strong> Training wakes the side path up from zero: <code>B</code> leaves zero, the loss falls as it learns, and before serving you fold <code>BA</code> into <code>W</code> once, so inference runs like a normally fine-tuned model with no extra latency.</li>
         </ul>
@@ -1020,7 +1020,7 @@
         <strong>What this shows</strong>
         <ul>
           <li><strong>The point:</strong> Rank is a dial, not a magic number. The easy task is done at <code>r</code> = <code>4</code> and never looks back, the hard task keeps buying accuracy with every notch, and the param bill for each notch is written right under the hallway.</li>
-          <li><strong>What you'll see:</strong> As <code>r</code> grows, the two accuracy curves separate: the easy-task curve flatlines near full fine-tuning while the hard-task curve keeps climbing, and the orange hallway widens with rank.</li>
+          <li><strong>What you'll see:</strong> Rank is a dial: the easy task is already done at <code>r = 4</code>, and the hard task keeps buying accuracy with each higher rank.</li>
           <li><strong>Rank sweep:</strong> As rank grows from <code>1</code> to <code>64</code>, the easy and hard curves separate: the easy curve flatlines while the hard curve keeps climbing.</li>
         </ul>
       </div>

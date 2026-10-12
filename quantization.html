@@ -22,6 +22,7 @@
     h2 { font-size: 2em; border-bottom: 1px solid #bdc3c7; padding-bottom: 0.2em;}
     h3 { font-size: 1.5em; }
     h4 { font-size: 1.2em; color: #555;}
+    h3.subhead-sm { font-size: 1.2em; color: #555; }
 
     /* Shared site nav (matches index.html topnav) */
     body { padding-top: calc(64px + 1.5rem); }
@@ -558,12 +559,12 @@
           border-left:3px solid transparent;line-height:1.7}
 
         .eq-line.eq-active{opacity:1;border-left-color:#2c3e50}
-      .eq-why{display:none;font-size:.85rem;color:#475569;padding:.15rem .35rem .4rem;line-height:1.55}
-      .eq-why.eq-active{display:block}
-      .eq-card.eq-stepped .eq-line{display:none}
-      .eq-card.eq-stepped .eq-line.eq-active{display:block;opacity:1}
-      .eq-card.eq-stepped .eq-legend .eq-item{display:none}
-      .eq-card.eq-stepped .eq-legend .eq-item.eq-active{display:block}
+      .eq-why{display:none;visibility:hidden;font-size:.85rem;color:#475569;padding:.15rem .35rem .4rem;line-height:1.55}
+      .eq-why.eq-active{display:block;visibility:visible}
+      .eq-card.eq-stepped .eq-line{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-line.eq-active{display:block;opacity:1;visibility:visible}
+      .eq-card.eq-stepped .eq-legend .eq-item{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-legend .eq-item.eq-active{display:block;visibility:visible}
 
         .eqt{font-weight:600;padding:0 .1em;border-radius:3px}
 
@@ -649,18 +650,18 @@
      <a class="tab-chip" href="#static-quantization">Static quantization: calibrate first, run everything in int8</a>
      <a class="tab-chip" href="#histogram-observers">MinMax gets clobbered by outliers: use histogram observers</a>
      <a class="tab-chip" href="#a-real-histogram-from-a-real-model">A real histogram from a real MNIST model</a>
-     <a class="tab-chip" href="#where-should-the-range-end">The clipping range</a>
-     <a class="tab-chip" href="#quick-refresher-scale-and-zero-point">Scale and zero-point</a>
+     <a class="tab-chip" href="#where-should-the-range-end">The clipping range decides the whole error tradeoff</a>
+     <a class="tab-chip" href="#quick-refresher-scale-and-zero-point">Scale and zero-point set the grid</a>
      <a class="tab-chip" href="#quantize-one-tensor">Quantize one tensor, step by step</a>
      <a class="tab-chip" href="#calibration-matters">Your quantization is only as good as your calibration data</a>
-     <a class="tab-chip" href="#be-smart-about-quant-boundaries">Quant boundaries</a>
+     <a class="tab-chip" href="#be-smart-about-quant-boundaries">Float-int boundaries are expensive, so stay quantized</a>
      <a class="tab-chip" href="#visualize-with-fx">See what quantization did to your model with FX</a>
-     <a class="tab-chip" href="#ptq-example-cnn-with-manual-observers">PTQ example</a>
-     <a class="tab-chip" href="#quantization-aware-training-qat">QAT</a>
-     <a class="tab-chip" href="#qat-training-fakequantize-details">FakeQuantize details</a>
-     <a class="tab-chip" href="#quantization-bugs">Quantization bugs</a>
-     <a class="tab-chip" href="#how-do-i-trace-these-bugs">Debugging recipes</a>
-     <a class="tab-chip" href="#wrapping-up">The checklist</a>
+     <a class="tab-chip" href="#ptq-example-cnn-with-manual-observers">Post-training quantization on a CNN, with manual observers</a>
+     <a class="tab-chip" href="#quantization-aware-training-qat">Quantization-Aware Training (QAT)</a>
+     <a class="tab-chip" href="#qat-training-fakequantize-details">Warm up the observers, then freeze the quantization noise</a>
+     <a class="tab-chip" href="#quantization-bugs">When quantization breaks: what to check first</a>
+     <a class="tab-chip" href="#how-do-i-trace-these-bugs">When quantized accuracy drops: print, plot, and disable layers</a>
+     <a class="tab-chip" href="#wrapping-up">The quantization checklist</a>
      <a class="tab-chip" href="#references">References</a>
    </div>
 
@@ -857,7 +858,7 @@ model.qconfig = qconfig_hist
          <strong>How to play</strong>
          <ul>
            <li><strong>The point:</strong> One loud weight sets the quantization scale for all <code>288</code> weights, so the quiet ones get crushed into a handful of bins. Removing that one weight from the scale shrinks the scale and drops the MSE.</li>
-           <li><strong>What you'll see:</strong> The <code>0.427</code> weight is removed from the scale: the x-axis covers the outlier-free range, the histogram becomes twice as many narrower bars across the same width with the orange quantized outline around them, the scale readout shrinks, and the MSE readout falls. Then the weight comes back and the verdict line names the culprit.</li>
+           <li><strong>What you'll see:</strong> One <code>0.427</code> outlier weight sets the scale for all <code>288</code> weights and crushes the rest into few bins; removing it from the scale cuts the MSE.</li>
            <li><strong>Filter (<code>0</code> to <code>31</code>):</strong> Picks which filter's weights get red triangles on the histogram. At filter <code>15</code>, the ticked one, the red dashed line sits on the <code>0.427</code> weight at the far edge that sets the scale.</li>
            <li>The exclude beat: the scale readout shrinks and the MSE falls with it.</li>
          </ul>
@@ -905,7 +906,7 @@ model.qconfig = qconfig_hist
          <strong>How to play</strong>
          <ul>
            <li><strong>The point:</strong> Picking the clipping range is a trade: too tight and outliers get beheaded (clipping error), too wide and the bins get fat for everyone (rounding error). The MSE-optimal range sits in the valley between and beats min-max at <code>4</code> bits.</li>
-           <li><strong>What you'll see:</strong> the range moves from tight around the bulk toward the data extremes, then to the green MSE-optimal marker. The orange dot sits on the dark total-error curve in the valley while clipping error falls and rounding error climbs.</li>
+           <li><strong>What you'll see:</strong> The best clipping range balances clipping error against rounding error, and the MSE optimal range beats min-max at <code>4</code> bits.</li>
            <li><strong>Min-max:</strong> snaps the range to the data extremes (widest, most rounding error); <strong>MSE-optimal:</strong> grid-searches the range that minimizes total error (the valley). The orange dot lands in different spots on the curve for each.</li>
            <li><strong>Red lines:</strong> the qmin/qmax handles set the range by hand; the error readouts and the orange dot update live as you trade clipping error against rounding error.</li>
          </ul>
@@ -1600,7 +1601,7 @@ model.qconfig = qconfig_hist
    </script>
 
    <section>
-     <h2 id="quick-refresher-scale-and-zero-point">Quick Refresher: Scale and Zero-Point</h2>
+     <h2 id="quick-refresher-scale-and-zero-point">Scale and zero-point set the grid</h2>
      <p>When you quantize a float, the recipe is two steps: squeeze each value onto the integer grid, then map it back. Dividing by the scale shrinks the float range down to the integer grid, rounding snaps each value to the nearest integer, and the zero-point shifts the grid so float zero lands exactly on an integer.</p>
      
      <p>To dequantize, run it backward: undo the zero-point shift, then multiply back up by the scale.</p>
@@ -1678,7 +1679,7 @@ model.qconfig = qconfig_hist
          <strong>How to play</strong>
          <ul>
            <li><strong>The point:</strong> Every bit you drop doubles the step size and costs about <code>6 dB</code> of SNR. One fixed sample, the <code>0.37V</code> line, shows you exactly what each lost bit costs in rounding error.</li>
-           <li><strong>What you'll see:</strong> The bins merge in pairs one bit at a time, <code>8</code> down to <code>2</code>. The <code>0.37V</code> sample sits at the nearest bin center, the red error arrow under it grows, and the SNR bar goes from green to orange.</li>
+           <li><strong>What you'll see:</strong> Each dropped bit doubles the step size and costs about <code>6</code> dB of SNR, with the fixed <code>0.37V</code> sample carrying a larger rounding error at <code>2</code> bits than at <code>8</code> bits.</li>
            <li><strong>Bit-width N (<code>2</code> to <code>8</code>):</strong> the bins, the LSB readout, and the error arrow change together.</li>
          </ul>
        </div>
@@ -1901,7 +1902,7 @@ model.qconfig = qconfig_hist
         <div class="eq-why" data-eqline="2">Snap back to float: reverse the mapping to see what value the bucket actually represents.</div>
          <div class="eq-line" data-eqline="3"><span class="eqt" data-k="e" style="color:#c0392b">e</span> = <span class="eqt" data-k="x" style="color:#2a7fbf">x</span>&#8722;<span class="eqt" data-k="xhat" style="color:#d35400">x&#770;</span></div>
         <div class="eq-why" data-eqline="3">Measure the damage: the gap between the original float and its snapped-back version is the rounding error.</div>
-         <div class="eq-legend"><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#8e44ad"></span><code>min</code>, <code>max</code> the tensor's</span><span class="eq-item" data-lines="0,1"><span class="eq-sw" style="background:#2a7fbf"></span><code>x</code> a float; <code>s</code> the scale: one bucket's</span><span class="eq-item" data-lines="1,2"><span class="eq-sw" style="background:#d35400"></span><code>x<sub>q</sub></code> the bucket index; <code>x̂</code> the snapped-back</span><span class="eq-item" data-lines="1,2"><span class="eq-sw" style="background:#2c3e50"></span><code>z</code> the zero point; <code>255</code> the bucket</span><span class="eq-item" data-lines="3"><span class="eq-sw" style="background:#c0392b"></span><code>e</code> the rounding</span><span class="eq-item" data-lines="1"><code>round</code> snap to the nearest </span><span class="eq-item" data-lines="0,2"><code>·</code> times: s</span></div>
+         <div class="eq-legend"><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#8e44ad"></span><code>min</code>, <code>max</code> the tensor's range</span><span class="eq-item" data-lines="0,1"><span class="eq-sw" style="background:#2a7fbf"></span><code>x</code> a float; <code>s</code> the scale: one bucket's width</span><span class="eq-item" data-lines="1,2"><span class="eq-sw" style="background:#d35400"></span><code>x<sub>q</sub></code> the bucket index; <code>x̂</code> the snapped-back float</span><span class="eq-item" data-lines="1,2"><span class="eq-sw" style="background:#2c3e50"></span><code>z</code> the zero point; <code>255</code> the bucket count</span><span class="eq-item" data-lines="3"><span class="eq-sw" style="background:#c0392b"></span><code>e</code> the rounding error</span><span class="eq-item" data-lines="1"><code>round</code> snap to the nearest bucket</span><span class="eq-item" data-lines="0,2"><code>·</code> times: scaling</span></div>
        </div>
        <div class="qsw-controls">
          <button type="button" class="play-btn" id="qswPrev">Prev</button>
@@ -2110,7 +2111,7 @@ qconfig_dict = {"": torch.quantization.get_default_qconfig('fbgemm')}
    </section>
 
     <section>
-        <h2 id="ptq-example-cnn-with-manual-observers">PTQ Example: CNN with Manual Observers</h2>
+        <h2 id="ptq-example-cnn-with-manual-observers">Post-training quantization on a CNN, with manual observers</h2>
         <p>Let me walk through a concrete PTQ example on a CNN, since this is the part I always had to look up. We manually add <code>PerChannelMinMaxObserver</code> for weights and <code>MinMaxObserver</code> for activation.</p>
         <pre><code class="language-python">
 class ObserverCNN(nn.Module):
@@ -2178,12 +2179,12 @@ with torch.no_grad():
         </table>
         </div>
         <p><code>calculate_qparams()</code> is a method used by observers in PyTorch to compute scale and zero-point. That's the observer's job to begin with.</p>
-                <h4>For Symmetric Quantization:</h4>
+                <h3 class="subhead-sm">For Symmetric Quantization:</h3>
         <ul>
             <li>The scale is the largest absolute value divided by <code>127</code> (or <code>128</code>)</li>
             <li>The zero-point is <code>0</code></li>
         </ul>
-        <h4>For Asymmetric Quantization:</h4>
+        <h3 class="subhead-sm">For Asymmetric Quantization:</h3>
         <ul>
             <li>The scale is the value range divided by the integer range</li>
             <li>The zero-point is rounded to the nearest integer and clamped inside the integer range</li>
@@ -2282,7 +2283,7 @@ else:
     </section>
 
     <section>
-        <h2 id="how-do-i-trace-these-bugs">Debugging recipes: print, plot, and disable layers</h2>
+        <h2 id="how-do-i-trace-these-bugs">When quantized accuracy drops: print, plot, and disable layers</h2>
         
         <h3>Print quantization parameters</h3>
         <pre><code class="language-python">
@@ -2377,7 +2378,7 @@ plt.show()
     </section>
 
     <section>
-        <h2 id="wrapping-up">Recap: the quantization checklist</h2>
+        <h2 id="wrapping-up">The quantization checklist</h2>
         <ul>
             <li>Dynamic quantization is your fast win on CPU, LSTMs, and fully connected models.</li>
             <li>Static quantization is where the real speedups live, especially for CNNs and edge deployment.</li>

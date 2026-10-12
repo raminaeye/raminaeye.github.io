@@ -827,9 +827,9 @@
         <a class="tab-link" href="#measured">First, measure what the gradients actually do</a>
         <a class="tab-link" href="#own-target">Each pair gets its own target</a>
         <a class="tab-link" href="#one-step">Walk through one GradVac step</a>
+        <a class="tab-link" href="#paper-figure-gv">GradVac works where PCGrad sits out</a>
         <a class="tab-link" href="#feel-the-nudge">GradVac nudges gradients back to their targets</a>
         <a class="tab-link" href="#does-it-pay">Restoring historical targets beats forcing zero on every language</a>
-        <a class="tab-link" href="#paper-figure-gv">GradVac works where PCGrad sits out</a>
         <a class="tab-link" href="#practical">When GradVac helps and when PCGrad is enough</a>
         <a class="tab-link" href="#references">References</a>
     </div>
@@ -893,6 +893,9 @@
         pair's target only a small fraction of the way toward the newly measured cosine, about one percent,
         so one noisy batch cannot yank it around. That target is the "normal" the pair is held to.
     </p>
+    <p>The running target update, written as an equation:</p>
+    <div class="math-display">$$\hat{\varphi}_{ij}(t) = (1-\beta) \cdot \hat{\varphi}_{ij}(t-1) + \beta \cdot \varphi_{ij}(t)$$</div>
+    <p>Here <code>φ̂<sub>ij</sub></code> is the pair's running target, <code>φ<sub>ij</sub>(t)</code> is this batch's measured cosine for the pair, and <code>β</code> is the averaging speed. Keep the averaging speed slow (<code>0.01</code> worked best).</p>
     <p>
         Whenever the current cosine dips below this target, GradVac nudges one task's gradient toward the
         other's by mixing in a little of the other gradient, with the dose solved so the new cosine lands
@@ -907,10 +910,61 @@
         other target is the vaccine.</em>
     </p>
 
+    <p>Check whether the two tasks agree less than their healthy target: if their cosine similarity falls below it, they need an edit.</p>
+    <div class="math-display">$$\cos(g_i, g_j) < \varphi_{ij}$$</div>
+    <p>Nudge task i's gradient toward task j, just enough to bring their agreement back up to the target level.</p>
+    <div class="math-display">$$g_i := g_i - \frac{(\cos-\varphi)}{(1-\varphi)} \cdot \frac{\|g_i\|}{\|g_j\|} \cdot g_j$$</div>
+    <p>Add the edited gradient to task j's untouched gradient: this is the final combined update direction.</p>
+    <div class="math-display">$$g_i^{edited} + g_j$$</div>
+    <p>Here <code>g<sub>i</sub></code> is task i's gradient, <code>g<sub>j</sub></code> is task j's gradient, <code>cos(g<sub>i</sub>, g<sub>j</sub>)</code> is how aligned the two gradients are, <code>φ<sub>ij</sub></code> is the target alignment, the <code>φ̂<sub>ij</sub></code> of the running target equation, per pair and per layer group, <code>g<sub>i</sub><sup>edited</sup></code> is task i's gradient after the edit, <code>∥g<sub>i</sub>∥</code> and <code>∥g<sub>j</sub>∥</code> are the gradient lengths, <code>·</code> means times, <code>&lt;</code> means less than, and <code>:=</code> means becomes, updated to.</p>
+
 <h2 id="one-step">Walk through one GradVac step</h2>
     <p>
         One GradVac training step on a single pair, slowed to five steps.
     </p>
+
+<pre><code class="language-python"># grads = [g_1..g_K]; target[i,j] = running target cosine, init 0
+for i, j in pairs:
+    cos_ij = grads[i] @ grads[j] / (norm(grads[i]) * norm(grads[j]))
+    target[i,j] = (1 - beta) * target[i,j] + beta * cos_ij  # slow running target
+    if cos_ij &lt; target[i,j]:                # fighting below their normal?
+        a = solve_for_cosine(grads[i], grads[j], target[i,j])  # restoring blend
+        grads[i] = grads[i] + a * grads[j]  # nudge, not a full cut
+d = sum(grads)                              # combine the edited gradients</code></pre>
+
+<h2 id="paper-figure-gv">GradVac works where PCGrad sits out</h2>
+
+    <p>Two cases, side by side. Case (a) is a pair that is really fighting, negative cosine. Case (b) is a pair that agrees, positive cosine, but has sagged below its healthy level.</p>
+
+
+<div class="demo" id="gvFigStatic">
+      <h3 style="margin-top: 0;">PCGrad vs GradVac on fighting and agreeing pairs</h3>
+      <div class="gv-fig-pair">
+      <div>
+      <img src="figures/papers/gradvac-fig5a.png" alt="Figure 5 case a of the GradVac paper: PCGrad and GradVac on negative gradient similarity" style="width:100%;height:auto;display:block;background:#fff;border:1px solid #bdc3c7;border-radius:4px;">
+      <p class="caption">Case (a): negative similarity. Left is PCGrad, right is GradVac.</p>
+      </div>
+      <div>
+      <img src="figures/papers/gradvac-fig5b.png" alt="Figure 5 case b of the GradVac paper: PCGrad and GradVac on positive gradient similarity" style="width:100%;height:auto;display:block;background:#fff;border:1px solid #bdc3c7;border-radius:4px;">
+      <p class="caption">Case (b): positive similarity. Left is PCGrad, right is GradVac.</p>
+      </div>
+      </div>
+      <div class="cap-card"><strong>How to read it</strong>
+        <ul>
+          <li><strong>The point:</strong> Figure 5 shows the two methods on the same two cases: both act on the fighting pair in (a), but only GradVac acts on the sagging pair in (b).</li>
+          <li><strong>What you'll see:</strong> GradVac acts on both fighting pairs with negative similarity and agreeing pairs whose positive similarity has sagged below target, where PCGrad acts only on the first.</li>
+          <li><strong>(a) left, PCGrad:</strong> the cosine is negative, so PCGrad detects the conflict and projects one gradient onto the normal plane of the other. Surgery works here: the pair lands at exactly zero.</li>
+          <li><strong>(a) right, GradVac:</strong> same fight, but GradVac restores the pair to its own target, not to zero. Both methods are effective on negative similarity, but only GradVac can use a different target for a different pair.</li>
+          <li><strong>(b) left, PCGrad:</strong> the cosine is positive, so PCGrad's alarm never goes off and g_i stays untouched. It cannot notice that two friends have started cooperating less than they used to.</li>
+          <li><strong>(b) right, GradVac:</strong> the pair has sagged below its healthy target, so GradVac nudges it back up. The vaccine works before the fight, on positive cosines that PCGrad cannot see.</li>
+        </ul>
+      </div>
+      <p class="caption">Rebuilt from Figure 5 of Wang et al. (ICLR 2021). <a href="https://arxiv.org/abs/2010.05874">arXiv:2010.05874</a></p>
+      <p class="caption">Figure 5, verbatim caption: "Comparing PCGrad (left) with GradVac (right) in two cases. (a): For negative similarity, both methods are effective but GradVac can utilize adaptive objectives between different tasks. (b): For positive similarity, only GradVac is active while PCGrad stays "idle"."</p>
+    </div>
+
+    
+    
 
 <div class="demo" id="wvDemo">
       <div class="demo-controls">
@@ -1007,7 +1061,7 @@
       <div class="honest-note"><strong>Honest labels.</strong> One pair, 2D toy. The real loop runs this on every pair in every layer group.</div>
       <div class="cap-card"><strong>What this shows</strong>
         <ul>
-          <li><strong>The point:</strong> one GradVac training step on a single pair, slowed to five steps. The steps follow the Python block below in order: measure the cosine, update the target, check the pair, nudge it, step.</li>
+          <li><strong>The point:</strong> one GradVac training step on a single pair, slowed to five steps. The steps follow the Python block above in order: measure the cosine, update the target, check the pair, nudge it, step.</li>
           <li><strong>Arrows:</strong> the dark arrow is <code>g1</code>, the blue arrow is <code>g2</code>, and the gray arc is the angle between them. The amber dashed outline marks what the current step is about.</li>
           <li><strong>The target strip:</strong> the flat gray line is the pair's running target over recent batches; the gray dots are past batches; the amber dot is the updated target after this batch, landing almost on the line because one batch barely moves the average.</li>
           <li><strong>The check axis:</strong> the dashed amber line is the updated target; the solid blue bar is this batch's cosine; the amber band between them is the sag.</li>
@@ -1017,16 +1071,10 @@
       </div>
     </div>
 
-<pre><code class="language-python"># grads = [g_1..g_K]; target[i,j] = running target cosine, init 0
-for i, j in pairs:
-    cos_ij = grads[i] @ grads[j] / (norm(grads[i]) * norm(grads[j]))
-    target[i,j] = (1 - beta) * target[i,j] + beta * cos_ij  # slow running target
-    if cos_ij &lt; target[i,j]:                # fighting below their normal?
-        a = solve_for_cosine(grads[i], grads[j], target[i,j])  # restoring blend
-        grads[i] = grads[i] + a * grads[j]  # nudge, not a full cut
-d = sum(grads)                              # combine the edited gradients</code></pre>
 
 <h2 id="feel-the-nudge">GradVac nudges gradients back to their targets</h2>
+
+<p>GradVac restores each pair to its own historical target with the smallest nudge that lands the cosine exactly on it. At target <code>0</code>, the nudge becomes exactly PCGrad's projection, the special case where the target is zero for every pair.</p>
 
 <div class="demo" id="gvDemo">
       <div class="demo-controls">
@@ -1099,7 +1147,6 @@ d = sum(grads)                              # combine the edited gradients</code
       </div>
       <div class="cap-card"><strong>What this shows</strong>
         <ul>
-          <li><strong>The point:</strong> GradVac restores each pair to its own historical target with the smallest nudge that lands the cosine exactly on it.</li>
           <li><strong>What you'll see:</strong> GradVac adds the smallest dose that moves a pair's cosine similarity exactly onto its historical target.</li>
           <li><strong>At target <code>0</code>,</strong> the nudge becomes exactly PCGrad's projection.</li>
         </ul>
@@ -1116,39 +1163,6 @@ d = sum(grads)                              # combine the edited gradients</code
 
     <p>And there is a free side product I keep coming back to: the pairwise-cosine log itself costs a few lines of code and draws me a map of how my tasks relate while I train, which is why the Field Guide puts it on the diagnose-first checklist. Even if you never vaccinate a single pair, watching the cosines is worth it.</p>
 
-    
-<h2 id="paper-figure-gv">GradVac works where PCGrad sits out</h2>
-
-    <p>Two cases, side by side. Case (a) is a pair that is really fighting, negative cosine. Case (b) is a pair that agrees, positive cosine, but has sagged below its healthy level.</p>
-
-
-<div class="demo" id="gvFigStatic">
-      <h3 style="margin-top: 0;">PCGrad vs GradVac on fighting and agreeing pairs</h3>
-      <div class="gv-fig-pair">
-      <div>
-      <img src="figures/papers/gradvac-fig5a.png" alt="Figure 5 case a of the GradVac paper: PCGrad and GradVac on negative gradient similarity" style="width:100%;height:auto;display:block;background:#fff;border:1px solid #bdc3c7;border-radius:4px;">
-      <p class="caption">Case (a): negative similarity. Left is PCGrad, right is GradVac.</p>
-      </div>
-      <div>
-      <img src="figures/papers/gradvac-fig5b.png" alt="Figure 5 case b of the GradVac paper: PCGrad and GradVac on positive gradient similarity" style="width:100%;height:auto;display:block;background:#fff;border:1px solid #bdc3c7;border-radius:4px;">
-      <p class="caption">Case (b): positive similarity. Left is PCGrad, right is GradVac.</p>
-      </div>
-      </div>
-      <div class="cap-card"><strong>How to read it</strong>
-        <ul>
-          <li><strong>The point:</strong> Figure 5 shows the two methods on the same two cases: both act on the fighting pair in (a), but only GradVac acts on the sagging pair in (b).</li>
-          <li><strong>What you'll see:</strong> GradVac acts on both fighting pairs with negative similarity and agreeing pairs whose positive similarity has sagged below target, where PCGrad acts only on the first.</li>
-          <li><strong>(a) left, PCGrad:</strong> the cosine is negative, so PCGrad detects the conflict and projects one gradient onto the normal plane of the other. Surgery works here: the pair lands at exactly zero.</li>
-          <li><strong>(a) right, GradVac:</strong> same fight, but GradVac restores the pair to its own target, not to zero. Both methods are effective on negative similarity, but only GradVac can use a different target for a different pair.</li>
-          <li><strong>(b) left, PCGrad:</strong> the cosine is positive, so PCGrad's alarm never goes off and g_i stays untouched. It cannot notice that two friends have started cooperating less than they used to.</li>
-          <li><strong>(b) right, GradVac:</strong> the pair has sagged below its healthy target, so GradVac nudges it back up. The vaccine works before the fight, on positive cosines that PCGrad cannot see.</li>
-        </ul>
-      </div>
-      <p class="caption">Rebuilt from Figure 5 of Wang et al. (ICLR 2021). <a href="https://arxiv.org/abs/2010.05874">arXiv:2010.05874</a></p>
-      <p class="caption">Figure 5, verbatim caption: "Comparing PCGrad (left) with GradVac (right) in two cases. (a): For negative similarity, both methods are effective but GradVac can utilize adaptive objectives between different tasks. (b): For positive similarity, only GradVac is active while PCGrad stays "idle"."</p>
-    </div>
-
-    
     
 <h2 id="practical">When GradVac helps and when PCGrad is enough</h2>
     <p>

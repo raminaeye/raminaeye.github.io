@@ -634,6 +634,20 @@
      .kd-dot:focus-visible{outline:2px solid #2c3e50;outline-offset:2px}
      #kdStep button:disabled{opacity:.35;cursor:default}
      #kdOutcome{min-height:2.8em;margin:0.5rem 0 0}
+     /* Shared walkthrough equation-card contract (verbatim, all pages) */
+     .eq-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+       padding:.55rem .8rem;margin:.6rem auto;max-width:640px;overflow-x:auto}
+     .eq-line{white-space:nowrap;opacity:.38;padding:.15rem .1rem;
+       border-left:3px solid transparent}
+     .eq-line.eq-active{opacity:1;border-left-color:#2c3e50}
+     .eqt{font-weight:600;padding:0 .1em;border-radius:3px}
+     .eqt.eqt-active{text-decoration:underline;text-underline-offset:2px}
+     .eq-legend{font-size:.78rem;color:#475569;margin-top:.35rem}
+     .eq-sw{display:inline-block;width:.7em;height:.7em;border-radius:2px;
+       margin:0 .25em 0 .6em;vertical-align:baseline}
+     /* diagram-side dim/highlight (SVG/DOM). Do NOT use .hl/.dim: taken. */
+     .eq-dim{opacity:.32}
+     .eq-hl{filter:drop-shadow(0 0 3px currentColor)}
      </style>
      <svg id="kdSvg" viewBox="0 0 340 230" role="img" aria-label="Step-through of one knowledge distillation training step" style="width:100%;max-width:520px;height:auto;display:block;margin:0 auto;"></svg>
      <div class="kd-dots">
@@ -641,6 +655,22 @@
        <button type="button" class="kd-dot" data-s="1" aria-label="Step 2: the student's guess">2</button>
        <button type="button" class="kd-dot" data-s="2" aria-label="Step 3: two lessons, one loss">3</button>
        <button type="button" class="kd-dot" data-s="3" aria-label="Step 4: the student updates">4</button>
+     </div>
+     <div class="eq-card" id="kdStepEq">
+       <div class="eq-line" data-eqline="0">
+         <span class="eqt" data-k="L" style="color:#2c3e50">L</span> =
+         (1&#8722;<span class="eqt" data-k="alpha" style="color:#2c3e50">&#945;</span>)&#183;<span class="eqt" data-k="Lce" style="color:#5d6d7e">L<sub>CE</sub></span> +
+         <span class="eqt" data-k="alpha" style="color:#2c3e50">&#945;</span>&#183;<span class="eqt" data-k="Lkl" style="color:#2a7fbf">L<sub>KL</sub></span>
+       </div>
+       <div class="eq-line" data-eqline="1">
+         soft targets = softmax(z/<span class="eqt" data-k="T" style="color:#8e44ad">T</span>)
+       </div>
+       <div class="eq-legend">
+         <span class="eq-sw" style="background:#8e44ad"></span>temperature
+         <span class="eq-sw" style="background:#2a7fbf"></span>soft lesson
+         <span class="eq-sw" style="background:#5d6d7e"></span>hard lesson
+         <span class="eq-sw" style="background:#2c3e50"></span>blend weight
+       </div>
      </div>
      <div class="demo-controls">
        <button type="button" id="kdPrev">Prev</button>
@@ -730,16 +760,40 @@
         svg.appendChild(tx(44, ticks[i][1] + 4, ticks[i][0], FS, 'end', MUT));
       }
     }
-    function group(x0, gw, fracs, cols, labels, dimmed) {
+    function group(x0, gw, fracs, cols, labels, dimmed, eqk, eqcolor) {
       var slotW = gw / 4, barW = 20, i;
+      var g = null;
+      if (eqk) {
+        g = el('g', { 'data-eqk': eqk });
+        if (eqcolor) g.setAttribute('style', 'color:' + eqcolor);
+      }
+      var put = function (node) { if (g) g.appendChild(node); else svg.appendChild(node); };
       for (i = 0; i < 4; i++) {
         var h = fracs[i] * (YB - YT);
         var x = x0 + i * slotW + (slotW - barW) / 2;
-        svg.appendChild(bar(x, YB - h, barW, h, cols[i], dimmed ? 0.3 : 1));
-        if (labels) svg.appendChild(tx(x + barW / 2, YB - h - 5, labels[i], FS, 'middle', dimmed ? MUT : INK));
-        svg.appendChild(tx(x + barW / 2, YB + 18, classes[i], FS, 'middle', MUT));
+        put(bar(x, YB - h, barW, h, cols[i], dimmed ? 0.3 : 1));
+        if (labels) put(tx(x + barW / 2, YB - h - 5, labels[i], FS, 'middle', dimmed ? MUT : INK));
+        put(tx(x + barW / 2, YB + 18, classes[i], FS, 'middle', MUT));
       }
+      if (g) svg.appendChild(g);
     }
+    function syncEq(cardId, lines, terms) {
+      var card = document.getElementById(cardId);
+      if (!card) return;
+      var ls = card.querySelectorAll('.eq-line');
+      for (var li = 0; li < ls.length; li++)
+        ls[li].classList.toggle('eq-active', lines.indexOf(li) >= 0);
+      var ts = card.querySelectorAll('.eqt');
+      for (var tj = 0; tj < ts.length; tj++)
+        ts[tj].classList.toggle('eqt-active',
+          terms.indexOf(ts[tj].getAttribute('data-k')) >= 0);
+    }
+    var KDEQMAP = [
+      { lines: [1], terms: ['T'] },
+      { lines: [0], terms: [] },
+      { lines: [0], terms: ['alpha', 'Lce', 'Lkl'] },
+      { lines: [0], terms: ['alpha', 'Lce', 'Lkl'] }
+    ];
     function render(k) {
       while (svg.firstChild) svg.removeChild(svg.firstChild);
       svg.appendChild(tx(170, 18, titles[k], FS + 2, 'middle', INK, 700));
@@ -748,7 +802,7 @@
       svg.appendChild(tx(262, 34, 'student', FS + 1, 'middle', INK, 700));
       var i;
       if (k === 0) {
-        group(TX0, TGW, teacherF, teacherCols, teacherLbl, false);
+        group(TX0, TGW, teacherF, teacherCols, teacherLbl, false, 'T', '#9b59b6');
         group(SX0, SGW, flatF, studentCols, flatLbl, true);
       } else if (k === 1) {
         group(TX0, TGW, teacherF, teacherCols, null, true);
@@ -757,9 +811,12 @@
         group(TX0, TGW, teacherF, teacherCols, teacherLbl, false);
         group(SX0, SGW, flatF, studentCols, flatLbl, false);
         svg.appendChild(tx(175, 56, 'soft ranking at weight 0.7', FS, 'middle', MUT));
-        svg.appendChild(arrow(135, 65, 240, 65, '#2980b9'));
+        var softArrow = arrow(135, 65, 240, 65, '#2980b9');
+        softArrow.setAttribute('data-eqk', 'Lkl');
+        softArrow.setAttribute('style', 'color:#2980b9');
+        svg.appendChild(softArrow);
         var ox = SX0 + (SGW / 4 - 20) / 2;
-        svg.appendChild(el('rect', { x: ox, y: YT, width: 20, height: YB - YT, fill: 'none', stroke: '#7f8c8d', 'stroke-width': 2, 'stroke-dasharray': '6 4' }));
+        svg.appendChild(el('rect', { x: ox, y: YT, width: 20, height: YB - YT, fill: 'none', stroke: '#7f8c8d', 'stroke-width': 2, 'stroke-dasharray': '6 4', 'data-eqk': 'Lce', 'style': 'color:#7f8c8d' }));
       } else {
         group(TX0, TGW, teacherF, teacherCols, null, true);
         group(SX0, SGW, teacherF, studentCols, teacherLbl, false);
@@ -770,9 +827,20 @@
           var slotX = SX0 + i * slotW;
           svg.appendChild(el('line', { x1: slotX + 2, y1: base, x2: cx - 12, y2: base, stroke: MUT, 'stroke-width': 1.5, 'stroke-dasharray': '5 4' }));
           svg.appendChild(el('line', { x1: cx + 12, y1: base, x2: slotX + slotW - 2, y2: base, stroke: MUT, 'stroke-width': 1.5, 'stroke-dasharray': '5 4' }));
-          if (top < base - 4) svg.appendChild(arrow(cx, base - 7, cx, top + 7, INK));
-          else svg.appendChild(arrow(cx, base + 3, cx, top + 5, INK));
+          var upArrow;
+          if (top < base - 4) upArrow = arrow(cx, base - 7, cx, top + 7, INK);
+          else upArrow = arrow(cx, base + 3, cx, top + 5, INK);
+          upArrow.setAttribute('data-eqk', 'Lkl');
+          upArrow.setAttribute('style', 'color:' + INK);
+          svg.appendChild(upArrow);
         }
+      }
+      var m = KDEQMAP[k];
+      syncEq('kdStepEq', m.lines, m.terms);
+      var eqels = svg.querySelectorAll('[data-eqk]');
+      for (var q = 0; q < eqels.length; q++) {
+        eqels[q].classList.toggle('eq-hl',
+          m.terms.indexOf(eqels[q].getAttribute('data-eqk')) >= 0);
       }
       svg.appendChild(tx(170, 218, notes[k], FS, 'middle', MUT));
       out.textContent = outcomes[k];

@@ -769,6 +769,7 @@
   <h1>Activation Probes</h1>
 <style>
 /* probes.html additions */
+.math-display { text-align: center; margin: 1rem 0; overflow-x: auto; max-width: 100%; }
 .seg-row { display: flex; gap: 8px; margin: 0.6rem 0; flex-wrap: wrap; }
 .seg-btn { border: 1px solid #dee2e6; background: #fff; border-radius: 999px; padding: 6px 16px; cursor: pointer; font-size: 0.9em; font-weight: 600; color: #343a40; font-family: inherit; }
 .seg-btn.active { background: #2980b9; border-color: #2980b9; color: #fff; }
@@ -887,6 +888,15 @@
 
 <h2 id="toy-model">The toy model: <code>12</code> blocks, hidden size <code>768</code>, tap block <code>8</code></h2>
 <p>The toy model on this page is a GPT-style transformer: <code>12</code> blocks, hidden size <code>768</code> (<code>8</code> of the <code>768</code> numbers are shown, so the arithmetic stays visible), <code>12</code> attention heads, meaning <code>12</code> independent scorers reading the prompt in parallel. The probe taps block <code>8</code> and copies every position's list of numbers. In the paper, the same setup watches Gemini 2.5 Flash; the toy stands in for it, and you will meet Flash properly in the cascade section below.</p>
+
+<h2 id="scoring">How a probe scores a prompt</h2>
+<p>Honest label first: what follows is a simplified single-head teaching version. It scores like the classic linear probe and combines by taking each head's most suspicious position, and it matches no single paper architecture exactly. The paper's real probes add heads, MLPs, and windows on top of this skeleton. score every position in the prompt by how attack-like its numbers look, keep the single most suspicious position's score, then squash that one number into a probability.</p>
+<p>In one line: every position's numbers get dotted against the learned direction, which measures how attack-like that position reads. The max over positions keeps only the single most suspicious score instead of an average, and that keep-only-the-winner move is the combine step. A bias nudges the winning score, and a sigmoid squashes it into a probability.</p>
+
+<div class="math-display">
+$$ s = w \cdot a + b $$
+</div>
+<p>The whole probe in one line: score each position's copied numbers along one learned direction, plus a bias. Here <code>s</code> is the score, <code>w</code> is the learned direction, <code>a</code> is the copied numbers, and <code>b</code> is the bias. The dot in the line means the copied numbers get dotted against the learned direction, and a high score means the concept is present.</p>
 
 <div class="demo" id="probeDemoA">
 <svg class="probe-svg" viewBox="0 0 380 330" role="img" aria-label="Transformer stack with probe tap at block 8">
@@ -1036,10 +1046,6 @@
 })();
 </script>
 
-<h2 id="scoring">How a probe scores a prompt</h2>
-<p>Honest label first: what follows is a simplified single-head teaching version. It scores like the classic linear probe and combines by taking each head's most suspicious position, and it matches no single paper architecture exactly. The paper's real probes add heads, MLPs, and windows on top of this skeleton. score every position in the prompt by how attack-like its numbers look, keep the single most suspicious position's score, then squash that one number into a probability.</p>
-<p>In one line: every position's numbers get dotted against the learned direction, which measures how attack-like that position reads. The max over positions keeps only the single most suspicious score instead of an average, and that keep-only-the-winner move is the combine step. A bias nudges the winning score, and a sigmoid squashes it into a probability.</p>
-
 <h2 id="skeleton">One skeleton for every probe: score positions, then combine</h2>
 <p>The probes split into two groups: earlier designs, then the ones that survive long contexts. For each one: how it scores positions, how it combines them, why the combine rule helps or fails, and where it works.</p>
 <h3>The baselines: linear, EMA, and attention probes</h3>
@@ -1162,6 +1168,14 @@
 <tr><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">Max of Rolling Means</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">worst 10-token window wins</td></tr>
 <tr><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">AlphaEvolve</td><td style="border:1px solid #bdc3c7;padding:0.4em 0.6em">machine-found, max-style pooling</td></tr>
 </table></div>
+<p>The figure below is the paper's own map of this skeleton, Figure 2.</p>
+
+<div class="diagram">
+<img src="figures/papers/probes-fig2-classifiers.png" alt="Figure 2 from the paper: probe architecture visualization showing the six stages" style="width:100%;height:auto;display:block;border:1px solid #e1e4e8;border-radius:8px;">
+<div class="caption">Rebuilt from Figure 2 of Kramár et al. (arXiv 2026). <a href="https://arxiv.org/abs/2601.11516">arXiv:2601.11516</a></div>
+<div class="caption">Figure 2, verbatim caption: &ldquo;Different probing classifiers that we compare in Section 3. All our probing classifiers can be composed into six states 1) to 6) as illustrated. [&hellip;]&rdquo;</div>
+</div>
+
 <p>The tool below makes the combine column visible: the same document, three combine rules, one threshold.</p>
 <div class="demo" id="probeDemoB">
 <div id="probeBDoc" style="margin:0.4rem 0; line-height:2.1"></div>
@@ -1288,14 +1302,6 @@
   renderDoc(); setStage(0);
 })();
 </script>
-
-<p>The figure below is the paper's own map of this skeleton, Figure 2.</p>
-
-<div class="diagram">
-<img src="figures/papers/probes-fig2-classifiers.png" alt="Figure 2 from the paper: probe architecture visualization showing the six stages" style="width:100%;height:auto;display:block;border:1px solid #e1e4e8;border-radius:8px;">
-<div class="caption">Rebuilt from Figure 2 of Kramár et al. (arXiv 2026). <a href="https://arxiv.org/abs/2601.11516">arXiv:2601.11516</a></div>
-<div class="caption">Figure 2, verbatim caption: &ldquo;Different probing classifiers that we compare in Section 3. All our probing classifiers can be composed into six states 1) to 6) as illustrated. [&hellip;]&rdquo;</div>
-</div>
 
 <h2 id="training">Trained only on short prompts, tested on long ones</h2>
 <p>The weights are learned from labeled prompts. The attack side is cyber attacks curated by security experts, plus multi-turn conversations that start innocent and escalate. The benign side is real user traffic with personal data removed, plus hard negatives: prompts that sound dangerous but are not, like asking how a famous breach worked or asking for a code security review. The hard negatives teach the probe the difference between <em>talking about</em> attacks and <em>asking for help with</em> one.</p>

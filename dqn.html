@@ -1743,29 +1743,36 @@ Q[s][a] += lr * (reward + gamma * max(Q[s_next]) - Q[s][a])
           if (window.__epsRaceTest) window.__epsRaceTest.blockedShown++;
         }
       }
+      function narrationText(res) {
+        if (res.rew === 1 && res.blocked) return 'Tried to go ' + res.dir + ': blocked by the wall, but this square pays +1 anyway.';
+        if (res.rew === -1 && res.blocked) return 'Tried to go ' + res.dir + ': blocked by the wall, and this square costs -1.';
+        if (res.blocked) return 'Tried to go ' + res.dir + ': blocked by the wall. No move, no reward.';
+        if (res.rew === 1) return 'Went ' + res.dir + ' and grabbed a yellow banana: +1.';
+        if (res.rew === -1) return 'Went ' + res.dir + ' onto a blue banana: -1.';
+        return 'Went ' + res.dir + '. Empty square, nothing earned.';
+      }
       function narrate(evEl, res) {
         if (!evEl) return;
-        var t;
-        if (res.rew === 1 && res.blocked) t = 'Tried to go ' + res.dir + ': blocked by the wall, but this square pays +1 anyway.';
-        else if (res.rew === -1 && res.blocked) t = 'Tried to go ' + res.dir + ': blocked by the wall, and this square costs -1.';
-        else if (res.blocked) t = 'Tried to go ' + res.dir + ': blocked by the wall. No move, no reward.';
-        else if (res.rew === 1) t = 'Went ' + res.dir + ' and grabbed a yellow banana: +1.';
-        else if (res.rew === -1) t = 'Went ' + res.dir + ' onto a blue banana: -1.';
-        else t = 'Went ' + res.dir + '. Empty square, nothing earned.';
-        evEl.textContent = t;
+        evEl.textContent = narrationText(res);
       }
-      /* Round 7: the 90ms dot animation stays, but these narration lines are
-         caption-directed reading text ("the line under each grid narrates the
-         last step in plain words"). Full sentences rewriting at 11Hz cannot be
-         read, so throttle narration to at most one update per 2000ms per line
-         (Round 3 landDemo precedent: text-bearing steps >= 2000ms). The
-         reserve sampler below calls narrate() directly, so it stays unthrottled. */
+      /* The narration under each grid is a small persistent log, not a
+         single rewriting line: the episode steps far too fast for sentences
+         that replace each other to be read. A new line joins the log at
+         most once per 2000ms per side, and the log keeps the last 3 lines,
+         so every sentence stays on screen at least 6000ms before it scrolls
+         away. The reserve sampler below calls narrate() directly, so it
+         stays unthrottled. */
       var narrateLastMs = { L: 0, R: 0 };
-      function narrateThrottled(key, evEl, res) {
+      var evLog = { L: [], R: [] };
+      function narrateLog(key, evEl, res) {
+        if (!evEl) return;
         var now = performance.now();
         if (now - narrateLastMs[key] < 2000) return;
         narrateLastMs[key] = now;
-        narrate(evEl, res);
+        var lines = evLog[key];
+        lines.push(narrationText(res));
+        while (lines.length > 3) lines.shift();
+        evEl.innerHTML = lines.map(function (t) { return '<div>' + t + '</div>'; }).join('');
       }
       function avgUpTo(arr, i, n) {
         var from = Math.max(0, i - n + 1), s = 0, k;
@@ -1883,12 +1890,13 @@ Q[s][a] += lr * (reward + gamma * max(Q[s_next]) - Q[s][a])
         countRendered(resL); countRendered(resR);
         renderAgent(L, cellsL); renderAgent(R, cellsR);
         fxForStep(fxL, resL); fxForStep(fxR, resR);
-        narrateThrottled('L', evL, resL); narrateThrottled('R', evR, resR);
+        narrateLog('L', evL, resL); narrateLog('R', evR, resR);
         timers.push(setTimeout(function () { spotlightStep(s, t + 1); }, STEP_MS));
       }
       function resetAll() {
         L = mkAgent(); R = mkAgent();
         narrateLastMs.L = 0; narrateLastMs.R = 0;
+        evLog.L = []; evLog.R = [];
         if (fxL) fxL.innerHTML = '';
         if (fxR) fxR.innerHTML = '';
         if (evL) evL.textContent = 'The first live episode will step through here, move by move.';
@@ -1929,6 +1937,7 @@ Q[s][a] += lr * (reward + gamma * max(Q[s_next]) - Q[s][a])
            it back, so a fresh load, a Reset, or a resize never leaves a stale
            sampled variant on screen. */
         var restL = evL.textContent, restR = evR.textContent;
+        var restLh = evL.innerHTML, restRh = evR.innerHTML;
         function fitText(el, samples) {
           var prev = el.textContent, max = 0, i;
           el.style.minHeight = '';
@@ -1954,6 +1963,15 @@ Q[s][a] += lr * (reward + gamma * max(Q[s_next]) - Q[s][a])
         fitText(evL, evSamples);
         fitText(evR, evSamples);
         evL.textContent = restL; evR.textContent = restR;
+        /* The race narration stacks up to 3 log lines: reserve three lines
+           (measured with the longest variant) so the log growing never
+           moves the page. */
+        var logSample = '<div>' + evSamples[1] + '</div><div>' + evSamples[1] + '</div><div>' + evSamples[1] + '</div>';
+        [evL, evR].forEach(function (el) {
+          el.innerHTML = logSample;
+          el.style.minHeight = Math.ceil(el.getBoundingClientRect().height) + 'px';
+        });
+        evL.innerHTML = restLh; evR.innerHTML = restRh;
         /* Stage captions: all stages, rest, final. */
         var capSamples = [], s;
         for (s = 0; s < N_STAGES; s++) capSamples.push(stageCaption(s));

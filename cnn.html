@@ -993,6 +993,19 @@ def conv2d(input, kernel, stride=1, padding=0):
     <p>
         You have met the parts: kernels, ReLU, pooling. Here is the whole machine at once. One handwritten <code>7</code> goes in, six stages of a LeNet-style stack do their work, and ten scores come out.
     </p>
+    <ul>
+        <li><strong>Max pooling</strong>: keeps only the biggest value in each window. Strong activations survive, noise dies. The price: everything except the winner is gone, so fine spatial detail goes with it.</li>
+    </ul>
+    <p>
+    $$y[i,j] = \max\left(0, \sum_{c,p,q} x[c][i+p][j+q] \cdot K[c][p][q] + b\right)$$
+    $$28 \to 24\ \text{5x5 conv},\quad 24 \to 12\ \text{\div 2 pool},\quad 12 \to 8\ \text{5x5 conv},\quad 8 \to 4\ \text{\div 2 pool},\quad \text{then } 256 \to 10\ \text{scores}$$
+    </p>
+    <p>
+        Here <code>y[i,j]</code> is one output cell; <code>x[c][i+p][j+q]</code> is the input patch under the kernel; <code>K[c][p][q]</code> are the kernel weights and <code>b</code> is the kernel's bias; <code>&#931;</code> sums over every kernel position; <code>max(0, &#183;)</code> is ReLU, which deletes the negatives; <code>i, j</code> are the output row and column; <code>c</code> is the input map; <code>p, q</code> are the position inside the <code>5x5</code> kernel; and a <code>&#247;2 pool</code> is a <code>2x2</code> max-pool, which halves each side. The second line is the stage sequence itself: input, conv, pool, conv, pool, then flatten to <code>256</code>, and the flat numbers become ten digit scores.
+    </p>
+    <p>
+        A CNN turns a picture into smaller, richer maps, then into ten scores. The shrinking is the network deciding what matters.
+    </p>
     <div class="demo" id="lenetWalkToy">
         <div class="walk-title" id="walkStageTitle">Stage 1 of 6: Input</div>
         <div class="canvas-wrap">
@@ -1502,6 +1515,16 @@ function syncEq(cardId, lines, terms){
     <p>
         Theoretical RF says every pixel in the window can influence the neuron. Technically true. Practically, <em>the center pixels shout and the edge pixels whisper.</em> This is the effective receptive field's bell curve, drawn. The heat bar is the <code>427</code> you computed. The lit part is what actually matters at your threshold. At a <code>50%</code> threshold, very little of the bar survives: only the bright center stays lit.
     </p>
+    <p>
+    $$\text{influence} = \exp\left(-\frac{d^2}{2\sigma^2}\right), \qquad \sigma = \frac{RF}{5}$$
+    $$\text{effective width} = 2\sigma \cdot \sqrt{2 \cdot \ln(1/t)}, \qquad \text{capped at } RF$$
+    </p>
+    <p>
+        Here <code>RF</code> is the theoretical receptive field from the section above; <code>&#963;</code> (sigma) is the bell's width, set to one fifth of <code>RF</code>; <code>d</code> is a pixel's distance from the window's center; <code>t</code> is the threshold as a fraction of the peak height; and the effective width is the part of the window where the bell stands above <code>t</code>. The model is illustrative.
+    </p>
+    <p>
+        The check runs in three steps: take a network's theoretical window, draw the bell with its width set from that window, then cut the bell at the chosen threshold. The surviving middle part is the effective width.
+    </p>
     <div class="demo" id="bellToy">
         <div class="demo-controls">
             <span role="group" aria-label="Architecture picker">
@@ -1762,7 +1785,6 @@ function syncEq(cardId, lines, terms){
         <strong>Pooling</strong> is downsampling with training wheels off. Slide a window over the input, keep one statistic per window, throw away the rest. <em>It learns nothing; it is hard-coded.</em>
     </p>
     <ul>
-        <li><strong>Max pooling</strong>: keeps only the biggest value in each window. Strong activations survive, noise dies. The price: everything except the winner is gone, so fine spatial detail goes with it.</li>
         <li><strong>Average pooling</strong>: takes the mean instead. Smoother, keeps more of the input's energy. For audio and time-series, where energy matters more than peaks, this is often the better call.</li>
         <li><strong>Global pooling</strong>: squashes the whole map to one number per channel. No parameters, no fully-connected layer to train, less overfitting. Cheap, and it works.</li>
         <li><strong>Adaptive pooling</strong>: you name the output shape and it picks the window and stride itself, whatever the input size. Handy when inputs arrive in different sizes.</li>
@@ -1818,6 +1840,61 @@ class SeparableConv2D(nn.Module):
     <p>
         Same spatial reach, fewer parameters, but where do they actually go? As the output channels grow, the standard bar explodes because every new output channel needs a full k by k kernel for every input channel. The separable bar shrugs: its depthwise part does not know C_out exists. At kernel <code>1</code> the separable bar loses. <em>The trick only pays when the kernel has spatial extent.</em>
     </p>
+    <svg viewBox="0 0 560 120" class="duel-schem duel-schem-h" role="img" aria-label="Standard versus separable connection schematic">
+        <g font-family="sans-serif" font-size="12" fill="#2c3e50">
+            <rect x="8" y="18" width="150" height="82" rx="6" fill="#dbe9f6" stroke="#2980b9"/>
+            <text x="83" y="44" text-anchor="middle" font-weight="bold">standard</text>
+            <text x="83" y="62" text-anchor="middle">Cout x Cin x k x k</text>
+            <text x="83" y="78" text-anchor="middle" fill="#555">every output reads</text>
+            <text x="83" y="92" text-anchor="middle" fill="#555">every input, kxk each</text>
+            <rect x="206" y="18" width="150" height="82" rx="6" fill="#fdebd7" stroke="#e67e22"/>
+            <text x="281" y="44" text-anchor="middle" font-weight="bold">depthwise</text>
+            <text x="281" y="62" text-anchor="middle">Cin x k x k</text>
+            <text x="281" y="78" text-anchor="middle" fill="#555">one kxk filter</text>
+            <text x="281" y="92" text-anchor="middle" fill="#555">per input channel</text>
+            <rect x="404" y="18" width="150" height="82" rx="6" fill="#fdebd7" stroke="#e67e22"/>
+            <text x="479" y="44" text-anchor="middle" font-weight="bold">pointwise</text>
+            <text x="479" y="62" text-anchor="middle">Cout x Cin x 1 x 1</text>
+            <text x="479" y="78" text-anchor="middle" fill="#555">mixes channels,</text>
+            <text x="479" y="92" text-anchor="middle" fill="#555">no spatial work</text>
+            <line x1="158" y1="59" x2="206" y2="59" stroke="#7f8c8d" stroke-width="1.5"/>
+            <polygon points="196,53 206,59 196,65" fill="#7f8c8d"/>
+            <line x1="356" y1="59" x2="404" y2="59" stroke="#7f8c8d" stroke-width="1.5"/>
+            <polygon points="394,53 404,59 394,65" fill="#7f8c8d"/>
+        </g>
+    </svg>
+    <svg viewBox="0 0 220 310" class="duel-schem duel-schem-v" role="img" aria-label="Standard versus separable connection schematic, stacked vertically">
+        <g font-family="sans-serif" font-size="12" fill="#2c3e50">
+            <rect x="20" y="8" width="180" height="84" rx="6" fill="#dbe9f6" stroke="#2980b9"/>
+            <text x="110" y="34" text-anchor="middle" font-weight="bold">standard</text>
+            <text x="110" y="52" text-anchor="middle">Cout x Cin x k x k</text>
+            <text x="110" y="68" text-anchor="middle" fill="#555">every output reads</text>
+            <text x="110" y="82" text-anchor="middle" fill="#555">every input, kxk each</text>
+            <line x1="110" y1="94" x2="110" y2="112" stroke="#7f8c8d" stroke-width="1.5"/>
+            <polygon points="104,106 116,106 110,114" fill="#7f8c8d"/>
+            <rect x="20" y="114" width="180" height="84" rx="6" fill="#fdebd7" stroke="#e67e22"/>
+            <text x="110" y="140" text-anchor="middle" font-weight="bold">depthwise</text>
+            <text x="110" y="158" text-anchor="middle">Cin x k x k</text>
+            <text x="110" y="174" text-anchor="middle" fill="#555">one kxk filter</text>
+            <text x="110" y="188" text-anchor="middle" fill="#555">per input channel</text>
+            <line x1="110" y1="200" x2="110" y2="218" stroke="#7f8c8d" stroke-width="1.5"/>
+            <polygon points="104,212 116,212 110,220" fill="#7f8c8d"/>
+            <rect x="20" y="220" width="180" height="84" rx="6" fill="#fdebd7" stroke="#e67e22"/>
+            <text x="110" y="246" text-anchor="middle" font-weight="bold">pointwise</text>
+            <text x="110" y="264" text-anchor="middle">Cout x Cin x 1 x 1</text>
+            <text x="110" y="280" text-anchor="middle" fill="#555">mixes channels,</text>
+            <text x="110" y="294" text-anchor="middle" fill="#555">no spatial work</text>
+        </g>
+    </svg>
+    <p>
+    $$\text{standard} = C_{out} \times C_{in} \times k \times k$$
+    $$\text{depthwise} = C_{in} \times k \times k$$
+    $$\text{pointwise} = C_{out} \times C_{in}$$
+    $$\text{separable total} = \text{depthwise} + \text{pointwise}$$
+    </p>
+    <p>
+        Here <code>C_in</code> is the input channel count, <code>C_out</code> is the output channel count, and <code>k</code> is the kernel side. The separable total is a sum because the two steps run one after the other, so their weights add. At kernel <code>1</code> the trick inverts, which is why nobody uses separable convolutions for <code>1x1</code> layers.
+    </p>
     <div class="demo" id="duelToy">
         <div class="demo-controls">
             <label class="toy-knob">C_in <input type="range" id="duelCin" min="4" max="128" step="1" value="32" aria-label="Input channels"> <span class="toy-val" id="duelCinVal">32</span></label>
@@ -1836,52 +1913,6 @@ class SeparableConv2D(nn.Module):
             <canvas id="duelBars" class="duel-canvas" role="img" aria-label="Parameter count comparison bars"></canvas>
         </div>
         <div class="demo-stats" id="duelReadout"></div>
-        <svg viewBox="0 0 560 120" class="duel-schem duel-schem-h" role="img" aria-label="Standard versus separable connection schematic">
-            <g font-family="sans-serif" font-size="12" fill="#2c3e50">
-                <rect x="8" y="18" width="150" height="82" rx="6" fill="#dbe9f6" stroke="#2980b9"/>
-                <text x="83" y="44" text-anchor="middle" font-weight="bold">standard</text>
-                <text x="83" y="62" text-anchor="middle">Cout x Cin x k x k</text>
-                <text x="83" y="78" text-anchor="middle" fill="#555">every output reads</text>
-                <text x="83" y="92" text-anchor="middle" fill="#555">every input, kxk each</text>
-                <rect x="206" y="18" width="150" height="82" rx="6" fill="#fdebd7" stroke="#e67e22"/>
-                <text x="281" y="44" text-anchor="middle" font-weight="bold">depthwise</text>
-                <text x="281" y="62" text-anchor="middle">Cin x k x k</text>
-                <text x="281" y="78" text-anchor="middle" fill="#555">one kxk filter</text>
-                <text x="281" y="92" text-anchor="middle" fill="#555">per input channel</text>
-                <rect x="404" y="18" width="150" height="82" rx="6" fill="#fdebd7" stroke="#e67e22"/>
-                <text x="479" y="44" text-anchor="middle" font-weight="bold">pointwise</text>
-                <text x="479" y="62" text-anchor="middle">Cout x Cin x 1 x 1</text>
-                <text x="479" y="78" text-anchor="middle" fill="#555">mixes channels,</text>
-                <text x="479" y="92" text-anchor="middle" fill="#555">no spatial work</text>
-                <line x1="158" y1="59" x2="206" y2="59" stroke="#7f8c8d" stroke-width="1.5"/>
-                <polygon points="196,53 206,59 196,65" fill="#7f8c8d"/>
-                <line x1="356" y1="59" x2="404" y2="59" stroke="#7f8c8d" stroke-width="1.5"/>
-                <polygon points="394,53 404,59 394,65" fill="#7f8c8d"/>
-            </g>
-        </svg>
-        <svg viewBox="0 0 220 310" class="duel-schem duel-schem-v" role="img" aria-label="Standard versus separable connection schematic, stacked vertically">
-            <g font-family="sans-serif" font-size="12" fill="#2c3e50">
-                <rect x="20" y="8" width="180" height="84" rx="6" fill="#dbe9f6" stroke="#2980b9"/>
-                <text x="110" y="34" text-anchor="middle" font-weight="bold">standard</text>
-                <text x="110" y="52" text-anchor="middle">Cout x Cin x k x k</text>
-                <text x="110" y="68" text-anchor="middle" fill="#555">every output reads</text>
-                <text x="110" y="82" text-anchor="middle" fill="#555">every input, kxk each</text>
-                <line x1="110" y1="94" x2="110" y2="112" stroke="#7f8c8d" stroke-width="1.5"/>
-                <polygon points="104,106 116,106 110,114" fill="#7f8c8d"/>
-                <rect x="20" y="114" width="180" height="84" rx="6" fill="#fdebd7" stroke="#e67e22"/>
-                <text x="110" y="140" text-anchor="middle" font-weight="bold">depthwise</text>
-                <text x="110" y="158" text-anchor="middle">Cin x k x k</text>
-                <text x="110" y="174" text-anchor="middle" fill="#555">one kxk filter</text>
-                <text x="110" y="188" text-anchor="middle" fill="#555">per input channel</text>
-                <line x1="110" y1="200" x2="110" y2="218" stroke="#7f8c8d" stroke-width="1.5"/>
-                <polygon points="104,212 116,212 110,220" fill="#7f8c8d"/>
-                <rect x="20" y="220" width="180" height="84" rx="6" fill="#fdebd7" stroke="#e67e22"/>
-                <text x="110" y="246" text-anchor="middle" font-weight="bold">pointwise</text>
-                <text x="110" y="264" text-anchor="middle">Cout x Cin x 1 x 1</text>
-                <text x="110" y="280" text-anchor="middle" fill="#555">mixes channels,</text>
-                <text x="110" y="294" text-anchor="middle" fill="#555">no spatial work</text>
-            </g>
-        </svg>
         <p class="caption">The asymmetry is the trick: the standard bar multiplies everything by the output channel count, the separable bar barely notices it. At kernel <code>1</code> the trick inverts, which is why nobody uses separable convolutions for <code>1x1</code> layers.</p>
         <div class="howto">
             <p class="howto-head">How to play</p>
@@ -2055,26 +2086,48 @@ self.block = nn.Sequential(
         Setup first: the race is ImageNet image classification. Inception and its batch-normalized variants all train on ImageNet's training set; the curves plot single-crop validation accuracy against training steps.
     </p>
     <p>
-        BatchNorm's pitch was speed. The paper's Figure 2 puts five training curves on one plot: plain Inception and four batch-normalized variants, accuracy versus training steps. I turned it into a race. The dots ride the paper's real curves (the overlay paths are traced from the paper's vector figure file, not eyeballed from the image). In the race, BN-x5 crosses the <code>72.2%</code> line in <code>2.1M</code> steps while plain Inception is still crawling toward <code>31.0M</code>. <em>The paper's claim: <code>14</code> times fewer steps.</em>
+        BatchNorm's pitch was speed. I turned the paper's Figure 2 into a race. The dots ride the paper's real curves (the overlay paths are traced from the paper's vector figure file, not eyeballed from the image). In the race, BN-x5 crosses the <code>72.2%</code> line in <code>2.1M</code> steps while plain Inception is still crawling toward <code>31.0M</code>. <em>The paper's claim: <code>14</code> times fewer steps.</em>
+    </p>
+    <p>
+    $$\mu = \frac{1}{m}\sum_{i=1}^{m} x_i, \qquad \sigma^2 = \frac{1}{m}\sum_{i=1}^{m} (x_i - \mu)^2$$
+    $$\hat{x}_i = \frac{x_i - \mu}{\sqrt{\sigma^2 + \epsilon}}, \qquad y_i = \gamma \cdot \hat{x}_i + \beta$$
+    </p>
+    <p>
+        The steps run in order: mean, variance, normalize, then scale and shift. Here <code>x</code> is one activation and <code>i</code> picks out one value from the set being averaged, which holds <code>m</code> values in total; <code>&#956;</code> is the mean of that channel's activations over the batch and, for a convolutional layer, over the spatial positions too; <code>&#963;&#178;</code> is the variance over the same set; <code>&#949;</code> is a small constant that keeps the division safe when the variance is near zero; and <code>&#947;</code> and <code>&#946;</code> are the learnable scale and shift. At inference the batch statistics are replaced by running averages gathered during training, so one example alone still normalizes the same way.
+    </p>
+    <figure class="paper-fig">
+        <div class="bn-figwrap">
+            <img src="figures/papers/bn-fig2.png" alt="Figure 2 from Ioffe and Szegedy (2015): single crop validation accuracy of Inception and its batch-normalized variants versus the number of training steps." style="width:100%;height:auto;display:block;">
+            <svg class="bn-overlay" viewBox="0 0 800 612" preserveAspectRatio="none" aria-hidden="true">
+                <g id="bnDots"></g>
+                <g id="bnStress" visibility="hidden">
+                    <path id="bnFallTrail" d="" fill="none" stroke="#c0392b" stroke-width="3" stroke-dasharray="7 5" opacity="0.85"/>
+                    <rect id="bnFallDot" x="-12" y="-12" width="24" height="24" rx="5" fill="#c0392b" stroke="#7b241c" stroke-width="2"/>
+                    <circle id="bnHalo" r="17" fill="none" stroke="#f39c12" stroke-width="3" visibility="hidden"/>
+                </g>
+            </svg>
+            <div id="bnFallLabel" class="bn-fall-label" hidden aria-hidden="true">diverged</div>
+        </div>
+        <figcaption>Figure 2: Single crop validation accuracy of Inception and its batch-normalized variants, vs. the number of training steps, on ImageNet. This is the paper's real figure. The traveling dots follow paths traced from the paper's vector figure file. Rebuilt from Figure 2 of Ioffe and Szegedy (ICML 2015). <a href="https://arxiv.org/abs/1502.03167">arXiv:1502.03167</a></figcaption>
+    </figure>
+    <div class="bn-finish">
+        <p class="bn-finish-title"><strong>Finish line: from the paper (Figure 3).</strong></p>
+        <table class="bn-table">
+            <tr><th>Model</th><th>Steps to 72.2%</th><th>Max accuracy</th></tr>
+            <tr><td>Inception</td><td>31.0M</td><td>72.2%</td></tr>
+            <tr><td>BN-Baseline</td><td>13.3M</td><td>72.7%</td></tr>
+            <tr><td>BN-x5</td><td>2.1M</td><td>73.0%</td></tr>
+            <tr><td>BN-x30</td><td><code>2.7M</code></td><td><code>74.8%</code></td></tr>
+            <tr><td>BN-x5-Sigmoid</td><td>never reaches it</td><td>69.8%</td></tr>
+        </table>
+        <p class="bn-finish-cap">Figure 3: steps to reach Inception's max accuracy (<code>72.2%</code>), and each network's max. (BN-x30's <code>74.8%</code> comes after <code>6M</code> steps, per the body text.)</p>
+    </div>
+    <p>
+        The paper's learning-rate stress test makes the same point harder: at <code>5x</code> the base learning rate, plain Inception dives off its curve while the batch normalized variant keeps rising; at <code>30x</code>, plain Inception dies at the start and only the <code>30x</code> batch normalized variant rises.
     </p>
     <div class="demo" id="bnRaceToy">
         <div class="bn-topgrid">
         <div class="bn-topcol">
-        <figure class="paper-fig">
-            <div class="bn-figwrap">
-                <img src="figures/papers/bn-fig2.png" alt="Figure 2 from Ioffe and Szegedy (2015): single crop validation accuracy of Inception and its batch-normalized variants versus the number of training steps." style="width:100%;height:auto;display:block;">
-                <svg class="bn-overlay" viewBox="0 0 800 612" preserveAspectRatio="none" aria-hidden="true">
-                    <g id="bnDots"></g>
-                    <g id="bnStress" visibility="hidden">
-                        <path id="bnFallTrail" d="" fill="none" stroke="#c0392b" stroke-width="3" stroke-dasharray="7 5" opacity="0.85"/>
-                        <rect id="bnFallDot" x="-12" y="-12" width="24" height="24" rx="5" fill="#c0392b" stroke="#7b241c" stroke-width="2"/>
-                        <circle id="bnHalo" r="17" fill="none" stroke="#f39c12" stroke-width="3" visibility="hidden"/>
-                    </g>
-                </svg>
-                <div id="bnFallLabel" class="bn-fall-label" hidden aria-hidden="true">diverged</div>
-            </div>
-            <figcaption>Figure 2: Single crop validation accuracy of Inception and its batch-normalized variants, vs. the number of training steps, on ImageNet. This is the paper's real figure. The traveling dots follow paths traced from the paper's vector figure file. Rebuilt from Figure 2 of Ioffe and Szegedy (ICML 2015). <a href="https://arxiv.org/abs/1502.03167">arXiv:1502.03167</a></figcaption>
-        </figure>
         <div class="demo-controls">
             <button type="button" class="toy-btn" id="bnPlay">Play</button>
             <button type="button" class="toy-btn" id="bnReset">Reset</button>
@@ -2084,18 +2137,6 @@ self.block = nn.Sequential(
         </div>
         <div class="bn-topcol">
         <div class="bn-runners" id="bnRunners"></div>
-        <div class="bn-finish">
-            <p class="bn-finish-title"><strong>Finish line: from the paper (Figure 3).</strong></p>
-            <table class="bn-table">
-                <tr><th>Model</th><th>Steps to 72.2%</th><th>Max accuracy</th></tr>
-                <tr><td>Inception</td><td>31.0M</td><td>72.2%</td></tr>
-                <tr><td>BN-Baseline</td><td>13.3M</td><td>72.7%</td></tr>
-                <tr><td>BN-x5</td><td>2.1M</td><td>73.0%</td></tr>
-                <tr><td>BN-x30</td><td><code>2.7M</code></td><td><code>74.8%</code></td></tr>
-                <tr><td>BN-x5-Sigmoid</td><td>never reaches it</td><td>69.8%</td></tr>
-            </table>
-            <p class="bn-finish-cap">Figure 3: steps to reach Inception's max accuracy (<code>72.2%</code>), and each network's max. (BN-x30's <code>74.8%</code> comes after <code>6M</code> steps, per the body text.)</p>
-        </div>
         <div class="bn-lr">
             <p class="bn-lr-title"><strong>Learning-rate stress test.</strong> Same three learning rates the paper tried. Watch what happens to plain Inception.</p>
             <div class="demo-controls">
@@ -2467,7 +2508,7 @@ class TCNBlock(nn.Module):
 
     <h3>EfficientNet</h3>
     <p>
-        EfficientNet is an extremely powerful CNN built on the ideas of ResNet and MobileNet, using neural architecture search and <strong>compound scaling</strong> to achieve state-of-the-art accuracy with an order of magnitude fewer parameters and FLOPs. Instead of scaling depth, width, or resolution individually, EfficientNet scales them together with a fixed ratio. It uses a block similar to MobileNetV2's but adds a <strong>Squeeze-and-Excitation (SE) block</strong>. The SE block provides channel-wise attention, allowing the network to reweigh each feature map based on its importance.
+        EfficientNet is an extremely powerful CNN built on the ideas of ResNet and MobileNet, using neural architecture search and <strong>compound scaling</strong> to achieve state-of-the-art accuracy with an order of magnitude fewer parameters and FLOPs. It uses a block similar to MobileNetV2's but adds a <strong>Squeeze-and-Excitation (SE) block</strong>. The SE block provides channel-wise attention, allowing the network to reweigh each feature map based on its importance.
     </p>
     <pre><code class="language-python">
 class SEBlock(nn.Module):
@@ -2494,22 +2535,44 @@ class SEBlock(nn.Module):
         A bigger input image needs more layers to grow the receptive field and more channels to capture fine-grained patterns. <em>Scale one dimension alone and you starve the others.</em> That is the intuition behind the paper's compound scaling: grow depth, width, and resolution together, in a fixed ratio.
     </p>
 
-    <div class="demo" id="effToy">
-        <figure class="figure">
-            <div class="eff-fig-wrap">
-                <img src="figures/papers/efficientnet-fig2.png" alt="Figure 2 from the EfficientNet paper: five network diagrams showing (a) baseline, (b) wider, (c) deeper, (d) higher-resolution, and (e) compound-scaled networks." class="eff-fig">
-                <div class="eff-veil" id="effVeil" aria-hidden="true">
-                    <div class="eff-veil-pane" id="effVeilT"></div>
-                    <div class="eff-veil-pane" id="effVeilB"></div>
-                    <div class="eff-veil-pane" id="effVeilL"></div>
-                    <div class="eff-veil-pane" id="effVeilR"></div>
-                    <div class="eff-veil-hole" id="effVeilHole"></div>
-                </div>
+    <p>
+    $$d = \alpha^{\varphi}, \qquad w = \beta^{\varphi}, \qquad r = \gamma^{\varphi}, \qquad \alpha \cdot \beta^2 \cdot \gamma^2 \approx 2, \qquad \alpha, \beta, \gamma \geq 1$$
+    </p>
+    <p>
+        Here <code>d</code>, <code>w</code>, and <code>r</code> are the depth, width, and resolution multipliers the dial produces; <code>&#966;</code> (phi) is the compound coefficient, the single dial that says how much more compute is available; <code>&#945;</code>, <code>&#946;</code>, and <code>&#947;</code> are fixed constants that split that budget among depth, width, and resolution. The constraint exists because a convolution's cost grows with depth once, but with width and resolution twice over, so the constraint keeps each step of <code>&#966;</code> at roughly double the FLOPs of the step before.
+    </p>
+    <p>
+        The paper finds those constants in two steps. Step 1: fix <code>&#966; = 1</code> and run a small grid search on the baseline B0 for <code>&#945;, &#946;, &#947;</code>; the values it finds are <code>&#945; = 1.2</code>, <code>&#946; = 1.1</code>, <code>&#947; = 1.15</code>. Step 2: freeze those constants and raise <code>&#966;</code> to grow B0 into the B1 to B7 ladder.
+    </p>
+    <figure class="figure">
+        <div class="eff-fig-wrap">
+            <img src="figures/papers/efficientnet-fig2.png" alt="Figure 2 from the EfficientNet paper: five network diagrams showing (a) baseline, (b) wider, (c) deeper, (d) higher-resolution, and (e) compound-scaled networks." class="eff-fig">
+            <div class="eff-veil" id="effVeil" aria-hidden="true">
+                <div class="eff-veil-pane" id="effVeilT"></div>
+                <div class="eff-veil-pane" id="effVeilB"></div>
+                <div class="eff-veil-pane" id="effVeilL"></div>
+                <div class="eff-veil-pane" id="effVeilR"></div>
+                <div class="eff-veil-hole" id="effVeilHole"></div>
             </div>
-            <figcaption>Figure 2. Model Scaling. (a) is a baseline network example; (b)-(d) are conventional scaling that only increases one dimension of network width, depth, or resolution. (e) is our proposed compound scaling method that uniformly scales all three dimensions with a fixed ratio.</figcaption>
-        </figure>
-        <p class="eff-rebuilt">Rebuilt from Figure 2 of Tan and Le (ICML 2019). <a href="https://arxiv.org/abs/1905.11946">arXiv:1905.11946</a></p>
-
+        </div>
+        <figcaption>Figure 2. Model Scaling. (a) is a baseline network example; (b)-(d) are conventional scaling that only increases one dimension of network width, depth, or resolution. (e) is our proposed compound scaling method that uniformly scales all three dimensions with a fixed ratio.</figcaption>
+    </figure>
+    <p class="eff-rebuilt">Rebuilt from Figure 2 of Tan and Le (ICML 2019). <a href="https://arxiv.org/abs/1905.11946">arXiv:1905.11946</a></p>
+    <div class="eff-table2">
+        <p class="eff-table2-head">From the paper (Table 2): the B0 to B7 ladder</p>
+        <table>
+            <tr><th>Model</th><th>Top-1</th><th>Params</th><th>FLOPS</th></tr>
+            <tr><td>B0</td><td>77.1%</td><td>5.3M</td><td>0.39B</td></tr>
+            <tr><td>B1</td><td>79.1%</td><td>7.8M</td><td>0.70B</td></tr>
+            <tr><td>B2</td><td>80.1%</td><td>9.2M</td><td>1.0B</td></tr>
+            <tr><td>B3</td><td>81.6%</td><td>12M</td><td>1.8B</td></tr>
+            <tr><td>B4</td><td>82.9%</td><td>19M</td><td>4.2B</td></tr>
+            <tr><td>B5</td><td>83.6%</td><td>30M</td><td>9.9B</td></tr>
+            <tr><td>B6</td><td>84.0%</td><td>43M</td><td>19B</td></tr>
+            <tr><td>B7</td><td>84.3%</td><td>66M</td><td>37B</td></tr>
+        </table>
+    <p class="eff-setup">The setup behind these numbers: ImageNet image classification. Every model trains on ImageNet; the score is top-1 accuracy and the cost is parameters and FLOPs, so a win means more accuracy for fewer params and flops.</p>
+    <div class="demo" id="effToy">
         <div class="demo-controls">
             <span class="eff-methods" role="group" aria-label="Scaling method">
                 <label><input type="radio" name="effMethod" value="compound" checked> <span class="eff-mbadge on" data-m="compound">(e)</span> Compound</label>
@@ -2528,19 +2591,6 @@ class SEBlock(nn.Module):
         <p class="demo-stats" id="effStats"></p>
         </div>
         <div class="eff-col">
-        <div class="eff-table2">
-            <p class="eff-table2-head">From the paper (Table 2): the B0 to B7 ladder</p>
-            <table>
-                <tr><th>Model</th><th>Top-1</th><th>Params</th><th>FLOPS</th></tr>
-                <tr><td>B0</td><td>77.1%</td><td>5.3M</td><td>0.39B</td></tr>
-                <tr><td>B1</td><td>79.1%</td><td>7.8M</td><td>0.70B</td></tr>
-                <tr><td>B2</td><td>80.1%</td><td>9.2M</td><td>1.0B</td></tr>
-                <tr><td>B3</td><td>81.6%</td><td>12M</td><td>1.8B</td></tr>
-                <tr><td>B4</td><td>82.9%</td><td>19M</td><td>4.2B</td></tr>
-                <tr><td>B5</td><td>83.6%</td><td>30M</td><td>9.9B</td></tr>
-                <tr><td>B6</td><td>84.0%</td><td>43M</td><td>19B</td></tr>
-                <tr><td>B7</td><td>84.3%</td><td>66M</td><td>37B</td></tr>
-            </table>
         </div>
         </div>
         </div>
@@ -2696,6 +2746,20 @@ class SEBlock(nn.Module):
     <p>
         <code>212 and 427</code> are not magic numbers. They are what you get when you run the recurrence from the receptive field section over the actual layer lists. The receptive-field animation in this section runs that recurrence over three real architectures. As the animation runs, the window crawls through the <code>3x3s</code> and then leaps every time a pool doubles the jump. That leap is the whole story: <em>stride is what makes receptive fields explode.</em> The <code>3x3s</code> are just along for the ride.
     </p>
+    <p>
+    $$\text{new RF} = \text{old RF} + (k - 1) \times \text{old jump}$$
+    $$\text{new jump} = \text{old jump} \times \text{stride}$$
+    </p>
+    <p>
+        Here <code>k</code> is the layer's kernel size, <code>stride</code> is how far the layer's outputs step, and <code>jump</code> is the spacing between neighboring outputs measured in input pixels. Both numbers start at <code>1</code> at the input.
+    </p>
+    <table class="datatable">
+        <tr><th>Architecture</th><th>Layer sequence</th><th>Layers</th><th>Final receptive field</th></tr>
+        <tr><td>LeNet-style</td><td>conv <code>5x5</code> stride <code>1</code>, pool <code>2x2</code> stride <code>2</code>, conv <code>5x5</code> stride <code>1</code>, pool <code>2x2</code> stride <code>2</code></td><td>4</td><td>16</td></tr>
+        <tr><td>VGG-16</td><td>blocks of <code>2, 2, 3, 3, 3</code> conv <code>3x3</code>, each block followed by pool <code>2x2</code> stride <code>2</code></td><td>18</td><td>212</td></tr>
+        <tr><td>ResNet-50</td><td>stem conv <code>7x7</code> stride <code>2</code>, maxpool <code>3x3</code> stride <code>2</code>, then stages of <code>3, 4, 6, 3</code> bottleneck blocks, each block a <code>1x1</code> pair with no RF growth plus one <code>3x3</code> whose stride is <code>2</code> on the first block of stages <code>2</code> to <code>4</code> and <code>1</code> otherwise</td><td>34</td><td>427</td></tr>
+        <caption>Pools and stride make receptive fields explode; stacked <code>3x3s</code> mostly crawl.</caption>
+    </table>
     <div class="demo" id="archToy">
         <div class="demo-controls">
             <span role="group" aria-label="Architecture picker">
@@ -2948,14 +3012,32 @@ class SEBlock(nn.Module):
         The VGG paper asked the bluntest question in deep learning: <em>what happens if we just keep stacking layers?</em> Same <code>3x3</code> convolutions, same max-pooling, just more of them. Config A has <code>11</code> weight layers. Config E has <code>19</code>. Everything else is held fixed, so any change in error is the depth talking.
     </p>
     <p>
-        Below is the paper's actual Table 3, single-test-scale results. I turned its S=<code>256</code>/Q=<code>256</code> column into a race (S is the training scale, Q the test scale: images resized so the shorter side measures <code>256</code> pixels). As the configs step from A to E, the top-5 error bar falls, and falls, and then at E it ticks back up. <em>That tick-up is the whole lesson</em>, and it is the paper's own conclusion, not my commentary: "The error rate of our architecture saturates when the depth reaches <code>19</code> layers."
+        Below is the paper's actual Table 3, single-test-scale results. I turned its S=<code>256</code>/Q=<code>256</code> column into a race (S is the training scale, Q the test scale: images resized so the shorter side measures <code>256</code> pixels). <em>That tick-up is the whole lesson</em>, and it is the paper's own conclusion, not my commentary: "The error rate of our architecture saturates when the depth reaches <code>19</code> layers."
+    </p>
+    <figure class="paper-fig">
+        <img src="figures/papers/vgg-table3.png" alt="Table 3 from Simonyan and Zisserman (2015): ConvNet performance at a single test scale." style="width:100%;height:auto;display:block;">
+        <figcaption>Table 3: ConvNet performance at a single test scale. This is the paper's real table, not a retyping. Rebuilt from Table 3 of Simonyan and Zisserman (ICLR 2015). <a href="https://arxiv.org/abs/1409.1556">arXiv:1409.1556</a></figcaption>
+    </figure>
+    <p class="vgg-racelabel">The race below reads only the S=<code>256</code>/Q=<code>256</code> column of that table: interactive data from Table 3, S=<code>256</code>/Q=<code>256</code> column.</p>
+    <table class="datatable">
+        <tr><th>Config</th><th>Weight layers</th><th>Params</th><th>Top-5 error at S=256/Q=256</th></tr>
+        <tr><td>A</td><td>11</td><td>133M</td><td>10.4%</td></tr>
+        <tr><td>A-LRN</td><td>11</td><td>133M</td><td>10.5%</td></tr>
+        <tr><td>B</td><td>13</td><td>133M</td><td>9.9%</td></tr>
+        <tr><td>C</td><td>16</td><td>134M</td><td>9.3%</td></tr>
+        <tr><td>D</td><td>16</td><td>138M</td><td>8.8%</td></tr>
+        <tr><td>E</td><td>19</td><td>144M</td><td>9.0%</td></tr>
+    </table>
+    <p>
+        Error falls from A to D, then ticks up at E. C and D have the same depth, but C mixes in <code>1x1</code> layers while D is pure <code>3x3</code>, and D wins; A-LRN adds local response normalization and does not help.
+    </p>
+    <p>
+    $$3 \times (3 \times 3 \times C \times C) = 27C^2 \text{ weights}, \qquad 7 \times 7 \times C \times C = 49C^2 \text{ weights}$$
+    </p>
+    <p>
+        That is the paper's <code>3x3</code> argument: three stacked <code>3x3</code> layers hold <code>27C&#178;</code> weights and one <code>7x7</code> layer holds <code>49C&#178;</code>, so the <code>7x7</code> costs <code>81%</code> more for the same receptive field. Here <code>C</code> is the channel count, the same in and out, which is what makes the two counts comparable.
     </p>
     <div class="demo" id="vggRaceToy">
-        <figure class="paper-fig">
-            <img src="figures/papers/vgg-table3.png" alt="Table 3 from Simonyan and Zisserman (2015): ConvNet performance at a single test scale." style="width:100%;height:auto;display:block;">
-            <figcaption>Table 3: ConvNet performance at a single test scale. This is the paper's real table, not a retyping. Rebuilt from Table 3 of Simonyan and Zisserman (ICLR 2015). <a href="https://arxiv.org/abs/1409.1556">arXiv:1409.1556</a></figcaption>
-        </figure>
-        <p class="vgg-racelabel">The race below reads only the S=<code>256</code>/Q=<code>256</code> column of that table: interactive data from Table 3, S=<code>256</code>/Q=<code>256</code> column.</p>
         <div class="demo-controls">
             <span role="group" aria-label="Config picker">
                 <button type="button" class="toy-btn vgg-pick" data-c="0">A (11)</button>
@@ -3218,7 +3300,18 @@ class SEBlock(nn.Module):
 
     <h3>Your receptive field window must be bigger than your object</h3>
     <p>
-        <em>This is the cheapest debugging step in computer vision and nobody does it.</em> Before you tune anything, check the ruler: is your network's window bigger than your object? Drag the object to <code>100</code> pixels, pick LeNet. Red. No training run fixes red. Now pick VGG. Green. That is the whole diagnosis, and it took ten seconds.
+        <em>This is the cheapest debugging step in computer vision and nobody does it.</em> Before you tune anything, check the ruler: is your network's window bigger than your object? At <code>100</code> pixels, LeNet is red and VGG is green. No training run fixes red. That is the whole diagnosis, and it took ten seconds.
+    </p>
+    <ul>
+        <li><strong>Green:</strong> the window covers at least <code>1.2</code> times the object, or exactly equals it.</li>
+        <li><strong>Amber:</strong> borderline, check the effective receptive field; the window is bigger than the object but under <code>1.2</code> times it.</li>
+        <li><strong>Red:</strong> the window is smaller than the object.</li>
+    </ul>
+    <p>
+        Here the window is the network's receptive field in pixels, <code>16</code>, <code>212</code>, and <code>427</code> for the three networks, and the object is the object's width in pixels.
+    </p>
+    <p>
+        The check runs in three steps: name your object size in pixels, name your network's window, then apply the rule above.
     </p>
     <div class="demo" id="seeToy">
         <div class="demo-controls">

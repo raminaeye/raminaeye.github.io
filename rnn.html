@@ -1045,6 +1045,9 @@ class GRUCell(nn.Module):
         <div class="canvas-wrap">
             <canvas class="flow-canvas" id="gruCanvas" role="img" aria-label="Animated GRU blend: old memory and candidate streams mixing through the update gate valve"></canvas>
         </div>
+        <div class="canvas-wrap">
+            <canvas class="flow-canvas" id="gruTrace" role="img" aria-label="Memory trace: one bar per timestep showing the running memory value"></canvas>
+        </div>
         <p class="demo-readout" id="gruReadout"></p>
         <p class="demo-takeaway" id="gruTake"></p>
         <p class="demo-note">
@@ -1054,7 +1057,7 @@ class GRUCell(nn.Module):
             <p class="cc-head">How to play</p>
             <ul>
                 <li><strong>The point:</strong> The GRU's update gate is a blend knob between old memory and the new candidate. z near <code>0</code> is a vault that keeps the memory untouched, z near <code>1</code> is a reflex that overwrites it.</li>
-                <li><strong>What you'll see:</strong> a spike of <code>7</code> moves through five timesteps while the blue old-memory stream and purple candidate stream blend at the z valve into the new memory. The readout shows the new memory value at each step, and the takeaway line names the verdict: vault, reflex, or blend.</li>
+                <li><strong>What you'll see:</strong> a spike of <code>7</code> moves through five timesteps while the blue old-memory stream and purple candidate stream blend at the z valve into the new memory. The strip below shows the running memory after each step: green bars are the memory value, the ringed bar is the current step, outlined bars with <code>?</code> are steps not reached yet. Dragging the update slider reshapes the whole strip.</li>
                 <li><strong>The update knob:</strong> Update z sets the blend at the valve (at <code>1.00</code> the spike passes straight through). The reset gate stays at <code>0.90</code> so the candidate mixer always sees most of the old memory.</li>
             </ul>
         </div>
@@ -1174,6 +1177,75 @@ class GRUCell(nn.Module):
             else take = '<strong>A genuine blend.</strong> ' + Math.round((1 - z) * 100) + '% old memory, ' + Math.round(z * 100) + '% new candidate: h = ' + fmt(s.h) + '.';
             if (r <= 0.2) take += ' And with r near 0, the candidate ignores the past entirely.';
             $('gruTake').innerHTML = take;
+            drawTrace();
+        }
+        /* Memory trace strip: one bar per timestep, drawn on its own canvas so the
+           main diagram layout is untouched. Bars appear as steps are reached; the
+           current bar gets an ink ring. Dragging z reshapes the whole strip live. */
+        var trc = $('gruTrace');
+        var tctx = trc ? trc.getContext('2d') : null;
+        function drawTrace() {
+            if (!tctx) return;
+            var cw = trc.parentElement.clientWidth - 4;
+            if (!(cw > 220)) cw = 300;
+            if (cw > 640) cw = 640;
+            var dpr = window.devicePixelRatio || 1;
+            var compact = cw < 480;
+            var FS = compact ? Math.round(12 * 640 / cw) : 12;
+            trc.width = Math.round(cw * dpr);
+            trc.height = Math.round(cw * 130 / 640 * dpr);
+            trc.style.width = cw + 'px';
+            trc.style.height = Math.round(cw * 130 / 640) + 'px';
+            var t = parseInt(tS.value, 10);
+            var r = 0.9, z = parseFloat(zS.value);
+            var hs = [], maxH = 1e-9;
+            for (var b = 0; b < 5; b++) {
+                var hb = stepVals(b + 1, r, z).h;
+                hs.push(hb);
+                if (Math.abs(hb) > maxH) maxH = Math.abs(hb);
+            }
+            var sc = cw / 640;
+            tctx.setTransform(dpr * sc, 0, 0, dpr * sc, 0, 0);
+            tctx.fillStyle = '#ffffff';
+            tctx.fillRect(0, 0, 640, 130);
+            tctx.fillStyle = '#2c3e50';
+            tctx.font = 'bold ' + FS + 'px sans-serif';
+            tctx.textAlign = 'left';
+            tctx.fillText('memory trace: h after each step', 12, 16);
+            var baseY = 64, bw = 56;
+            tctx.strokeStyle = '#bdc3c7'; tctx.lineWidth = 1;
+            tctx.beginPath(); tctx.moveTo(40, baseY); tctx.lineTo(600, baseY); tctx.stroke();
+            for (var b2 = 0; b2 < 5; b2++) {
+                var bx = 100 + b2 * 110 - bw / 2;
+                var bh = Math.abs(hs[b2]) / maxH * 36;
+                var isCur = (b2 === t - 1), seen = (b2 < t);
+                tctx.textAlign = 'center';
+                if (seen) {
+                    tctx.fillStyle = hs[b2] >= 0 ? '#27ae60' : '#5d6d7e';
+                    if (hs[b2] >= 0) tctx.fillRect(bx, baseY - bh, bw, bh);
+                    else tctx.fillRect(bx, baseY, bw, bh);
+                    if (isCur) {
+                        tctx.strokeStyle = '#2c3e50'; tctx.lineWidth = 3;
+                        if (hs[b2] >= 0) tctx.strokeRect(bx, baseY - bh, bw, bh);
+                        else tctx.strokeRect(bx, baseY, bw, bh);
+                    }
+                    tctx.fillStyle = '#2c3e50'; tctx.font = FS + 'px sans-serif';
+                    tctx.fillText('t=' + (b2 + 1), bx + bw / 2, 112);
+                    /* compact: drop the numeric value line; the readout above the
+                       tool already shows the exact h, and the two lines smear here */
+                    if (!compact) {
+                        tctx.fillStyle = '#5d6d7e'; tctx.font = Math.max(9, FS - 2) + 'px sans-serif';
+                        tctx.fillText(fmt(hs[b2]), bx + bw / 2, 124);
+                    }
+                } else {
+                    tctx.strokeStyle = '#bdc3c7'; tctx.lineWidth = 1.5;
+                    tctx.strokeRect(bx, baseY - 36, bw, 72);
+                    tctx.fillStyle = '#bdc3c7'; tctx.font = FS + 'px sans-serif';
+                    tctx.fillText('?', bx + bw / 2, baseY + 6);
+                    tctx.fillStyle = '#2c3e50';
+                    tctx.fillText('t=' + (b2 + 1), bx + bw / 2, 112);
+                }
+            }
         }
         function pipe(x1, y1, x2, y2, w, color) {
             ctx.strokeStyle = color; ctx.lineWidth = w; ctx.lineCap = 'round';
@@ -1339,7 +1411,7 @@ class GRUCell(nn.Module):
             gruKick();
         });
         // Drag the z valve directly on its track (the walkthrough promises this).
-        window.addEventListener('resize', function() { sizeCanvas(); gruKick(); });
+        window.addEventListener('resize', function() { sizeCanvas(); drawTrace(); gruKick(); });
         if ('IntersectionObserver' in window) {
             new IntersectionObserver(function(es) {
                 visible = es[0].isIntersecting;
@@ -1503,7 +1575,7 @@ class GRUCell(nn.Module):
             <p class="cc-head">How to play</p>
             <ul>
                 <li><strong>The point:</strong> The LSTM stores memory in a tank that only leaks through the forget gate. Keep f at <code>1.00</code> and the <code>7</code> survives all five steps; drain it and the <code>7</code> is gone.</li>
-                <li><strong>What you'll see:</strong> the <code>7</code> enters the tank for five timesteps: gray drops leave, blue rain fills in, the green shutter reveals the hidden state. The mini-tank strip fills one step at a time; the readout shows the math and the takeaway names the verdict: Vault, Fading, or Gone.</li>
+                <li><strong>What you'll see:</strong> the <code>7</code> enters the tank for five timesteps: gray drops leave, blue rain fills in, the green shutter reveals the hidden state. The mini-tank strip fills one step at a time, and the line across the bar tops traces the memory level: flat means the <code>7</code> survives, falling means it drains. The readout shows the math and the takeaway names the verdict: Vault, Fading, or Gone.</li>
                 <li><strong>The forget knob:</strong> Forget f drains the tank (at <code>0.10</code> the <code>7</code> washes out). Input and output gates stay open so the forget gate does all the work.</li>
                 <li><strong>Vanilla RNN compare:</strong> adds a gateless track where the <code>7</code> washes out with nothing to protect it.</li>
             </ul>
@@ -1850,6 +1922,22 @@ class GRUCell(nn.Module):
                     ctx.fillText('?', sx + (sw - 12) / 2, L.svalY);
                 }
             }
+            // trajectory curve: connects the tops of the visited bars, so the
+            // drain-vs-survival shape reads without numbers (flat = survives,
+            // falling = drains)
+            if (t >= 2) {
+                var shT = 46, syT = L.sy;
+                ctx.strokeStyle = '#2c3e50'; ctx.lineWidth = 2;
+                ctx.beginPath();
+                for (var kt = 0; kt < t; kt++) {
+                    var sxT = 24 + kt * sw + 6 + (sw - 12) / 2;
+                    var svT = steps5[kt].c;
+                    var syvT = syT + (HI - svT) / (HI - LO) * shT;
+                    if (kt === 0) ctx.moveTo(sxT, syvT);
+                    else ctx.lineTo(sxT, syvT);
+                }
+                ctx.stroke();
+            }
             if (van.checked) {
                 var sx6 = 24 + 5 * sw + 6;
                 ctx.lineWidth = 1.5; ctx.strokeStyle = '#7f8c8d';
@@ -1957,6 +2045,7 @@ class GRUCell(nn.Module):
         function $(id) { return document.getElementById(id); }
         var XS = [7, 0.1, -0.2, 9.9, 0.1, 0.0];
         var N = XS.length;
+        var SF_MAXX = Math.max.apply(null, XS.map(function (x) { return Math.abs(x); }));
         var W = 640, H = 440;
         var TANK_LO = -1, TANK_HI = 17.5;
         var cv = $('sfCanvas');
@@ -2066,7 +2155,7 @@ class GRUCell(nn.Module):
             // pipes (marks drawn first, labels after them)
             for (var k = 0; k < N; k++) {
                 var g = vals[k];
-                var cx = colX(k), pw = 3 + 24 * g;
+                var cx = colX(k), pw = g >= 0.05 ? (4 + 20 * g) * (0.2 + 0.8 * Math.pow(Math.abs(XS[k]) / SF_MAXX, 2)) : 3;
                 var cc = colColor(k);
                 var hot = playing && k === playK;
                 // pipe body
@@ -2094,9 +2183,10 @@ class GRUCell(nn.Module):
                 ctx.textAlign = 'center';
                 ctx.fillStyle = hot ? '#2c3e50' : '#555';
                 ctx.font = (hot ? 'bold ' : '') + FS13 + 'px sans-serif';
-                ctx.fillText('t=' + (k + 1), cx, 34);
+                ctx.fillText('t=' + (k + 1), cx, 30);
                 ctx.font = FS + 'px sans-serif'; ctx.fillStyle = '#555';
-                ctx.fillText('x=' + XS[k], cx, 52);
+                /* FS-relative gap so the two labels never smear at phone widths */
+                ctx.fillText('x=' + XS[k], cx, 30 + Math.max(18, FS + 6));
                 ctx.fillStyle = '#555'; ctx.font = FS + 'px sans-serif';
                 ctx.fillText('i=' + g.toFixed(2), cx, 274);
                 if (hot && !compact) {

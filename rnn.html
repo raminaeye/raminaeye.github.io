@@ -487,6 +487,7 @@
         @media (max-width: 480px) {
         }
         .canvas-wrap { position: relative; }
+        .math-display { text-align: center; margin: 1rem 0; overflow-x: auto; max-width: 100%; }
         .mjx-chtml.MJXc-display { overflow-x: auto; overflow-y: hidden; max-width: 100%; }
         /* MathJax 2.7 preview spans during typesetting: contain them so the
            document never exceeds the viewport while equations render */
@@ -813,6 +814,19 @@
         </figcaption>
     </figure>
 
+    <p>
+        One RNN step in one line: mix the incoming word with the last cell's memory, squash, and that is the new memory.
+    </p>
+    <div class="math-display">
+    $$h_t = \tanh(W \cdot x_t + U \cdot h_{t-1})$$
+    </div>
+    <p>
+        Here <code>x<sub>t</sub></code>, the word entering, and <code>h<sub>t-1</sub></code>, memory from the last cell, are the two sides of the mix, and <code>h<sub>t</sub></code>, the new cell state, is what comes out. <code>W</code>, <code>U</code>, the learned weights, scale each side, <code>tanh</code>, the squasher, squeezes the total, and <code>·</code> means times: scaling. The equation's <code>W</code> is the dataflow figure's <code>W<sub>xh</sub></code> (it multiplies <code>x<sub>t</sub></code>), and the equation's <code>U</code> is the figure's <code>W<sub>hh</sub></code> (it multiplies <code>h<sub>t-1</sub></code>). A small bias joins the mix, and one more matrix turns the hidden state into the output prediction; neither appears in this equation line.
+    </p>
+    <p>
+        Each hand-off fades the past; by the third cell the first word is barely there. The hand-off arrow carries <code>h<sub>t</sub></code> to the next cell. Fading shows repeated squashing erasing early content.
+    </p>
+
     <div class="demo" id="unrollToy">
         <h4>Toy: one sentence through the unrolled RNN</h4>
         <div class="demo-controls">
@@ -1001,6 +1015,22 @@
         <li><strong>Exploding gradients.</strong> The same chain can run in reverse. If the recurrent weights are large, each timestep multiplies the gradient instead of shrinking it, and the updates blow up to garbage. Same mechanism, opposite disease. This one is at least loud about it: you see NaNs, not silence.</li>
     </ul>
 
+    <p>
+        The tool's model, stated plainly: a gradient multiplied at every timestep grows or shrinks exponentially, straight on a log scale.
+    </p>
+    <div class="math-display">
+    $$w^t \qquad w^T$$
+    </div>
+    <p>
+        The gradient magnitude after <code>t</code> steps is <code>w</code> raised to the power <code>t</code>, and after all <code>T</code> steps it is <code>w</code> raised to the power <code>T</code>. Weight scale <code>w</code>: sets the multiplier per step, <code>0.50</code> to <code>1.50</code>. Timesteps <code>T</code>: sets how far back the dot goes, <code>1</code> to <code>50</code>. <code>T</code> is the number of timesteps, and multiply a number below <code>1</code> by itself <code>T</code> times and it collapses. On the plot, the band above <code>1e2</code> is exploded, the band below <code>1e-2</code> is vanished, and the band between is safe.
+    </p>
+    <p>
+        This is the simplified scalar picture. Real Jacobians are matrices, not one number, but the exponential dependence on <code>T</code> is the whole story.
+    </p>
+    <p>
+        The exploded end has a standard fix, taught in full in the clipping section that follows this tool: measure the length of the whole gradient vector, all the parameter gradients flattened into one big vector. If that length is bigger than a threshold, scale every component down proportionally until the length lands exactly on that threshold.
+    </p>
+
     <div class="demo" id="gradDemo">
         <h3 class="demo-h3">Why gradients vanish (or explode)</h3>
         <div class="demo-controls">
@@ -1127,6 +1157,34 @@
 
     
 
+    <p>
+        The GRU in four lines: two gates decide what to keep and what to forget, a candidate memory is proposed, and the update gate blends old and new.
+    </p>
+    <div class="math-display">
+    $$z_t = \sigma(W_z \cdot x_t + U_z \cdot h_{t-1})$$
+    </div>
+    <p>
+        The update gate decides: how much of the new candidate to let in versus keeping the old memory. <code>z<sub>t</sub></code>, the update gate, is built from <code>x<sub>t</sub></code>, the input, scaled by <code>W<sub>z</sub></code>, that gate's input weight, and <code>h<sub>t-1</sub></code>, the old memory, scaled by <code>U<sub>z</sub></code>, that gate's old-memory weight. <code>σ</code>, the gate squasher: outputs 0 to 1. <code>W</code>, <code>U</code> are the learned weights, and <code>·</code> means times: scaling.
+    </p>
+    <div class="math-display">
+    $$r_t = \sigma(W_r \cdot x_t + U_r \cdot h_{t-1})$$
+    </div>
+    <p>
+        The reset gate decides: how much of the old memory the candidate gets to see. <code>r<sub>t</sub></code>, the reset gate, is built the same way, from the input <code>x<sub>t</sub></code> scaled by <code>W<sub>r</sub></code>, that gate's input weight, and the old memory <code>h<sub>t-1</sub></code> scaled by <code>U<sub>r</sub></code>, that gate's old-memory weight, with <code>σ</code>, the gate squasher: outputs 0 to 1.
+    </p>
+    <div class="math-display">
+    $$\tilde{h}_t = \tanh(W_h \cdot x_t + U_h \cdot (r_t \odot h_{t-1}))$$
+    </div>
+    <p>
+        Build the candidate: mix the incoming word with the reset-filtered old memory, then squash. <code>h̃<sub>t</sub></code>, the candidate memory, mixes <code>x<sub>t</sub></code>, the input, scaled by <code>W<sub>h</sub></code>, the candidate's input weight, with <code>r<sub>t</sub></code> ⊙ <code>h<sub>t-1</sub></code>, the reset gate element-wise mixing the old memory, scaled by <code>U<sub>h</sub></code>, the candidate's old-memory weight. <code>⊙</code> is element-wise mix, and <code>tanh</code> squashes to between -1 and 1.
+    </p>
+    <div class="math-display">
+    $$h_t = (1 - z_t) \cdot h_{t-1} + z_t \cdot \tilde{h}_t$$
+    </div>
+    <p>
+        Blend old and new: the update gate picks the mix between keeping the old memory and taking the candidate. <code>h<sub>t</sub></code>, the new memory, adds the old memory <code>h<sub>t-1</sub></code> scaled by (1 - <code>z<sub>t</sub></code>), the keep share from the dataflow figure's keep stream, to the candidate memory <code>h̃<sub>t</sub></code> scaled by <code>z<sub>t</sub></code>, the update gate itself, the replace stream's share.
+    </p>
+
     <h3>One GRU step, in code</h3>
     <p>
         The whole cell is just those four equations. Here it is, one step:
@@ -1154,6 +1212,26 @@ class GRUCell(nn.Module):
 </code></pre>
     <p>
         Even though the GRU doesn't have a dedicated <strong>cell state</strong>, <em>it can still preserve long-term memory</em> because the update gate can create identity connections across time steps.
+    </p>
+
+    <ul>
+        <li><strong>Shut: the vault.</strong> The update gate is shut: the old memory flows straight through and the candidate is pinched off, so the memory survives unchanged.</li>
+        <li><strong>Open: the reflex.</strong> The update gate is wide open: the candidate floods through and overwrites the old memory.</li>
+        <li><strong>Halfway: the blend.</strong> The update gate sits halfway: both streams feed the output, part old memory and part new candidate.</li>
+        <li><strong>The reset gate's job.</strong> The reset gate pinches the old-memory branch feeding the candidate mixer: starved of the past, the candidate thins out.</li>
+    </ul>
+    <p>
+        This is the paper that introduced the GRU (Cho et al., EMNLP 2014). Below is its real Figure 2, the hidden-unit diagram, with its original caption.
+    </p>
+
+    <figure class="diagram" id="gruFig">
+        <div style="position:relative;max-width:640px;margin:0 auto;">
+            <img src="figures/papers/gru-fig1.png" alt="Figure 2 from Cho et al. (2014): the GRU hidden unit drawn with a circle for the hidden state h, a square for the candidate, an input x, and two switches labeled z and r." style="width:100%;height:auto;display:block;">
+        </div>
+        <figcaption><strong>Figure 2.</strong> An illustration of the proposed hidden activation function. The update gate <code>z</code> selects whether the hidden state is to be updated with a new hidden state <code>h̃</code>. The reset gate <code>r</code> decides whether the previous hidden state is ignored. See Eqs. (5)-(8) for the detailed equations of <code>r</code>, <code>z</code>, <code>h</code> and <code>h̃</code>. Rebuilt from Figure 2 of Cho et al. (EMNLP 2014). <a href="https://arxiv.org/abs/1406.1078">arXiv:1406.1078</a></figcaption>
+    </figure>
+    <p>
+        One quirk worth knowing: the paper writes the blend exactly the way this page does, with <code>(1 minus z)</code> weighting the <em>old</em> state and <code>z</code> weighting the new candidate, so fully open replaces the old memory. The flipped form, <code>z</code> weighting the old state, is the later library convention (PyTorch's GRU uses it). Same idea, mirrored knob. If a library's <code>z</code> feels backwards next to the paper, that is why.
     </p>
 
     <div class="demo" id="gruToy">
@@ -1500,20 +1578,6 @@ class GRUCell(nn.Module):
     })();
     </script>
 
-    <h3>The z convention flipped once</h3>
-    <p>
-        This is the paper that introduced the GRU (Cho et al., EMNLP 2014): the two gates you just played with, built to help a translation model remember long sentences. Below is its real Figure 2, the hidden-unit diagram, with its original caption.
-    </p>
-
-    <figure class="diagram" id="gruFig">
-        <div style="position:relative;max-width:640px;margin:0 auto;">
-            <img src="figures/papers/gru-fig1.png" alt="Figure 2 from Cho et al. (2014): the GRU hidden unit drawn with a circle for the hidden state h, a square for the candidate, an input x, and two switches labeled z and r." style="width:100%;height:auto;display:block;">
-        </div>
-        <figcaption><strong>Figure 2.</strong> An illustration of the proposed hidden activation function. The update gate <code>z</code> selects whether the hidden state is to be updated with a new hidden state <code>h̃</code>. The reset gate <code>r</code> decides whether the previous hidden state is ignored. See Eqs. (5)-(8) for the detailed equations of <code>r</code>, <code>z</code>, <code>h</code> and <code>h̃</code>. Rebuilt from Figure 2 of Cho et al. (EMNLP 2014). <a href="https://arxiv.org/abs/1406.1078">arXiv:1406.1078</a></figcaption>
-    </figure>
-    <p>
-        One quirk worth knowing: the paper writes the blend exactly the way this page does, with <code>(1 minus z)</code> weighting the <em>old</em> state and <code>z</code> weighting the new candidate, so fully open replaces the old memory. The flipped form, <code>z</code> weighting the old state, is the later library convention (PyTorch's GRU uses it). Same idea, mirrored knob. If a library's <code>z</code> feels backwards next to the paper, that is why.
-    </p>
 
     <hr>
 
@@ -1618,6 +1682,52 @@ class GRUCell(nn.Module):
     </figure>
 
     
+
+    <p>
+        The LSTM in six lines: three gates guard a cell state: forget the stale, add the fresh, and output a filtered read.
+    </p>
+    <div class="math-display">
+    $$f_t = \sigma(W_f \cdot x_t + U_f \cdot h_{t-1} + b_f)$$
+    </div>
+    <p>
+        The forget gate: decides how much of the old cell state to keep versus drain away. <code>f<sub>t</sub></code>, the forget gate, is built from <code>x<sub>t</sub></code>, the input, scaled by <code>W<sub>f</sub></code>, the forget gate's own input weight, and <code>h<sub>t-1</sub></code>, the hidden state from the previous step, scaled by <code>U<sub>f</sub></code>, its own hidden-state weight, plus <code>b<sub>f</sub></code>, the forget gate's bias. <code>W</code>, <code>U</code> are the learned weights, <code>σ</code> squashes to between 0 and 1, the gatekeeper, and <code>·</code> means times: scaling.
+    </p>
+    <div class="math-display">
+    $$i_t = \sigma(W_i \cdot x_t + U_i \cdot h_{t-1} + b_i)$$
+    </div>
+    <p>
+        The input gate: decides how much of the new candidate to pour into the cell. <code>i<sub>t</sub></code>, the input gate, is built from the input <code>x<sub>t</sub></code> scaled by <code>W<sub>i</sub></code>, the input gate's own input weight, and the hidden state from the previous step, <code>h<sub>t-1</sub></code>, scaled by <code>U<sub>i</sub></code>, its own hidden-state weight, plus <code>b<sub>i</sub></code>, the input gate's bias, all squashed by <code>σ</code> to between 0 and 1.
+    </p>
+    <div class="math-display">
+    $$\tilde{C}_t = \tanh(W_c \cdot x_t + U_c \cdot h_{t-1} + b_c)$$
+    </div>
+    <p>
+        The candidate cell: fresh information mixed from the word and the last hidden state, squashed. <code>C̃<sub>t</sub></code>, the candidate cell state, mixes the input <code>x<sub>t</sub></code>, scaled by <code>W<sub>c</sub></code>, the candidate's own input weight, with <code>h<sub>t-1</sub></code>, the hidden state from the previous step, scaled by <code>U<sub>c</sub></code>, its own hidden-state weight, plus <code>b<sub>c</sub></code>, the candidate's bias, and <code>tanh</code> squashes the mix to between -1 and 1.
+    </p>
+    <div class="math-display">
+    $$C_t = f_t \odot C_{t-1} + i_t \odot \tilde{C}_t$$
+    </div>
+    <p>
+        Update the cell: keep what the forget gate saved, add what the input gate let in. <code>C<sub>t</sub></code>, the cell state, is <code>f<sub>t</sub></code>, the forget gate, element-wise mixing <code>C<sub>t-1</sub></code>, the cell state's previous value, plus <code>i<sub>t</sub></code>, the input gate, element-wise mixing <code>C̃<sub>t</sub></code>, the candidate cell state. <code>⊙</code> is element-wise mix. These are the two streams from the dataflow figure: the forget gate scales the old balance, the input gate scales the deposit, and they add.
+    </p>
+    <div class="math-display">
+    $$o_t = \sigma(W_o \cdot x_t + U_o \cdot h_{t-1} + b_o)$$
+    </div>
+    <p>
+        The output gate: decides how much of the cell state to reveal as the hidden state. <code>o<sub>t</sub></code>, the output gate, is built from the input <code>x<sub>t</sub></code> scaled by <code>W<sub>o</sub></code>, the output gate's own input weight, and <code>h<sub>t-1</sub></code>, the hidden state from the previous step, scaled by <code>U<sub>o</sub></code>, its own hidden-state weight, plus <code>b<sub>o</sub></code>, the output gate's bias, squashed by <code>σ</code> to between 0 and 1.
+    </p>
+    <div class="math-display">
+    $$h_t = o_t \odot \tanh(C_t)$$
+    </div>
+    <p>
+        The new hidden state: the squashed cell, filtered by the output gate. <code>h<sub>t</sub></code>, the output, is <code>o<sub>t</sub></code>, the output gate, element-wise mixing <code>tanh(C<sub>t</sub>)</code>, the cell state squashed by <code>tanh</code> to between -1 and 1.
+    </p>
+    <ul>
+        <li><strong>The input pours in.</strong> The input gate is open: drops pour into the tank and the level rises.</li>
+        <li><strong>Shut: the vault.</strong> Every gate is shut: the level never drops, step after step. That flat line is the whole trick.</li>
+        <li><strong>Open: the drain.</strong> The forget gate opens its drain: the level falls and keeps falling. Erasure is permanent.</li>
+        <li><strong>The output reveals.</strong> The output gate opens its shutter: the hidden state flows out, as much as the shutter lets through.</li>
+    </ul>
 
     <div class="demo" id="lstmToy">
         <h4>Toy: the memory tank</h4>
@@ -1987,6 +2097,19 @@ class GRUCell(nn.Module):
     })();
     </script>
 
+    <p>
+        The forget gate stays open (nothing leaks out), so the write gate does all the routing alone. That gate is the LSTM's input gate. A real network learns both schedules from data.
+    </p>
+    <p>
+        The setup: six gated pipes pouring into a memory tank; the important signal and the loud distractor streams compete, alongside quiet steps. Gating is a routing policy you choose. Open the valve on the important signal, close it on the loud distractor, and the tank remembers exactly what you let in.
+    </p>
+    <p>
+        At rest: the tank starts empty with the verdict pending. The three presets are Remember everything, Block the distractor, and Amnesia. Remember everything opens all six valves (verdict: remembers the distractor); Block the distractor opens every valve except the distractor's (verdict flips to the important signal); Amnesia closes all six (the network remembers nothing).
+    </p>
+    <p>
+        With all gates open the loudest input wins.
+    </p>
+
     <div class="demo" id="sfToy">
         <h4>Toy: gate safari, you set the routing policy</h4>
         <div class="demo-controls">
@@ -2315,6 +2438,41 @@ class GRUCell(nn.Module):
 
     <h2 id="results">Long sequences expose the vanilla RNN</h2>
 
+    <p>
+        One spike feeds a plain RNN, a GRU, and an LSTM. The RNN's echo decays to flat, the gated lanes hold it, and holding costs <code>3x</code> to <code>4x</code> the compute. The RNN trace flattens by the last step while the gated traces stay up. The numbers: RNN <code>0.76</code> down to <code>0.01</code>, GRU holds <code>0.96</code>, LSTM holds <code>0.64</code>.
+    </p>
+    <p>
+        Illustrative fixed weights, scalar state, both starting at zero. Costs are relative and schematic (gate-count framing), not measured.
+    </p>
+
+    <p>
+        In practice you never write these cells by hand. PyTorch has them built in, and the call is <em>boring in the best way</em>:
+    </p>
+<pre><code class="language-python">
+# A 2-layer LSTM; batch_first matches the (batch, seq, features) convention
+lstm = nn.LSTM(input_size=28, hidden_size=128, num_layers=2, batch_first=True)
+output, (hn, cn) = lstm(x)  # output: every step of the last layer; hn, cn: final states per layer
+# GRU is the same minus the cell state: output, hn = gru(x)
+</code></pre>
+    <p>
+        <em>So what does gating actually buy you?</em> The classic stress test is <strong>sequential MNIST</strong>: feed a <code>28</code>x<code>28</code> digit in one row at a time, so the model must remember early rows for <code>28</code> steps before it gets to classify. Here is how the three architectures compare:
+    </p>
+    <div class="result-block">
+        <h4>Result: sequential MNIST (28 steps, 1 hidden layer of 128, ~20 epochs)</h4>
+        <table class="results">
+            <tr><th>Model</th><th>Test accuracy</th><th>Notes</th></tr>
+            <tr><td>Vanilla RNN</td><td>~95%</td><td>Works, but the long gap between early rows and the label hurts it</td></tr>
+            <tr><td>GRU</td><td>~98%</td><td>The update gate holds early rows in memory across all 28 steps</td></tr>
+            <tr><td>LSTM</td><td>~98%</td><td>Same story; the cell-state highway carries the rows straight through</td></tr>
+        </table>
+        <p>
+            <em>Honestly labeled:</em> these are reference values typical of published sequential-MNIST runs with this setup, not measured on this machine. The ordering is the point and it is robust: once the sequence gets long, the vanilla RNN falls behind and the gated models do not.
+        </p>
+    </div>
+    <p>
+        GRUs typically achieve similar results to LSTMs with fewer parameters: no separate cell state, two gates instead of three. If you are not sure which to pick, <em>start with a GRU</em>.
+    </p>
+
     <div class="demo" id="tripleToy">
         <h3 class="demo-h3">Toy: same spike, three memories</h3>
         <div class="demo-controls">
@@ -2546,33 +2704,6 @@ class GRUCell(nn.Module):
     })();
     </script>
 
-    <p>
-        In practice you never write these cells by hand. PyTorch has them built in, and the call is <em>boring in the best way</em>:
-    </p>
-<pre><code class="language-python">
-# A 2-layer LSTM; batch_first matches the (batch, seq, features) convention
-lstm = nn.LSTM(input_size=28, hidden_size=128, num_layers=2, batch_first=True)
-output, (hn, cn) = lstm(x)  # output: every step of the last layer; hn, cn: final states per layer
-# GRU is the same minus the cell state: output, hn = gru(x)
-</code></pre>
-    <p>
-        <em>So what does gating actually buy you?</em> The classic stress test is <strong>sequential MNIST</strong>: feed a <code>28</code>x<code>28</code> digit in one row at a time, so the model must remember early rows for <code>28</code> steps before it gets to classify. Here is how the three architectures compare:
-    </p>
-    <div class="result-block">
-        <h4>Result: sequential MNIST (28 steps, 1 hidden layer of 128, ~20 epochs)</h4>
-        <table class="results">
-            <tr><th>Model</th><th>Test accuracy</th><th>Notes</th></tr>
-            <tr><td>Vanilla RNN</td><td>~95%</td><td>Works, but the long gap between early rows and the label hurts it</td></tr>
-            <tr><td>GRU</td><td>~98%</td><td>The update gate holds early rows in memory across all 28 steps</td></tr>
-            <tr><td>LSTM</td><td>~98%</td><td>Same story; the cell-state highway carries the rows straight through</td></tr>
-        </table>
-        <p>
-            <em>Honestly labeled:</em> these are reference values typical of published sequential-MNIST runs with this setup, not measured on this machine. The ordering is the point and it is robust: once the sequence gets long, the vanilla RNN falls behind and the gated models do not.
-        </p>
-    </div>
-    <p>
-        GRUs typically achieve similar results to LSTMs with fewer parameters: no separate cell state, two gates instead of three. If you are not sure which to pick, <em>start with a GRU</em>.
-    </p>
 
     <hr>
 

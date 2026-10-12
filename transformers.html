@@ -983,6 +983,35 @@
     keeps listening to everyone, and small score changes still move the weights.
   </p>
 
+  <p>
+    Written as equations, the whole mechanism is four lines:
+  </p>
+  <div class="dmath">$$ Q = XW_Q, \quad K = XW_K, \quad V = XW_V $$</div>
+  <p>
+    Turn each token into three roles: a query asking what to look for, a key advertising what it offers, and a value carrying its content. In that line, <code>X</code> is the token strips, and <code>W<sub>Q</sub></code>, <code>W<sub>K</sub></code>, <code>W<sub>V</sub></code> are the learned projections that produce each role.
+  </p>
+  <div class="dmath">$$ S = \frac{QK^T}{\sqrt{d_k}} $$</div>
+  <p>
+    Score every pair: dot each query against every key, scaled down so the numbers stay tame. <code>S</code> is the scores, the superscript <code>T</code> is the transpose that flips the key table so the dot products line up, and <code>d<sub>k</sub></code> is the key size.
+  </p>
+  <div class="dmath">$$ A = \mathrm{softmax}(S) $$</div>
+  <p>
+    Turn scores into shares: softmax makes each row sum to one, so every token distributes its attention budget. <code>A</code> is the listening weights.
+  </p>
+  <div class="dmath">$$ \mathrm{out} = A \cdot V $$</div>
+  <p>
+    Blend the values: mix every token's content by the attention shares to build the output. <code>V</code> is the values, <code>out</code> is the blended output, and the dot is a matrix product: mix rows by columns.
+  </p>
+  <p>
+    The walkthrough below steps through those four lines in pictures. In words, its four steps are:
+  </p>
+  <ol>
+    <li><strong>Strips:</strong> each token's vector is a strip of component bars, where the heights are the vector's components (no numbers, just shapes). A striped strip is added to every token: the position pattern (the paper uses sine/cosine).</li>
+    <li><strong>Heat grid:</strong> how strongly each pair of tokens matches; darker means stronger. The row we follow is "sat", and its darkest cell is "cat".</li>
+    <li><strong>Weight bars:</strong> the same grid after the softmax, drawn as bars instead of heat. Every row is now a set of listening weights that sums to <code>1</code>.</li>
+    <li><strong>Flow:</strong> "cat"'s strip flows into "sat"'s rebuilt vector through the thick arrow: the blend is the main event. The residual skip adds "sat"'s own vector back in, then layer norm rescales every token's vector to the same overall length, matching the paper's add-then-normalize order.</li>
+  </ol>
+
   <hr>
 
   <h2 id="one-attention-layer-walked-through">One attention layer, walked through</h2>
@@ -1022,10 +1051,6 @@
       <strong class="cap-title">What this shows</strong>
       <ul>
         <li><strong>The point:</strong> attention lets each token borrow from the tokens it needs most. Here, "sat" ends up leaning on "cat", its subject.</li>
-        <li><strong>The strips (step 1):</strong> each token's vector is a strip of component bars, where the heights are the vector's components (no numbers, just shapes). A striped strip is added to every token: the position pattern (the paper uses sine/cosine). Attention itself sees no order, so without that add, "cat sat" would look exactly like "sat cat".</li>
-        <li><strong>The heat grid (step 2):</strong> how strongly each pair of tokens matches; darker means stronger. The highlighted row is "sat", the token we follow, and its darkest cell is "cat". Each cell is a query-key match, the dot product taught in the equation section above. These are the raw scores; the weight rows in the next step make the listening shares explicit, and they rank the same as these scores.</li>
-        <li><strong>The weight bars (step 3):</strong> the same grid after the softmax, drawn as bars instead of heat so the change is unmistakable. Every row is now a set of listening weights that sums to <code>1</code>.</li>
-        <li><strong>The flow (step 4):</strong> "cat"'s strip flows into "sat"'s rebuilt vector through the thick arrow: the blend is the main event. The small print: the residual skip adds "sat"'s own vector back in, then layer norm rescales every token's vector to the same overall length, matching the paper's add-then-normalize order, to produce this sublayer's output.</li>
         <li><strong>What's next:</strong> this is a single attention head doing all four steps by itself, so what do the other seven heads do? The next section, &lsquo;One head learns one relationship, so run several in parallel,&rsquo; answers that.</li>
         <li><strong>The simplifications:</strong> these are illustrative values picked to show the pattern, not a real trained run. This is the encoder half of the block; the decoder reuses this same block and adds cross-attention.</li>
       </ul>
@@ -1320,12 +1345,33 @@ class MultiHeadAttention(nn.Module):
     found, back in the model's main feature space.
   </p>
   <p>
+    Written per head, each head runs the same four lines from the equation section above, but on its own projections:
+  </p>
+  <div class="dmath">$$ \mathrm{head}_i = \mathrm{Attention}(QW_i^Q, KW_i^K, VW_i^V) $$</div>
+  <p>
+    <code>head<sub>i</sub></code> is the attention output of head <code>i</code>, computed with the four lines of the attention equation applied to that head's own projected queries, keys, and values. Each head gets its own projections of the queries, keys, and values. <code>h</code> is the head count, <code>8</code> in the running example, and the per-head dimension is <code>64</code> when the model width is <code>512</code>.
+  </p>
+  <p>
+    The heads then recombine:
+  </p>
+  <div class="dmath">$$ \mathrm{MultiHead}(Q, K, V) = \mathrm{Concat}(\mathrm{head}_1, \dots, \mathrm{head}_h) W^O $$</div>
+  <p>
+    The multi-head output is the concatenation of all head outputs, then multiplied by the output projection. Concat means the head outputs placed side by side back to <code>512</code> dimensions. The output projection, written <code>W<sup>O</sup></code> in that line and <code>W_o</code> in the code snippet above, is the final projection that re-mixes the heads: the output projection lets the model combine what the different heads found.
+  </p>
+  <p>
+    Because each head has its own learned projections into a smaller subspace, and the learning lives in the per-head query, key, and value projections, the same query word is scored in a different subspace by each head, so two heads can put their weight on different tokens.
+  </p>
+  <p>
     Here is the classic case where heads split the job. Take the sentence "The animal
     didn't cross the street because it was too tired." <em>What does "it" refer to?</em> You know
     it's the animal, but a single attention head has to mix that <strong>coreference signal</strong> with
     everything else it tracks. Give the model two heads and they specialize: one head
     learns the long-range "it means animal" link, the other keeps track of the local
     syntax around "it". These are illustrative weights again, tuned to show the split:
+  </p>
+
+  <p>
+    Head A puts <code>0.55</code> on "animal": it resolved the pronoun. Head B spreads across "because", "it", "was": it is tracking the local clause structure. One big head would have to average these two jobs into mush.
   </p>
 
   <div class="demo" id="headRoles">
@@ -1347,9 +1393,7 @@ class MultiHeadAttention(nn.Module):
         <li>Head A slams <code>0.55</code> on "animal"; Head B spreads over "because", "it", "was". On the second head the orange bars never touch "animal".</li>
       </ul>
     </div>
-    <p class="caption">Head A puts <code>0.55</code> on "animal": it resolved the pronoun. Head B spreads
-    across "because", "it", "was": it is tracking the local clause structure. One big head
-    would have to average these two jobs into mush. <em>That is the whole argument for multihead.</em></p>
+    <p class="caption"><em>That is the whole argument for multihead.</em></p>
   </div>
   <script>
   (function() {
@@ -1524,9 +1568,32 @@ class MultiHeadAttention(nn.Module):
     The total never moves. Heads are a free axis: more specialists, same <strong>parameter bill</strong>.
   </p>
 
+  <p>
+    The count, step by step:
+  </p>
+  <ol>
+    <li><strong>Per-head dimension:</strong> with model width <code>d</code> and <code>h</code> heads, each head dimension is <code>d</code> divided by <code>h</code>. <code>d</code> is the model width, fixed at <code>512</code> in this section, and <code>h</code> is the head count.</li>
+    <li><strong>QKV projections:</strong> one head's query, key, and value projections cost <code>3</code> times <code>d</code> times its head dimension; the factor <code>3</code> is the three projections, query, key, and value. Across <code>h</code> heads the head dimension cancels, giving <code>3d²</code> in total.</li>
+    <li><strong>Output projection:</strong> it is model-width by model-width, so it costs <code>d²</code>.</li>
+  </ol>
+  <div class="dmath">$$ \mathrm{total} = 3d^2 + d^2 = 4d^2 $$</div>
+  <p>
+    The total does not contain <code>h</code>, so it cannot move when <code>h</code> changes.
+  </p>
+  <div class="slice-wrap">
+    <div class="slice-bar"><div class="slice-seg" style="width:12.5%;background:#3498db;"></div><div class="slice-seg" style="width:12.5%;background:#e67e22;"></div><div class="slice-seg" style="width:12.5%;background:#9b59b6;"></div><div class="slice-seg" style="width:12.5%;background:#16a085;"></div><div class="slice-seg" style="width:12.5%;background:#e74c3c;"></div><div class="slice-seg" style="width:12.5%;background:#f39c12;"></div><div class="slice-seg" style="width:12.5%;background:#1abc9c;"></div><div class="slice-seg" style="width:12.5%;background:#8e44ad;"></div></div>
+    <div class="slice-cap">The 512-dim pie, sliced into 8 pieces of 64 dims each. More slices, same pie.</div>
+  </div>
+  <div class="slice-wrap">
+    <div class="bill-bar"><div class="bill-seg" style="width:75%;background:#8e44ad;">QKV</div><div class="bill-seg" style="width:25%;background:#16a085;">out</div></div>
+    <div class="bill-cap">The bill, at every head count: same length, always.</div>
+  </div>
+  <p class="caption">
+    What changes is how the <code>512</code> dimensions get partitioned: sixteen <code>32</code>-dim specialists instead of one <code>512</code>-dim generalist, across the head counts the tool below runs through: <code>1</code>, <code>2</code>, <code>4</code>, <code>8</code>, and <code>16</code>.
+  </p>
+
   <div class="demo" id="headParams">
-    <p><strong>Multihead costs nothing (in params).</strong>
-    The model width is fixed at <code>512</code>, and the parameter total stays the same at every head count.</p>
+    <p><strong>Multihead costs nothing (in params).</strong></p>
     
     <div class="play-row"><button type="button" class="play-btn" id="hpPlay">Play</button><button type="button" class="play-btn" id="hpReset">Reset</button></div>
     <div class="demo-controls">
@@ -1782,6 +1849,13 @@ pe = positional_encoding(seq_len=8, d_model=16)
     negative infinity plus anything is still negative infinity, so the softmax hands that cell exactly
     zero. <em>No parameters, no learning, just arithmetic.</em>
   </p>
+  <p>
+    Written as one line, masking changes the attention weights from the equation section above to:
+  </p>
+  <div class="dmath">$$ A = \mathrm{softmax}(S + M) $$</div>
+  <p>
+    <code>S</code> is the score matrix from the attention equation. <code>M</code> is the mask matrix: an entry of <code>M</code> is <code>0</code> for a pair that may attend and negative infinity for a pair that may not. Adding <code>M</code> before the softmax is the whole mechanism, so a blocked cell gets exactly zero weight.
+  </p>
   <h3>Padding mask</h3>
   <p>
     When you batch sequences of different lengths, the short ones get padded with dummy
@@ -1870,6 +1944,75 @@ pe = positional_encoding(seq_len=8, d_model=16)
   <figcaption style="font-size:0.9em; color:#555; margin-top:0.5em; max-width:640px; margin-left:auto; margin-right:auto;"><strong>Figure:</strong> The causal mask for a 5-token sequence. Green cells (0) let the query attend, red cells (masked out) block it. Each token can look at itself and the tokens before it, but never into the future.</figcaption>
   </figure>
 
+
+<figure style="text-align:center; margin:1.5em 0;">
+<svg width="360" height="294" viewBox="0 0 360 294" xmlns="http://www.w3.org/2000/svg" style="max-width:100%;height:auto;background:#fff;border:1px solid #bdc3c7;border-radius:4px">
+<text x="230.0" y="18" text-anchor="middle" font-size="13" font-weight="bold" fill="#2c3e50">keys (j)</text>
+<text x="16" y="164.0" text-anchor="middle" font-size="13" font-weight="bold" fill="#2c3e50" transform="rotate(-90 16 164.0)">queries (i)</text>
+<text x="129.0" y="38" text-anchor="middle" font-size="12" fill="#555">k1</text>
+<text x="177.0" y="38" text-anchor="middle" font-size="12" fill="#555">k2</text>
+<text x="225.0" y="38" text-anchor="middle" font-size="12" fill="#555">k3</text>
+<text x="273.0" y="38" text-anchor="middle" font-size="12" fill="#555">k4</text>
+<text x="321.0" y="38" text-anchor="middle" font-size="12" fill="#555">k5</text>
+<text x="102" y="72" text-anchor="end" font-size="12" fill="#555">q1</text>
+<rect x="110" y="44" width="46" height="46" fill="#d5f5e3" stroke="#7f8c8d" stroke-width="1"/>
+<text x="133.0" y="73" text-anchor="middle" font-size="15" font-weight="bold" fill="#1e8449">0</text>
+<rect x="158" y="44" width="46" height="46" fill="#d5f5e3" stroke="#7f8c8d" stroke-width="1"/>
+<text x="181.0" y="73" text-anchor="middle" font-size="15" font-weight="bold" fill="#1e8449">0</text>
+<rect x="206" y="44" width="46" height="46" fill="#d5f5e3" stroke="#7f8c8d" stroke-width="1"/>
+<text x="229.0" y="73" text-anchor="middle" font-size="15" font-weight="bold" fill="#1e8449">0</text>
+<rect x="254" y="44" width="46" height="46" fill="#fadbd8" stroke="#7f8c8d" stroke-width="1"/>
+<text x="277.0" y="73" text-anchor="middle" font-size="13" font-weight="bold" fill="#922b21">-inf</text>
+<rect x="302" y="44" width="46" height="46" fill="#fadbd8" stroke="#7f8c8d" stroke-width="1"/>
+<text x="325.0" y="73" text-anchor="middle" font-size="13" font-weight="bold" fill="#922b21">-inf</text>
+<text x="102" y="120" text-anchor="end" font-size="12" fill="#555">q2</text>
+<rect x="110" y="92" width="46" height="46" fill="#d5f5e3" stroke="#7f8c8d" stroke-width="1"/>
+<text x="133.0" y="121" text-anchor="middle" font-size="15" font-weight="bold" fill="#1e8449">0</text>
+<rect x="158" y="92" width="46" height="46" fill="#d5f5e3" stroke="#7f8c8d" stroke-width="1"/>
+<text x="181.0" y="121" text-anchor="middle" font-size="15" font-weight="bold" fill="#1e8449">0</text>
+<rect x="206" y="92" width="46" height="46" fill="#d5f5e3" stroke="#7f8c8d" stroke-width="1"/>
+<text x="229.0" y="121" text-anchor="middle" font-size="15" font-weight="bold" fill="#1e8449">0</text>
+<rect x="254" y="92" width="46" height="46" fill="#fadbd8" stroke="#7f8c8d" stroke-width="1"/>
+<text x="277.0" y="121" text-anchor="middle" font-size="13" font-weight="bold" fill="#922b21">-inf</text>
+<rect x="302" y="92" width="46" height="46" fill="#fadbd8" stroke="#7f8c8d" stroke-width="1"/>
+<text x="325.0" y="121" text-anchor="middle" font-size="13" font-weight="bold" fill="#922b21">-inf</text>
+<text x="102" y="168" text-anchor="end" font-size="12" fill="#555">q3</text>
+<rect x="110" y="140" width="46" height="46" fill="#d5f5e3" stroke="#7f8c8d" stroke-width="1"/>
+<text x="133.0" y="169" text-anchor="middle" font-size="15" font-weight="bold" fill="#1e8449">0</text>
+<rect x="158" y="140" width="46" height="46" fill="#d5f5e3" stroke="#7f8c8d" stroke-width="1"/>
+<text x="181.0" y="169" text-anchor="middle" font-size="15" font-weight="bold" fill="#1e8449">0</text>
+<rect x="206" y="140" width="46" height="46" fill="#d5f5e3" stroke="#7f8c8d" stroke-width="1"/>
+<text x="229.0" y="169" text-anchor="middle" font-size="15" font-weight="bold" fill="#1e8449">0</text>
+<rect x="254" y="140" width="46" height="46" fill="#fadbd8" stroke="#7f8c8d" stroke-width="1"/>
+<text x="277.0" y="169" text-anchor="middle" font-size="13" font-weight="bold" fill="#922b21">-inf</text>
+<rect x="302" y="140" width="46" height="46" fill="#fadbd8" stroke="#7f8c8d" stroke-width="1"/>
+<text x="325.0" y="169" text-anchor="middle" font-size="13" font-weight="bold" fill="#922b21">-inf</text>
+<text x="102" y="216" text-anchor="end" font-size="12" fill="#555">q4</text>
+<rect x="110" y="188" width="46" height="46" fill="#d5f5e3" stroke="#7f8c8d" stroke-width="1"/>
+<text x="133.0" y="217" text-anchor="middle" font-size="15" font-weight="bold" fill="#1e8449">0</text>
+<rect x="158" y="188" width="46" height="46" fill="#d5f5e3" stroke="#7f8c8d" stroke-width="1"/>
+<text x="181.0" y="217" text-anchor="middle" font-size="15" font-weight="bold" fill="#1e8449">0</text>
+<rect x="206" y="188" width="46" height="46" fill="#d5f5e3" stroke="#7f8c8d" stroke-width="1"/>
+<text x="229.0" y="217" text-anchor="middle" font-size="15" font-weight="bold" fill="#1e8449">0</text>
+<rect x="254" y="188" width="46" height="46" fill="#fadbd8" stroke="#7f8c8d" stroke-width="1"/>
+<text x="277.0" y="217" text-anchor="middle" font-size="13" font-weight="bold" fill="#922b21">-inf</text>
+<rect x="302" y="188" width="46" height="46" fill="#fadbd8" stroke="#7f8c8d" stroke-width="1"/>
+<text x="325.0" y="217" text-anchor="middle" font-size="13" font-weight="bold" fill="#922b21">-inf</text>
+<text x="102" y="264" text-anchor="end" font-size="12" fill="#555">q5</text>
+<rect x="110" y="236" width="46" height="46" fill="#d5f5e3" stroke="#7f8c8d" stroke-width="1"/>
+<text x="133.0" y="265" text-anchor="middle" font-size="15" font-weight="bold" fill="#1e8449">0</text>
+<rect x="158" y="236" width="46" height="46" fill="#d5f5e3" stroke="#7f8c8d" stroke-width="1"/>
+<text x="181.0" y="265" text-anchor="middle" font-size="15" font-weight="bold" fill="#1e8449">0</text>
+<rect x="206" y="236" width="46" height="46" fill="#d5f5e3" stroke="#7f8c8d" stroke-width="1"/>
+<text x="229.0" y="265" text-anchor="middle" font-size="15" font-weight="bold" fill="#1e8449">0</text>
+<rect x="254" y="236" width="46" height="46" fill="#fadbd8" stroke="#7f8c8d" stroke-width="1"/>
+<text x="277.0" y="265" text-anchor="middle" font-size="13" font-weight="bold" fill="#922b21">-inf</text>
+<rect x="302" y="236" width="46" height="46" fill="#fadbd8" stroke="#7f8c8d" stroke-width="1"/>
+<text x="325.0" y="265" text-anchor="middle" font-size="13" font-weight="bold" fill="#922b21">-inf</text>
+</svg>
+<figcaption style="font-size:0.9em; color:#555; margin-top:0.5em; max-width:640px; margin-left:auto; margin-right:auto;"><strong>Figure:</strong> The padding mask for the same 5-token sequence, with the last two tokens as dummies. Whole columns k4 and k5 go dark, for every query: if key j is padding, every query i ignores it.</figcaption>
+</figure>
+
   <div class="demo" id="maskDemo">
     <p style="margin-top:0;"><strong>Mask playground.</strong> Same <code>5</code>-token grid, live. Flip
     between the three masks: each one shuts off a different set of cells:</p>
@@ -1913,9 +2056,7 @@ pe = positional_encoding(seq_len=8, d_model=16)
         <li><strong>Padding tokens slider:</strong> sets how many dummy tokens sit at the end, <code>0 to 4</code>. At <code>4</code>, four whole columns go dark under the padding mask.</li>
       </ul>
     </div>
-    <p class="caption">Padding mask here pretends the last two tokens are dummies: whole
-    columns k4 and k5 go dark, for every query. The causal mask instead kills the upper
-    triangle. <em>Two different reasons, one mechanism.</em></p>
+    <p class="caption"><em>Two different reasons, one mechanism.</em></p>
   </div>
   <script>
   (function () {
@@ -2662,11 +2803,40 @@ def generate(model, idx, max_new_tokens, temperature=1.0):
     roughly constant.</em> How big is that saving, exactly? Count it:
   </p>
 
+  <p>
+    The KV cache, stated plainly: without a cache, step <code>t</code> recomputes attention over all <code>t</code> tokens so far. With a cache, step <code>t</code> reuses the stored keys and values and only touches the new token. Numbers are per layer with width <code>512</code>, counting the query-key scores and weighted-sum terms. Generating the next token costs only that token's worth of attention instead of recomputing over all previous tokens. The steps:
+  </p>
+  <ol>
+    <li>When a token is generated, its keys and values are stored, one entry per token per layer.</li>
+    <li>At the next step, the stored keys and values are reused and are not recomputed.</li>
+    <li>Only the new token's keys and values are computed, and its query is scored against the stored keys.</li>
+    <li>The new token's keys and values are appended to the cache for the following step.</li>
+  </ol>
+  <p>
+    The per-step cost of each path, written as equations:
+  </p>
+  <div class="dmath">$$ \mathrm{cost\ with\ cache} = 4dt $$</div>
+  <div class="dmath">$$ \mathrm{cost\ without\ cache} = 4dt^2 $$</div>
+  <p>
+    Both lines are per step <code>t</code>, per layer. <code>t</code> is the number of tokens so far, which is also the step index. <code>d</code> is the model width, <code>512</code> in this section. The factor <code>4</code> and the scope, query-key scores and weighted-sum terms only, per layer, are exactly as counted here. The uncached path pays <code>t</code> times more at step <code>t</code>, so the saving grows with the sequence.
+  </p>
+  <p class="kvbar-title">Cost of the current step, linear scale</p>
+  <div class="kvbar-row">
+    <span class="lbl">No cache (recompute)</span>
+    <div class="kvbar-track"><div class="kvbar-fill" style="width:100%"></div></div>
+    <span class="val"></span>
+  </div>
+  <div class="kvbar-row">
+    <span class="lbl">With KV cache</span>
+    <div class="kvbar-track"><div class="kvbar-fill cache" style="width:0.78%"></div></div>
+    <span class="val"></span>
+  </div>
+  <p class="caption">
+    The static version of the tool's bars, at its default length of <code>128</code> tokens: the red no-cache bar runs full width next to the cached sliver. At <code>128</code> tokens the last step's saving reads <code>128x</code>.
+  </p>
+
   <div class="demo" id="kvCache">
-    <p><strong>The KV cache payoff.</strong> Generating <code>T</code> tokens, one step at a time.
-    Without a cache, step <code>t</code> recomputes attention over all <code>t</code> tokens so far. With a
-    cache, step <code>t</code> reuses the stored keys and values and only touches the new token.
-    Numbers are per layer with width <code>512</code>, counting the query-key scores and weighted-sum terms.</p>
+    <p><strong>The KV cache payoff.</strong> Generating <code>T</code> tokens, one step at a time.</p>
     
     <div class="play-row"><button type="button" class="play-btn" id="kvPlay">Play</button><button type="button" class="play-btn" id="kvReset">Reset</button></div>
     <div class="demo-controls">
@@ -2692,7 +2862,6 @@ def generate(model, idx, max_new_tokens, temperature=1.0):
     <div class="howto capcard" id="kvHowto"><strong class="cap-title">How to play</strong>
       <ul>
         <li><strong>The point:</strong> With a KV cache, generating the next token costs only that token's worth of attention instead of recomputing over all previous tokens, so each step saves more the longer the sequence gets.</li>
-        <li>The cache makes each new token a shrinking fraction of the no-cache work: the red no-cache bar runs full width next to the cached sliver. At <code>128</code> tokens the last step's saving reads <code>128x</code>.</li>
         <li><strong>Tokens to generate slider:</strong> sets the target length, <code>1</code> to <code>128</code>. At <code>16</code>, the cached sliver grows to a sixteenth of the bar.</li>
       </ul>
     </div>
@@ -2859,6 +3028,277 @@ for i in range(n):
     tokens have arrived.</em> Bigger chunks, more context, slower response.
   </p>
 
+  <p>
+    Stated as a rule: a query may read a key exactly when the key position is at or before the end of the query's own chunk. Written with positions:
+  </p>
+  <div class="dmath">$$ j \le (\lfloor i / C \rfloor + 1) \cdot C - 1 $$</div>
+  <p>
+    <code>i</code> is the query position, <code>j</code> is the key position, and <code>C</code> is the chunk size in tokens. The right side is the last key position in the query's own chunk. Keys past that point are masked to negative infinity, the mechanism from the Masking section above. And the waiting relation: emission of a chunk waits for all <code>C</code> tokens of that chunk, so you wait <code>C</code> tokens per chunk to buy that extra context.
+  </p>
+  <figure style="text-align:center; margin:1.5em 0;">
+<svg width="362" height="360" viewBox="0 0 362 360" xmlns="http://www.w3.org/2000/svg" style="max-width:100%;height:auto;background:#fff;border:1px solid #bdc3c7;border-radius:4px">
+<text x="194.0" y="16" text-anchor="middle" font-size="12" font-weight="bold" fill="#2c3e50">keys (j)</text>
+<text x="12" y="190.0" text-anchor="middle" font-size="12" font-weight="bold" fill="#2c3e50" transform="rotate(-90 12 190.0)">queries (i)</text>
+<rect x="34" y="30" width="19" height="19" fill="#aed6f1"/>
+<rect x="54" y="30" width="19" height="19" fill="#aed6f1"/>
+<rect x="74" y="30" width="19" height="19" fill="#aed6f1"/>
+<rect x="94" y="30" width="19" height="19" fill="#aed6f1"/>
+<rect x="114" y="30" width="19" height="19" fill="#e9ecef"/>
+<rect x="134" y="30" width="19" height="19" fill="#e9ecef"/>
+<rect x="154" y="30" width="19" height="19" fill="#e9ecef"/>
+<rect x="174" y="30" width="19" height="19" fill="#e9ecef"/>
+<rect x="194" y="30" width="19" height="19" fill="#e9ecef"/>
+<rect x="214" y="30" width="19" height="19" fill="#e9ecef"/>
+<rect x="234" y="30" width="19" height="19" fill="#e9ecef"/>
+<rect x="254" y="30" width="19" height="19" fill="#e9ecef"/>
+<rect x="274" y="30" width="19" height="19" fill="#e9ecef"/>
+<rect x="294" y="30" width="19" height="19" fill="#e9ecef"/>
+<rect x="314" y="30" width="19" height="19" fill="#e9ecef"/>
+<rect x="334" y="30" width="19" height="19" fill="#e9ecef"/>
+<rect x="34" y="50" width="19" height="19" fill="#aed6f1"/>
+<rect x="54" y="50" width="19" height="19" fill="#aed6f1"/>
+<rect x="74" y="50" width="19" height="19" fill="#aed6f1"/>
+<rect x="94" y="50" width="19" height="19" fill="#aed6f1"/>
+<rect x="114" y="50" width="19" height="19" fill="#e9ecef"/>
+<rect x="134" y="50" width="19" height="19" fill="#e9ecef"/>
+<rect x="154" y="50" width="19" height="19" fill="#e9ecef"/>
+<rect x="174" y="50" width="19" height="19" fill="#e9ecef"/>
+<rect x="194" y="50" width="19" height="19" fill="#e9ecef"/>
+<rect x="214" y="50" width="19" height="19" fill="#e9ecef"/>
+<rect x="234" y="50" width="19" height="19" fill="#e9ecef"/>
+<rect x="254" y="50" width="19" height="19" fill="#e9ecef"/>
+<rect x="274" y="50" width="19" height="19" fill="#e9ecef"/>
+<rect x="294" y="50" width="19" height="19" fill="#e9ecef"/>
+<rect x="314" y="50" width="19" height="19" fill="#e9ecef"/>
+<rect x="334" y="50" width="19" height="19" fill="#e9ecef"/>
+<rect x="34" y="70" width="19" height="19" fill="#aed6f1"/>
+<rect x="54" y="70" width="19" height="19" fill="#aed6f1"/>
+<rect x="74" y="70" width="19" height="19" fill="#aed6f1"/>
+<rect x="94" y="70" width="19" height="19" fill="#aed6f1"/>
+<rect x="114" y="70" width="19" height="19" fill="#e9ecef"/>
+<rect x="134" y="70" width="19" height="19" fill="#e9ecef"/>
+<rect x="154" y="70" width="19" height="19" fill="#e9ecef"/>
+<rect x="174" y="70" width="19" height="19" fill="#e9ecef"/>
+<rect x="194" y="70" width="19" height="19" fill="#e9ecef"/>
+<rect x="214" y="70" width="19" height="19" fill="#e9ecef"/>
+<rect x="234" y="70" width="19" height="19" fill="#e9ecef"/>
+<rect x="254" y="70" width="19" height="19" fill="#e9ecef"/>
+<rect x="274" y="70" width="19" height="19" fill="#e9ecef"/>
+<rect x="294" y="70" width="19" height="19" fill="#e9ecef"/>
+<rect x="314" y="70" width="19" height="19" fill="#e9ecef"/>
+<rect x="334" y="70" width="19" height="19" fill="#e9ecef"/>
+<rect x="34" y="90" width="19" height="19" fill="#aed6f1"/>
+<rect x="54" y="90" width="19" height="19" fill="#aed6f1"/>
+<rect x="74" y="90" width="19" height="19" fill="#aed6f1"/>
+<rect x="94" y="90" width="19" height="19" fill="#aed6f1"/>
+<rect x="114" y="90" width="19" height="19" fill="#e9ecef"/>
+<rect x="134" y="90" width="19" height="19" fill="#e9ecef"/>
+<rect x="154" y="90" width="19" height="19" fill="#e9ecef"/>
+<rect x="174" y="90" width="19" height="19" fill="#e9ecef"/>
+<rect x="194" y="90" width="19" height="19" fill="#e9ecef"/>
+<rect x="214" y="90" width="19" height="19" fill="#e9ecef"/>
+<rect x="234" y="90" width="19" height="19" fill="#e9ecef"/>
+<rect x="254" y="90" width="19" height="19" fill="#e9ecef"/>
+<rect x="274" y="90" width="19" height="19" fill="#e9ecef"/>
+<rect x="294" y="90" width="19" height="19" fill="#e9ecef"/>
+<rect x="314" y="90" width="19" height="19" fill="#e9ecef"/>
+<rect x="334" y="90" width="19" height="19" fill="#e9ecef"/>
+<rect x="34" y="110" width="19" height="19" fill="#aed6f1"/>
+<rect x="54" y="110" width="19" height="19" fill="#aed6f1"/>
+<rect x="74" y="110" width="19" height="19" fill="#aed6f1"/>
+<rect x="94" y="110" width="19" height="19" fill="#aed6f1"/>
+<rect x="114" y="110" width="19" height="19" fill="#aed6f1"/>
+<rect x="134" y="110" width="19" height="19" fill="#aed6f1"/>
+<rect x="154" y="110" width="19" height="19" fill="#aed6f1"/>
+<rect x="174" y="110" width="19" height="19" fill="#aed6f1"/>
+<rect x="194" y="110" width="19" height="19" fill="#e9ecef"/>
+<rect x="214" y="110" width="19" height="19" fill="#e9ecef"/>
+<rect x="234" y="110" width="19" height="19" fill="#e9ecef"/>
+<rect x="254" y="110" width="19" height="19" fill="#e9ecef"/>
+<rect x="274" y="110" width="19" height="19" fill="#e9ecef"/>
+<rect x="294" y="110" width="19" height="19" fill="#e9ecef"/>
+<rect x="314" y="110" width="19" height="19" fill="#e9ecef"/>
+<rect x="334" y="110" width="19" height="19" fill="#e9ecef"/>
+<rect x="34" y="130" width="19" height="19" fill="#aed6f1"/>
+<rect x="54" y="130" width="19" height="19" fill="#aed6f1"/>
+<rect x="74" y="130" width="19" height="19" fill="#aed6f1"/>
+<rect x="94" y="130" width="19" height="19" fill="#aed6f1"/>
+<rect x="114" y="130" width="19" height="19" fill="#aed6f1"/>
+<rect x="134" y="130" width="19" height="19" fill="#aed6f1"/>
+<rect x="154" y="130" width="19" height="19" fill="#aed6f1"/>
+<rect x="174" y="130" width="19" height="19" fill="#aed6f1"/>
+<rect x="194" y="130" width="19" height="19" fill="#e9ecef"/>
+<rect x="214" y="130" width="19" height="19" fill="#e9ecef"/>
+<rect x="234" y="130" width="19" height="19" fill="#e9ecef"/>
+<rect x="254" y="130" width="19" height="19" fill="#e9ecef"/>
+<rect x="274" y="130" width="19" height="19" fill="#e9ecef"/>
+<rect x="294" y="130" width="19" height="19" fill="#e9ecef"/>
+<rect x="314" y="130" width="19" height="19" fill="#e9ecef"/>
+<rect x="334" y="130" width="19" height="19" fill="#e9ecef"/>
+<rect x="34" y="150" width="19" height="19" fill="#aed6f1"/>
+<rect x="54" y="150" width="19" height="19" fill="#aed6f1"/>
+<rect x="74" y="150" width="19" height="19" fill="#aed6f1"/>
+<rect x="94" y="150" width="19" height="19" fill="#aed6f1"/>
+<rect x="114" y="150" width="19" height="19" fill="#aed6f1"/>
+<rect x="134" y="150" width="19" height="19" fill="#aed6f1"/>
+<rect x="154" y="150" width="19" height="19" fill="#aed6f1"/>
+<rect x="174" y="150" width="19" height="19" fill="#aed6f1"/>
+<rect x="194" y="150" width="19" height="19" fill="#e9ecef"/>
+<rect x="214" y="150" width="19" height="19" fill="#e9ecef"/>
+<rect x="234" y="150" width="19" height="19" fill="#e9ecef"/>
+<rect x="254" y="150" width="19" height="19" fill="#e9ecef"/>
+<rect x="274" y="150" width="19" height="19" fill="#e9ecef"/>
+<rect x="294" y="150" width="19" height="19" fill="#e9ecef"/>
+<rect x="314" y="150" width="19" height="19" fill="#e9ecef"/>
+<rect x="334" y="150" width="19" height="19" fill="#e9ecef"/>
+<rect x="34" y="170" width="19" height="19" fill="#aed6f1"/>
+<rect x="54" y="170" width="19" height="19" fill="#aed6f1"/>
+<rect x="74" y="170" width="19" height="19" fill="#aed6f1"/>
+<rect x="94" y="170" width="19" height="19" fill="#aed6f1"/>
+<rect x="114" y="170" width="19" height="19" fill="#aed6f1"/>
+<rect x="134" y="170" width="19" height="19" fill="#aed6f1"/>
+<rect x="154" y="170" width="19" height="19" fill="#aed6f1"/>
+<rect x="174" y="170" width="19" height="19" fill="#aed6f1"/>
+<rect x="194" y="170" width="19" height="19" fill="#e9ecef"/>
+<rect x="214" y="170" width="19" height="19" fill="#e9ecef"/>
+<rect x="234" y="170" width="19" height="19" fill="#e9ecef"/>
+<rect x="254" y="170" width="19" height="19" fill="#e9ecef"/>
+<rect x="274" y="170" width="19" height="19" fill="#e9ecef"/>
+<rect x="294" y="170" width="19" height="19" fill="#e9ecef"/>
+<rect x="314" y="170" width="19" height="19" fill="#e9ecef"/>
+<rect x="334" y="170" width="19" height="19" fill="#e9ecef"/>
+<rect x="34" y="190" width="19" height="19" fill="#aed6f1"/>
+<rect x="54" y="190" width="19" height="19" fill="#aed6f1"/>
+<rect x="74" y="190" width="19" height="19" fill="#aed6f1"/>
+<rect x="94" y="190" width="19" height="19" fill="#aed6f1"/>
+<rect x="114" y="190" width="19" height="19" fill="#aed6f1"/>
+<rect x="134" y="190" width="19" height="19" fill="#aed6f1"/>
+<rect x="154" y="190" width="19" height="19" fill="#aed6f1"/>
+<rect x="174" y="190" width="19" height="19" fill="#aed6f1"/>
+<rect x="194" y="190" width="19" height="19" fill="#aed6f1"/>
+<rect x="214" y="190" width="19" height="19" fill="#aed6f1"/>
+<rect x="234" y="190" width="19" height="19" fill="#aed6f1"/>
+<rect x="254" y="190" width="19" height="19" fill="#aed6f1"/>
+<rect x="274" y="190" width="19" height="19" fill="#e9ecef"/>
+<rect x="294" y="190" width="19" height="19" fill="#e9ecef"/>
+<rect x="314" y="190" width="19" height="19" fill="#e9ecef"/>
+<rect x="334" y="190" width="19" height="19" fill="#e9ecef"/>
+<rect x="34" y="210" width="19" height="19" fill="#aed6f1"/>
+<rect x="54" y="210" width="19" height="19" fill="#aed6f1"/>
+<rect x="74" y="210" width="19" height="19" fill="#aed6f1"/>
+<rect x="94" y="210" width="19" height="19" fill="#aed6f1"/>
+<rect x="114" y="210" width="19" height="19" fill="#aed6f1"/>
+<rect x="134" y="210" width="19" height="19" fill="#aed6f1"/>
+<rect x="154" y="210" width="19" height="19" fill="#aed6f1"/>
+<rect x="174" y="210" width="19" height="19" fill="#aed6f1"/>
+<rect x="194" y="210" width="19" height="19" fill="#aed6f1"/>
+<rect x="214" y="210" width="19" height="19" fill="#aed6f1"/>
+<rect x="234" y="210" width="19" height="19" fill="#aed6f1"/>
+<rect x="254" y="210" width="19" height="19" fill="#aed6f1"/>
+<rect x="274" y="210" width="19" height="19" fill="#e9ecef"/>
+<rect x="294" y="210" width="19" height="19" fill="#e9ecef"/>
+<rect x="314" y="210" width="19" height="19" fill="#e9ecef"/>
+<rect x="334" y="210" width="19" height="19" fill="#e9ecef"/>
+<rect x="34" y="230" width="19" height="19" fill="#aed6f1"/>
+<rect x="54" y="230" width="19" height="19" fill="#aed6f1"/>
+<rect x="74" y="230" width="19" height="19" fill="#aed6f1"/>
+<rect x="94" y="230" width="19" height="19" fill="#aed6f1"/>
+<rect x="114" y="230" width="19" height="19" fill="#aed6f1"/>
+<rect x="134" y="230" width="19" height="19" fill="#aed6f1"/>
+<rect x="154" y="230" width="19" height="19" fill="#aed6f1"/>
+<rect x="174" y="230" width="19" height="19" fill="#aed6f1"/>
+<rect x="194" y="230" width="19" height="19" fill="#aed6f1"/>
+<rect x="214" y="230" width="19" height="19" fill="#aed6f1"/>
+<rect x="234" y="230" width="19" height="19" fill="#aed6f1"/>
+<rect x="254" y="230" width="19" height="19" fill="#aed6f1"/>
+<rect x="274" y="230" width="19" height="19" fill="#e9ecef"/>
+<rect x="294" y="230" width="19" height="19" fill="#e9ecef"/>
+<rect x="314" y="230" width="19" height="19" fill="#e9ecef"/>
+<rect x="334" y="230" width="19" height="19" fill="#e9ecef"/>
+<rect x="34" y="250" width="19" height="19" fill="#aed6f1"/>
+<rect x="54" y="250" width="19" height="19" fill="#aed6f1"/>
+<rect x="74" y="250" width="19" height="19" fill="#aed6f1"/>
+<rect x="94" y="250" width="19" height="19" fill="#aed6f1"/>
+<rect x="114" y="250" width="19" height="19" fill="#aed6f1"/>
+<rect x="134" y="250" width="19" height="19" fill="#aed6f1"/>
+<rect x="154" y="250" width="19" height="19" fill="#aed6f1"/>
+<rect x="174" y="250" width="19" height="19" fill="#aed6f1"/>
+<rect x="194" y="250" width="19" height="19" fill="#aed6f1"/>
+<rect x="214" y="250" width="19" height="19" fill="#aed6f1"/>
+<rect x="234" y="250" width="19" height="19" fill="#aed6f1"/>
+<rect x="254" y="250" width="19" height="19" fill="#aed6f1"/>
+<rect x="274" y="250" width="19" height="19" fill="#e9ecef"/>
+<rect x="294" y="250" width="19" height="19" fill="#e9ecef"/>
+<rect x="314" y="250" width="19" height="19" fill="#e9ecef"/>
+<rect x="334" y="250" width="19" height="19" fill="#e9ecef"/>
+<rect x="34" y="270" width="19" height="19" fill="#aed6f1"/>
+<rect x="54" y="270" width="19" height="19" fill="#aed6f1"/>
+<rect x="74" y="270" width="19" height="19" fill="#aed6f1"/>
+<rect x="94" y="270" width="19" height="19" fill="#aed6f1"/>
+<rect x="114" y="270" width="19" height="19" fill="#aed6f1"/>
+<rect x="134" y="270" width="19" height="19" fill="#aed6f1"/>
+<rect x="154" y="270" width="19" height="19" fill="#aed6f1"/>
+<rect x="174" y="270" width="19" height="19" fill="#aed6f1"/>
+<rect x="194" y="270" width="19" height="19" fill="#aed6f1"/>
+<rect x="214" y="270" width="19" height="19" fill="#aed6f1"/>
+<rect x="234" y="270" width="19" height="19" fill="#aed6f1"/>
+<rect x="254" y="270" width="19" height="19" fill="#aed6f1"/>
+<rect x="274" y="270" width="19" height="19" fill="#aed6f1"/>
+<rect x="294" y="270" width="19" height="19" fill="#aed6f1"/>
+<rect x="314" y="270" width="19" height="19" fill="#aed6f1"/>
+<rect x="334" y="270" width="19" height="19" fill="#aed6f1"/>
+<rect x="34" y="290" width="19" height="19" fill="#aed6f1"/>
+<rect x="54" y="290" width="19" height="19" fill="#aed6f1"/>
+<rect x="74" y="290" width="19" height="19" fill="#aed6f1"/>
+<rect x="94" y="290" width="19" height="19" fill="#aed6f1"/>
+<rect x="114" y="290" width="19" height="19" fill="#aed6f1"/>
+<rect x="134" y="290" width="19" height="19" fill="#aed6f1"/>
+<rect x="154" y="290" width="19" height="19" fill="#aed6f1"/>
+<rect x="174" y="290" width="19" height="19" fill="#aed6f1"/>
+<rect x="194" y="290" width="19" height="19" fill="#aed6f1"/>
+<rect x="214" y="290" width="19" height="19" fill="#aed6f1"/>
+<rect x="234" y="290" width="19" height="19" fill="#aed6f1"/>
+<rect x="254" y="290" width="19" height="19" fill="#aed6f1"/>
+<rect x="274" y="290" width="19" height="19" fill="#aed6f1"/>
+<rect x="294" y="290" width="19" height="19" fill="#aed6f1"/>
+<rect x="314" y="290" width="19" height="19" fill="#aed6f1"/>
+<rect x="334" y="290" width="19" height="19" fill="#aed6f1"/>
+<rect x="34" y="310" width="19" height="19" fill="#aed6f1"/>
+<rect x="54" y="310" width="19" height="19" fill="#aed6f1"/>
+<rect x="74" y="310" width="19" height="19" fill="#aed6f1"/>
+<rect x="94" y="310" width="19" height="19" fill="#aed6f1"/>
+<rect x="114" y="310" width="19" height="19" fill="#aed6f1"/>
+<rect x="134" y="310" width="19" height="19" fill="#aed6f1"/>
+<rect x="154" y="310" width="19" height="19" fill="#aed6f1"/>
+<rect x="174" y="310" width="19" height="19" fill="#aed6f1"/>
+<rect x="194" y="310" width="19" height="19" fill="#aed6f1"/>
+<rect x="214" y="310" width="19" height="19" fill="#aed6f1"/>
+<rect x="234" y="310" width="19" height="19" fill="#aed6f1"/>
+<rect x="254" y="310" width="19" height="19" fill="#aed6f1"/>
+<rect x="274" y="310" width="19" height="19" fill="#aed6f1"/>
+<rect x="294" y="310" width="19" height="19" fill="#aed6f1"/>
+<rect x="314" y="310" width="19" height="19" fill="#aed6f1"/>
+<rect x="334" y="310" width="19" height="19" fill="#aed6f1"/>
+<rect x="34" y="330" width="19" height="19" fill="#aed6f1"/>
+<rect x="54" y="330" width="19" height="19" fill="#aed6f1"/>
+<rect x="74" y="330" width="19" height="19" fill="#aed6f1"/>
+<rect x="94" y="330" width="19" height="19" fill="#aed6f1"/>
+<rect x="114" y="330" width="19" height="19" fill="#aed6f1"/>
+<rect x="134" y="330" width="19" height="19" fill="#aed6f1"/>
+<rect x="154" y="330" width="19" height="19" fill="#aed6f1"/>
+<rect x="174" y="330" width="19" height="19" fill="#aed6f1"/>
+<rect x="194" y="330" width="19" height="19" fill="#aed6f1"/>
+<rect x="214" y="330" width="19" height="19" fill="#aed6f1"/>
+<rect x="234" y="330" width="19" height="19" fill="#aed6f1"/>
+<rect x="254" y="330" width="19" height="19" fill="#aed6f1"/>
+<rect x="274" y="330" width="19" height="19" fill="#aed6f1"/>
+<rect x="294" y="330" width="19" height="19" fill="#aed6f1"/>
+<rect x="314" y="330" width="19" height="19" fill="#aed6f1"/>
+<rect x="334" y="330" width="19" height="19" fill="#aed6f1"/>
+</svg>
+  <figcaption style="font-size:0.9em; color:#555; margin-top:0.5em; max-width:640px; margin-left:auto; margin-right:auto;"><strong>Figure:</strong> The chunked streaming mask for 16 tokens at chunk size 4. The allowed region is four square blocks along the diagonal, each covering one chunk of rows and all keys up to that chunk's end. With chunk 4, token 9 sees tokens 0 to 11. Chunk 1 is strictly causal: decide now, see little. Chunk 16 is full attention: see everything, wait for everything.</figcaption>
+  </figure>
+
   <div class="demo" id="streamMask">
     <p><strong>Chunked streaming mask.</strong> A <code>16</code>-token sequence. Pick a chunk size and
     see which tokens each query is allowed to read. Blue means allowed.</p>
@@ -2887,9 +3327,7 @@ for i in range(n):
         <li><strong>Chunk buttons (<code>1</code>, <code>2</code>, <code>4</code>, <code>8</code>, <code>16</code>):</strong> set how many tokens arrive per chunk. Chunk <code>16</code> versus chunk <code>1</code>: seeing everything versus seeing now.</li>
       </ul>
     </div>
-    <p class="caption">Chunk <code>1</code> is strictly causal: decide now, see little. Chunk <code>16</code> is full
-    attention: see everything, wait for everything. <em>Every streaming system lives somewhere
-    on this slider, trading context for latency.</em></p>
+    <p class="caption"><em>Every streaming system lives somewhere on this slider, trading context for latency.</em></p>
   </div>
   <script>
   (function() {
@@ -3065,9 +3503,42 @@ for i in range(n):
     quadruples.</em> Move the sliders:
   </p>
 
+  <p>
+    Written as equations, per layer:
+  </p>
+  <div class="dmath">$$ \mathrm{attention\ FLOPs} = 4n^2 d $$</div>
+  <div class="dmath">$$ \mathrm{FFN\ FLOPs} = 16 n d^2 $$</div>
+  <p>
+    <code>n</code> is the sequence length, the symbol the tool below uses in its legend and its slider label "Sequence length n". <code>d</code> is the model width. The counts cover only the score and weighted-sum terms for attention and the two FFN matmuls: I'm ignoring the QKV projections, softmax, and norms here to keep the comparison clean.
+  </p>
+  <figure style="text-align:center; margin:1.5em 0;">
+<svg width="600" height="290" viewBox="0 0 600 290" xmlns="http://www.w3.org/2000/svg" style="max-width:100%;height:auto;background:#fff;border:1px solid #bdc3c7;border-radius:4px">
+<line x1="70" y1="207.9" x2="580" y2="207.9" stroke="#e5e8ec"/>
+<text x="62" y="211.9" text-anchor="end" font-size="12" fill="#7f8c8d">1M</text>
+<line x1="70" y1="160.1" x2="580" y2="160.1" stroke="#e5e8ec"/>
+<text x="62" y="164.1" text-anchor="end" font-size="12" fill="#7f8c8d">10M</text>
+<line x1="70" y1="112.4" x2="580" y2="112.4" stroke="#e5e8ec"/>
+<text x="62" y="116.4" text-anchor="end" font-size="12" fill="#7f8c8d">100M</text>
+<line x1="70" y1="64.6" x2="580" y2="64.6" stroke="#e5e8ec"/>
+<text x="62" y="68.6" text-anchor="end" font-size="12" fill="#7f8c8d">1G</text>
+<polyline points="70.0,250.0 133.8,221.2 197.5,192.5 261.2,163.8 325.0,135.0 388.8,106.3 452.5,77.5 516.2,48.8 580.0,20.0" fill="none" stroke="#3498db" stroke-width="2.5"/>
+<polyline points="70.0,135.0 133.8,120.6 197.5,106.3 261.2,91.9 325.0,77.5 388.8,63.1 452.5,48.8 516.2,34.4 580.0,20.0" fill="none" stroke="#e67e22" stroke-width="2.5"/>
+<circle cx="574.0" cy="26.0" r="5" fill="#2c3e50"/>
+<text x="564.0" y="42.0" text-anchor="end" font-size="12" fill="#2c3e50">crossover n=4d=2048</text>
+<text x="261.2" y="153.8" font-size="12" fill="#3498db">attention: 4n²d</text>
+<text x="261.2" y="111.9" font-size="12" fill="#e67e22">FFN: 16nd²</text>
+<text x="14" y="24" font-size="12" fill="#7f8c8d">FLOPs (log scale)</text>
+<text x="70.0" y="270" text-anchor="middle" font-size="12" fill="#7f8c8d">n=8</text>
+<text x="197.5" y="270" text-anchor="middle" font-size="12" fill="#7f8c8d">n=32</text>
+<text x="325.0" y="270" text-anchor="middle" font-size="12" fill="#7f8c8d">n=128</text>
+<text x="452.5" y="270" text-anchor="middle" font-size="12" fill="#7f8c8d">n=512</text>
+<text x="580.0" y="270" text-anchor="middle" font-size="12" fill="#7f8c8d">n=2048</text>
+</svg>
+  <figcaption style="font-size:0.9em; color:#555; margin-top:0.5em; max-width:640px; margin-left:auto; margin-right:auto;"><strong>Figure:</strong> The two bills on the tool's own axes, sequence length 8 to 2048 and FLOPs on a log scale, at the tool default width of 512. Where the blue attention curve crosses above the orange FFN curve, a crossover line marks it: right where the length is four times the width. At length 2048 the two bills are exactly equal. At 100,000 tokens and width 512, one head's attention matrix alone holds 10 billion entries, 80 billion across 8 heads.</figcaption>
+  </figure>
+
   <div class="demo" id="flopBill">
-    <p><strong>The quadratic bill.</strong> Attention FLOPs grow with the square of the sequence length, FFN FLOPs linearly.
-    The curves cross exactly where the sequence length is four times the model width.</p>
+    <p><strong>The quadratic bill.</strong></p>
     
     <div class="play-row"><button type="button" class="play-btn" id="flopPlay">Play</button><button type="button" class="play-btn" id="flopReset">Reset</button></div>
     <div class="chart-legend">

@@ -625,6 +625,22 @@
     <p>The algorithm is three verbs: plot the query, find its neighbors, count the vote. Walk one query through all three, then the fourth move: change who gets to vote.</p>
 
     <div class="demo" id="stDemo">
+      <style>
+      /* Shared walkthrough equation-card contract (verbatim, all pages) */
+      .eq-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+        padding:.55rem .8rem;margin:.6rem auto;max-width:640px;overflow-x:auto}
+      .eq-line{white-space:nowrap;opacity:.38;padding:.15rem .1rem;
+        border-left:3px solid transparent}
+      .eq-line.eq-active{opacity:1;border-left-color:#2c3e50}
+      .eqt{font-weight:600;padding:0 .1em;border-radius:3px}
+      .eqt.eqt-active{text-decoration:underline;text-underline-offset:2px}
+      .eq-legend{font-size:.78rem;color:#475569;margin-top:.35rem}
+      .eq-sw{display:inline-block;width:.7em;height:.7em;border-radius:2px;
+        margin:0 .25em 0 .6em;vertical-align:baseline}
+      /* diagram-side dim/highlight (SVG/DOM). Do NOT use .hl/.dim: taken. */
+      .eq-dim{opacity:.32}
+      .eq-hl{filter:drop-shadow(0 0 3px currentColor)}
+      </style>
       <p class="st-beat-title" id="stBeatTitle"></p>
       <p class="st-beat-desc" id="stBeatDesc"></p>
       <div class="canvas-wrap">
@@ -635,6 +651,10 @@
         <button type="button" class="st-dot" data-s="1" aria-label="Step 2: find the k nearest neighbors">2</button>
         <button type="button" class="st-dot" data-s="2" aria-label="Step 3: take the majority vote">3</button>
         <button type="button" class="st-dot" data-s="3" aria-label="Step 4: change k, change the verdict">4</button>
+      </div>
+      <div class="eq-card" id="stDemoEq">
+        <div class="eq-line" data-eqline="0"><span class="eqt" data-k="yhat" style="color:#2c3e50">&#375;</span> = mode{<span class="eqt" data-k="yi" style="color:#2a7fbf">y<sub>i</sub></span> : i &#8712; <span class="eqt" data-k="nk" style="color:#b45309">N<sub>k</sub>(x)</span>}</div>
+        <div class="eq-legend"><span class="eq-sw" style="background:#2c3e50"></span>&#375;, the query&rsquo;s verdict <span class="eq-sw" style="background:#2a7fbf"></span>y<sub>i</sub>, each voter&rsquo;s label <span class="eq-sw" style="background:#b45309"></span>N<sub>k</sub>(x), the k voters</div>
       </div>
       <div class="st-controls">
         <button type="button" id="stPrev">Prev</button>
@@ -780,6 +800,38 @@
      ];
      var beatK = [0, 5, 5, 15]; /* beat 0: no neighbors yet */
      var beat = 0;
+     /* Shared walkthrough equation-card sync (verbatim, all pages). */
+     function syncEq(cardId, lines, terms){
+       var card = document.getElementById(cardId);
+       if(!card) return;
+       var ls = card.querySelectorAll('.eq-line');
+       for(var i = 0; i < ls.length; i++)
+         ls[i].classList.toggle('eq-active', lines.indexOf(i) >= 0);
+       var ts = card.querySelectorAll('.eqt');
+       for(var j = 0; j < ts.length; j++)
+         ts[j].classList.toggle('eqt-active',
+           terms.indexOf(ts[j].getAttribute('data-k')) >= 0);
+     }
+     /* Step map: the equation is the vote (step 3 of 4); the other steps
+        are diagram plus highlight only. */
+     var EQMAP = [
+       { lines: [], terms: [] },
+       { lines: [], terms: [] },
+       { lines: [0], terms: ['yhat', 'yi', 'nk'] },
+       { lines: [], terms: [] }
+     ];
+     /* Canvas regions: the full scene draws every step; the step’s region
+        stays at full opacity and the rest dims to 0.32. */
+     function withAlpha(a, fn) {
+       ctx.save(); ctx.globalAlpha = a; fn(); ctx.restore();
+     }
+     function dim(group, hi) { return hi.indexOf(group) >= 0 ? 1 : 0.32; }
+     var HI = [
+       ['query'],
+       ['query', 'links', 'voters'],
+       ['query', 'voters'],
+       ['query', 'voters']
+     ];
 
      var titleEl = document.getElementById('stBeatTitle');
      var descEl = document.getElementById('stBeatDesc');
@@ -808,35 +860,44 @@
          ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
        }
        /* training points */
-       for (i = 0; i < bluePts.length; i++) drawPoint(bluePts[i][0], bluePts[i][1], 5, BLUE, '#ffffff', 1.2);
-       for (i = 0; i < orangePts.length; i++) drawPoint(orangePts[i][0], orangePts[i][1], 5, ORANGE, '#ffffff', 1.2);
+       var hi = HI[beat];
+       withAlpha(dim('pts', hi), function () {
+         for (i = 0; i < bluePts.length; i++) drawPoint(bluePts[i][0], bluePts[i][1], 5, BLUE, '#ffffff', 1.2);
+         for (i = 0; i < orangePts.length; i++) drawPoint(orangePts[i][0], orangePts[i][1], 5, ORANGE, '#ffffff', 1.2);
+       });
        var k = beatK[beat], nb = null;
        var qpx = xPix(qx), qpy = yPix(qy);
        if (k > 0) {
          nb = nearest(k);
          /* lines to the voters */
-         ctx.strokeStyle = 'rgba(44,62,80,0.38)'; ctx.lineWidth = 1.5;
-         for (i = 0; i < nb.length; i++) {
-           ctx.beginPath();
-           ctx.moveTo(qpx, qpy);
-           ctx.lineTo(xPix(nb[i].x), yPix(nb[i].y));
-           ctx.stroke();
-         }
+         withAlpha(dim('links', hi), function () {
+           ctx.strokeStyle = 'rgba(44,62,80,0.38)'; ctx.lineWidth = 1.5;
+           for (i = 0; i < nb.length; i++) {
+             ctx.beginPath();
+             ctx.moveTo(qpx, qpy);
+             ctx.lineTo(xPix(nb[i].x), yPix(nb[i].y));
+             ctx.stroke();
+           }
+         });
          /* voters enlarged with a dark outline */
-         for (i = 0; i < nb.length; i++) {
-           drawPoint(nb[i].x, nb[i].y, 7.5, nb[i].c === 0 ? BLUE : ORANGE, DARK, 2.5);
-         }
+         withAlpha(dim('voters', hi), function () {
+           for (i = 0; i < nb.length; i++) {
+             drawPoint(nb[i].x, nb[i].y, 7.5, nb[i].c === 0 ? BLUE : ORANGE, DARK, 2.5);
+           }
+         });
        }
        /* the query diamond */
-       var ds = 11;
-       var fill = '#ffffff';
-       if (beat === 2) fill = BLUE;
-       if (beat === 3) fill = ORANGE;
-       ctx.fillStyle = fill; ctx.strokeStyle = DARK; ctx.lineWidth = 2.5;
-       ctx.beginPath();
-       ctx.moveTo(qpx, qpy - ds); ctx.lineTo(qpx + ds, qpy);
-       ctx.lineTo(qpx, qpy + ds); ctx.lineTo(qpx - ds, qpy);
-       ctx.closePath(); ctx.fill(); ctx.stroke();
+       withAlpha(dim('query', hi), function () {
+         var ds = 11;
+         var fill = '#ffffff';
+         if (beat === 2) fill = BLUE;
+         if (beat === 3) fill = ORANGE;
+         ctx.fillStyle = fill; ctx.strokeStyle = DARK; ctx.lineWidth = 2.5;
+         ctx.beginPath();
+         ctx.moveTo(qpx, qpy - ds); ctx.lineTo(qpx + ds, qpy);
+         ctx.lineTo(qpx, qpy + ds); ctx.lineTo(qpx - ds, qpy);
+         ctx.closePath(); ctx.fill(); ctx.stroke();
+       });
        ctx.fillStyle = '#555'; ctx.textAlign = 'center'; ctx.font = '12px sans-serif';
        ctx.fillText('feature 1', (padL + W - padR) / 2, H - 8);
      }
@@ -860,6 +921,7 @@
        dots.forEach(function (d, i) { d.classList.toggle('active', i === beat); });
        prevBtn.disabled = (beat === 0);
        nextBtn.disabled = (beat === 3);
+       syncEq('stDemoEq', EQMAP[beat].lines, EQMAP[beat].terms);
        draw();
      }
 

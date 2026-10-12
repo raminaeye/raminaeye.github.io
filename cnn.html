@@ -309,6 +309,20 @@
         font-size: 12px; font-weight: 600; cursor: pointer; padding: 0; line-height: 1;
     }
     .walk-dot-on { background: #3498db; border-color: #3498db; color: #fff; }
+        /* Shared walkthrough equation-card contract (verbatim, all pages) */
+        .eq-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+          padding:.55rem .8rem;margin:.6rem auto;max-width:640px;overflow-x:auto}
+        .eq-line{white-space:nowrap;opacity:.38;padding:.15rem .1rem;
+          border-left:3px solid transparent}
+        .eq-line.eq-active{opacity:1;border-left-color:#2c3e50}
+        .eqt{font-weight:600;padding:0 .1em;border-radius:3px}
+        .eqt.eqt-active{text-decoration:underline;text-underline-offset:2px}
+        .eq-legend{font-size:.78rem;color:#475569;margin-top:.35rem}
+        .eq-sw{display:inline-block;width:.7em;height:.7em;border-radius:2px;
+          margin:0 .25em 0 .6em;vertical-align:baseline}
+        /* diagram-side dim/highlight (SVG/DOM). Do NOT use .hl/.dim: taken. */
+        .eq-dim{opacity:.32}
+        .eq-hl{filter:drop-shadow(0 0 3px currentColor)}
 
     /* References */
     .brefs { font-size: 0.92em; color: #555; }
@@ -1114,7 +1128,7 @@ def conv2d(input, kernel, stride=1, padding=0):
         ];
         var stageMaps = [s1, s2, s3, s4, s5, null];
         var stageCols = [1, 3, 3, 4, 4, 0];
-        var cv = $('walkCv'), H = 360;
+        var cv = $('walkCv'), H = 470;
         var state = { stage: 0, playing: false, timer: null };
         var dots = [];
         function sizeCanvas() {
@@ -1130,23 +1144,23 @@ def conv2d(input, kernel, stride=1, padding=0):
             var s = Math.round(245 - Math.min(1, Math.max(0, v)) * 228);
             return 'rgb(' + s + ',' + s + ',' + Math.min(255, s + 6) + ')';
         }
-        function drawGridMaps(g, maps, mapW, mapH, cols) {
+        function drawGridMaps(g, maps, mapW, mapH, cols, ph) {
             var ctx = g.ctx, w = g.w, gap = 12, pad = 10;
             var rows = Math.ceil(maps.length / cols);
             var cell = Math.floor(Math.min(
                 (w - 2 * pad - (cols - 1) * gap) / (cols * mapW),
-                (H - 2 * pad - (rows - 1) * gap) / (rows * mapH)
+                (ph - 2 * pad - (rows - 1) * gap) / (rows * mapH)
             ));
             if (cell < 2) cell = 2;
             var gridW = cols * mapW * cell + (cols - 1) * gap;
             var gridH = rows * mapH * cell + (rows - 1) * gap;
-            var x0 = (w - gridW) / 2, y0 = (H - gridH) / 2;
+            var x0 = (w - gridW) / 2, y0 = (ph - gridH) / 2;
             var mx = 1e-9;
             for (var m = 0; m < maps.length; m++)
                 for (var i = 0; i < maps[m].length; i++)
                     if (maps[m][i] > mx) mx = maps[m][i];
             ctx.fillStyle = '#f4f6f7';
-            ctx.fillRect(0, 0, w, H);
+            ctx.fillRect(0, 0, w, ph);
             for (var m2 = 0; m2 < maps.length; m2++) {
                 var gx = x0 + (m2 % cols) * (mapW * cell + gap);
                 var gy = y0 + Math.floor(m2 / cols) * (mapH * cell + gap);
@@ -1160,13 +1174,13 @@ def conv2d(input, kernel, stride=1, padding=0):
                 ctx.strokeRect(gx + 0.5, gy + 0.5, mapW * cell - 1, mapH * cell - 1);
             }
         }
-        function drawBars(g) {
+        function drawBars(g, ph) {
             var ctx = g.ctx, w = g.w;
             ctx.fillStyle = '#f4f6f7';
-            ctx.fillRect(0, 0, w, H);
+            ctx.fillRect(0, 0, w, ph);
             var maxS = 1e-9, d;
             for (d = 0; d < 10; d++) if (scores[d] > maxS) maxS = scores[d];
-            var top = 14, rowH = Math.min(30, (H - top - 10) / 10);
+            var top = 14, rowH = Math.min(30, (ph - top - 10) / 10);
             var labW = 26, barX = labW + 8, trackW = w - barX - 46;
             ctx.font = '12px sans-serif';
             for (d = 0; d < 10; d++) {
@@ -1182,18 +1196,73 @@ def conv2d(input, kernel, stride=1, padding=0):
                 ctx.fillText((100 * scores[d] / maxS).toFixed(0), barX + bw + 6, y + rowH / 2 + 4);
             }
         }
+        var SHORT = ['Input', 'Conv+ReLU', 'Pool', 'Conv+ReLU', 'Pool', 'Classify'];
+        var thumbs = null;
+        function buildThumbs() {
+            thumbs = [];
+            for (var s = 0; s < 6; s++) {
+                var c = document.createElement('canvas');
+                c.width = 640; c.height = 360;
+                var g2 = { ctx: c.getContext('2d'), w: 640 };
+                if (s < 5) {
+                    var sm0 = stageMaps[s];
+                    drawGridMaps(g2, sm0.maps, sm0.w, sm0.h, stageCols[s], 360);
+                } else {
+                    drawBars(g2, 360);
+                }
+                thumbs.push(c);
+            }
+        }
         function render() {
             var g = sizeCanvas(), st = state.stage;
             $('walkStageTitle').textContent = STAGES[st].title;
             $('walkStageLabel').textContent = STAGES[st].label;
             $('walkStageSize').textContent = STAGES[st].size;
             for (var i = 0; i < dots.length; i++) dots[i].classList.toggle('walk-dot-on', i === st);
+            if (!thumbs) buildThumbs();
+            var ctx = g.ctx, w = g.w;
+            ctx.fillStyle = '#f4f6f7';
+            ctx.fillRect(0, 0, w, H);
+            /* Persistent 6-stage strip: all stages visible every step. */
+            var pad = 10, gap = 8;
+            var tw = (w - 2 * pad - 5 * gap) / 6, th = tw * 360 / 640, ty = 8;
+            var showNames = tw >= 80;
+            for (var k = 0; k < 6; k++) {
+                var tx = pad + k * (tw + gap);
+                ctx.globalAlpha = (k === st) ? 1 : 0.32;
+                ctx.drawImage(thumbs[k], tx, ty, tw, th);
+                ctx.globalAlpha = 1;
+                if (k === st) {
+                    ctx.strokeStyle = '#3498db'; ctx.lineWidth = 3;
+                    ctx.strokeRect(tx - 1.5, ty - 1.5, tw + 3, th + 3);
+                } else {
+                    ctx.strokeStyle = '#bdc3c7'; ctx.lineWidth = 1;
+                    ctx.strokeRect(tx + 0.5, ty + 0.5, tw - 1, th - 1);
+                }
+                if (showNames) {
+                    ctx.fillStyle = (k === st) ? '#2c3e50' : '#7f8c8d';
+                    ctx.font = '600 11px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(SHORT[k], tx + tw / 2, ty + th + 15);
+                }
+            }
+            /* Active stage, full-size, highlighted. */
+            var ay = ty + th + (showNames ? 26 : 14), ah = H - ay - 8;
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(0, ay, w, ah);
+            ctx.clip();
+            ctx.translate(0, ay);
+            var gg = { ctx: ctx, w: w };
             if (st < 5) {
                 var sm = stageMaps[st];
-                drawGridMaps(g, sm.maps, sm.w, sm.h, stageCols[st]);
+                drawGridMaps(gg, sm.maps, sm.w, sm.h, stageCols[st], ah);
             } else {
-                drawBars(g);
+                drawBars(gg, ah);
             }
+            ctx.restore();
+            ctx.strokeStyle = '#3498db'; ctx.lineWidth = 2.5;
+            ctx.strokeRect(1.5, ay + 1.5, w - 3, ah - 3);
         }
         function stopPlay() {
             state.playing = false;

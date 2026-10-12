@@ -648,6 +648,17 @@
      <p class="caption">π is one path: the prediction picked at each frame. B(π) is that path after the collapse rule is applied to it. The blank token soaks up the extra frames. Ten noisy frames collapse to three real tokens, so the model never needs to know where each letter starts or ends.</p>
    </div>
 
+   <p>In short: the total probability of the ground truth given the input. Each alignment path contributes the product of its per-frame probabilities, summed over every path that collapses to the ground truth.</p>
+
+   <p>In plain language: pick one alignment path, multiply the model's per-frame probabilities along it, then do that for <em>every</em> path that collapses to the ground truth and add them up. The path <code>c c - a t t</code> from the path builder is one of those paths.</p>
+
+   <p>The CTC loss is then <em>just the negative log of that total probability</em>.</p>
+
+   $$P(\pi|x) = \prod_t p_t(\pi_t)$$
+   $$P(y|x) = \sum_{\pi:\, B(\pi) = y} P(\pi|x)$$
+   $$\text{CTC loss} = -\log P(y|x)$$
+   <p>\(\pi\) is one path: the prediction picked at each frame. \(p_t\) is frame \(t\)'s probability for the symbol the path picks at that frame: each frame gets a probability distribution over <code>V+1</code> (tokens + blank). \(B(\pi)\) is that path after the collapse rule is applied to it. \(y\) is the ground truth and \(x\) is the input, so \(P(y|x)\) is the total probability of the ground truth given the input: pick one alignment path, multiply the model's per-frame probabilities along it, then do that for every path that collapses to the ground truth and add them up. The CTC loss is then just the negative log of that total probability.</p>
+
    <p>That diagram is the whole trick, but it is static. In this path builder, each path you lay down, one cell per frame from left to right, collapses by the same rule the diagram shows:</p>
 
    <div class="demo" id="ctcDemo">
@@ -884,15 +895,15 @@
 
    <p>The predictions supply the probability at each frame and the ground truth constrain which sequence of choices we care about. We compute the total probability of the ground truth string by summing over all valid alignment paths.</p>
 
-   <p>In short: the total probability of the ground truth given the input. Each alignment path contributes the product of its per-frame probabilities, summed over every path that collapses to the ground truth.</p>
+   
 
-   <p>In plain language: pick one alignment path, multiply the model's per-frame probabilities along it, then do that for <em>every</em> path that collapses to the ground truth and add them up. The path <code>c c - a t t</code> from the path builder is one of those paths.</p>
+   
 
    <p>There are <code>84</code> paths that collapse to "cat", and their probabilities add up to the model's total belief that the audio says "cat", over every timing it can imagine. <em>No single alignment is ever chosen during training.</em></p>
 
    <p>Since multiple alignments can collapse to the same label sequence, the total probability of that sequence is the sum of all alignment probabilities.</p>
 
-   <p>The CTC loss is then <em>just the negative log of that total probability</em>.</p>
+   
 
    <p><em>Same negative-log trick as cross-entropy, one level up.</em> The toy table gives that sum, and the loss is its negative log. If the model piles its mass onto alignments that collapse to the right transcript, the sum approaches <code>1</code> and the loss approaches <code>0</code>. If the mass leaks onto wrong transcripts, the loss grows. The DP just computes that sum without enumerating paths.</p>
 
@@ -1468,6 +1479,17 @@ def ctc_forward_backward(probs, target):
    <p>
      The path toy showed you one alignment. Training never picks one. Here is where the credit actually goes. Each cell below answers one question: how much does frame <code>t</code> belong to position <code>s</code> of the target? Untrained, the answer is "everywhere, a little". Trained, the answer is "right here, a lot". That sharpening <strong>is</strong> learning.
    </p>
+   <ol>
+     <li>Forward DP: compute <code>alpha</code>, the prefix probability, all the probability mass up to this frame and target position.</li>
+     <li>Backward DP: compute <code>beta</code>, the suffix probability, all the mass from here to the end.</li>
+     <li>The forward score is the prefix mass, the backward score the suffix mass; combined and normalized, they give each frame's share of the credit.</li>
+     <li>The gradient at each frame is that share minus what the model predicted.</li>
+   </ol>
+   $$\text{posterior at } (t, s) = \frac{\text{alpha}[t][s] \cdot \text{beta}[t][s]}{p_t(l'_s) \cdot P(y|x)}$$
+   $$\text{gradient at frame } t = \text{posterior share at frame } t - \text{what the model predicted at frame } t$$
+   <p><code>alpha[t][s]</code> is the prefix mass, all the probability mass up to this frame and target position, and <code>beta[t][s]</code> is the suffix mass, all the mass from here to the end. <code>p_t(l'_s)</code> is frame <code>t</code>'s predicted probability for the column's character. <code>P(y|x)</code> is the total probability, <code>total_prob = alpha[T-1][S-1] + alpha[T-1][S-2]</code> in the listing. The division by <code>p_t(l'_s)</code> appears because <code>alpha</code> and <code>beta</code>, as the code listing computes them, each already include this frame's probability: the listing sets <code>alpha[t][s] = probs[t, vocab[extended[s]]] * (stay + prev + skip)</code> and <code>beta[t][s] = probs[t, vocab[extended[s]]] * (same + nxt + skip)</code>.</p>
+
+
 
    <div class="demo" id="postDemo">
      <div class="btn-row" style="justify-content:center">
@@ -1492,7 +1514,7 @@ def ctc_forward_backward(probs, target):
                          </ul>
      </div>
      <p class="caption">Training is not "pick the best path". It is "spread credit over all paths". The mass smears across the valid region, then concentrates as the model learns. The per-frame softmax tables are fixed illustrative toys, not a real model's output.</p>
-     <p class="caption">The forward score is the prefix mass, the backward score the suffix mass; combined and normalized, they give each frame's share of the credit. The gradient at each frame is that share minus what the model predicted.</p>
+     
    </div>
    <script>
    (function () {
@@ -1748,9 +1770,19 @@ def ctc_forward_backward(probs, target):
    <h3>Beam search merges hypotheses</h3>
 
    <p>Greedy decoding is lazy. It takes the best symbol at each frame and calls it a day, which means it sees exactly one path: "ab". But fourteen other paths collapse to "ab" too, and greedy never looks at them. With beam width <code>3</code>, the "ab" bar eats fifteen thin segments. <em>That stacking IS beam search: it recovers probability mass by merging.</em> The code above does this in twenty-seven lines; the bars show you what those lines are actually doing.</p>
+   $$\text{score(new\_prefix) after this frame} = \text{score already accumulated for new\_prefix} + \text{prob} \times p$$
+   <p><code>prob</code> is the prefix probability carried in <code>beams</code>, which starts from <code>beams = {"": 1.0}</code>, an empty prefix with prob <code>1</code>. <code>p</code> is this frame's probability for the symbol, <code>p = probs[t][sym]</code> in the listing. <code>new_prefix</code> is the prefix after the collapse rule in the listing: if the symbol is blank the prefix stays, and if it repeats the prefix's last symbol it does not double add. A candidate is a merged prefix: beam search recovers some of its mass by merging multiple paths that collapse to the same candidate sequence, and that stacking is beam search: it recovers probability mass by merging, which is the sum in the line above.</p>
 
 
-   <div class="demo" id="beamDemo">
+
+
+   <style>
+    .bm-static .bm-table { border-collapse: collapse; margin: 0.4rem auto; font-size: 0.88em; }
+    .bm-static .bm-table th, .bm-static .bm-table td { border: 1px solid #d5dbdb; padding: 4px 12px; text-align: center; }
+    .bm-static .bm-table th { background: #eaf4fb; color: #2c3e50; font-weight: bold; }
+    .bm-static .bm-table td { font-family: 'SFMono-Regular', Consolas, Menlo, monospace; }
+   </style>
+   <div class="bm-static">
      <table class="bm-table" aria-label="Fixed illustrative per-frame probabilities">
        <tr><th>frame</th><th>_ (blank)</th><th>a</th><th>b</th></tr>
        <tr><th>t0</th><td>0.20</td><td>0.50</td><td>0.30</td></tr>
@@ -1759,6 +1791,11 @@ def ctc_forward_backward(probs, target):
        <tr><th>t3</th><td>0.25</td><td>0.15</td><td>0.60</td></tr>
      </table>
      <p class="caption" style="text-align:center">Fixed illustrative table. Collapse rule is standard CTC: merge repeats first, then drop blanks.</p>
+   </div>
+
+   <div class="demo" id="beamDemo">
+     
+     
      <div class="demo-controls" style="justify-content:center">
        <label for="bmW">Beam width <input type="range" id="bmW" min="1" max="5" step="1" value="3"> <span class="pval" id="bmWV">3</span></label>
        <div class="btn-row" style="margin:0">

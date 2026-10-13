@@ -736,7 +736,7 @@
     <p>Here is the sweep this toy runs, in words first. Sweep the capacity: the red test curve falls while the model is underfitting, then climbs once it starts memorizing the training data. That minimum is the sweet spot. Too little capacity and both curves sit high; too much and the red test curve climbs the overfitting wall. Then grow the dataset size: a larger dataset sinks the whole red curve and moves the sweet spot right.</p>
     <p style="text-align:center;font-size:1.38rem;line-height:2.0;font-weight:500">Training Error = <span class="frac"><span class="top">8</span><span class="bot">Capacity</span></span> + 0.5</p>
     <p style="text-align:center;font-size:1.38rem;line-height:2.0;font-weight:500">Test Error = Training Error + <span class="frac"><span class="top">12 &#215; Capacity</span><span class="bot">Data Size</span></span></p>
-    <p>Capacity is the model size dial and data size is the dataset size dial. The training error is the first curve, and the test error is the training error plus the capacity over data size penalty. Illustrative curves from a toy model, not measured runs.</p>
+    <p>Capacity is the model size dial and data size is the dataset size dial. The training error is the first curve. The test error is the training error plus a capacity over data size penalty, which climbs steeply while the model can still memorize and then levels off once it has memorized everything there is to memorize. Both curves sink toward the dashed floor and neither can cross it: that floor is the label noise. Illustrative curves from a toy model, not measured runs.</p>
 
     <h2 class="subhead">The Irreducible Error (Bayes Error)</h2>
     <p><strong>Irreducible error</strong> is something <em>you cannot remove</em>, no matter what model, data, or optimizer you use! It comes from the randomness or noise inherent in the data.</p>
@@ -840,11 +840,38 @@
       var canvas = document.getElementById('bvCanvas');
       var ctx = canvas.getContext('2d');
 
-      function trainErr(cap) { return 8 / cap + 0.5; }
-      function testErr(cap, data) { return trainErr(cap) + 12 * cap / data; }
-      function sweetSpot(data) { return Math.sqrt(2 * data / 3); }
+      /* Toy model, bounded by construction: both errors live between the
+         label-noise floor and a saturating overfitting wall, so no slider
+         combination can push an error past 100 or off any axis.
+         train: falls toward the floor as capacity grows.
+         test: train plus a capacity-over-data penalty that rises steeply
+         while the model can still memorize, then levels off once it has
+         memorized everything there is to memorize. */
+      var FLOOR = 0.2;
+      function trainErr(cap) { return 8 / cap + FLOOR; }
+      function testErr(cap, data) { return trainErr(cap) + 30 * cap / (4 * data + cap); }
+      function sweetSpot(data) { return 4 * data / (Math.sqrt(15 * data) - 1); }
 
-      var XMIN = 1, XMAX = 100, YMAX = 22;
+      var XMIN = 1, XMAX = 100;
+      /* y-axis auto-scales to the visible curves, with headroom and round ticks */
+      function yScale(data) {
+        var mx = 0;
+        for (var i = 0; i <= 100; i++) {
+          var c = XMIN + (XMAX - XMIN) * i / 100;
+          mx = Math.max(mx, trainErr(c), testErr(c, data));
+        }
+        var raw = mx * 1.12;
+        var cands = [1, 2, 5, 10, 20, 50, 100];
+        var step = cands[cands.length - 1];
+        for (var j = 0; j < cands.length; j++) {
+          if (cands[j] >= raw / 5) { step = cands[j]; break; }
+        }
+        var top = Math.ceil(raw / step) * step;
+        var labels = [];
+        for (var v = 0; v <= top + 1e-9; v += step) { labels.push(v); }
+        return { top: top, labels: labels };
+      }
+      function fmtTick(v) { return (Math.round(v * 10) / 10).toString(); }
       var FS = 12; /* coordinates are CSS pixels, so 12px renders 12px effective */
 
       function draw() {
@@ -861,9 +888,12 @@
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, w, h);
 
+        var scale = yScale(data);
+        var YMAX = scale.top;
+
         /* measurement-driven layout: left pad fits the y-title lane plus the widest tick label */
         ctx.font = FS + 'px sans-serif';
-        var yTickLabels = ['0', '5', '10', '15', '20'];
+        var yTickLabels = scale.labels.map(fmtTick);
         var tickW = 0;
         yTickLabels.forEach(function (s) { tickW = Math.max(tickW, ctx.measureText(s).width); });
         var padL = Math.ceil(10 + FS + 6 + tickW + 6), padR = 12, padT = FS + 2, padB = 34;
@@ -896,6 +926,14 @@
         ctx.moveTo(padL, padT); ctx.lineTo(padL, h - padB); ctx.lineTo(w - padR, h - padB);
         ctx.stroke();
 
+        /* the label-noise floor: the line both curves sink toward and
+           neither can cross; the line is drawn under the curves, its
+           label after them (see below) */
+        var floorY = Y(FLOOR);
+        ctx.strokeStyle = '#7f8c8d'; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]);
+        ctx.beginPath(); ctx.moveTo(padL, floorY); ctx.lineTo(w - padR, floorY); ctx.stroke();
+        ctx.setLineDash([]);
+
         /* curves, clipped to the plot rect */
         function plotTrain() {
           ctx.save();
@@ -910,66 +948,34 @@
           ctx.stroke();
           ctx.restore();
         }
-        /* test curve with a break/off-chart indicator: where the curve leaves the
-           top of the chart it ends in an up arrow, never a clipped flatline at error=22 */
+        /* test curve: the model is bounded and the axis auto-scales, so the
+           whole curve always fits; drawn as one clipped polyline */
         function plotTest() {
-          var exits = [];
           ctx.save();
           ctx.beginPath(); ctx.rect(padL, padT, plotW, plotH); ctx.clip();
           ctx.strokeStyle = '#c0392b'; ctx.lineWidth = 2.5; ctx.setLineDash([8, 5]);
           ctx.beginPath();
-          var started = false, prevPx = 0, prevE = 0;
           for (var i = 0; i <= 240; i++) {
             var c = XMIN + (XMAX - XMIN) * i / 240;
-            var e = testErr(c, data);
-            var px = X(c);
-            if (e <= YMAX) {
-              if (!started && i > 0 && prevE > YMAX) {
-                var t0 = (YMAX - prevE) / (e - prevE);
-                var ex0 = prevPx + (px - prevPx) * t0;
-                ctx.moveTo(ex0, padT);
-                exits.push(ex0);
-              } else if (!started) {
-                ctx.moveTo(px, Y(e));
-              } else {
-                ctx.lineTo(px, Y(e));
-              }
-              started = true;
-            } else if (started) {
-              var t1 = (YMAX - prevE) / (e - prevE);
-              var ex1 = prevPx + (px - prevPx) * t1;
-              ctx.lineTo(ex1, padT);
-              exits.push(ex1);
-              started = false;
-            }
-            prevPx = px; prevE = e;
+            var px = X(c), py = Y(testErr(c, data));
+            if (i === 0) { ctx.moveTo(px, py); } else { ctx.lineTo(px, py); }
           }
           ctx.stroke();
           ctx.setLineDash([]);
           ctx.restore();
-          /* off-chart arrows sit just inside the top edge; the label comes after the marks */
-          ctx.font = FS + 'px sans-serif';
-          exits.forEach(function (ex, k) {
-            var ax = Math.max(padL + 8, Math.min(w - padR - 8, ex));
-            ctx.fillStyle = '#c0392b';
-            ctx.beginPath();
-            ctx.moveTo(ax, padT + 3); ctx.lineTo(ax - 5, padT + 11); ctx.lineTo(ax + 5, padT + 11);
-            ctx.closePath(); ctx.fill();
-            if (k === 0) {
-              ctx.textAlign = 'left';
-              var lab = 'off chart';
-              var lw = ctx.measureText(lab).width;
-              var lx = ax + 9;
-              if (lx + lw > w - padR) { lx = ax - 9 - lw; }
-              ctx.fillStyle = '#ffffff';
-              ctx.fillRect(lx - 3, padT + 3, lw + 6, 18);
-              ctx.fillStyle = '#c0392b';
-              ctx.fillText(lab, lx, padT + 16);
-            }
-          });
         }
         plotTrain();
         plotTest();
+
+        /* floor label, on top of the curves with a white backing, same
+           treatment as the sweet spot label: the train curve descends
+           through this corner and would strike through bare text */
+        ctx.font = FS + 'px sans-serif'; ctx.textAlign = 'left';
+        var flab = 'error floor (label noise)';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(padL + 3, floorY - 21, ctx.measureText(flab).width + 6, 19);
+        ctx.fillStyle = '#7f8c8d';
+        ctx.fillText(flab, padL + 6, floorY - 7);
 
         /* sweet spot dot on the test curve minimum */
         var ss = Math.max(XMIN, sweetSpot(data));
@@ -1003,17 +1009,8 @@
         var te = trainErr(cap), tse = testErr(cap, data);
         ctx.fillStyle = '#2980b9';
         ctx.beginPath(); ctx.arc(cx, Y(te), 4, 0, 2 * Math.PI); ctx.fill();
-        if (tse > YMAX) {
-          /* test dot is off the top of the chart: park it at the edge with an up arrow */
-          ctx.fillStyle = '#c0392b';
-          ctx.beginPath(); ctx.arc(cx, padT + 14, 4, 0, 2 * Math.PI); ctx.fill();
-          ctx.beginPath();
-          ctx.moveTo(cx, padT + 4); ctx.lineTo(cx - 4, padT + 9); ctx.lineTo(cx + 4, padT + 9);
-          ctx.closePath(); ctx.fill();
-        } else {
-          ctx.fillStyle = '#c0392b';
-          ctx.beginPath(); ctx.arc(cx, Y(tse), 4, 0, 2 * Math.PI); ctx.fill();
-        }
+        ctx.fillStyle = '#c0392b';
+        ctx.beginPath(); ctx.arc(cx, Y(tse), 4, 0, 2 * Math.PI); ctx.fill();
 
         stats.innerHTML = 'capacity <strong>' + cap + '</strong>, data <strong>' + data +
           '</strong>: train error <strong>' + te.toFixed(2) +

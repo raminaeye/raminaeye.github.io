@@ -2187,6 +2187,7 @@ class GRUCell(nn.Module):
         // result. Fresh load and Reset leave the tank empty and the verdict
         // pending; a pour (Play) or a preset is what fills them.
         var live = false;
+        var poured = false;
         // Gated RAF loop: it runs only while pouring, while the tank level is
         // still easing toward its target, or right after an interaction that
         // changed the canvas. At rest the tool sits dead still: no ambient
@@ -2240,6 +2241,11 @@ class GRUCell(nn.Module):
                 $('sfTake').innerHTML = '<strong>Nothing poured yet.</strong> When the sequence runs, all six steps pour in and the tank shows who it remembers. Or pick a preset, and the tank fills at once.';
                 return;
             }
+            if (!poured) {
+                $('sfReadout').innerHTML = 'the tank is <strong>pouring</strong>';
+                $('sfTake').innerHTML = '<strong>Pouring.</strong> The six steps pour in one at a time; the verdict lands when the last step has poured.';
+                return;
+            }
             $('sfReadout').innerHTML = 'the tank now <strong>holds the pour</strong>';
             var take;
             if (info.m < 0.5) take = '<strong>Verdict: the network remembers nothing.</strong> Every write was blocked or trivial.';
@@ -2254,7 +2260,7 @@ class GRUCell(nn.Module):
             if (playing) {
                 if (now - sfStepStart >= sfStepDur) {
                     var nk = playK + 1;
-                    if (nk >= N) { playing = false; playK = -1; tankShown = total; tankTarget = total; }
+                    if (nk >= N) { playing = false; playK = -1; tankShown = total; tankTarget = total; poured = true; draw(); }
                     else { playK = nk; sfStepStart = now; sfStepDur = 800; }
                 }
                 if (playK >= 0) {
@@ -2334,7 +2340,7 @@ class GRUCell(nn.Module):
             ctx.fillStyle = '#2c3e50'; ctx.font = FS13 + 'px sans-serif'; ctx.textAlign = 'left';
             ctx.fillText('memory tank', tx + 10, ty + 22);
             ctx.textAlign = 'center'; ctx.fillStyle = '#555'; ctx.font = FS + 'px sans-serif';
-            var domTxt = live ? 'dominated by ' + domName : 'tank is empty';
+            var domTxt = poured ? 'dominated by ' + domName : (live ? 'pouring' : 'tank is empty');
             if (compact && playing && playK >= 0) domTxt = 'pouring a step in';
             ctx.fillText(domTxt, tx + tw / 2, ty + th - 10);
             // segmented contribution bar: one segment per timestep, width ~ |i_k * x_k|,
@@ -2405,14 +2411,14 @@ class GRUCell(nn.Module):
             if (playing || Math.abs(tankTarget - tankShown) > 0.002) requestAnimationFrame(frame);
             else running = false;
         }
-        function preset(arr) { for (var k = 0; k < N; k++) vals[k] = arr[k]; playing = false; playK = -1; live = true; draw(); sfKick(); }
+        function preset(arr) { for (var k = 0; k < N; k++) vals[k] = arr[k]; playing = false; playK = -1; live = true; poured = true; draw(); sfKick(); }
         $('sfP1').addEventListener('click', function() { preset([1, 1, 1, 1, 1, 1]); });
         $('sfP2').addEventListener('click', function() { preset([1, 1, 1, 0, 1, 1]); });
         $('sfP3').addEventListener('click', function() { preset([0, 0, 0, 0, 0, 0]); });
         $('sfPlay').addEventListener('click', function() {
             var demo = $('sfToy');
             if (demo) playScrollEnsure(demo);
-            live = true;
+            live = true; poured = false;
             draw();
             playing = true; playK = 0; playBase = 0;
             sfStepStart = performance.now(); tankShown = 0;
@@ -2420,7 +2426,7 @@ class GRUCell(nn.Module):
             sfKick();
         });
         $('sfReset').addEventListener('click', function() {
-            playing = false; playK = -1; live = false;
+            playing = false; playK = -1; live = false; poured = false;
             tankTarget = 0;
             for (var k = 0; k < N; k++) vals[k] = 1;
             draw();
@@ -2841,14 +2847,16 @@ output, (hn, cn) = lstm(x)  # output: every step of the last layer; hn, cn: fina
             var resting = (gradAnimK === null);
             var K = resting ? 1 : gradAnimK;
             if (resting) {
-                /* at rest the full walk is only a dashed ghost preview; the solid
-                   trace starts at t = 1 and Play builds it from there */
+                /* at rest the dashed ghost previews only the opening of the
+                   walk; where the curve ends up is what Play reveals, step by
+                   step. The solid trace starts at t = 1. */
                 ctx.save();
                 ctx.setLineDash([5, 5]);
                 ctx.strokeStyle = "#aeb9c4";
                 ctx.lineWidth = 1.5;
                 ctx.beginPath();
-                for (var t2 = 1; t2 <= T; t2++) {
+                var ghostT = Math.max(2, Math.ceil(T * 0.12));
+                for (var t2 = 1; t2 <= ghostT; t2++) {
                     var v = t2 * Math.log(w) / Math.LN10;
                     var vc = Math.max(vmin, Math.min(vmax, v));
                     if (t2 === 1) ctx.moveTo(X(t2), Y(vc));

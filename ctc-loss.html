@@ -658,7 +658,7 @@
    <p>If we had a sequence of input frames, and we knew the label for each frame <em>(we don’t here)</em> then we could just score each frame against its known label and average over frames.</p>
 
 
-   <p>But this assumes a <strong>frame-to-label alignment</strong>. We don’t have labels for every frame and the target tokens are much shorter than input. The speech sequence length typically <code>1000</code> frames for <code>10</code> sec is much longer than the text token, maybe <code>20</code> words and we don’t know frame to token alignment.</p>
+   <p>But this assumes a <strong>frame-to-label alignment</strong>. We don’t have labels for every frame and the target tokens are much shorter than input. A speech sequence is typically <code>1000</code> frames for <code>10</code> seconds of audio, while the text it should produce is maybe <code>20</code> words, and we don’t know which frames belong to which token.</p>
 
    <p>We need a loss that doesn’t require explicit alignment and can collapse variable length frame prediction into a shorter token length. This is where <strong>“Connectionist Temporal Classification” (CTC)</strong> loss comes to play.</p>
 
@@ -690,7 +690,7 @@
    $$P(\pi|x) = \prod_t p_t(\pi_t)$$
    $$P(y|x) = \sum_{\pi:\, B(\pi) = y} P(\pi|x)$$
    $$\text{CTC loss} = -\log P(y|x)$$
-   <p>\(\pi\) is one path: the prediction picked at each frame. \(p_t\) is frame \(t\)'s probability for the symbol the path picks at that frame: each frame gets a probability distribution over <code>V+1</code> (tokens + blank). \(B(\pi)\) is that path after the collapse rule is applied to it. \(y\) is the ground truth and \(x\) is the input, so \(P(y|x)\) is the total probability of the ground truth given the input: pick one alignment path, multiply the model's per-frame probabilities along it, then do that for every path that collapses to the ground truth and add them up. The CTC loss is then just the negative log of that total probability.</p>
+   <p>\(\pi\) is one path: the prediction picked at each frame. \(p_t\) is frame \(t\)'s probability for the symbol the path picks at that frame: each frame gets a probability distribution over <code>V+1</code> (tokens + blank). \(B(\pi)\) is that path after the collapse rule is applied to it. \(y\) is the ground truth and \(x\) is the input, so \(P(y|x)\) is the total probability of the ground truth given the input: pick one alignment path, multiply the model's per-frame probabilities along it, then do that for every path that collapses to the ground truth and add them up.</p>
 
    <p>That diagram is the whole trick, but it is static. In this path builder, each path you lay down, one cell per frame from left to right, collapses by the same rule the diagram shows:</p>
 
@@ -937,17 +937,17 @@
 
    <p>There are <code>84</code> paths that collapse to "cat", and their probabilities add up to the model's total belief that the audio says "cat", over every timing it can imagine. <em>No single alignment is ever chosen during training.</em></p>
 
-   <p>Since multiple alignments can collapse to the same label sequence, the total probability of that sequence is the sum of all alignment probabilities.</p>
+   
 
    
 
    <p><em>Same negative-log trick as cross-entropy, one level up.</em> The toy table gives that sum, and the loss is its negative log. If the model piles its mass onto alignments that collapse to the right transcript, the sum approaches <code>1</code> and the loss approaches <code>0</code>. If the mass leaks onto wrong transcripts, the loss grows. The DP just computes that sum without enumerating paths.</p>
 
-   <p>Well that’s a lot of math that you probably don’t need, but the big idea here is that we need to find the alignments that collapse to the target word and use our model’s probability predictions to score each valid alignment. CTC doesn’t enumerate every single alignment though. It uses <strong>forward-backward dynamic programming algorithm</strong> to efficiently sum their probabilities.</p>
+   <p>The big idea: find the alignments that collapse to the target word, and score each valid alignment with the model’s probability predictions. CTC doesn’t enumerate every single alignment though. It uses <strong>forward-backward dynamic programming algorithm</strong> to efficiently sum their probabilities.</p>
 
    <h3>Dynamic Programming for CTC</h3>
 
-   <p>At each input you can output either a symbol or a blank token. A <strong>valid alignment</strong> is any sequence of frame labels that collapses to the ground truth after removing blanks and merging consecutive duplicates. You can think of this as a leetcode hard problem, counting paths. We need to count how many paths collapse to the target sequence and once we have that we can replace those counts with probabilities.</p>
+   <p>At each input you can output either a symbol or a blank token. A <strong>valid alignment</strong> is any sequence of frame labels that collapses to the ground truth after removing blanks and merging consecutive duplicates. It comes down to counting paths: how many paths collapse to the target sequence and once we have that we can replace those counts with probabilities.</p>
 
    <p>A naive CTC would be a softmax with repeat collapse. You take the single best-scoring alignment and collapse repeats accordingly. It’s simple and fast and it <strong>doesn’t work</strong>! It assumes each character or phoneme is well aligned in time or clearly segmented. Misalignment and variable timing will cause errors.</p>
 
@@ -1524,7 +1524,7 @@ def ctc_forward_backward(probs, target):
    </ol>
    $$\text{posterior at } (t, s) = \frac{\text{alpha}[t][s] \cdot \text{beta}[t][s]}{p_t(l'_s) \cdot P(y|x)}$$
    $$\text{gradient at frame } t = \text{posterior share at frame } t - \text{what the model predicted at frame } t$$
-   <p><code>alpha[t][s]</code> is the prefix mass, all the probability mass up to this frame and target position, and <code>beta[t][s]</code> is the suffix mass, all the mass from here to the end. <code>p_t(l'_s)</code> is frame <code>t</code>'s predicted probability for the column's character. <code>P(y|x)</code> is the total probability, <code>total_prob</code> in the listing: the sum of the last two alpha values in the final column. The division by <code>p_t(l'_s)</code> appears because <code>alpha</code> and <code>beta</code>, as the code listing computes them, each already include this frame's probability: the listing sets <code>alpha[t][s] = probs[t, vocab[extended[s]]] * (stay + prev + skip)</code> and <code>beta[t][s] = probs[t, vocab[extended[s]]] * (same + nxt + skip)</code>.</p>
+   <p><code>alpha[t][s]</code> is the prefix mass, all the probability mass up to this frame and target position, and <code>beta[t][s]</code> is the suffix mass, all the mass from here to the end. <code>p_t(l'_s)</code> is frame <code>t</code>'s predicted probability for the column's character. <code>P(y|x)</code> is the total probability, <code>total_prob</code> in the listing: the sum of the last two alpha values in the final column. The division by <code>p_t(l'_s)</code> undoes a double count: <code>alpha</code> and <code>beta</code> each already include this frame's probability, so multiplying them counts it twice. In the listing, both are built that way: <code>alpha[t][s] = probs[t, vocab[extended[s]]] * (stay + prev + skip)</code> and <code>beta[t][s] = probs[t, vocab[extended[s]]] * (same + nxt + skip)</code>.</p>
 
 
 
@@ -1746,7 +1746,7 @@ def ctc_forward_backward(probs, target):
 
    <h2 id="beam-search">Inference: Beam Search</h2>
    
-   <p>At inference, we need to figure out which output sequence to return. If the model is confident and the output space is small or constrained then a greedy decoding is okay. But, that would throw away a lot of probability mass. <strong>Beam search</strong> recovers some of it by merging multiple paths that collapse to the same candidate sequence.</p>
+   <p>At inference, we need to figure out which output sequence to return. If the model is confident and the output space is small or constrained then a greedy decoding is okay. But, that would throw away a lot of probability mass. <strong>Beam search</strong> recovers some of it.</p>
 
 <pre><code class="language-python">def simple_ctc_beam_search(probs, beam_size=3, top_k=3):
     """

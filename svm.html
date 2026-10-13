@@ -715,11 +715,11 @@ figcaption { margin-top: 1rem; }
     <p>Same setup as the notebook: a 2D classification problem, a linear model, the hinge loss, trained with plain subgradient descent. One dial: <code>C</code>, on a log scale from <code>0.01</code> to <code>1000</code>. The margin, its boundaries, and the ringed support vectors all move with that one dial.</p>
 
     <h2 id="what">The C dial trades margin width for violations</h2>
-    <p>At <code>0.01</code>, the bottom of the dial, the margin is enormous, wider than the whole plot, and all <code>400</code> points sit inside it, every one of them a "support vector." The model barely cares about violations, so it buys the widest margin it can. At <code>1000</code>, the top of the dial, the margin has squeezed down to a width of about <code>0.76</code> data units, only about <code>55</code> points still touch or violate the margin boundaries, and the rest are outside, safely classified. Same data, same loss, same optimizer. The only thing that changed is what violations cost.</p>
+    <p>At <code>0.01</code>, the bottom of the dial, the margin is enormous, wider than the whole plot, and all <code>400</code> points sit inside it, every one of them a "support vector." The model barely cares about violations, so it buys the widest margin it can. At <code>1000</code>, the top of the dial, the margin has squeezed down to a width of about <code>0.56</code> data units, only <code>46</code> points still touch or violate the margin boundaries, and the rest are outside, safely classified. Same data, same loss, same optimizer. The only thing that changed is what violations cost.</p>
 
     <p>Notice what <em>didn't</em> change: the number of misclassified points stays around <code>15</code> to <code>19</code> across the whole sweep. Those are the points sitting in the overlap between the two clouds, and no margin placement can save all of them. <code>C</code> does not buy accuracy here; it buys a different <em>kind</em> of correctness. Cheap violations: a wide, forgiving margin that lets points slide. Expensive violations: a narrow, strict margin that pulls every point it can outside the margin boundaries.</p>
 
-    <p>This is also why the support vectors matter so much. At <code>1000</code>, <code>55</code> points decide everything and the other <code>345</code> could be deleted without moving the boundary a pixel. There is a classic bound behind this: the expected error is at most the expected fraction of training points that end up as support vectors (Cortes and Vapnik, 1995). Few support vectors, good generalization. <em>That is the whole theory of the SVM in one sentence.</em></p>
+    <p>This is also why the support vectors matter so much. At <code>1000</code>, <code>46</code> points decide everything and the other <code>354</code> could be deleted without moving the boundary a pixel. There is a classic bound behind this: the expected error is at most the expected fraction of training points that end up as support vectors (Cortes and Vapnik, 1995). Few support vectors, good generalization. <em>That is the whole theory of the SVM in one sentence.</em></p>
 
 
     <div class="demo" id="marginDemo">
@@ -900,11 +900,23 @@ figcaption { margin-top: 1rem; }
 
      /* Full-batch subgradient descent on J = 0.5||w||^2 + C * mean(hinge).
         This is the notebook's "SVM as a neural network that minimizes the
-        hinge loss," done by hand: only points with y*f < 1 push back. */
+        hinge loss," done by hand: only points with y*f < 1 push back.
+        The step size decays and the run is long enough to converge at
+        every C, so the readout for a given C is the model's real answer
+        and does not depend on how the reader reached that C. (A fixed
+        short run at constant step left the endpoints undertrained and the
+        readouts path-dependent: dragging to a C and jumping to it gave
+        different models. Converged, the margin and the support-vector
+        count fall steadily as C rises, while the misclassified count
+        stays around 15 to 19, exactly the tradeoff this section teaches.
+        A 400,000-step reference run on this data reproduces these
+        readouts at C = 0.01, 3.162, and 1000.) */
      function train(C, steps) {
-       var lr = 0.1 / (1 + C);
+       var lr0 = 0.5 / (1 + C);
        var i, j, gw0, gw1, gb, f, m;
+       steps = 3000;
        for (i = 0; i < steps; i++) {
+         var lr = lr0 / (1 + i / 800);
          gw0 = w[0]; gw1 = w[1]; gb = 0;
          for (j = 0; j < N; j++) {
            f = w[0] * X[j][0] + w[1] * X[j][1] + b;
@@ -996,15 +1008,38 @@ figcaption { margin-top: 1rem; }
        ctx.beginPath();
        ctx.rect(padL, padT, W - padL - padR, H - padT - padB);
        ctx.clip();
-       if (g1 && gm1) {
-         ctx.fillStyle = 'rgba(42,127,191,0.22)';
-         ctx.beginPath();
-         ctx.moveTo(xPix(g1[0][0]), yPix(g1[0][1]));
-         ctx.lineTo(xPix(g1[1][0]), yPix(g1[1][1]));
-         ctx.lineTo(xPix(gm1[1][0]), yPix(gm1[1][1]));
-         ctx.lineTo(xPix(gm1[0][0]), yPix(gm1[0][1]));
-         ctx.closePath(); ctx.fill();
-       }
+       /* The band is the part of the plot rectangle lying between the two
+          margin boundaries. Clip the rectangle against both half-planes
+          instead of joining the two boundary segments: when the margin is
+          wider than the plot (tiny C), both boundary lines fall outside
+          the axes and the old join drew nothing, while the honest picture
+          is the whole plot inside the margin. */
+       (function () {
+         var poly = [[XMIN, YMIN], [XMAX, YMIN], [XMAX, YMAX], [XMIN, YMAX]];
+         function clipPlane(src, sgn) {
+           var out = [], i, p, q, vp, vq, t;
+           function val(pt) { return sgn * (w[0] * pt[0] + w[1] * pt[1] + b); }
+           for (i = 0; i < src.length; i++) {
+             p = src[i]; q = src[(i + 1) % src.length];
+             vp = val(p); vq = val(q);
+             if (vp <= 1) out.push(p);
+             if ((vp < 1 && vq > 1) || (vp > 1 && vq < 1)) {
+               t = (1 - vp) / (vq - vp);
+               out.push([p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])]);
+             }
+           }
+           return out;
+         }
+         poly = clipPlane(poly, 1);
+         poly = clipPlane(poly, -1);
+         if (poly.length > 2) {
+           ctx.fillStyle = 'rgba(42,127,191,0.22)';
+           ctx.beginPath();
+           ctx.moveTo(xPix(poly[0][0]), yPix(poly[0][1]));
+           for (var i = 1; i < poly.length; i++) ctx.lineTo(xPix(poly[i][0]), yPix(poly[i][1]));
+           ctx.closePath(); ctx.fill();
+         }
+       })();
        /* margin boundaries */
        ctx.strokeStyle = '#7f8c8d'; ctx.lineWidth = Math.max(1, Math.round(1.5 * SC));
        ctx.setLineDash([Math.round(6 * SC), Math.round(5 * SC)]);

@@ -917,10 +917,10 @@
     <p>Check whether the two tasks agree less than their healthy target: if their cosine similarity falls below it, they need an edit.</p>
     <div class="math-display">$$\cos(g_i, g_j) < \varphi_{ij}$$</div>
     <p>Nudge task i's gradient toward task j, just enough to bring their agreement back up to the target level.</p>
-    <div class="math-display">$$g_i := g_i - \frac{(\cos-\varphi)}{(1-\varphi)} \cdot \frac{\|g_i\|}{\|g_j\|} \cdot g_j$$</div>
+    <div class="math-display">$$g_i := g_i + \frac{\|g_i\| \cdot (\varphi_{ij}\sqrt{1-\cos^2} - \cos\sqrt{1-\varphi_{ij}^2})}{\|g_j\| \cdot \sqrt{1-\varphi_{ij}^2}} \cdot g_j$$</div>
     <p>Add the edited gradient to task j's untouched gradient: this is the final combined update direction.</p>
     <div class="math-display">$$g_i^{edited} + g_j$$</div>
-    <p>Here <code>g<sub>i</sub></code> is task i's gradient, <code>g<sub>j</sub></code> is task j's gradient, <code>cos(g<sub>i</sub>, g<sub>j</sub>)</code> is how aligned the two gradients are, <code>φ<sub>ij</sub></code> is the target alignment, the <code>φ̂<sub>ij</sub></code> of the running target equation, per pair and per layer group, <code>g<sub>i</sub><sup>edited</sup></code> is task i's gradient after the edit, <code>∥g<sub>i</sub>∥</code> and <code>∥g<sub>j</sub>∥</code> are the gradient lengths, <code>·</code> means times, <code>&lt;</code> means less than, and <code>:=</code> means becomes, updated to.</p>
+    <p>Here <code>g<sub>i</sub></code> is task i's gradient, <code>g<sub>j</sub></code> is task j's gradient, <code>cos(g<sub>i</sub>, g<sub>j</sub>)</code> is how aligned the two gradients are, <code>φ<sub>ij</sub></code> is the target alignment, the <code>φ̂<sub>ij</sub></code> of the running target equation, per pair and per layer group, <code>g<sub>i</sub><sup>edited</sup></code> is task i's gradient after the edit, <code>∥g<sub>i</sub>∥</code> and <code>∥g<sub>j</sub>∥</code> are the gradient lengths, the square roots are sines: <code>√(1−cos²)</code> is the sine of the pair's angle and <code>√(1−φ²)</code> the sine of the target angle, <code>·</code> means times, <code>&lt;</code> means less than, and <code>:=</code> means becomes, updated to.</p>
 
 <h2 id="one-step">Walk through one GradVac step</h2>
     <p>
@@ -1010,10 +1010,10 @@ d = sum(grads)                              # combine the edited gradients</code
           <text x="472" y="172" font-size="20" font-weight="700" fill="#2c3e50" text-anchor="middle">cosine vs target</text>
           <line x1="440" y1="190" x2="440" y2="280" stroke="#7f8c8d" stroke-width="2"></line>
           <rect id="wvGapBand" x="408" y="209.2" width="64" height="49.5" fill="rgba(230,126,34,0.15)" stroke="#f39c12" stroke-width="3" stroke-dasharray="9 6" rx="6"></rect>
-          <line x1="408" y1="209.2" x2="472" y2="209.2" stroke="#e67e22" stroke-width="3" stroke-dasharray="8 6"></line>
-          <text x="480" y="215" font-size="20" fill="#2c3e50" text-anchor="start">target 0.4485</text>
-          <line x1="408" y1="258.7" x2="472" y2="258.7" stroke="#2980b9" stroke-width="6"></line>
-          <text x="480" y="264" font-size="20" fill="#2c3e50" text-anchor="start">batch 0.30</text>
+          <line id="wvTgtLine" x1="408" y1="209.2" x2="472" y2="209.2" stroke="#e67e22" stroke-width="3" stroke-dasharray="8 6"></line>
+          <text id="wvTgtText" x="480" y="215" font-size="20" fill="#2c3e50" text-anchor="start">target 0.4485</text>
+          <line id="wvBatchLine" x1="408" y1="258.7" x2="472" y2="258.7" stroke="#2980b9" stroke-width="6"></line>
+          <text id="wvBatchText" x="480" y="264" font-size="20" fill="#2c3e50" text-anchor="start">batch 0.30</text>
         </g>
       </svg>
       <div class="wv-outcome" id="wvOutcome" aria-live="polite"></div>
@@ -1683,6 +1683,9 @@ d = sum(grads)                              # combine the edited gradients</code
         var el = {
             zoneA: $('wvZoneA'), zoneB: $('wvZoneB'), zoneC: $('wvZoneC'),
             focalA: $('wvFocalA'), newRing: $('wvNewRing'),
+            newDot: $('wvNewDot'), newTargetLabel: $('wvNewTargetLabel'),
+            gapBand: $('wvGapBand'), tgtLine: $('wvTgtLine'), tgtText: $('wvTgtText'),
+            batchLine: $('wvBatchLine'), batchText: $('wvBatchText'),
             g1: $('wvG1'), g2: $('wvG2'), g1Label: $('wvG1Label'), g2Label: $('wvG2Label'),
             arc: $('wvArc'), arcLabel: $('wvArcLabel'),
             nudgeG: $('wvNudgeG'), dose: $('wvDose'), doseLabel: $('wvDoseLabel'),
@@ -1799,6 +1802,16 @@ d = sum(grads)                              # combine the edited gradients</code
             el.zoneC.style.opacity = n === 3 ? '1' : '0.28';
             show(el.focalA, n === 1 || n === 4 || n === 5);
             show(el.newRing, n === 2);
+            /* Future values stay hidden until their step earns them: the
+               updated target appears at step 2, the comparison panel's
+               contents at step 3. Dimming alone left them readable. */
+            show(el.newDot, n >= 2);
+            show(el.newTargetLabel, n >= 2);
+            show(el.gapBand, n >= 3);
+            show(el.tgtLine, n >= 3);
+            show(el.tgtText, n >= 3);
+            show(el.batchLine, n >= 3);
+            show(el.batchText, n >= 3);
             show(el.nudgeG, n === 4);
             show(el.sumG, n === 5);
             /* Step 5: the base gradients and the arc stay in the diagram,

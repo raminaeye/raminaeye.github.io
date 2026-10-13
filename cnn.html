@@ -2262,18 +2262,21 @@ self.block = nn.Sequential(
             var last = curve[curve.length - 1];
             return { x: last[1], y: last[2], acc: last[0], started: true, ended: true };
         }
-        var state = { t: 0, timer: null, lr: 0, diveProg: null, fallGeom: null };
+        var state = { t: 0, timer: null, lr: 0, diveProg: null, fallGeom: null, fallen: false, diving: false };
         function render() {
             $('bnClock').textContent = state.t.toFixed(1) + 'M steps';
             var box = $('bnRunners');
             box.innerHTML = '';
-            // Learning-rate stress test: plain Inception has fallen off the chart.
-            var fallActive = (state.lr > 0 && state.fallGeom);
+            // Learning-rate stress test: plain Inception falls off the chart
+            // DURING the race. The slider's dive is a transient preview; the
+            // badge, the fallen dot, and the resting trail belong to the race
+            // state (state.fallen), never to a race that has not started.
+            var fallActive = (state.lr > 0 && state.fallGeom && (state.fallen || state.diving));
             RUNNERS.forEach(function (r) {
                 var curve = CURVES[r.id];
                 var p = posAt(curve, state.t);
                 var dot = dots[r.id];
-                var isFallen = fallActive && r.id === 'inception';
+                var isFallen = state.lr > 0 && state.fallen && r.id === 'inception';
                 if (isFallen) { dot.setAttribute('visibility', 'hidden'); }
                 else if (!p.started) { dot.setAttribute('visibility', 'hidden'); }
                 else { dot.setAttribute('visibility', 'visible'); dot.setAttribute('cx', p.x.toFixed(1)); dot.setAttribute('cy', p.y.toFixed(1)); }
@@ -2347,6 +2350,11 @@ self.block = nn.Sequential(
         function step() {
             if (state.t >= MAXT) { stop(2000); return; }
             state.t = Math.min(MAXT, Math.round((state.t + TICK) * 10) / 10);
+            if (state.lr > 0 && !state.fallen) {
+                state.fallen = true;
+                state.fallGeom = computeFallGeom();
+                playDive();
+            }
             render();
             /* the run is finite: at MAXT the Step button clamps off instead
                of staying live and doing nothing */
@@ -2354,7 +2362,7 @@ self.block = nn.Sequential(
         }
         $('bnPlay').addEventListener('click', function () {
             if (state.timer) { stop(2000); return; }
-            if (state.t >= MAXT) { state.t = 0; $('bnStep').disabled = false; render(); }
+            if (state.t >= MAXT) { state.t = 0; state.fallen = false; $('bnStep').disabled = false; render(); }
             $('bnPlay').textContent = 'Pause';
             playScrollEnsure(document.getElementById('bnRaceToy'));
             function bnSchedule() {
@@ -2371,7 +2379,7 @@ self.block = nn.Sequential(
             stop(600); stopStress();
             $('bnLr').value = '0';
             state.lr = 0;
-            state.t = 0; state.diveProg = null; state.fallGeom = null;
+            state.t = 0; state.diveProg = null; state.fallGeom = null; state.fallen = false; state.diving = false;
             $('bnStep').disabled = false;
             renderLr(); render();
         });
@@ -2420,6 +2428,7 @@ self.block = nn.Sequential(
         }
         function playDive() {
             stopStress();
+            state.diving = true;
             state.diveProg = 0;
             render();
             var diveSteps = [0.3, 0.55, 0.8, 1], di = 0;
@@ -2429,7 +2438,7 @@ self.block = nn.Sequential(
                     render();
                     di++;
                     if (di < diveSteps.length) { tick(); }
-                    else { stressTimer = null; state.diveProg = null; render(); }
+                    else { stressTimer = null; state.diveProg = null; state.diving = false; render(); }
                 }, 160);
             })();
         }
@@ -2438,8 +2447,8 @@ self.block = nn.Sequential(
             state.lr = parseInt(this.value, 10);
             state.diveProg = null;
             renderLr();
-            if (state.lr > 0) { state.fallGeom = computeFallGeom(); playDive(); }
-            else { state.fallGeom = null; render(); }
+            if (state.lr > 0) { state.fallGeom = computeFallGeom(); if (state.t > 0) { state.fallen = true; } playDive(); }
+            else { state.fallGeom = null; state.fallen = false; render(); }
         });
         renderLr();
         render();

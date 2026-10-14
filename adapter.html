@@ -667,19 +667,19 @@
 
     <p><em>How do you teach a giant model a new trick without retraining the whole thing?</em> You know me, I do not like paying for compute twice.</p>
 
-    <p>Full fine-tuning a transformer is simple and brutal. You take all <code>110</code> million parameters, you update all of them, and you keep one full copy of the weights per task. <em>Ten tasks means ten copies of the model on disk.</em> Worse, the optimizer keeps two extra numbers per parameter (Adam momentum and variance), so training needs roughly three times the model size in GPU memory just to hold the state. And there is the quiet part nobody likes to admit: the model learns your new task and starts forgetting the old ones. That is <strong>catastrophic forgetting</strong>, and it is exactly what it sounds like.</p>
+    <p>Full fine-tuning a transformer is simple and brutal. A transformer is a stack of blocks that processes a sequence, where each block first lets the positions exchange information with each other and then processes each position on its own, and that stack is the model this whole page modifies. You take all <code>110</code> million parameters, you update all of them, and you keep one full copy of the weights per task. <em>Ten tasks means ten copies of the model on disk.</em> Worse, the optimizer keeps two extra numbers per parameter (Adam momentum and variance, where Adam is the optimizer that runs training and those two numbers are a running average of the direction each parameter has been moving and a running measure of how spread out its recent steps have been), so training needs roughly three times the model size in GPU memory just to hold the state. And there is the quiet part nobody likes to admit: the model learns your new task and starts forgetting the old ones. That is <strong>catastrophic forgetting</strong>, and it is exactly what it sounds like.</p>
 
     <p><strong>Adapters</strong> flip the deal. Freeze the big model, bolt on tiny trainable modules, and train only those. The backbone never moves. You keep one frozen copy of the model and swap in a small adapter per task, <em>like changing lenses on a camera instead of buying a new camera body.</em></p>
 
     <h2 id="the-bottleneck-adapter">Bottleneck adapters add tiny trainable layers</h2>
 
-    <p>The original idea (Houlsby et al.) is almost embarrassingly simple. Inside each transformer layer, after the attention block and after the feed-forward block, you insert a small two-layer MLP (multilayer perceptron) with a <strong>bottleneck</strong>. The hidden state is <code>768</code> numbers wide. You squeeze it down through a <code>64</code>-wide hallway and expand it back. <em>The squeeze is the whole trick: the hallway is the only thing that learns.</em></p>
+    <p>The original idea (Houlsby et al.) is almost embarrassingly simple. Inside each transformer layer, after the attention block, where each position mixes in information from the other positions, and after the feed-forward block, which processes each position on its own without mixing anything across positions, you insert a small two-layer MLP (multilayer perceptron) with a <strong>bottleneck</strong>. The hidden state, the vector of numbers that carries one position's information through the layer, is <code>768</code> numbers wide. You squeeze it down through a <code>64</code>-wide hallway and expand it back. <em>The squeeze is the whole trick: the hallway is the only thing that learns.</em></p>
 
-    <p>The authors were trying to solve the many-tasks problem. Fine-tuning a large pretrained model works well, but it is parameter inefficient: with many downstream tasks you need an entire new copy of the model per task.</p>
+    <p>The authors were trying to solve the many-tasks problem. A pretrained model is one that was already trained beforehand on a large general body of text, so its weights already carry useful language knowledge before any task training starts. Fine-tuning a large pretrained model works well, but it is parameter inefficient: with many downstream tasks, the later tasks the pretrained model gets adapted to after its general training, you need an entire new copy of the model per task.</p>
 
     <p>Their alternative is transfer with adapter modules. The base network stays frozen, each task gets a few small trainable modules, and new tasks can be added without revisiting the old ones.</p>
 
-    <p>They demonstrate it by transferring BERT (Bidirectional Encoder Representations from Transformers) to <code>26</code> diverse text classification tasks including GLUE (a standard suite of language-understanding tests): <em>adapters land within <code>0.4%</code> of full fine-tuning while adding only <code>3.6%</code> parameters per task,</em> against <code>100%</code> for fine-tuning. That is the idea this whole page is built on.</p>
+    <p>They demonstrate it by transferring BERT (Bidirectional Encoder Representations from Transformers, a large pretrained language model that had already learned from general text) to <code>26</code> diverse text classification tasks including GLUE (a standard suite of language-understanding tests): <em>adapters land within <code>0.4%</code> of full fine-tuning while adding only <code>3.6%</code> parameters per task,</em> against <code>100%</code> for fine-tuning. That is the idea this whole page is built on.</p>
 
     <p>Here is the entire module. Down project, nonlinear, up project, add it back to the input so <em>the frozen signal flows through untouched if the adapter does nothing</em>:</p>
 
@@ -698,7 +698,7 @@
 <div class="eq-card" id="adapterEqStatic">
 <div class="eq-what">The adapter's whole job in two lines: squeeze the frozen features down, bend them, lift them back, and add the result as a small nudge on top.</div>
 <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="h" style="color:#2c3e50">h</span> = <span class="eqt" data-k="Wup" style="color:#b45309">W<sub>up</sub></span>&#183;<span class="eqt" data-k="sigma" style="color:#5d6d7e">&#963;</span>(<span class="eqt" data-k="Wdown" style="color:#b45309">W<sub>down</sub></span>&#183;<span class="eqt" data-k="x" style="color:#2a7fbf">x</span>)</div>
-<div class="eq-why eq-active" data-eqline="0">Read it inside out: each dot means times. The frozen input <span class="eqt" style="color:#2a7fbf">x</span> is squeezed by <span class="eqt" style="color:#b45309">W<sub>down</sub></span>, 768 numbers down to 64, bent by <span class="eqt" style="color:#5d6d7e">&#963;</span>, the ReLU bend, then lifted by <span class="eqt" style="color:#b45309">W<sub>up</sub></span>, 64 numbers back to 768, and the result is named <span class="eqt" style="color:#2c3e50">h</span>, the learned nudge. The squeeze is the whole trick: the hallway is the only thing that learns.</div>
+<div class="eq-why eq-active" data-eqline="0">Read it inside out: each dot means times. The frozen input <span class="eqt" style="color:#2a7fbf">x</span> is squeezed by <span class="eqt" style="color:#b45309">W<sub>down</sub></span>, 768 numbers down to 64, bent by <span class="eqt" style="color:#5d6d7e">&#963;</span>, the ReLU bend, where ReLU passes positive values through unchanged and turns negative values to zero, then lifted by <span class="eqt" style="color:#b45309">W<sub>up</sub></span>, 64 numbers back to 768, and the result is named <span class="eqt" style="color:#2c3e50">h</span>, the learned nudge. The squeeze is the whole trick: the hallway is the only thing that learns.</div>
 <div class="eq-line eq-active" data-eqline="1"><span class="eqt" data-k="y" style="color:#2a7fbf">y</span> = <span class="eqt" data-k="x" style="color:#2a7fbf">x</span> + <span class="eqt" data-k="h" style="color:#2c3e50">h</span></div>
 <div class="eq-why eq-active" data-eqline="1"><span class="eqt" style="color:#2a7fbf">y</span> is the frozen input <span class="eqt" style="color:#2a7fbf">x</span> plus the learned nudge <span class="eqt" style="color:#2c3e50">h</span>: I add it back to the input so the frozen signal flows through untouched if the adapter does nothing.</div>
 </div>
@@ -973,7 +973,7 @@
 
     <h2 id="lora-shrink-the-update-not-the-model">LoRA: shrink the update, not the model</h2>
 
-    <p><strong>LoRA</strong> (low-rank adaptation) asks a different question. Instead of adding new modules, look at what fine-tuning actually does to a weight matrix. You start with the pretrained weight <code>W</code> and you end with <code>W</code> plus an update. The update is a big dense matrix, but <em>it turns out the useful part of it lives in a tiny subspace.</em> So instead of learning the full update, you learn it as two skinny matrices multiplied together:</p>
+    <p><strong>LoRA</strong> (low-rank adaptation) asks a different question. Instead of adding new modules, look at what fine-tuning actually does to a weight matrix. You start with the pretrained weight <code>W</code> and you end with <code>W</code> plus an update. The update is a big dense matrix, but <em>it turns out the useful part of it lives in a tiny subspace, a small low dimensional slice of the full space of possible updates, rather than needing the whole space.</em> So instead of learning the full update, you learn it as two skinny matrices multiplied together:</p>
 
     <p>The idea is: freeze what the model already knows (<code>W</code>) and learn only the change, as a detour through a tiny bottleneck. <code>A</code> squeezes the signal down to rank <code>r</code>, <code>B</code> lifts it back up, and the two together add a small learned nudge on top of the frozen weight. <em>The rank <code>r</code> is the whole budget:</em> a smaller <code>r</code> means far fewer new parameters and a coarser approximation of the update.</p>
 
@@ -1034,7 +1034,7 @@
         return self.linear(x) + self.scale * (x @ self.A.T @ self.B.T)
 </code></pre>
 
-    <p>In practice you wrap the query and value projections of each attention block and leave the rest frozen. For a <code>12</code>-layer, <code>768</code>-wide model with <code>r = 8</code> on query and value:</p>
+    <p>In practice you wrap the query and value projections of each attention block and leave the rest frozen. A projection here is a learned matrix that turns each position into a new vector. The query is the vector a position uses to say what it is looking for, the key is the vector a position advertises so other positions can match against it, and the value is the vector a position offers to others if they attend to it, so adapting the query and value projections changes what positions look for and what they pass along. For a <code>12</code>-layer, <code>768</code>-wide model with <code>r = 8</code> on query and value:</p>
 
     <div class="stat-grid">
       <div class="stat-card">
@@ -1583,7 +1583,7 @@
 
     <p>The authors were chasing a better trade-off than adapters alone could offer. Fine-tuning giant language models is sample inefficient, unstable in low-resource settings, and wasteful, since it stores a full copy per task. Existing parameter-efficient methods either still used a relatively large number of parameters or underperformed full fine-tuning.</p>
 
-    <p>Compacter builds on adapters, low-rank optimization, and a trick the paper calls parameterized hypercomplex multiplication: each adapter weight matrix becomes a sum of Kronecker products between shared "slow" weights and per-layer "fast" rank-one matrices.</p>
+    <p>Compacter builds on adapters, low-rank optimization, and a construction where each adapter weight matrix becomes a sum of Kronecker products between shared "slow" weights and per-layer "fast" rank-one matrices, matrices that carry only one independent direction and so can be built from a single pair of vectors, so the big matrix is built out of small shared factors that are combined in a structured way instead of being learned entry by entry.</p>
 
     <p><em>Training only <code>0.047%</code> of the model's parameters, it matches full fine-tuning on GLUE and beats it on SuperGLUE, GLUE's harder successor suite, and in low-resource settings.</em></p>
     <p>An <code>8 × 8</code> factor plus a <code>96 × 8</code> factor expands to a <code>768 × 64</code> adapter matrix, but <em>you only store <code>832</code> numbers instead of <code>49,152</code>.</em></p>
@@ -1630,7 +1630,7 @@ class CompacterAdapter(nn.Module):
 
     <h2 id="what-happens-on-a-real-task">Half a point of accuracy from 0.27% of the parameters</h2>
 
-    <p>So what do you actually get? Representative numbers for sentiment classification (SST-2) on a BERT-base sized model, rounded from published adapter and LoRA runs. <em>Treat these as the pattern, not gospel;</em> your dataset will differ, but the ordering is stable:</p>
+    <p>So what do you actually get? Representative numbers for sentiment classification (SST-2) on a BERT-base sized model, rounded from published adapter and LoRA runs. <em>Treat these as the pattern, not gospel;</em> your dataset will differ, but the ordering is stable. The last row needs one term explained before you read it. A soft prompt is a short set of learned vectors placed at the front of the input, in front of the real words, and only those vectors learn while the model itself stays frozen, so they steer the frozen model toward the task:</p>
 
     <div class="stat-grid">
       <div class="stat-card">
@@ -1660,10 +1660,10 @@ class CompacterAdapter(nn.Module):
     <h2 id="caveats">Adapter limitations: latency, rank tuning, and overfitting</h2>
 
     <ul>
-      <li>Unmerged adapters cost latency. Two extra matmuls per block, every token, forever. Bottleneck adapters cannot merge, so they stay in the graph.</li>
+      <li>Unmerged adapters cost latency. Two extra matmuls, matrix multiplications, per block, every token, one unit piece of the input sequence, forever. Bottleneck adapters cannot merge, so they stay in the graph.</li>
       <li>On big datasets, full fine-tuning still wins sometimes. Adapters shine when data or compute is scarce, not when you have both in abundance.</li>
       <li>Adapt query and value first, skip the rest. Most of the gain comes from the attention projections; adapters on the feed-forward layers add parameters for less return on many tasks.</li>
-      <li>Soft prompts look sad on small models. Prompt and prefix tuning need a big frozen model to steer. On base-size models, LoRA beats them cleanly.</li>
+      <li>Soft prompts look sad on small models. Prompt and prefix tuning, prefix tuning being the one that adds extra learned key and value vectors set in front of the sequence in each attention layer, need a big frozen model to steer. On base-size models, LoRA beats them cleanly.</li>
       <li>Frozen does not mean forget-proof. The backbone is safe, but the adapter can still overfit <code>500</code> examples. Validate like always.</li>
     </ul>
 
@@ -1671,12 +1671,12 @@ class CompacterAdapter(nn.Module):
     <p>LoRA and Compacter are not the only way to keep the update small.</p>
     <ul>
       <li><strong>Prompt tuning</strong> trains a soft prompt of about <code>20K</code> parameters. On base-size models it trails LoRA on SST-2, and it only pays off with a much bigger frozen model to steer.</li>
-      <li><strong>Prefix tuning</strong> prepends learned keys and values to each attention layer, a similar parameter budget, with the same catch: it needs a big frozen model to steer.</li>
+      <li><strong>Prefix tuning</strong> prepends learned keys and values to each attention layer, meaning each layer gets extra learned key and value vectors that every position can attend to, on top of the keys and values it builds from the real input, a similar parameter budget, with the same catch: it needs a big frozen model to steer.</li>
     </ul>
 
     <h2 id="what-is-next">Next: quantize the frozen 98%</h2>
     <p>
-      Adapters shrink what you train. <em>Quantization shrinks what you store:</em> the frozen <code>98</code> percent of the model still has to live in memory at inference time. The <a href="quantization.html">quantization tutorial</a> picks up where this one ends.
+      Adapters shrink what you train. <em>Quantization, storing each weight with fewer bits per number instead of at full precision, shrinks what you store:</em> the frozen <code>98</code> percent of the model still has to live in memory at inference time. The <a href="quantization.html">quantization tutorial</a> picks up where this one ends.
     </p>
 
     <h2 id="references">References</h2>

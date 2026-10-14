@@ -870,15 +870,20 @@ model.qconfig = qconfig_hist
         <li>The scale is the largest absolute value divided by <code>127</code> (for int8, typically range <code>[-127, 127]</code> or <code>[-128, 127]</code>)</li>
      </ul>
      <p>Used for weights. Assumes distribution is centered around <code>0</code> (which is usually true for weights).</p>
-     <p>
-     $$s = \frac{\text{largest } |\text{weight}|}{7}$$
-     $$x_q = \text{clamp}\left(\text{round}\left(\frac{x}{s}\right), -7, 7\right)$$
-     $$\hat{x} = s \cdot x_q$$
-     $$MSE = \text{average over all weights of } (x - \hat{x})^2$$
-     </p>
-     <p>
-         Here <code>s</code> is the scale, one bin's width on the integer grid; <code>7</code> is the largest integer a symmetric <code>4</code>-bit grid holds on either side of zero; <code>x</code> is one of this tool's <code>288</code> weights; <code>x_q</code> is its integer bin; <code>clamp</code> means a value past the grid edge stops at the edge; <code>x&#770;</code> (x-hat) is the weight mapped back to a float; and <code>MSE</code> is the mean squared gap between each original weight and its mapped back value, which is what the tool's round-trip MSE readout reports.
-     </p>
+     <p>For weights, with zero staying at zero, the recipe runs in four lines:</p>
+<div class="eq-card" id="quantSymEqStatic">
+<div class="eq-what">When you quantize a float, the recipe is two steps: squeeze each value onto the integer grid, then map it back.</div>
+<div class="eq-line eq-active" data-eqline="0"><span class="eqt" style="color:#2a7fbf">s</span> = <span class="frac"><span class="top">largest |weight|</span><span class="bot"><span class="eqt" style="color:#2c3e50">7</span></span></span></div>
+<div class="eq-why eq-active" data-eqline="0"><span class="eqt" style="color:#2a7fbf">s</span> is the scale, one bin's width on the integer grid: I set it from the single biggest weight, the largest |weight| divided by <span class="eqt" style="color:#2c3e50">7</span>, the largest integer a symmetric 4-bit grid holds on either side of zero. One loud weight makes all the quiet ones share a handful of bins.</div>
+<div class="eq-line eq-active" data-eqline="1"><span class="eqt" style="color:#d35400">x<sub>q</sub></span> = clamp(round(<span class="frac"><span class="top"><span class="eqt" style="color:#2a7fbf">x</span></span><span class="bot"><span class="eqt" style="color:#2a7fbf">s</span></span></span>), &#8722;7, 7)</div>
+<div class="eq-why eq-active" data-eqline="1"><span class="eqt" style="color:#d35400">x<sub>q</sub></span> is one weight's integer bin: divide <span class="eqt" style="color:#2a7fbf">x</span> by the scale, rounding snaps it to the nearest integer, and clamp means a value past the grid edge stops at the edge. Every weight outside the range gets clipped, and every weight inside gets rounded to the 4-bit grid.</div>
+<div class="eq-line eq-active" data-eqline="2"><span class="eqt" style="color:#d35400">x&#770;</span> = <span class="eqt" style="color:#2a7fbf">s</span>&#183;<span class="eqt" style="color:#d35400">x<sub>q</sub></span></div>
+<div class="eq-why eq-active" data-eqline="2"><span class="eqt" style="color:#d35400">x&#770;</span> is the weight mapped back to a float: multiply the bin index by the bin width to get the float the bin stands for, the map it back step of the recipe.</div>
+<div class="eq-line eq-active" data-eqline="3">MSE = average over all weights of (<span class="eqt" style="color:#2a7fbf">x</span> &#8722; <span class="eqt" style="color:#d35400">x&#770;</span>)<sup>2</sup></div>
+<div class="eq-why eq-active" data-eqline="3">MSE is the mean squared gap between each original weight and its mapped back value, which is what the tool's round-trip MSE readout reports.</div>
+</div>
+<p>The histogram tool below runs these lines on its 288 weights: its scale readout is the first line's output, set by the biggest weight, its orange after quantize + dequantize series is the third line applied to every weight, and its round-trip MSE readout is the fourth line.</p>
+     
      <p>
          The experiment runs in order: take the <code>288</code> weights; set the scale from the single biggest weight, so one loud weight makes all the quiet ones share a handful of bins; round every weight to the grid and map it back; read the round-trip MSE. Then the exclude beat: drop the biggest weight out of the scale and repeat, and the scale readout shrinks and the MSE falls with it.
      </p>
@@ -927,16 +932,16 @@ model.qconfig = qconfig_hist
        <p class="caption">Figure 5, verbatim caption: \"Per (output) channel weight ranges of the first depthwise-separable layer in MobileNetV2 after BN folding. The boxplots show the min and max value, the 2nd and 3rd quartile and the median are plotted for each channel.\"</p>
      </div>
      <p>Figure 5 is why min-max loses. These are per-channel weight ranges from the first depthwise layer of MobileNetV2 after batch-norm folding. Most channels are tiny. A few are enormous. One global min-max range is set by the freaks, and every normal channel pays for it in rounding error.</p>
-     <p>
-     $$\text{scale} = \frac{qmax - qmin}{15}$$
-     $$\text{total MSE} = \text{clipping MSE} + \text{rounding MSE}$$
-     </p>
-     <p>
-         Here <code>qmin</code> and <code>qmax</code> are the two ends of the clipping range being tried; <code>15</code> is the number of steps in a <code>4</code>-bit grid; and each weight's squared gap between itself and its quantized then mapped back value is counted as clipping if the weight falls outside the range and as rounding if it falls inside, with both sums averaged over <code>N</code>, the weight count. The MSE strategy as a procedure: try candidate ranges on a grid, score each one with the total above, keep the lowest. Min-max, the other named strategy, sets the range to the tensor's actual minimum and maximum.
-     </p>
-     <p>
-         The total scored above is that same sum divided by the weight count.
-     </p>
+     <p>The two lines behind that choice:</p>
+<div class="eq-card" id="quantClipEqStatic">
+<div class="eq-what">Where do you cut the range? The scale follows from the cut, and the total error splits into the two ways a weight can miss.</div>
+<div class="eq-line eq-active" data-eqline="0">scale = <span class="frac"><span class="top"><span class="eqt" style="color:#8e44ad">qmax</span> &#8722; <span class="eqt" style="color:#8e44ad">qmin</span></span><span class="bot"><span class="eqt" style="color:#2c3e50">15</span></span></span></div>
+<div class="eq-why eq-active" data-eqline="0">The scale is the clipping range being tried, from <span class="eqt" style="color:#8e44ad">qmin</span> to <span class="eqt" style="color:#8e44ad">qmax</span>, split into <span class="eqt" style="color:#2c3e50">15</span>, the number of steps in a 4-bit grid. Cut wide and the outliers are safe but the bins get fat; cut tight and the bins get fine but the outliers get beheaded.</div>
+<div class="eq-line eq-active" data-eqline="1">total MSE = clipping MSE + rounding MSE</div>
+<div class="eq-why eq-active" data-eqline="1">Each weight's squared gap between itself and its quantized then mapped back value is counted as clipping if the weight falls outside the range and as rounding if it falls inside, with both sums averaged over N, the weight count: the total is that same sum divided by the weight count.</div>
+</div>
+<p>The clipping tool below runs this search: widening the range recomputes the scale on every step, in its own words the bins fatten, and its MSE-optimal button tries candidate ranges on a grid, scores each one with the total above, and keeps the lowest.</p>
+     
        <p>The same scale and zero-point arithmetic runs on real layers. The observer table below shows <code>conv.0</code>'s activations spanning <code>0</code> to <code>6.478520</code>, mapped to scale <code>0.025406</code> with zero-point <code>0</code>: float <code>0</code> lands exactly on int <code>0</code>, which is why ReLU outputs quantize so cleanly.</p>
      <div class="crp-paperbox">
        <h4>MSE beats min-max at 4 bits</h4>
@@ -1709,14 +1714,18 @@ model.qconfig = qconfig_hist
        </svg>
        <p class="caption">Scale is the width of each integer bin. The float range gets chopped into <code>256</code> equal steps, and everything inside one bin rounds to the same number. Zero-point <code>0</code> means float <code>0</code> lands exactly on int <code>0</code>.</p>
      </div>
-     <p>
-     $$\text{bins} = 2^N$$
-     $$\text{step size (LSB)} = \frac{2.4V}{\text{bins}}$$
-     $$SNR = 6.02 \cdot N + 1.76\ \text{dB}$$
-     </p>
-     <p>
-         Here <code>N</code> is the bit-width; <code>bins</code> is how many integer steps the range is chopped into; <code>LSB</code>, spelled out as least significant bit, is the size of one step, the smallest change the grid can represent; and <code>SNR</code>, spelled out as signal-to-noise ratio, is how clean the snapped-back signal is next to the original, measured in decibels, the signal quality the tool's bar compares against the <code>8</code>-bit reference. Every bit you drop doubles the step size and costs about <code>6 dB</code> of SNR.
-     </p>
+     <p>Fix the range and choose the bit-width, and three lines follow:</p>
+<div class="eq-card" id="quantGridEqStatic">
+<div class="eq-what">Scale and zero-point set the grid: the bins, the step, and the signal quality all follow from the bit-width.</div>
+<div class="eq-line eq-active" data-eqline="0"><span class="eqt" style="color:#2a7fbf">bins</span> = 2<sup><span class="eqt" style="color:#2c3e50">N</span></sup></div>
+<div class="eq-why eq-active" data-eqline="0"><span class="eqt" style="color:#2a7fbf">bins</span> is how many integer steps the range is chopped into: 2 to the bit-width <span class="eqt" style="color:#2c3e50">N</span>, so each added bit doubles the number of bins.</div>
+<div class="eq-line eq-active" data-eqline="1">step size (LSB) = <span class="frac"><span class="top">2.4V</span><span class="bot"><span class="eqt" style="color:#2a7fbf">bins</span></span></span></div>
+<div class="eq-why eq-active" data-eqline="1">The step size, LSB, spelled out as least significant bit, is the size of one step, the smallest change the grid can represent: the range is fixed at plus/minus 1.2V, so the step is that 2.4V span divided by the bin count.</div>
+<div class="eq-line eq-active" data-eqline="2"><span class="eqt" style="color:#b9770e">SNR</span> = 6.02&#183;<span class="eqt" style="color:#2c3e50">N</span> + 1.76 dB</div>
+<div class="eq-why eq-active" data-eqline="2"><span class="eqt" style="color:#b9770e">SNR</span>, spelled out as signal-to-noise ratio, is how clean the snapped-back signal is next to the original, measured in decibels: it grows by about 6 for every bit of width, plus a fixed 1.76. Every bit you drop doubles the step size and costs about 6 dB of SNR.</div>
+</div>
+<p>The bit-width tool below reports these three lines as its Bins, LSB and SNR readouts, and its bar compares the SNR against the 8-bit reference.</p>
+     
      <p>
          The procedure runs in order: fix the range, choose <code>N</code>, and the bins and the step follow from the lines above. The float range gets chopped into equal steps, and everything inside one bin rounds to the same number: a value snaps to the nearest bin center, and the gap between the value and the center is its rounding error.
      </p>
@@ -1941,21 +1950,22 @@ model.qconfig = qconfig_hist
    <section>
      <h2 id="quantize-one-tensor">Quantize one tensor, step by step</h2>
      <p>Here is the recipe from <a href="#quick-refresher-scale-and-zero-point">Scale and zero-point set the grid</a>, run on one tiny tensor: six floats, quantized to <code>8</code> bits.</p>
-     <p>
-     $$s = \frac{max - min}{255}$$
-     $$x_q = \text{round}\left(\frac{x}{s}\right) + z$$
-     $$\hat{x} = s \cdot (x_q - z)$$
-     $$e = x - \hat{x}$$
-     </p>
-     <p>
-         Here <code>min</code> and <code>max</code> are the tensor's smallest and largest floats; <code>x</code> is one float; <code>s</code> is the scale, one bucket's width; <code>x_q</code> is the bucket index; <code>x&#770;</code> (x-hat) is the snapped-back float; <code>z</code> is the zero point; <code>255</code> is the number of steps between the <code>256</code> buckets of an <code>8</code>-bit grid; <code>round</code> means snap to the nearest bucket; and <code>e</code> is the rounding error.
-     </p>
-     <p>
-     $$z = \text{round}\left(\frac{-min}{s}\right)$$
-     </p>
-     <p>
-         The zero point is that value, clamped inside the integer range. It is the shift that makes the tensor's minimum land on the first bucket, and it is the form the step-through below runs.
-     </p>
+     <p>The recipe, run on this one tensor, in five lines:</p>
+<div class="eq-card" id="quantTensorEqStatic">
+<div class="eq-what">The recipe from Scale and zero-point set the grid, run on one tiny tensor: six floats, quantized to 8 bits.</div>
+<div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="s" style="color:#2a7fbf">s</span> = <span class="frac"><span class="top"><span class="eqt" data-k="max" style="color:#8e44ad">max</span>&#8722;<span class="eqt" data-k="min" style="color:#8e44ad">min</span></span><span class="bot"><span class="eqt" data-k="n255" style="color:#2c3e50">255</span></span></span></div>
+<div class="eq-why eq-active" data-eqline="0">The scale <span class="eqt" style="color:#2a7fbf">s</span> is one bucket's width: the tensor's full range, <span class="eqt" style="color:#8e44ad">max</span> minus <span class="eqt" style="color:#8e44ad">min</span>, split into 255 equal steps, the number of steps between the 256 buckets of an 8-bit grid. The scale is what shrinks the float range down to the integer grid.</div>
+<div class="eq-line eq-active" data-eqline="1"><span class="eqt" data-k="xq" style="color:#d35400">x<sub>q</sub></span> = <span class="eqt" data-k="round" style="color:#2c3e50">round</span>(<span class="frac"><span class="top"><span class="eqt" data-k="x" style="color:#2a7fbf">x</span></span><span class="bot"><span class="eqt" data-k="s" style="color:#2a7fbf">s</span></span></span>)+<span class="eqt" data-k="z" style="color:#2c3e50">z</span></div>
+<div class="eq-why eq-active" data-eqline="1">Snap each float to a bucket: dividing by the scale shrinks the float range down to the integer grid, round snaps each value to the nearest bucket, and adding <span class="eqt" style="color:#2c3e50">z</span>, the zero point, shifts the grid so float zero lands exactly on an integer; here the shift makes the tensor's minimum land on the first bucket.</div>
+<div class="eq-line eq-active" data-eqline="2"><span class="eqt" data-k="xhat" style="color:#d35400">x&#770;</span> = <span class="eqt" data-k="s" style="color:#2a7fbf">s</span>&#183;(<span class="eqt" data-k="xq" style="color:#d35400">x<sub>q</sub></span>&#8722;<span class="eqt" data-k="z" style="color:#2c3e50">z</span>)</div>
+<div class="eq-why eq-active" data-eqline="2">Snap back to float: run it backward, undo the zero-point shift, then multiply back up by the scale, to see what value the bucket actually represents.</div>
+<div class="eq-line eq-active" data-eqline="3"><span class="eqt" data-k="e" style="color:#c0392b">e</span> = <span class="eqt" data-k="x" style="color:#2a7fbf">x</span>&#8722;<span class="eqt" data-k="xhat" style="color:#d35400">x&#770;</span></div>
+<div class="eq-why eq-active" data-eqline="3"><span class="eqt" style="color:#c0392b">e</span> is the rounding error: the gap between the original float and its snapped-back version, and each value rounds to within half a bucket.</div>
+<div class="eq-line eq-active" data-eqline="4"><span class="eqt" style="color:#2c3e50">z</span> = round(<span class="frac"><span class="top">&#8722;<span class="eqt" style="color:#8e44ad">min</span></span><span class="bot"><span class="eqt" style="color:#2a7fbf">s</span></span></span>)</div>
+<div class="eq-why eq-active" data-eqline="4"><span class="eqt" style="color:#2c3e50">z</span> counts how many bucket widths the minimum sits below zero, rounded to a whole bucket and clamped inside the integer range. It is the shift that makes the tensor's minimum land on the first bucket.</div>
+</div>
+<p>The step-through below runs these exact lines on the six floats, the form the step-through runs: it finds min and max, splits the range into 256 buckets, snaps each float to a bucket, snaps back, and measures the rounding error.</p>
+     
      <div class="bw-demo" id="qswStep">
 <style>
        .qsw-dots { display: flex; gap: 10px; justify-content: center; margin: 0 0 0.6rem; }
@@ -1982,19 +1992,20 @@ model.qconfig = qconfig_hist
 <div class="eq-card" id="qswStepEq">
          <div class="eq-what">Four lines that squeeze floats into bytes: measure the range, snap each value to a bucket, snap it back, and name the error.</div>
          <div class="eq-line" data-eqline="0"><span class="eqt" data-k="s" style="color:#2a7fbf">s</span> = <span class="frac"><span class="top"><span class="eqt" data-k="max" style="color:#8e44ad">max</span>&#8722;<span class="eqt" data-k="min" style="color:#8e44ad">min</span></span><span class="bot"><span class="eqt" data-k="n255" style="color:#2c3e50">255</span></span></span></div>
-        <div class="eq-why" data-eqline="0">Measure the bucket size: split the tensor's range into 255 equal steps.</div>
+        <div class="eq-why" data-eqline="0">Measure the bucket size: split the tensor's range into 255 equal steps. One scale squeezes six floats into 256 buckets, and each value rounds to within half a bucket. Steps 1 and 2 of the step-through above run this line: find min and max, then split into 256 buckets.</div>
          <div class="eq-line" data-eqline="1"><span class="eqt" data-k="xq" style="color:#d35400">x<sub>q</sub></span> = <span class="eqt" data-k="round" style="color:#2c3e50">round</span>(<span class="frac"><span class="top"><span class="eqt" data-k="x" style="color:#2a7fbf">x</span></span><span class="bot"><span class="eqt" data-k="s" style="color:#2a7fbf">s</span></span></span>)+<span class="eqt" data-k="z" style="color:#2c3e50">z</span></div>
-        <div class="eq-why" data-eqline="1">Snap each float to a bucket: divide by the bucket size, round to the nearest whole number, and shift by the zero point.</div>
+        <div class="eq-why" data-eqline="1">Snap each float to a bucket: divide by the bucket size, round to the nearest whole number, and shift by the zero point, the shift that makes the tensor's minimum land on the first bucket. This is step 3 of the step-through above, snap floats to bucket centers.</div>
          <div class="eq-line" data-eqline="2"><span class="eqt" data-k="xhat" style="color:#d35400">x&#770;</span> = <span class="eqt" data-k="s" style="color:#2a7fbf">s</span>&#183;(<span class="eqt" data-k="xq" style="color:#d35400">x<sub>q</sub></span>&#8722;<span class="eqt" data-k="z" style="color:#2c3e50">z</span>)</div>
         <div class="eq-why" data-eqline="2">Snap back to float: reverse the mapping to see what value the bucket actually represents.</div>
          <div class="eq-line" data-eqline="3"><span class="eqt" data-k="e" style="color:#c0392b">e</span> = <span class="eqt" data-k="x" style="color:#2a7fbf">x</span>&#8722;<span class="eqt" data-k="xhat" style="color:#d35400">x&#770;</span></div>
-        <div class="eq-why" data-eqline="3">Measure the damage: the gap between the original float and its snapped-back version is the rounding error.</div>
+        <div class="eq-why" data-eqline="3">Measure the damage: the gap between the original float and its snapped-back version is the rounding error, and each value rounds to within half a bucket. This is step 4 of the step-through above, measure the rounding error.</div>
          <div class="eq-legend"><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#8e44ad"></span><code>min</code>, <code>max</code> the tensor's range</span><span class="eq-item" data-lines="0,1"><span class="eq-sw" style="background:#2a7fbf"></span><code>s</code> the scale: one bucket's width</span><span class="eq-item" data-lines="1,3"><code>x</code> a float</span><span class="eq-item" data-lines="1,2"><span class="eq-sw" style="background:#d35400"></span><code>x<sub>q</sub></code> the bucket index; <code>x̂</code> the snapped-back float</span><span class="eq-item" data-lines="1,2"><span class="eq-sw" style="background:#2c3e50"></span><code>z</code> the zero point; <code>255</code> the step count</span><span class="eq-item" data-lines="3"><span class="eq-sw" style="background:#c0392b"></span><code>e</code> the rounding error</span><span class="eq-item" data-lines="1"><code>round</code> snap to the nearest bucket</span><span class="eq-item" data-lines="2"><code>·</code> times: scaling</span></div>
        </div>
 <div class="cap-card" id="qswCaption">
          <strong>What this shows</strong>
          <ul>
            <li><strong>The point:</strong> One scale squeezes six floats into <code>256</code> buckets, and each value rounds to within half a bucket.</li>
+          <li>The snap-back in the card's third line runs inside step 4 of the step-through, just before the error is measured.</li>
          </ul>
        </div>
 </div>

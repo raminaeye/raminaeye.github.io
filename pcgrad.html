@@ -741,7 +741,7 @@
 <p>
         The volume knobs are balanced. Now the directions: PCGrad operates on <strong>conflicting
         gradients</strong>, projecting away the part that fights another task and leaving the rest of each
-        gradient untouched.
+        gradient untouched. A gradient here is the direction, computed from a task's loss (the error score that task is trying to lower), in which that loss rises fastest, so training steps the other way.
     </p>
 
     <p class="tabs-label">On this page</p>
@@ -760,8 +760,8 @@
 
 <h2 id="the-culprit">Conflicting gradients are the culprit</h2>
         <p>
-        Joint training can come out worse than independent training. Some multi-task RL (reinforcement learning) methods quietly
-        retreated to training tasks separately first and distilling afterward, which throws away the
+        Joint training can come out worse than independent training. Some multi-task RL (reinforcement learning, where an agent learns what to do from the rewards it earns by acting) methods quietly
+        retreated to training tasks separately first and distilling afterward (training a second model to imitate the separately trained ones, so their skills end up in one model), which throws away the
         efficiency gains the whole thing was for.
     </p>
     <p>
@@ -771,21 +771,21 @@
     </p>
     <p>
         Picture a deep valley with one task's pull much stronger than the other's: the combined
-        gradient follows the loud task downhill, the curvature makes the optimizer misjudge both
+        gradient follows the loud task downhill, the curvature, the loss surface bending so fast that the slope itself changes inside a single step, makes the optimizer misjudge both
         moves, and the quiet task pays for it.
     </p>
     <p>
         The answer: stop tuning around the gradients and operate on them directly. When two gradients
-        conflict, project each onto the normal plane of the other, cutting away only the interfering
+        conflict, project each onto the normal plane of the other (the flat surface at a right angle to the other gradient), cutting away only the interfering
         components.</p>
     <p>
-        It works across multi-task supervised learning and multi-task RL.
+        It works across multi-task supervised learning (learning from examples that come with the right answers) and multi-task RL.
     </p>
 
     
 <h2 id="the-deal">The deal: drop the part of your pull that fights me</h2>
     <p>
-        GradNorm fixes loudness. But loudness was never the only disease. Sometimes the directions
+        GradNorm fixes loudness by learning how loud each task should be, driven by how fast each task is training, to keep progress balanced. But loudness was never the only disease. Sometimes the directions
         themselves fight: two task gradients point partly against each other, and adding them lets the
         tasks cancel each other out before the step even happens. PCGrad ignores the size of gradients
         completely and goes straight after the direction problem.
@@ -881,9 +881,9 @@
         The full procedure, per training step:
     </p>
     <ol>
-        <li>Compute each task's gradient on the shared parameters (one backward pass per task).</li>
+        <li>Compute each task's gradient on the shared parameters, the weights both tasks use and both gradients refer to (one backward pass per task, the pass that works back from a task's loss to produce its gradient).</li>
         <li>For each task <code>i</code>: for every other task <code>j</code> in random order, if the two gradients fight, cut the interfering part: subtract the part of this gradient that points along the other task's line.</li>
-        <li>Combine the edited gradients (sum or average) and hand the result to any optimizer: SGD, Adam, anything.</li>
+        <li>Combine the edited gradients (sum or average) and hand the result to any optimizer: SGD (plain stochastic gradient descent), Adam (the adaptive optimizer), anything.</li>
     </ol>
     <pre><code class="language-python">import numpy as np
 def pcgrad_combine(grads):
@@ -1005,8 +1005,8 @@ def pcgrad_combine(grads):
         The theory ties it together: PCGrad is proven to lower the multitask loss more than plain gradient
         descent when the fight is strong compared to the loudness gap, the
         landscape is curved enough, and the step size is big enough. In other words, when the triad shows
-        up. On simple convex two-task problems, PCGrad is proven to reach the best point or a point of
-        perfect standoff. The paper's test of the gains: one shared robot policy trained with multi-task SAC (soft actor-critic, an off-policy reinforcement-learning algorithm) on Meta-World, a suite of simulated robot manipulation tasks learned all at once (the ten-task and fifty-task sets), scored by the average success rate across the tasks, against the same training run without the surgery. And the gains are real: over <code>30%</code> absolute improvement in that success rate on multi-task
+        up. On simple convex two-task problems (convex here means bowl shaped, with no local traps where a run can get stuck), PCGrad is proven to reach the best point or a point of
+        perfect standoff. The paper's test of the gains: one shared robot policy (the rule the robot uses to pick its actions) trained with multi-task SAC (soft actor-critic, a reinforcement-learning algorithm with two parts, an actor that picks the actions and a critic that scores them, and off-policy, meaning it learns from experience collected by other policies) on Meta-World, a suite of simulated robot manipulation tasks learned all at once (the ten-task and fifty-task sets), scored by the average success rate across the tasks, against the same training run without the surgery. And the gains are real: over <code>30%</code> absolute improvement in that success rate on multi-task
         robot-learning benchmarks.
     </p>
 
@@ -1021,7 +1021,8 @@ def pcgrad_combine(grads):
 
 
 
-    <p>The two weighting methods, the volume knobs (GradNorm and Uncertainty Weighting), the three steering methods (PCGrad, GradVac, and CAGrad), and MGDA, which lands on the Pareto frontier, side by side:</p>
+    <p>The two weighting methods, the volume knobs (GradNorm and Uncertainty Weighting), the three steering methods (PCGrad; GradVac, which gives each pair its own target level, learned from how that pair usually cooperates, and nudges sagging pairs back up to it; and CAGrad, which takes the average gradient and adds one bounded nudge toward the worst-off task, never straying far from that average), and MGDA, which searches over blends of the task gradients for the shortest combined direction and lands on the Pareto frontier, side by side:</p>
+    <p>The Pareto frontier those rows name is the set of outcomes where no task can improve without another task getting worse. Every point on it is a trade-off with no free upgrade left, which is why where a run lands on it matters.</p>
 
     <table class="cmp">
         <thead><tr><th>Method</th><th>The question it answers</th></tr></thead>

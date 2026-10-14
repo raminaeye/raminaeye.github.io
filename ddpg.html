@@ -648,9 +648,9 @@
 
     <p>DQN's world is <strong>buttons</strong>. The banana agent had four: forward, back, left, right. Score every move, pick the biggest, done. That works beautifully when the menu is short.</p>
 
-    <p>But here is the question that breaks it: <em>how hard</em> do you twist the shoulder joint? Not which button. <em>How much.</em> A torque is any real number between <code>-1</code> and <code>1</code>, and there are infinitely many of them. You cannot <strong>argmax over infinity</strong>. I hit this exact wall in my RF-DDPG repo (my DDPG solution for the Unity Reacher task), where a double-jointed arm has to hold its hand on a floating target in a Unity ML-Agents task. The fix: an <strong>actor</strong> that outputs the move directly, and a <strong>critic</strong> that judges it.</p>
+    <p>But here is the question that breaks it: <em>how hard</em> do you twist the shoulder joint? Not which button. <em>How much.</em> A torque is any real number between <code>-1</code> and <code>1</code>, and there are infinitely many of them. You cannot <strong>argmax over infinity</strong> (picking the move with the biggest score). I hit this exact wall in my RF-DDPG repo (my DDPG solution for the Unity Reacher task), where a double-jointed arm has to hold its hand on a floating target in a Unity ML-Agents task. The fix: an <strong>actor</strong> that outputs the move directly, and a <strong>critic</strong> that judges it.</p>
 
-    <p>A quick note on <strong>what is toy and what is real</strong>, before we start: the interactive toys on this page are from-scratch JavaScript re-enactments at toy scale, labeled as toys where it matters. The environment facts, the network sizes, the hyperparameters, and the training curve come straight from my RF-DDPG repo. I will tell you which is which every time.</p>
+    <p>A quick note on <strong>what is toy and what is real</strong>, before we start: the interactive toys on this page are from-scratch JavaScript re-enactments at toy scale, labeled as toys where it matters. The environment facts, the network sizes, the hyperparameters (the settings chosen before training, not learned), and the training curve come straight from my RF-DDPG repo. I will tell you which is which every time.</p>
 
     <p class="tabs-label">On this page</p>
     <div class="tab-strip">
@@ -699,12 +699,12 @@
 
     <p>You cannot dodge this by chopping the dials into buttons. Split each torque into <code>10</code> notches and you get <code>10,000</code> combos, and the Q-table drowns in the curse of dimensionality. Worse, you throw away the precision the task wants: the difference between <code>0.61</code> and <code>0.62</code> on the elbow can be the difference between holding the ball and missing it. Finer buttons are not the answer. <em>No buttons at all is the answer.</em></p>
 
-    <p>This is exactly the gap the DDPG paper (Lillicrap et al., 2016) set out to close. It takes DQN's machinery, the Q-network, the replay buffer, the target network, and bolts on an actor that outputs continuous actions directly, trained with the <strong>deterministic policy gradient</strong>. If DQN is the ancestor, <em>DDPG is the child that learned to use its hands.</em></p>
+    <p>This is exactly the gap the DDPG paper (Lillicrap et al., 2016) set out to close. It takes DQN's machinery, the Q-network, the replay buffer, a memory of past steps that training samples from at random, the target network, a slow copy of the critic whose prices hold still, and bolts on an actor that outputs continuous actions directly, trained with the <strong>deterministic policy gradient</strong>, where the actor improves by following the gradient the critic hands it. If DQN is the ancestor, <em>DDPG is the child that learned to use its hands.</em></p>
 
     
     <p>DDPG carries the ideas behind DQN's success into the continuous-action domain. The algorithm is <strong>actor-critic</strong> and <strong>model-free</strong> (it learns from rewards alone, with no model of how the world responds), built on the deterministic policy gradient, and the same learning algorithm, network architecture, and hyperparameters solved more than <code>20</code> simulated physics tasks: cartpole swing-up, dexterous manipulation, legged locomotion, car driving.</p>
 
-    <p>On many of them it matched a planner with full access to the dynamics, and it could learn end to end, straight from raw pixels. My reacher page is a small cousin of that result: one algorithm, continuous dials, no task-specific tuning.</p>
+    <p>On many of them it matched a planner (a method that searches ahead using the true dynamics instead of learning from rewards) with full access to the dynamics, and it could learn end to end, straight from raw pixels. My reacher page is a small cousin of that result: one algorithm, continuous dials, no task-specific tuning.</p>
 
     <p>There is a deeper reason the actor matters, beyond "argmax is impossible." Even if you could search torque space perfectly at every step, doing that search in real time, dozens of times per second while the arm is moving, would be absurd. The actor <strong>amortizes the search</strong>: it pays the cost once, during training, and compresses the answer into a fast forward pass. At test time there is no optimization loop, no search, no argmax. State in, torques out, microseconds. That is what "policy" means here: <em>the search, distilled.</em></p>
 
@@ -850,7 +850,8 @@
 
     <h2 id="ddpg-critic">The critic learns from the Bellman backup</h2>
 
-    <p>The critic learns the same way DQN's Q-network did: a <strong>Bellman backup</strong>. Its guess versus a target built from the reward plus the discounted future, with squared error because big mistakes should hurt more than small ones.</p>
+    <p>The critic learns the same way DQN's Q-network did: a <strong>Bellman backup</strong>. Its guess versus a target built from the reward plus the discounted future, with squared error because big mistakes should hurt more than small ones. Gamma is the discount factor doing that shrinking. It scales down the future part of the target, because the future matters but it matters less than the present.</p>
+    <p>I think of it as a consistency check. If the critic prices a move correctly, that price has to agree with itself one step later: it should equal the reward the move just earned plus the discounted price of the position the move leaves the arm in. One step recorded whole, with its state, torques, reward, and next state, is a transition. In DDPG that next price does not come from picking the best move by search; the slow actor picks the next move and the slow critic prices it. A backup is the work of building that one step target from the reward and the next price, then pulling the live critic's guess toward it, a little at a time, until the two agree.</p>
     <p>Written out, that backup is two lines:</p>
     <div class="eq-card" id="ddpgCriticEqStatic">
         <div class="eq-what">One critic update in two lines: the slow twin sets the target price, then the live critic measures its miss.</div>
@@ -874,7 +875,7 @@
 
     <p>Picture the critic as a landscape over torque space. Fix a state, and every torque setting sits somewhere on that landscape: valleys of low Q, hills of high Q. The actor's current output is a dot on it. The gradient points uphill. The actor steps uphill. Repeat a few hundred thousand times and the dot lives on the peaks. That is the deterministic policy gradient as one image: <em>climb the critic.</em></p>
 
-    <p>Under the hood this is the chain rule doing the talking. The actor's weights produce torques, and the critic turns torques into a score. The update multiplies two sensitivities: how the score changes when the torques change, times how the torques change when the weights change. Read it as a sentence: move the weights in the direction that moves the torques in the direction that raises the score. Two links, one chain. That is the <strong>deterministic policy gradient theorem</strong> in plain English, the second big idea on this page after the Bellman backup in <a href="#ddpg-critic">The critic learns from the Bellman backup</a>.</p>
+    <p>Under the hood this is the chain rule doing the talking. The actor's weights produce torques, and the critic turns torques into a score. The update multiplies two sensitivities: how the score changes when the torques change, times how the torques change when the weights change. Read it as a sentence: move the weights in the direction that moves the torques in the direction that raises the score. Two links, one chain. That is the <strong>deterministic policy gradient theorem</strong> in plain English, the second big idea on this page after the Bellman backup in <a href="#ddpg-critic">The critic learns from the Bellman backup</a>. The score in that sentence is the critic's estimate of the real return, the total future reward the arm actually collects.</p>
     <div class="eq-card" id="ddpgUphillEqStatic">
         <div class="eq-what">The actor's uphill step in one line: two sensitivities multiplied, two links, one chain.</div>
         <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="gradJ" style="color:#b3541e">&#8711;<sub>&#952;</sub>J</span> &#8776; <span class="eqt" data-k="gradQ" style="color:#1e8449">&#8711;<sub>a</sub>Q</span>&#183;<span class="eqt" data-k="gradMu" style="color:#b3541e">&#8711;<sub>&#952;</sub>&#956;</span></div>
@@ -957,7 +958,7 @@
 
     <p>The target barely flinches. Ten thousand updates later it has caught up. That is the pace you want for a bullseye.</p>
 
-    <p><strong>Ornstein-Uhlenbeck noise.</strong> The actor is deterministic: same state in, same torques out, every time. Left alone it never tries anything new, so it repeats its first guess forever and learns nothing. During training I add OU noise to the torques. This is not white-noise jitter. OU noise drifts: each step remembers the last, wandering smoothly like a hand exploring in the dark instead of twitching. That smoothness matters for a physical arm, where torque commands should flow, not stutter. Noise on during training; typically off at test time, so the arm can hold still. That is the whole deal.</p>
+    <p><strong>Ornstein-Uhlenbeck noise.</strong> The actor is deterministic: same state in, same torques out, every time. Left alone it never tries anything new, so it repeats its first guess forever and learns nothing. During training I add OU noise to the torques. This is not white noise, where each step's jitter is independent of the last and carries no memory. OU noise drifts: each step remembers the last, wandering smoothly like a hand exploring in the dark instead of twitching. All the while it is pulled back toward zero, so it wanders around zero instead of drifting off in one direction. That pull is why it can keep exploring without running away and dragging the torques with it. That smoothness matters for a physical arm, where torque commands should flow, not stutter. Noise on during training; typically off at test time, so the arm can hold still. That is the whole deal.</p>
 
     <p>Why <strong>Ornstein-Uhlenbeck</strong> specifically, and not plain Gaussian noise? <strong>Gaussian noise is amnesiac</strong>: each step's jitter is independent, so the torques stutter. OU noise has <em>momentum</em>: each step's noise remembers the last one, so the exploration wanders smoothly.</p>
     <p>For a physical system with inertia, smooth exploration tries coherent strategies (<em>"push left for a while, see what happens"</em>) instead of vibrating in place. The original DDPG paper used OU noise for exactly this reason, and my repo kept it.</p>
@@ -1100,7 +1101,7 @@
 <div class="cap-card">
         <strong>What this shows</strong>
         <ul>
-          <li><strong>The point:</strong> one DDPG training update, from a sampled minibatch to the actor's uphill step. The loop trains on old experience, never on the step that just happened.</li>
+          <li><strong>The point:</strong> one DDPG training update, from a sampled minibatch to the actor's uphill step. The loop trains on old experience, never on the step that just happened. That is off-policy learning: the networks learn from experience gathered by older versions of the actor, not only from the actor as it is right now. It is what makes reusing the replay buffer legal, because old steps stay useful even after the actor has changed.</li>
           <li>Amber boxes are the actor, green boxes the critic, dashed gray boxes the slow target copies. The glow marks the active step; the rest dim.</li>
         </ul>
       </div>

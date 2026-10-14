@@ -1851,7 +1851,7 @@ def simple_ctc_beam_search(probs, vocab, beam_size=3, top_k=3):
 
    <h3>Beam search merges hypotheses</h3>
 
-   <p>Greedy decoding is lazy. It takes the best symbol at each frame and calls it a day, which means it sees exactly one path: "ab". But fourteen other paths collapse to "ab" too, and greedy never looks at them. With beam width <code>3</code>, the "ab" bar eats fifteen thin segments. <em>That stacking IS beam search.</em> The code above does this in forty-five lines; the bars show you what those lines are actually doing.</p>
+   <p>Greedy decoding is lazy. It takes the best symbol at each frame and calls it a day, which means it sees exactly one path: "ab". But fourteen other paths collapse to "ab" too, and greedy never looks at them. With beam width <code>3</code>, the "ab" bar eats fourteen thin segments. <em>That stacking IS beam search.</em> The code above does this in forty-five lines; the bars show you what those lines are actually doing.</p>
    $$\text{score(new\_prefix) after this frame} = \text{score already accumulated for new\_prefix} + \text{prob} \times p$$
    <p><code>prob</code> is the sum of the pair carried in <code>beams</code> for a prefix, which maps each prefix to the probabilities of its paths ending in blank and not ending in blank, and starts from <code>beams = {"": (1.0, 0.0)}</code>, an empty prefix ending in blank with total prob <code>1</code>. <code>p</code> is this frame's probability for the symbol, <code>p = probs[t][idx]</code> in the listing, with <code>sym = vocab[idx]</code>. <code>new_prefix</code> is the prefix after the collapse rule in the listing: if the symbol is blank the prefix stays, if it repeats the prefix's last symbol it merges only when no blank came between and counts as a new character after a blank, and otherwise the symbol is added. A candidate is a merged prefix: beam search recovers its mass by merging the paths that collapse to the same candidate sequence, each path adding its own carried prob, times this frame's p, into the candidate, and that per-path adding is the sum in the line above.</p>
 
@@ -1894,13 +1894,13 @@ def simple_ctc_beam_search(probs, vocab, beam_size=3, top_k=3):
      <div class="demo-stats" id="bmPunch"></div>
      
    </div>
-<p class="caption">Greedy sees one path. Beam search sees every path that collapses to the same answer and adds them up. That merging is where the extra probability mass comes from, and it is the entire reason beam search beats greedy.</p>
+<p class="caption">Greedy sees one path. Beam search sees the paths that collapse to the same answer and adds them up. That merging is where the extra probability mass comes from, and it is the entire reason beam search beats greedy.</p>
 
    <div class="caption-card" id="bmCap">
      <p class="cc-head">How to play</p>
      <ul>
-       <li><strong>The point:</strong> Greedy decoding keeps only the single best path, while beam search keeps several candidates and adds up every path that collapses to the same answer, recovering probability mass that greedy throws away.</li>
-       <li><strong>What you'll see:</strong> At width <code>3</code>, beam search merges fifteen paths into the "ab" answer and keeps probability mass that greedy decoding at width <code>1</code> throws away.</li>
+       <li><strong>The point:</strong> Greedy decoding keeps only the single best path, while beam search keeps several candidates and adds up the paths that collapse to the same answer, recovering probability mass that greedy throws away.</li>
+       <li><strong>What you'll see:</strong> At width <code>3</code>, beam search merges fourteen paths into the "ab" answer and keeps probability mass that greedy decoding at width <code>1</code> throws away.</li>
      </ul>
    </div>
    <script>
@@ -1960,16 +1960,18 @@ def simple_ctc_beam_search(probs, vocab, beam_size=3, top_k=3):
      function beamFrames(w) {
        if (cache[w]) return cache[w];
        var frames = [];
+       /* Beam search carries only the surviving hypotheses forward: each
+          frame extends the kept hypotheses' paths by one symbol, and
+          pruned mass never comes back. This matches the printed listing,
+          which prunes its beams dict to beam_size after every frame. */
+       var paths = [[]];
        for (var t = 0; t < 4; t++) {
-         var paths = [[]], tt, k;
-         for (tt = 0; tt <= t; tt++) {
-           var next = [];
-           paths.forEach(function (p) { for (k = 0; k < 3; k++) next.push(p.concat([k])); });
-           paths = next;
-         }
+         var next = [], k;
+         paths.forEach(function (p) { for (k = 0; k < 3; k++) next.push(p.concat([k])); });
+         paths = next;
          var agg = {};
          paths.forEach(function (p) {
-           var pr = 1;
+           var pr = 1, tt;
            for (tt = 0; tt < p.length; tt++) pr *= TABLE[tt][p[tt]];
            var c = collapse(p), key = c.join(',');
            if (!agg[key]) agg[key] = { str: c, prob: 0, segs: [] };
@@ -1978,10 +1980,12 @@ def simple_ctc_beam_search(probs, vocab, beam_size=3, top_k=3):
          });
          var ranked = Object.keys(agg).map(function (key) { return agg[key]; });
          ranked.sort(function (a, b) { return b.prob - a.prob; });
-         ranked.forEach(function (h) { h.segs.sort(function (a, b) { return b.prob - a.prob; }); });
          var kept = ranked.slice(0, w), dropped = ranked.slice(w);
          var droppedMass = dropped.reduce(function (a, h) { return a + h.prob; }, 0);
          frames.push({ kept: kept, dropped: dropped, droppedMass: droppedMass });
+         paths = [];
+         kept.forEach(function (h) { h.segs.forEach(function (sg) { paths.push(sg.path); }); });
+         ranked.forEach(function (h) { h.segs.sort(function (a, b) { return b.prob - a.prob; }); });
        }
        cache[w] = frames;
        return frames;
@@ -2078,7 +2082,7 @@ def simple_ctc_beam_search(probs, vocab, beam_size=3, top_k=3):
        fr.kept.forEach(function (h) { if (strOf(h.str) === 'ab') ab = h; });
        if (ab) {
          mergeEl.style.display = '';
-         mergeEl.innerHTML = '<span class="bm-rule">P("ab") = sum of all paths that collapse to "ab"</span><br>'
+         mergeEl.innerHTML = '<span class="bm-rule">P("ab") = sum of the paths that collapse to "ab"</span><br>'
            + 'so far: <strong>' + ab.segs.length + '</strong> paths, running sum = <strong>' + ab.prob.toFixed(4) + '</strong>';
        }
        if (frame === 3 && ab) {

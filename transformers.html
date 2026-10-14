@@ -851,7 +851,7 @@ figcaption { margin-top: 1rem; }
     through <code>50</code> sequential steps. <em>Every step is a chance to forget.</em>
   </p>
   <p>
-    <strong>CNNs</strong> (convolutional neural networks) can look at a local neighborhood, but you have to stack a lot of layers before a
+    <strong>CNNs</strong> (convolutional neural networks, networks that slide a small learned filter across the input and react to local patterns wherever they appear) can look at a local neighborhood, but you have to stack a lot of layers before a
     token on the left end can influence a token on the right end. <em>Long range relations
     arrive late, if at all.</em>
   </p>
@@ -1816,7 +1816,7 @@ class MultiHeadAttention(nn.Module):
     token's position gets encoded in multiple frequency bands: a unique <strong>multi-frequency
     signature</strong>. High-frequency dimensions track local order, low-frequency dimensions
     track long-range order. Sine and cosine together encode each position as a point on a
-    circle, so relative offsets fall out of trig identities.
+    circle, so relative offsets fall out of trig identities: the sine and cosine at a shifted position can be worked out from the sine and cosine at the original position and the size of the shift alone, so the model can recover how far apart two positions are from their encodings.
   </p>  <div class="diagram">
     <div class="chart-legend">
       <span><span class="sw"></span>first band: fast wave, period 2&#960;</span>
@@ -1850,7 +1850,7 @@ def positional_encoding(seq_len, d_model):
 pe = positional_encoding(seq_len=8, d_model=16)
 </code></pre>
   <p>
-    Does it actually capture "closeness"? Cosine similarity between the encoding at
+    Does it actually capture "closeness"? Cosine similarity (a measure of how aligned two vectors are: <code>1</code> when they point the same way, <code>0</code> when they have nothing in common, lower when they point apart) between the encoding at
     position <code>0</code> and its neighbors, from a real run of the positional encoding snippet in this section:
   </p>
   <div class="stat-grid">
@@ -2535,6 +2535,7 @@ masked = np.where(causal_mask(4), scores, -1e9)
     this step?</em> The encoder's keys answer "cat", and the decoder pulls in "cat"'s value.
     Each decoder position distributes its attention over all encoder positions, and the
     score matrix has one row per decoder position and one column per encoder position.
+    At the top of the decoder, the final layer outputs logits, one raw score for every token in the vocabulary, before softmax turns those scores into probabilities.
   </p>
   <div class="diagram">
   <svg width="860" height="330" viewBox="0 0 860 330" font-family="sans-serif" font-size="13" style="width:100%;height:auto;display:block">
@@ -2579,6 +2580,7 @@ masked = np.where(causal_mask(4), scores, -1e9)
     Each <strong>encoder block</strong> is the same recipe: multi-head attention to mix information between
     tokens, then a position-wise feed-forward network applied to each token independently.
     Around each, a <strong>residual connection</strong> plus <strong>layer normalization</strong>.
+    The feed-forward network in the code below uses ReLU, an activation function that passes positive values through unchanged and sets negative values to zero, which is what gives the network its bends instead of one straight line.
   </p>
 <pre><code class="language-python">class EncoderBlock(nn.Module):
     def __init__(self, d_model, num_heads, d_ff):
@@ -2662,7 +2664,7 @@ masked = np.where(causal_mask(4), scores, -1e9)
   <p>
     Notice the cross-attention queries come <em>right after self-attention, not
     after the FFN</em>. The self-attention output already integrated the past target tokens; the FFN is just a
-    position-wise MLP that adds no new cross-token context, so it wouldn't make the
+    position-wise MLP (multilayer perceptron, the small stack of layers the page has been calling the feed-forward network, applied to each position on its own) that adds no new cross-token context, so it wouldn't make the
     queries any smarter about what to ask the encoder.
   </p>
 
@@ -2745,7 +2747,7 @@ masked = np.where(causal_mask(4), scores, -1e9)
     causal mask. <em>The model never sees the answer; it only gets graded on it.</em>
   </p>
   <p>
-    A minimal GPT-style model, complete:
+    A minimal GPT-style model, complete. Its blocks use GELU, a smooth activation function that passes large positive values through and eases small ones toward zero, in their feed-forward layers:
   </p>
 <pre><code class="language-python">import math
 import torch
@@ -2809,11 +2811,11 @@ class MiniGPT(nn.Module):
     matrix. The model doesn't need to learn twice that similar embeddings should decode
     similarly, and you save a big chunk of parameters. (In translation you wouldn't tie to
     the encoder's embeddings, since those are a different language; you'd tie to the
-    decoder's input embeddings.) <strong>GELU</strong> (Gaussian error linear unit) instead of ReLU in the FFN is the
+    decoder's input embeddings.) <strong>GELU</strong> (Gaussian error linear unit), a smooth activation function that behaves like ReLU for large positive values but eases through zero instead of cutting hard, instead of ReLU in the FFN is the
     modern default; it just trains a bit better.
   </p>
   <p>
-    Training is one loop. The target at each position is the input <strong>shifted by one</strong>:
+    Training is one loop. The target at each position is the input <strong>shifted by one</strong>. The loop trains with AdamW, the optimizer named in the listing below, which is Adam with weight decay handled separately, meaning that besides Adam's adaptive steps it shrinks each weight a little directly on every step, instead of folding that shrinkage into the gradient. That separate shrinkage is the W's job:
   </p>
 <pre><code class="language-python">model = MiniGPT(vocab_size=10000, d_model=256, num_heads=8,
                 d_ff=1024, num_layers=4, max_len=128)
@@ -2859,7 +2861,7 @@ def generate(model, idx, max_new_tokens, temperature=1.0):
     <li>The new token's keys and values are appended to the cache for the following step.</li>
   </ol>
   <p>
-    The per-step cost of each path, written as equations:
+    The per-step cost of each path, written as equations. Costs on this page are counted in FLOPs, where one FLOP is one floating-point operation, a single multiply or a single add:
   </p>
   <div class="eq-card" id="tfKvEq">
       <div class="eq-what">The per-step cost of each path, with and without the KV cache.</div>
@@ -3065,7 +3067,7 @@ for i in range(n):
     A neat detail: the window doesn't reset the model's memory the way chopping the input
     into chunks would. At layer <code>1</code> each token blends its <code>10</code>-frame window; at layer <code>2</code> those
     enriched tokens carry their context forward, so <em>the effective span grows with depth,
-    just like a receptive field.</em> Stack enough layers and a small window still sees far.
+    just like a receptive field, the span of input a token's representation can actually reach back and draw on.</em> Stack enough layers and a small window still sees far.
   </p>
   <p>
     The extreme version of this is <strong>chunked</strong> streaming: the model emits
@@ -3518,7 +3520,7 @@ for i in range(n):
 
   <h2 id="counting-the-cost-why-long-sequences-hurt">Counting the cost: why long sequences hurt</h2>
   <p>
-    Let's count <strong>FLOPs</strong>, because <em>the bill is the reason half of transformer research exists</em>.
+    Let's count <strong>FLOPs</strong> (one FLOP is one floating-point operation, a single multiply or a single add, and counting them is how this section prices the work), because <em>the bill is the reason half of transformer research exists</em>.
     Start with the old guys for calibration. An RNN step is a couple of <code>d × d</code>
     matrix-vector products, so the cost grows with the square of the model width per step, and with the
     sequence length times the square of the model width for the whole sequence.
@@ -3620,7 +3622,7 @@ for i in range(n):
   </div>
   <p class="caption">Counting only the quadratic score and weighted-sum terms for attention and the
     two FFN matmuls; projections, softmax, and norms ignored. <em>That is why
-    long-context models need sparse, windowed, or linear attention.</em></p>
+    long-context models need sparse attention (each token attends to only a chosen subset of tokens, not all of them), windowed attention, or linear attention (attention rewritten so its cost grows in a straight line with sequence length instead of with the square).</em></p>
 <div class="howto capcard" id="flopHowto"><strong class="cap-title">How to play</strong>
       <ul>
         <li><strong>The point:</strong> Attention FLOPs grow quadratically with sequence length while the FFN grows linearly, so once the sequence length passes four times the model width, attention dominates the bill and never looks back.</li>
@@ -3901,15 +3903,15 @@ for i in range(n):
     </div>
   </div>
   <p>
-    The training recipe was <strong>Adam</strong>
+    The training recipe was <strong>Adam</strong>, an optimizer that adapts each parameter's step size as training goes, based on how that parameter's gradients have been behaving
     (first moment decay <code>0.9</code>, second moment decay <code>0.98</code>, stability constant <code>10<sup>-9</sup></code>) with a warmup of <code>4000</code> steps
-    and dropout <code>0.1</code>. The schedule: ramp the learning rate up linearly for the first <code>4000</code> steps, then decay it
+    and dropout <code>0.1</code>, meaning that during training a tenth of the activations are randomly set to zero on each pass, so the model cannot lean on any single one and memorizes less. The schedule: ramp the learning rate up linearly for the first <code>4000</code> steps, then decay it
     proportionally to the inverse square root of the step.
   </p>
   <p>
     The warmup matters. <em>Transformers
     are twitchy at the start of training,</em> and hitting them with a full learning rate on
-    step one is a good way to get NaNs.
+    step one is a good way to get NaNs (not a number, the invalid value a calculation produces when the numbers blow up, which then poisons everything it touches).
   </p>  <div class="diagram">
     <div class="chart-legend">
       <span><span class="sw"></span>linear warmup, 0 to 4000 steps</span>

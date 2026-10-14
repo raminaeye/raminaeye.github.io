@@ -713,7 +713,7 @@ quantized_model = torch.quantization.quantize_dynamic(
         <li>Weights → <code>int8</code></li>
         <li>Activations → <code>float32</code></li>
         <li>Quantization of activations happens at runtime, per batch</li>
-        <li>Dequantization happens immediately after matmul</li>
+        <li>Dequantization happens immediately after matmul (matrix multiplication, the multiply and add work that a Linear layer mostly does)</li>
      </ul>
      <p>So why use it? It's stupid easy and gives you a fast win on CPUs, especially for LSTMs (long short-term memory networks) and Linear-heavy models. On a small MNIST (handwritten-digit) CNN from the companion notebook, dynamic quantization barely moved the needle:</p>
      <div class="stat-grid">
@@ -736,7 +736,7 @@ quantized_model = torch.quantization.quantize_dynamic(
      <h2 id="static-quantization">Static quantization: calibrate first, run everything in int8</h2>
      <p>Static quantization is the version I actually deploy. Both weights and activations go to int8. But to quantize activations, you first need to know their range. That is where <strong>calibration</strong> comes in. You run some input data through the model (no labels needed) to collect min and max values of activations. PyTorch uses that to decide how to quantize.</p>
      <p>This works great for CNNs and edge deployment. You get full int8 inference.</p>
-     <p>The workflow looks like this:</p>
+     <p>The workflow looks like this. The listing picks a quantized kernel backend, the library that actually runs the int8 operations on the machine: fbgemm on x86 machines and qnnpack on ARM machines.</p>
      <pre><code class="language-python">
 model = YourCNN()
 model.eval()
@@ -775,7 +775,7 @@ torch.quantization.convert(model, inplace=True)
      <h3>Fuse Conv+BN+ReLU into a single op first</h3>
      <p>Before quantizing, you fuse Conv + BatchNorm + ReLU into a single op. Why? It reduces memory overhead, speeds things up, and minimizes numerical errors.</p>
      <h3>QConfig tells PyTorch how to quantize each tensor</h3>
-     <p>QConfig tells PyTorch how to quantize: symmetric vs asymmetric, per-tensor vs per-channel. Example:</p>
+     <p>QConfig tells PyTorch how to quantize: symmetric vs asymmetric, per-tensor (one scale for the whole tensor) vs per-channel (each channel gets its own scale, so one channel with a wide range does not set the grid for the rest). Example:</p>
      <pre><code class="language-python">
 from torch.quantization import default_per_channel_weight_observer, MinMaxObserver
 import torch # Ensure torch is imported for dtypes
@@ -851,8 +851,8 @@ qconfig_hist = tq.QConfig(
 )
 model.qconfig = qconfig_hist
      </code></pre>
-     <p>They look at the L2 error between the original and the quantized-dequantized tensor and find the best range for preserving accuracy.</p>
-     <p>This is the point where quantization starts earning its keep for me. It matters most when your activations have long tails, skew, or multimodal distributions, the cases where MinMax quietly destroys your accuracy.</p>
+     <p>They look at the L2 error (squaring each gap between an original value and its quantized then mapped back value, so big gaps count far more than small ones) between the original and the quantized-dequantized tensor and find the best range for preserving accuracy.</p>
+     <p>This is the point where quantization starts earning its keep for me. It matters most when your activations have long tails, skew, or multimodal distributions (distributions with more than one peak, where the values clump into several separate groups instead of one), the cases where MinMax quietly destroys your accuracy.</p>
    </section>
    <section>
      <h2 id="a-real-histogram-from-a-real-model">A real histogram from a real MNIST model</h2>
@@ -923,7 +923,7 @@ model.qconfig = qconfig_hist
        <p class="caption">Rebuilt from Figure 5 of Nagel et al. (arXiv 2021). <a href="https://arxiv.org/abs/2106.08295">arXiv:2106.08295</a></p>
        <p class="caption">Figure 5, verbatim caption: \"Per (output) channel weight ranges of the first depthwise-separable layer in MobileNetV2 after BN folding. The boxplots show the min and max value, the 2nd and 3rd quartile and the median are plotted for each channel.\"</p>
      </div>
-     <p>Figure 5 is why min-max loses. These are per-channel weight ranges from the first depthwise layer of MobileNetV2 after batch-norm folding. Most channels are tiny. A few are enormous. One global min-max range is set by the freaks, and every normal channel pays for it in rounding error.</p>
+     <p>Figure 5 is why min-max loses. These are per-channel weight ranges from the first depthwise-separable layer of MobileNetV2 (a layer that filters each channel separately, then mixes the channels with a cheap 1 by 1 step) after batch-norm folding (folding absorbs the batch norm scale and shift into the convolution weights before quantizing, so batch norm stops being its own layer). Most channels are tiny. A few are enormous. One global min-max range is set by the freaks, and every normal channel pays for it in rounding error.</p>
      <p>The two lines behind that choice:</p>
 <div class="eq-card" id="quantClipEqStatic">
 <div class="eq-what">Where do you cut the range? The scale follows from the cut, and the total error splits into the two ways a weight can miss.</div>
@@ -936,7 +936,7 @@ model.qconfig = qconfig_hist
        <p>The same scale and zero-point arithmetic runs on real layers. The observer table below shows <code>conv.0</code>'s activations spanning <code>0</code> to <code>6.478520</code>, mapped to scale <code>0.025406</code> with zero-point <code>0</code>: float <code>0</code> lands exactly on int <code>0</code>, which is why ReLU outputs quantize so cleanly.</p>
      <div class="crp-paperbox">
        <h4>MSE beats min-max at 4 bits</h4>
-       <p>ImageNet validation accuracy, %, symmetric weight quantization with activations in FP32, averaged over <code>5</code> runs. FP32 baselines: ResNet18 <code>69.68</code>, MobileNetV2 <code>71.72</code>.</p>
+       <p>In the table headers, W8 means weights quantized to 8 bits and W4 means weights quantized to 4 bits. ImageNet validation accuracy, %, symmetric weight quantization with activations in FP32, averaged over <code>5</code> runs. FP32 baselines: ResNet18 <code>69.68</code>, MobileNetV2 <code>71.72</code>.</p>
        <div class="table-scroll"><table class="datatable">
          <tr><th>Model (FP32)</th><th>W8 Min-Max</th><th>W8 MSE</th><th>W4 Min-Max</th><th>W4 MSE</th></tr>
          <tr><td>ResNet18 (69.68)</td><td>69.57</td><td>69.45</td><td>0.12</td><td>18.82</td></tr>
@@ -2187,7 +2187,7 @@ graph.print_tabular() # For a more readable table
         <li>Quantize cleanly</li>
         <li>Inspect the graph</li>
      </ul>
-     <p>It is the modern way to quantize in PyTorch. I would not start a new project on the old Eager-mode API: FX handles the qconfig recursion, the observer insertion, and the fusion correctly, and Eager mode will fight you on all three.</p>
+     <p>It is the modern way to quantize in PyTorch. I would not start a new project on the old Eager-mode API, which quantizes the module tree directly, layer by layer, instead of working from a traced graph: FX handles the qconfig recursion (applying the quantization settings, the qconfig, down through the whole module tree, layer by layer and into the layers nested inside each one), the observer insertion, and the fusion correctly, and Eager mode will fight you on all three.</p>
      <pre><code class="language-python">
 import torch # Ensure torch is imported for torch.quantization
 qconfig_dict = {"": torch.quantization.get_default_qconfig('fbgemm')}
@@ -2292,7 +2292,7 @@ model_for_qat.train() # Set model to training mode for QAT
 model_prepared_qat = prepare_qat_fx(model_for_qat, qconfig_dict_qat)
         </code></pre>
         <p>Then you train the <code>model_prepared_qat</code> and convert it to int8 with <code>convert_fx</code>, after switching it to eval mode. Inside the <code>FakeQuantize</code> module, it takes the input tensor, computes scale and zero-point, and simulates the quantize-then-dequantize round trip from the refresher above: round onto the int grid, clamp, then map back to float.</p>
-        <p>QAT can learn activation clipping, push small weights out of dead zones, and learn quantization-friendly distributions.</p>
+        <p>QAT can learn activation clipping, push small weights out of dead zones (the band of small values around zero that all round to zero, so they carry no signal after quantization), and learn quantization-friendly distributions.</p>
         <p>QAT simulates quantization in the forward pass. Rounding and clamping are, however, both non-differentiable, so you can't directly backpropagate through them. QAT uses a <strong>Straight-Through Estimator (STE)</strong>, which basically means this operation has no gradient for the non-differentiable part. It pretends the output equals the input during backpropagation for that specific part.</p>
         <pre><code class="language-python">
 class RoundSTE(torch.autograd.Function):

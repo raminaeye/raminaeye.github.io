@@ -680,12 +680,12 @@
   <p>Here is the mental picture. Imagine every image is a point on the surface of a ball. Two views of the same photo should sit right next to each other. Different photos should spread out. After training, photos of similar things end up clustered together on that ball, <em>and you never once showed the model a label</em>.</p>
 
     <p class="caption">
-      This is the whole contrastive mechanism. The loss falls as the twin is dragged toward the anchor and the strangers are shoved away, and the top-1 check reads yes whenever the twin is the anchor's nearest neighbor. Every point lives on this disk because embeddings are L2 normalized, so similarity is just cosine similarity and the model cannot cheat by making vectors huge.
+      This is the whole contrastive mechanism. The loss falls as the twin is dragged toward the anchor and the strangers are shoved away, and the top-1 check reads yes whenever the twin is the anchor's nearest neighbor. Every point lives on this disk because embeddings are L2 normalized, so similarity is just cosine similarity (a score for how far two vectors point the same way, 1 when they point the same way and near 0 when they are unrelated) and the model cannot cheat by making vectors huge.
     </p>
 
   <h3>The NT-Xent Loss</h3>
 
-  <p>SimCLR's loss is called <strong>NT-Xent</strong>: normalized temperature-scaled cross entropy. Fancy name, simple idea. For one positive pair, the loss is:</p>
+  <p>SimCLR's loss is called <strong>NT-Xent</strong>: normalized temperature-scaled cross entropy, the standard loss for picking the right one out of a set of choices, which grows unless the model puts most of its weight on the correct partner. Fancy name, simple idea. For one positive pair, the loss is:</p>
 
   <div class="eq-card" id="sslNtxentEqStatic">
 <div class="eq-what">The whole SimCLR loss in one line: pull each image's twin views together while pushing every other pair apart.</div>
@@ -1136,7 +1136,7 @@
   })();
   </script>
 
-  <p>SimCLR also adds a small <strong>projection head</strong> on top of the encoder: two linear layers with a ReLU. Here is the funny part. You train the contrastive loss on the projection output, then you throw the head away and use the encoder output for downstream tasks. <em>The head is a sacrificial layer.</em> It absorbs the contrastive objective so the encoder stays general. Do not skip it, it buys a few points for free.</p>
+  <p>SimCLR also adds a small <strong>projection head</strong> on top of the encoder: two linear layers with a ReLU (the activation that passes positive values through unchanged and zeroes out the negative ones). Here is the funny part. You train the contrastive loss on the projection output, then you throw the head away and use the encoder output for downstream tasks. <em>The head is a sacrificial layer.</em> It absorbs the contrastive objective so the encoder stays general. Do not skip it, it buys a few points for free.</p>
 
 <pre><code class="language-python">class ProjectionHead(nn.Module):
     def __init__(self, in_dim, hidden_dim=2048, out_dim=128):
@@ -1150,7 +1150,7 @@
     def forward(self, x):
         return self.net(x)  # trained with contrastive loss, discarded after</code></pre>
 
-  <p>One subtle detail in the code: <em>you must exclude <strong>self-similarity</strong></em>. Every vector is perfectly similar to itself, similarity <code>1.0</code>, and that would dominate the softmax. The standard trick is to mask the diagonal of the similarity matrix with a huge negative number before the softmax.</p>
+  <p>One subtle detail in the code: <em>you must exclude <strong>self-similarity</strong></em>. Every vector is perfectly similar to itself, similarity <code>1.0</code>, and that would dominate the softmax (the step that turns a set of scores into probabilities that add up to 1, so the highest score takes the largest share). The standard trick is to mask the diagonal of the similarity matrix with a huge negative number before the softmax.</p>
 
 <pre><code class="language-python">def nt_xent_loss(z1, z2, temperature=0.5):
     # z1, z2: [B, D] projected views, already L2 normalized
@@ -1792,7 +1792,7 @@
 
   <p>MoCo fixes this with a <strong>queue</strong>. Instead of taking negatives from the current batch, it keeps a queue of tens of thousands of embeddings from past batches. Batch size of <code>256</code>, queue of <code>65,536</code>, <em>you get the best of both worlds</em>.</p>
 
-  <p><em>But there is a catch.</em> Embeddings from ten batches ago were made by an older encoder, so they are <strong>stale</strong>. MoCo's answer is a second encoder for the keys, updated with a slow <strong>exponential moving average</strong> of the query encoder:</p>
+  <p><em>But there is a catch.</em> Embeddings from ten batches ago were made by an older encoder, so they are <strong>stale</strong>. The query encoder keeps learning the usual way, by gradient descent, nudging each weight a small step in the direction that lowers the loss. MoCo's answer is a second encoder for the keys, updated with a slow <strong>exponential moving average</strong> of the query encoder:</p>
 
   <div class="eq-card" id="sslMocoEqStatic">
 <div class="eq-what">A second encoder for the keys, updated with a slow exponential moving average of the query encoder.</div>
@@ -1830,7 +1830,7 @@ def momentum_update(query_encoder, key_encoder, m=0.999):
 
   <ol>
     <li><strong>Stop-gradient.</strong> The target network never receives gradients. If both networks were trained, they could happily walk together to a constant output. The target is anchored in the past, so the online network has to chase a moving but real target.</li>
-    <li><strong>The predictor.</strong> The online path has an extra MLP the target path does not have. This asymmetry matters. The predictor has to map the online representation to the target representation, which is a nontrivial function. A constant output cannot be predicted well across different views, so collapse is not actually a minimum the optimizer can reach.</li>
+    <li><strong>The predictor.</strong> The online path has an extra MLP (multilayer perceptron, a small stack of fully connected layers) the target path does not have. This asymmetry matters. The predictor has to map the online representation to the target representation, which is a nontrivial function. A constant output cannot be predicted well across different views, so collapse is not actually a minimum the optimizer can reach.</li>
     <li><strong>The EMA target.</strong> The target network changes slower than the online network, so it provides a stable bootstrap signal. The online network improves, the target absorbs the improvement slowly, the online network chases it again. Bootstrap your own latent. The name is literal.</li>
   </ol>
 
@@ -2109,12 +2109,12 @@ def momentum_update(query_encoder, key_encoder, m=0.999):
   <h2 id="six-ways-this-quietly-breaks">Six ways self-supervised learning breaks</h2>
 
   <div class="warning">
-    <strong>Collapse is real, just not where you expect.</strong> BYOL avoids full collapse, but there is a subtler failure: dimensional collapse, where the embeddings use only a small subspace of the available dimensions. Your loss looks fine, your probe accuracy quietly suffers. Check the rank or the singular values of your embedding matrix every so often. If 128 dimensions collapse to effectively 20, something is wrong.
+    <strong>Collapse is real, just not where you expect.</strong> BYOL avoids full collapse, but there is a subtler failure: dimensional collapse, where the embeddings use only a small subspace (a lower dimensional slice of the full space they could spread through) of the available dimensions. Your loss looks fine, your probe accuracy quietly suffers. Check the rank (how many independent dimensions the embeddings actually use) or the singular values (numbers that show how the embedding spread is shared across dimensions, so a collapse shows up as a few large values and the rest near zero) of your embedding matrix every so often. If 128 dimensions collapse to effectively 20, something is wrong.
   </div>
 
   <p><strong>Augmentations are the method.</strong> This is the part people underestimate. SimCLR and BYOL do not learn from the images, they learn from the difference between the two views. The strength tradeoff from the SimCLR section is the whole design problem here.</p>
 
-  <p>For natural images the standard recipe is random crop plus color jitter plus blur. For your own data, say sensor signals or spectrograms, you have to design augmentations that preserve identity. There is no universal recipe. <em>This is where most failed SSL projects actually fail.</em></p>
+  <p>For natural images the standard recipe is random crop plus color jitter plus blur. For your own data, say sensor signals or spectrograms (charts that show how a signal's energy is spread across frequencies as time passes), you have to design augmentations that preserve identity. There is no universal recipe. <em>This is where most failed SSL projects actually fail.</em></p>
 
   <p><strong>SimCLR is hungry for batch size.</strong> With a batch of <code>256</code> you get only <code>510</code> negatives and the signal is thin. The paper used a batch of <code>4096</code>. If you cannot afford that, use MoCo's queue or switch to BYOL, which does not care about batch size. Do not run SimCLR with batch <code>64</code> and wonder why it does nothing.</p>
 

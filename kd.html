@@ -548,12 +548,12 @@ figcaption { margin-top: 1rem; }
      You have a giant model that works great and costs a fortune to run. How do you squeeze it into a small one without tanking performance? That is what <strong>Knowledge Distillation (KD)</strong> does, and the trick is <em>embarrassingly simple</em>: take a big, accurate, pre-trained model, call it the teacher, and train the small model, the student, to copy the teacher's behavior.
    </p>
    <p>
-     This is not a toy trick. <code>DistilBERT</code> is <code>BERT-base</code> (BERT: Bidirectional Encoder Representations from Transformers) with <code>40%</code> of the parameters chopped off, and it still keeps <code>97%</code> of BERT's performance on GLUE. Same story with the distilled <code>MobileNet</code> variants taught by <code>ResNet-50</code>. The pattern is always the same: <em>the big model you cannot afford to serve teaches the small model you can</em>.
+     This is not a toy trick. <code>DistilBERT</code> is <code>BERT-base</code> (BERT: Bidirectional Encoder Representations from Transformers) with <code>40%</code> of the parameters chopped off, and it still keeps <code>97%</code> of BERT's performance on GLUE, a standard language-understanding benchmark suite. Same story with the distilled <code>MobileNet</code> variants taught by <code>ResNet-50</code> (a ResNet is a deep residual network, one whose blocks learn the change to add to their input instead of a whole new transformation). The pattern is always the same: <em>the big model you cannot afford to serve teaches the small model you can</em>.
    </p>
 
       <p>The problem is a deployment problem. The most reliable way to squeeze more accuracy out of a model is to train a whole <strong>ensemble</strong> and average the predictions, but an ensemble is too expensive to serve, especially when the individual models are large neural nets. Earlier work showed an ensemble's knowledge could be compressed into a single model (Bucila et al.); distillation is the simplest version of that idea: train one small model that behaves like the big one.</p>
    <p>The key insight: the teacher's soft outputs <em>carry information the hard labels never will</em>. A model that says an image is <code>90%</code> cat, <code>8%</code> dog, <code>2%</code> car is telling you which mistakes are reasonable, and that ranking, the <strong>"dark knowledge"</strong>, is what the student should learn.</p>
-   <p>Soften the teacher's softmax with a <strong>temperature</strong> and train the small model to match those soft targets, alongside the usual hard-label loss.</p>
+   <p>Soften the teacher's softmax, the step that turns raw scores into probabilities that sum to <code>1</code>, with a <strong>temperature</strong> and train the small model to match those soft targets, alongside the usual hard-label loss.</p>
    <p>The results in Hinton et al.'s distillation paper (in my References at the end of this page) sold the field on the idea: on MNIST (the handwritten-digit dataset) the distilled student surprised even its authors by nearly matching the big ensemble it learned from, and the same compression significantly improved the acoustic model of a heavily used commercial speech system.</p>
 
    <h2 id="soft-predictions-what-the-teacher-really-knows">Soft predictions: what the teacher really knows</h2>
@@ -582,7 +582,7 @@ figcaption { margin-top: 1rem; }
 <figure class="diagram"><svg viewBox="0 0 660 190" role="img" aria-label="Teacher distribution at temperatures 0.5, 2 and 20 for classes cat, dog, car and bird" style="width:100%;max-width:660px;height:auto;display:block"><text x="110" y="18" text-anchor="middle" font-size="13" font-weight="700">T = 0.5</text><rect x="30" y="31.13801088016109" width="32" height="128.8619891198389" fill="#3498db"/><text x="46" y="178" text-anchor="middle" font-size="11">cat</text><rect x="75" y="158.93949842531015" width="32" height="1.0605015746898463" fill="#2ecc71"/><text x="91" y="178" text-anchor="middle" font-size="11">dog</text><rect x="120" y="159.93551083282898" width="32" height="0.06448916717103181" fill="#e67e22"/><text x="136" y="178" text-anchor="middle" font-size="11">car</text><rect x="165" y="159.98697986169978" width="32" height="0.013020138300206565" fill="#9b59b6"/><text x="181" y="178" text-anchor="middle" font-size="11">bird</text><text x="330" y="18" text-anchor="middle" font-size="13" font-weight="700">T = 2</text><rect x="250" y="76.18427897731867" width="32" height="83.81572102268133" fill="#3498db"/><text x="266" y="178" text-anchor="middle" font-size="11">cat</text><rect x="295" y="134.7551899607205" width="32" height="25.244810039279503" fill="#2ecc71"/><text x="311" y="178" text-anchor="middle" font-size="11">dog</text><rect x="340" y="147.46379833748796" width="32" height="12.536201662512035" fill="#e67e22"/><text x="356" y="178" text-anchor="middle" font-size="11">car</text><rect x="385" y="151.59673272447287" width="32" height="8.403267275527124" fill="#9b59b6"/><text x="401" y="178" text-anchor="middle" font-size="11">bird</text><text x="550" y="18" text-anchor="middle" font-size="13" font-weight="700">T = 20</text><rect x="470" y="122.94621141136372" width="32" height="37.05378858863628" fill="#3498db"/><text x="486" y="178" text-anchor="middle" font-size="11">cat</text><rect x="515" y="127.13623764294148" width="32" height="32.86376235705852" fill="#2ecc71"/><text x="531" y="178" text-anchor="middle" font-size="11">dog</text><rect x="560" y="129.3580310794209" width="32" height="30.6419689205791" fill="#e67e22"/><text x="576" y="178" text-anchor="middle" font-size="11">car</text><rect x="605" y="130.5595198662739" width="32" height="29.440480133726112" fill="#9b59b6"/><text x="621" y="178" text-anchor="middle" font-size="11">bird</text></svg><figcaption>At 0.5 the teacher is almost one-hot, with barely any ranking to copy; at 2, a crisp ranking; at 20, the bars wash out toward uniform.</figcaption></figure>
       <h2 id="how-it-works-the-distillation-loss">Distillation loss: match the teacher's soft targets</h2>
    <p>
-     <em>The student answers to two bosses at once</em>: the true labels, and the teacher's soft predictions. One loss term for each, mixed together:
+     <em>The student answers to two bosses at once</em>: the true labels, and the teacher's soft predictions. One loss term for each, mixed together. The labels' term is cross-entropy, the loss that measures how badly the student's prediction misses the true label and punishes a confident wrong answer hardest:
    </p>
    <p>
      The final loss is a weighted average of these two components, controlled by a single <strong>mixing weight</strong>, written <code>α</code> (alpha) in the equation:
@@ -1279,7 +1279,7 @@ figcaption { margin-top: 1rem; }
    </script>
    <h2 id="what-happens-distilling-a-resnet-18-into-a-small-cnn">What happens: distilling a ResNet-18 into a small CNN</h2>
    <p>
-     The full experiment lives in the companion notebook. The setup: the <strong>teacher</strong> is a ResNet-18 (ImageNet-pretrained, classifier fine-tuned on STL-10, a dataset of 96&#215;96 color images in 10 classes), and the <strong>student</strong> is <code>DeeperStudentCNN</code>, a plain <code>4</code>-block CNN (convolutional neural network) with a fraction of the teacher's size. Distillation runs with temperature <code>2.0</code>, mixing weight <code>0.7</code>, Adam at learning rate <code>1e-3</code> (0.001), for <code>10</code> epochs.
+     The full experiment lives in the companion notebook. The setup: the <strong>teacher</strong> is a ResNet-18 (ImageNet-pretrained, that is, pretrained on ImageNet, a large labeled image dataset; classifier fine-tuned on STL-10, a dataset of 96&#215;96 color images in 10 classes), and the <strong>student</strong> is <code>DeeperStudentCNN</code>, a plain <code>4</code>-block CNN (convolutional neural network) with a fraction of the teacher's size. Distillation runs with temperature <code>2.0</code>, mixing weight <code>0.7</code>, Adam (an adaptive optimizer, one that adjusts each weight's step size as training goes) at learning rate <code>1e-3</code> (0.001), for <code>10</code> epochs (one epoch is one full pass over the training data).
    </p>
    <p>First, the teacher's accuracy, which is the target we are chasing:</p>
    <div class="stat-grid">
@@ -1300,7 +1300,7 @@ figcaption { margin-top: 1rem; }
    <p>
      <code>53%</code> is a long way from <code>93%</code>, but keep perspective: this student is tiny, trained for only <code>10</code> epochs, and it learned entirely by watching the teacher. The loss fell steadily the whole way, so it was still improving when training stopped. Distillation got a small model somewhere meaningful in <code>10</code> epochs. <em>That is a fast win.</em>
    </p>
-   <p>I also tried forcing the student to mimic the teacher's intermediate features, adding an MSE (mean squared error) term between feature maps alongside the CE and KL terms (mixing weights <code>0.5</code>, <code>0.3</code>, <code>0.2</code> across the three terms, temperature <code>2.0</code>, same <code>10</code> epochs):</p>
+   <p>I also tried forcing the student to mimic the teacher's intermediate features, adding an MSE (mean squared error) term between feature maps, the intermediate layer outputs of the two networks, alongside the CE and KL terms (mixing weights <code>0.5</code>, <code>0.3</code>, <code>0.2</code> across the three terms, temperature <code>2.0</code>, same <code>10</code> epochs):</p>
    <div class="stat-grid">
      <div class="stat-card">
        <div class="stat-num">42.48<span class="stat-unit">%</span></div>
@@ -1309,7 +1309,7 @@ figcaption { margin-top: 1rem; }
      </div>
    </div>
    <p>
-     <em>Worse, not better.</em> More supervision is not always better supervision. Matching raw activations across very different architectures is hard: feature scales differ, and forcing a small network to reproduce a big network's internals can fight the classification objective. More on that in the caveats.
+     <em>Worse, not better.</em> More supervision is not always better supervision. Matching raw activations (the numbers each layer outputs) across very different architectures is hard: feature scales differ, and forcing a small network to reproduce a big network's internals can fight the classification objective. More on that in the caveats.
    </p>
 
    <h2 id="other-flavors-of-distillation">Beyond logits: feature, relation, and self-distillation</h2>
@@ -1325,7 +1325,7 @@ figcaption { margin-top: 1rem; }
    <h3>Relation-Based Distillation</h3>
    <p>Instead of copying absolute values, the student copies relationships: which examples the teacher thinks are similar, how classes sit relative to each other in the teacher's space. Think of it as <em>learning the teacher's map of the world rather than its exact coordinates</em>. It is more forgiving when the student is too small to match the teacher's exact numbers.</p>
    <h3>Self-Distillation</h3>
-   <p>The weird one: the model teaches itself. Train a teacher, then train a student with the exact same architecture on the teacher's outputs, and you somehow get a better model. It sounds like a free lunch, <em>and it almost is</em>: the soft targets act as a regularizer and smooth out the optimization. People usually iterate it once or twice and just bank the gains.</p>
+   <p>The weird one: the model teaches itself. Train a teacher, then train a student with the exact same architecture on the teacher's outputs, and you somehow get a better model. It sounds like a free lunch, <em>and it almost is</em>: the soft targets act as a regularizer, something that keeps the model from overfitting to noise in the labels, and smooth out the optimization. People usually iterate it once or twice and just bank the gains.</p>
 
    <h2 id="caveats">Distillation pitfalls: capacity gaps, temperature, and teacher mistakes</h2>
    <ul>

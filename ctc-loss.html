@@ -1782,31 +1782,44 @@ def simple_ctc_beam_search(probs, vocab, beam_size=3, top_k=3):
     probs: (T, V) softmax probabilities over vocab (incl blank "_")
     vocab: the symbol for each column of probs, e.g. ["_", "c", "a", "t"]
     """
-    beams = {"": 1.0}  # start with empty prefix and prob=1
+    # each prefix tracks two totals: prob of its paths ending in blank,
+    # and prob of its paths not ending in blank
+    beams = {"": (1.0, 0.0)}  # start with empty prefix, ending in blank
+
+    def add(new_beams, prefix, ends_blank, prob):
+        p_blank, p_not = new_beams.get(prefix, (0.0, 0.0))
+        if ends_blank:
+            new_beams[prefix] = (p_blank + prob, p_not)
+        else:
+            new_beams[prefix] = (p_blank, p_not + prob)
 
     for t in range(len(probs)):
         new_beams = {}
         # pick top_k symbols at this frame (argsort gives column indices,
         # so map each index back to its symbol through vocab)
         top_idx = np.argsort(probs[t])[-top_k:]
-        for prefix, prob in beams.items():
+        for prefix, (p_blank, p_not) in beams.items():
             for idx in top_idx:
                 sym = vocab[idx]
                 p = probs[t][idx]
                 if sym == "_":
-                    new_prefix = prefix
+                    # blank: prefix stays, and the path now ends in blank
+                    add(new_beams, prefix, True, (p_blank + p_not) * p)
+                elif prefix.endswith(sym):
+                    # collapse rule: merge repeats first, then drop
+                    # blanks, so a repeat merges only when no blank
+                    # came between; after a blank it counts again
+                    add(new_beams, prefix, False, p_not * p)
+                    add(new_beams, prefix + sym, False, p_blank * p)
                 else:
-                    # collapse rule: if repeat, don't double add
-                    if prefix.endswith(sym):
-                        new_prefix = prefix  # same seq
-                    else:
-                        new_prefix = prefix + sym
-                # accumulate probability
-                new_beams[new_prefix] = new_beams.get(new_prefix, 0) + prob * p
-        # prune to top beam_size
-        beams = dict(sorted(new_beams.items(), key=lambda x: -x[1])[:beam_size])
+                    add(new_beams, prefix + sym, False,
+                        (p_blank + p_not) * p)
+        # prune to top beam_size by total prob (blank ending + not)
+        beams = dict(sorted(new_beams.items(),
+                            key=lambda x: -(x[1][0] + x[1][1]))[:beam_size])
 
-    return max(beams.items(), key=lambda x: x[1])
+    best = max(beams.items(), key=lambda x: x[1][0] + x[1][1])
+    return best[0], best[1][0] + best[1][1]
 </code></pre>
    <style>
     #beamDemo .bm-table { border-collapse: collapse; margin: 0.4rem auto; font-size: 0.88em; }

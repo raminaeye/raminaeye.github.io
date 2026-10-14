@@ -702,10 +702,16 @@
 
    <p>The CTC loss is then <em>just the negative log of that total probability</em>.</p>
 
-   $$P(\pi|x) = \prod_t p_t(\pi_t)$$
-   $$P(y|x) = \sum_{\pi:\, B(\pi) = y} P(\pi|x)$$
-   $$\text{CTC loss} = -\log P(y|x)$$
-   <p>\(\pi\) is one path: the prediction picked at each frame. \(p_t\) is frame \(t\)'s probability for the symbol the path picks at that frame: each frame gets a probability distribution over <code>V+1</code> (tokens + blank). \(B(\pi)\) is that path after the collapse rule is applied to it. \(y\) is the ground truth and \(x\) is the input, so \(P(y|x)\) is the total probability of the ground truth given the input.</p>
+   <div class="eq-card" id="ctcProbEq">
+       <div class="eq-what">CTC in three lines: one path's probability, every path that collapses to the truth added up, then the loss.</div>
+       <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="P" style="color:#3498db">P(&#960;|x)</span> = &#8719;<sub>t</sub> <span class="eqt" data-k="pt" style="color:#d35400">p<sub>t</sub>(&#960;<sub>t</sub>)</span></div>
+        <div class="eq-why eq-active" data-eqline="0">Pick one alignment path, multiply the model's per-frame probabilities along it. &#960; is one path: the prediction picked at each frame. <span class="eqt" style="color:#d35400">p<sub>t</sub></span> is frame t's probability for the symbol the path picks at that frame.</div>
+       <div class="eq-line eq-active" data-eqline="1"><span class="eqt" data-k="P" style="color:#3498db">P(y|x)</span> = &#931;<sub>&#960;: B(&#960;) = y</sub> <span class="eqt" data-k="P" style="color:#3498db">P(&#960;|x)</span></div>
+        <div class="eq-why eq-active" data-eqline="1">Do that for every path that collapses to the ground truth and add them up. B(&#960;) is that path after the collapse rule is applied to it. y is the ground truth and x is the input, so <span class="eqt" style="color:#3498db">P(y|x)</span> is the total probability of the ground truth given the input.</div>
+       <div class="eq-line eq-active" data-eqline="2"><span class="eqt" data-k="loss" style="color:#c0392b">CTC loss</span> = &minus;log <span class="eqt" data-k="P" style="color:#3498db">P(y|x)</span></div>
+        <div class="eq-why eq-active" data-eqline="2">The CTC loss is then just the negative log of that total probability.</div>
+     </div>
+   <p>The path builder below lays down paths like the <code>c c - a t t</code> path, one of those paths. The <code>ctc_forward</code> listing further down computes the total: its last line returns the final frame's two alpha values added, which is <code>P(y|x)</code>, and the loss is its negative log.</p>
 
    <p>That diagram is the whole trick, but it is static. In this path builder, each path you lay down, one cell per frame from left to right, collapses by the same rule the diagram shows:</p>
 
@@ -1083,9 +1089,9 @@ def ctc_forward(probs, target):
 <div class="eq-card" id="dpEq">
        <div class="eq-what">The whole forward algorithm in one line: each cell is its frame's probability times the sum of the three neighbors that can flow into it.</div>
        <div class="eq-line" data-eqline="0"><span class="eqt" data-k="cell" style="color:#3498db">&#945;<sub>t</sub>(s)</span> = p<sub>t</sub>(l&#8242;<sub>s</sub>) &#183; (<span class="eqt" data-k="src" style="color:#d35400">&#945;<sub>t&#8722;1</sub>(s)</span> + <span class="eqt" data-k="src" style="color:#d35400">&#945;<sub>t&#8722;1</sub>(s&#8722;1)</span> + <span class="eqt" data-k="src" style="color:#d35400">&#945;<sub>t&#8722;1</sub>(s&#8722;2)</span>)</div>
-       <div class="eq-why" data-eqline="0">Build each cell from the row above: add the stay, step, and skip totals that flow into it, then multiply by this frame's probability for this column's character.</div>
+       <div class="eq-why" data-eqline="0">Build each cell from the row above: add the stay, step, and skip totals that flow into it, then multiply by this frame's probability for this column's character. The three neighbors are every way an alignment can arrive at this cell, so adding them counts all alignments at once instead of enumerating paths.</div>
        <div class="eq-line" data-eqline="1"><span class="eqt" data-k="src" style="color:#d35400">skip allowed only if l&#8242;<sub>s</sub> &#8800; l&#8242;<sub>s&#8722;2</sub></span></div>
-       <div class="eq-why" data-eqline="1">Guard the skip: a cell may skip one column only when this column and the column two back hold different characters.</div>
+       <div class="eq-why" data-eqline="1">Guard the skip: a cell may skip one column only when this column and the column two back hold different characters. Without the guard, a skip between two identical characters would let one letter do the work of two, and the collapse would merge two letters into one.</div>
        <div class="eq-legend"><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#3498db"></span><code>&#945;<sub>t</sub>(s)</code> the cell's total: every way to reach column <code>s</code> by frame <code>t</code> (blue = the spotlight cell, just computed)</span><span class="eq-item" data-lines="0"><code>p<sub>t</sub>(l&#8242;<sub>s</sub>)</code> frame <code>t</code>'s predicted probability for the column's character</span><span class="eq-item" data-lines="0,1"><span class="eq-sw" style="background:#d35400"></span><code>&#945;<sub>t&#8722;1</sub>(s)</code> stay, <code>&#945;<sub>t&#8722;1</sub>(s&#8722;1)</code> step, <code>&#945;<sub>t&#8722;1</sub>(s&#8722;2)</code> skip: the three incoming flows (orange arrows)</span><span class="eq-item" data-lines="0,1"><code>&#183;</code> times today's probability; <code>+</code> sum the three flows; <code>=</code> defines the cell; <code>l&#8242;<sub>s</sub></code> the extended target's character at column <code>s</code></span><span class="eq-item" data-lines="1"><code>&#8800;</code> skip allowed only when the two columns differ</span></div>
      </div>
 
@@ -1547,11 +1553,23 @@ def ctc_forward_backward(probs, target):
      <li>The forward score is the prefix mass, the backward score the suffix mass; combined and normalized, they give each frame's share of the credit.</li>
      <li>The gradient at each frame is that share minus what the model predicted.</li>
    </ol>
-   $$\text{posterior at } (t, s) = \frac{\text{alpha}[t][s] \cdot \text{beta}[t][s]}{p_t(l'_s) \cdot P(y|x)}$$
-   $$\text{gradient at frame } t = \text{posterior share at frame } t - \text{what the model predicted at frame } t$$
-   <p><code>alpha[t][s]</code> is the prefix mass, all the probability mass up to this frame and target position, and <code>beta[t][s]</code> is the suffix mass, all the mass from here to the end. <code>p_t(l'_s)</code> is frame <code>t</code>'s predicted probability for the column's character. <code>P(y|x)</code> is the total probability, <code>total_prob</code> in the listing: the sum of the final frame's last two alpha values. The division by <code>p_t(l'_s)</code> undoes a double count: <code>alpha</code> and <code>beta</code> each already include this frame's probability, so multiplying them counts it twice. In the listing, both are built that way:</p>
-   $$\text{alpha[t][s] = probs[t, vocab[extended[s]]] * (stay + prev + skip)}$$
-   $$\text{beta[t][s] = probs[t, vocab[extended[s]]] * (same + nxt + skip)}$$
+   <div class="eq-card" id="ctcPostEq">
+       <div class="eq-what">The posterior: where the credit actually goes, and the gradient it produces.</div>
+       <div class="eq-line eq-active" data-eqline="0">posterior at (t, s) = <span class="frac"><span class="top"><span class="eqt" data-k="al" style="color:#3498db">alpha[t][s]</span> &#183; <span class="eqt" data-k="be" style="color:#d35400">beta[t][s]</span></span><span class="bot">p<sub>t</sub>(l&#8242;<sub>s</sub>) &#183; <span class="eqt" data-k="P" style="color:#3498db">P(y|x)</span></span></span></div>
+        <div class="eq-why eq-active" data-eqline="0">The forward score is the prefix mass, the backward score the suffix mass; combined and normalized, they give each frame's share of the credit. <span class="eqt" style="color:#3498db">alpha[t][s]</span> is the prefix mass, all the probability mass up to this frame and target position, and <span class="eqt" style="color:#d35400">beta[t][s]</span> is the suffix mass, all the mass from here to the end. The division by p<sub>t</sub>(l&#8242;<sub>s</sub>), frame t's predicted probability for the column's character, undoes a double count: alpha and beta each already include this frame's probability, so multiplying them counts it twice. <span class="eqt" style="color:#3498db">P(y|x)</span> is the total probability, total_prob in the listing.</div>
+       <div class="eq-line eq-active" data-eqline="1">gradient at frame t = posterior share at frame t &minus; what the model predicted at frame t</div>
+        <div class="eq-why eq-active" data-eqline="1">The gradient at each frame is that share minus what the model predicted: the share is where the credit should go, and the prediction is where it went.</div>
+     </div>
+   <div class="eq-card" id="ctcListEq">
+       <div class="eq-what">In the listing, both alpha and beta are built that way:</div>
+       <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="al" style="color:#3498db">alpha[t][s]</span> = probs[t, vocab[extended[s]]] * (stay + prev + skip)</div>
+        <div class="eq-why eq-active" data-eqline="0">This is the forward cell in the listing's own names: this frame's probability for the extended target's symbol at column s, times the three incoming totals from the row above, stay, prev, and skip. The listing builds the extended target first, and vocab maps symbol to index in probs.</div>
+     </div>
+   <div class="eq-card" id="ctcList2Eq">
+       <div class="eq-what">And beta, the same shape run backwards:</div>
+       <div class="eq-line eq-active" data-eqline="1"><span class="eqt" data-k="be" style="color:#d35400">beta[t][s]</span> = probs[t, vocab[extended[s]]] * (same + nxt + skip)</div>
+        <div class="eq-why eq-active" data-eqline="1">Beta runs the alpha pattern backwards, in the backward listing's own names: this frame's probability for the extended target's symbol, times the three totals from the frame after. In that listing, same is beta[t+1][s], this column's own next-frame value; nxt is beta[t+1][s+1], the next column's; and skip is beta[t+1][s+2], two columns over, counted only when extended[s] and extended[s+2] differ.</div>
+     </div>
 
 
 
@@ -1852,8 +1870,12 @@ def simple_ctc_beam_search(probs, vocab, beam_size=3, top_k=3):
    <h3>Beam search merges hypotheses</h3>
 
    <p>Greedy decoding is lazy. It takes the best symbol at each frame and calls it a day, which means it sees exactly one path: "ab". But fourteen other paths collapse to "ab" too, and greedy never looks at them. With beam width <code>3</code>, the "ab" bar eats fourteen thin segments. <em>That stacking IS beam search.</em> The code above does this in forty-five lines; the bars show you what those lines are actually doing.</p>
-   $$\text{score(new\_prefix) after this frame} = \text{score already accumulated for new\_prefix} + \text{prob} \times p$$
-   <p><code>prob</code> is the sum of the pair carried in <code>beams</code> for a prefix, which maps each prefix to the probabilities of its paths ending in blank and not ending in blank, and starts from <code>beams = {"": (1.0, 0.0)}</code>, an empty prefix ending in blank with total prob <code>1</code>. <code>p</code> is this frame's probability for the symbol, <code>p = probs[t][idx]</code> in the listing, with <code>sym = vocab[idx]</code>. <code>new_prefix</code> is the prefix after the collapse rule in the listing: if the symbol is blank the prefix stays, if it repeats the prefix's last symbol it merges only when no blank came between and counts as a new character after a blank, and otherwise the symbol is added. A candidate is a merged prefix: beam search recovers its mass by merging the paths that collapse to the same candidate sequence, each path adding its own carried prob, times this frame's p, into the candidate, and that per-path adding is the sum in the line above.</p>
+   <div class="eq-card" id="ctcBeamEq">
+       <div class="eq-what">Beam search in one line: a candidate's score grows by every path that merges into it.</div>
+       <div class="eq-line eq-active" data-eqline="0">score(new_prefix) after this frame = score already accumulated for new_prefix + <span class="eqt" data-k="prob" style="color:#3498db">prob</span> &#215; <span class="eqt" data-k="p" style="color:#d35400">p</span></div>
+        <div class="eq-why eq-active" data-eqline="0">A candidate is a merged prefix: beam search recovers its mass by merging the paths that collapse to the same candidate sequence, each path adding its own carried <span class="eqt" style="color:#3498db">prob</span>, times this frame's <span class="eqt" style="color:#d35400">p</span>, into the candidate, and that per-path adding is the sum in this line. <span class="eqt" style="color:#3498db">prob</span> is the sum of the pair carried in beams for a prefix, and <span class="eqt" style="color:#d35400">p</span> is this frame's probability for the symbol, p = probs[t][idx] in the listing.</div>
+     </div>
+   <p><code>new_prefix</code> is the prefix after the collapse rule in the listing: if the symbol is blank the prefix stays, if it repeats the prefix's last symbol it merges only when no blank came between and counts as a new character after a blank, and otherwise the symbol is added.</p>
 
 
 

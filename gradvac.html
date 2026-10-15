@@ -901,8 +901,8 @@
 <h2 id="measured">First, measure what the gradients actually do</h2>
     <p>
         The GradVac authors started by watching instead of fixing. They trained one translation model on
-        many languages at once, and at regular checkpoints they measured
-        the cosine between every pair of task gradients. Three things showed up.
+        many languages at once, and at regular checkpoints (saved points in training where the model is
+        paused and inspected) they measured the cosine between every pair of task gradients. Three things showed up.
     </p>
     <ol>
         <li><strong>Related languages have similar gradients.</strong> French and Spanish gradients point in similar directions, as do other pairs from the same language family. You can see the clusters with the naked eye.</li>
@@ -931,7 +931,9 @@
         The fix: keep a running estimate of what "normal" looks like for each pair, a slow-moving average
         of the cosines seen so far, tracked separately for each group of layers. Each batch nudges the
         pair's target only a small fraction of the way toward the newly measured cosine, about one percent,
-        so one noisy batch cannot yank it around. That target is the "normal" the pair is held to.
+        so one noisy batch cannot yank it around. That small fraction is beta (&#946; in the equation
+        below), the averaging speed: the number that decides how fast the target follows each new
+        measurement. That target is the "normal" the pair is held to.
     </p>
     <p>The running target update, written as an equation:</p>
     <div class="eq-card" id="gvEqS1">
@@ -963,7 +965,7 @@
         <div class="eq-line eq-active" data-eqline="2"><span class="eqt" data-k="g1p" style="color:#c0392b">g<sub>i</sub><sup>edited</sup></span> + <span class="eqt" data-k="gj" style="color:#2980b9">g<sub>j</sub></span></div>
         <div class="eq-why eq-active" data-eqline="2">Add the edited gradient to task j's untouched gradient: this is the final combined update direction. Only the sag is repaired and the untouched gradient is added as-is, so the step keeps the pair's healthy cooperation instead of forcing it to zero: target zero is surgery; any other target is the vaccine.</div>
       </div>
-    <p>In the listing in &#8220;Walk through one GradVac step&#8221; below, the <code>target</code> line blends the pair's old target with this batch's cosine, weighted by <code>beta</code>, the slow running target; the check line asks, in its own words, fighting below their normal?; the <code>grads</code> line adds a scaled copy of the other gradient to task i's gradient, the nudge, not a full cut; and the final line sums the edited gradients into the combined step <code>d</code>. The dose line is the one place the listing does not show the formula: it computes the dose inside <code>solve_for_cosine</code>, in its own words the restoring blend.</p>
+    <p>In the listing in &#8220;Walk through one GradVac step&#8221; below, the <code>target</code> line blends the pair's old target with this batch's cosine, weighted by <code>beta</code>, that same small averaging-speed fraction; the check line asks, in its own words, fighting below their normal?; the <code>grads</code> line adds a scaled copy of the other gradient to task i's gradient, the nudge, not a full cut; and the final line sums the edited gradients into the combined step <code>d</code>. The dose line is the one place the listing does not show the formula: it computes the dose inside <code>solve_for_cosine</code>, in its own words the restoring blend.</p>
 
 <h2 id="one-step">Walk through one GradVac step</h2>
     <p>
@@ -1225,7 +1227,8 @@ d = sum(grads)                              # combine the edited gradients</code
         </li>
         <li>
             <strong>Costs:</strong> both need <code>K</code> gradient-computation passes (backward passes, the passes that compute the gradients) and <code>K</code> stored gradients per step, where <code>K</code> is the number of tasks. With many tasks
-            that is most of your budget. The fix is the subsampling trick used by CAGrad-Fast: apply the cuts
+            that is most of your budget. The fix is the subsampling trick used by CAGrad-Fast (a faster
+            variant of CAGrad, the worst-task method covered on its own page): apply the cuts
             or nudges to a random handful of tasks per step. GradVac additionally stores one running target per
             pair per layer group, which is tiny next to the gradients.
         </li>
@@ -1312,7 +1315,7 @@ d = sum(grads)                              # combine the edited gradients</code
         }
         function X(p) { return OX + p.x * SC; }
         function Y(p) { return OY - p.y * SC; }
-        function f2(x) { return x.toFixed(2); }
+        function f2(x) { var s = x.toFixed(2); return s === '-0.00' ? '0.00' : s; }
         function f3(x) { return x.toFixed(3); }
         function arcD(th1, th2, r) {
             var a1 = th1 * Math.PI / 180, a2 = th2 * Math.PI / 180;
@@ -1463,8 +1466,11 @@ d = sum(grads)                              # combine the edited gradients</code
         }
         function readoutHTML(c) {
             if (c.acts) {
+                var suffix = (st.target !== 0)
+                    ? ': exactly the pair\'s own target, not zero.'
+                    : ': exactly the pair\'s own target.';
                 return 'nudge: g1 &larr; g1 + ' + f3(c.a) + '&middot;g2<br>' +
-                    'check: cos(g1&prime;, g2) = ' + f2(c.newCos) + ': exactly the pair\'s own target, not zero.';
+                    'check: cos(g1&prime;, g2) = ' + f2(c.newCos) + suffix;
             }
             return 'a = 0.000: GradVac only tops up pairs that sag below their own normal.';
         }
@@ -1517,7 +1523,7 @@ d = sum(grads)                              # combine the edited gradients</code
             if (i === 1) return '<span class="gv-stage-tag">Stage 2, nudge.</span> Mixing in a dose of g2: g1 becomes g1 + ' + f3(c.a) +
                 ' &middot; g2. The orange arrow is the dose from g2, added at the tip of g1; the red arrow is the nudged gradient.';
             return '<span class="gv-stage-tag">Stage 3, check.</span> The pair now sits at cos = ' + f2(c.newCos) +
-                ', exactly its own target, not zero.';
+                (st.target !== 0 ? ', exactly its own target, not zero.' : ', exactly its own target.');
         }
         function renderPlayStage(c, i, frac) {
             fitScale(c);

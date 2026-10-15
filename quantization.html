@@ -715,7 +715,7 @@ quantized_model = torch.quantization.quantize_dynamic(
         <li>Quantization of activations happens at runtime, per batch</li>
         <li>Dequantization happens immediately after matmul (matrix multiplication, the multiply and add work that a Linear layer mostly does)</li>
      </ul>
-     <p>So why use it? It's stupid easy and gives you a fast win on CPUs, especially for LSTMs (long short-term memory networks) and Linear-heavy models. On a small MNIST (handwritten-digit) CNN from the companion notebook, dynamic quantization barely moved the needle:</p>
+     <p>So why use it? It's stupid easy and gives you a fast win on CPUs, especially for LSTMs (long short-term memory networks, recurrent networks that carry a memory across long sequences, reading text and signals one step at a time) and Linear-heavy models. On a small MNIST (handwritten-digit) CNN from the companion notebook, dynamic quantization barely moved the needle:</p>
      <div class="stat-grid">
        <div class="stat-card">
          <div class="stat-num">92.72<span class="stat-unit">%</span></div>
@@ -923,14 +923,14 @@ model.qconfig = qconfig_hist
        <p class="caption">Rebuilt from Figure 5 of Nagel et al. (arXiv 2021). <a href="https://arxiv.org/abs/2106.08295">arXiv:2106.08295</a></p>
        <p class="caption">Figure 5, verbatim caption: \"Per (output) channel weight ranges of the first depthwise-separable layer in MobileNetV2 after BN folding. The boxplots show the min and max value, the 2nd and 3rd quartile and the median are plotted for each channel.\"</p>
      </div>
-     <p>Figure 5 is why min-max loses. These are per-channel weight ranges from the first depthwise-separable layer of MobileNetV2 (a layer that filters each channel separately, then mixes the channels with a cheap 1 by 1 step) after batch-norm folding (folding absorbs the batch norm scale and shift into the convolution weights before quantizing, so batch norm stops being its own layer). Most channels are tiny. A few are enormous. One global min-max range is set by the freaks, and every normal channel pays for it in rounding error.</p>
+     <p>Figure 5 is why min-max loses. These are per-channel weight ranges from MobileNetV2, a small network built for phones and tight hardware, in its first depthwise-separable layer (a layer that filters each channel separately, then mixes the channels with a cheap 1 by 1 step) after batch-norm folding (folding absorbs the batch norm scale and shift into the convolution weights before quantizing, so batch norm stops being its own layer). Most channels are tiny. A few are enormous. One global min-max range is set by the freaks, and every normal channel pays for it in rounding error.</p>
      <p>The two lines behind that choice:</p>
 <div class="eq-card" id="quantClipEqStatic">
 <div class="eq-what">Where do you cut the range? The scale follows from the cut, and the total error splits into the two ways a weight can miss.</div>
 <div class="eq-line eq-active" data-eqline="0">scale = <span class="frac"><span class="top"><span class="eqt" style="color:#8e44ad">qmax</span> &#8722; <span class="eqt" style="color:#8e44ad">qmin</span></span><span class="bot"><span class="eqt" style="color:#2c3e50">15</span></span></span></div>
 <div class="eq-why eq-active" data-eqline="0">The scale is the clipping range being tried, from <span class="eqt" style="color:#8e44ad">qmin</span> to <span class="eqt" style="color:#8e44ad">qmax</span>, split into <span class="eqt" style="color:#2c3e50">15</span>, the number of steps in a 4-bit grid. Cut wide and the outliers are safe but the bins get fat; cut tight and the bins get fine but the outliers get beheaded.</div>
 <div class="eq-line eq-active" data-eqline="1">total MSE = clipping MSE + rounding MSE</div>
-<div class="eq-why eq-active" data-eqline="1">Each weight's squared gap between itself and its quantized then mapped back value is counted as clipping if the weight falls outside the range and as rounding if it falls inside, and each total is averaged over the weights that produced it: the total is the clipping average plus the rounding average, the two ways a weight can miss, added.</div>
+<div class="eq-why eq-active" data-eqline="1">Each weight's squared gap between itself and its quantized then mapped back value is counted as clipping if the weight falls outside the range and as rounding if it falls inside, and both terms are shares over all the weights: each term adds up its kind of squared gap, then divides by the total number of weights, so both terms share the same denominator and add up to the total, the two ways a weight can miss, added.</div>
 </div>
      
        <p>The same scale and zero-point arithmetic runs on real layers. The observer table below shows <code>conv.0</code>'s activations spanning <code>0</code> to <code>6.478520</code>, mapped to scale <code>0.025406</code> with zero-point <code>0</code>: float <code>0</code> lands exactly on int <code>0</code>, which is why ReLU outputs quantize so cleanly.</p>
@@ -1711,7 +1711,7 @@ model.qconfig = qconfig_hist
 <div class="eq-line eq-active" data-eqline="0"><span class="eqt" style="color:#2a7fbf">bins</span> = 2<sup><span class="eqt" style="color:#2c3e50">N</span></sup></div>
 <div class="eq-why eq-active" data-eqline="0"><span class="eqt" style="color:#2a7fbf">bins</span> is how many integer steps the range is chopped into: 2 to the bit-width <span class="eqt" style="color:#2c3e50">N</span>, so each added bit doubles the number of bins.</div>
 <div class="eq-line eq-active" data-eqline="1">step size (LSB) = <span class="frac"><span class="top">2.4V</span><span class="bot"><span class="eqt" style="color:#2a7fbf">bins</span></span></span></div>
-<div class="eq-why eq-active" data-eqline="1">The step size, LSB, spelled out as least significant bit, is the size of one step, the smallest change the grid can represent: the range is fixed at plus/minus 1.2V, so the step is that 2.4V span divided by the bin count.</div>
+<div class="eq-why eq-active" data-eqline="1">The step size, LSB, spelled out as least significant bit, is the size of one step, the smallest change the grid can represent: the range is fixed at plus/minus 1.2V, the example range this card borrows from the ADC tutorial's setup, so the step is that 2.4V span divided by the bin count.</div>
 <div class="eq-line eq-active" data-eqline="2"><span class="eqt" style="color:#b9770e">SNR</span> = 6.02&#183;<span class="eqt" style="color:#2c3e50">N</span> + 1.76 dB</div>
 <div class="eq-why eq-active" data-eqline="2"><span class="eqt" style="color:#b9770e">SNR</span>, spelled out as signal-to-noise ratio, is how clean the snapped-back signal is next to the original, measured in decibels: it grows by about 6 for every bit of width, plus a fixed 1.76. Every bit you drop doubles the step size and costs about 6 dB of SNR.</div>
 </div>
@@ -1719,7 +1719,7 @@ model.qconfig = qconfig_hist
      <p>
          The procedure runs in order: fix the range, choose <code>N</code>, and the bins and the step follow from the lines above. The float range gets chopped into equal steps, and everything inside one bin rounds to the same number: a value snaps to the nearest bin center, and the gap between the value and the center is its rounding error.
      </p>
-     <p>Fixed range, plus/minus <code>1.2V</code>, like the <a href="adc.html">ADC tutorial</a>:</p>
+     <p>Fixed range, plus/minus <code>1.2V</code>, like the <a href="adc.html">ADC tutorial</a>: this tool borrows that tutorial's example range and its one fixed sample value, <code>0.37V</code>, a single example voltage inside the range, so you can watch that one sample's rounding error grow as bits drop and the numbers here line up with the ones there:</p>
      <div class="bw-demo">
        <div class="bw-controls">
          <label for="bwSlider">Bit-width N: <span id="bwBits">8</span></label>
@@ -1946,9 +1946,9 @@ model.qconfig = qconfig_hist
 <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="s" style="color:#2a7fbf">s</span> = <span class="frac"><span class="top"><span class="eqt" data-k="max" style="color:#8e44ad">max</span>&#8722;<span class="eqt" data-k="min" style="color:#8e44ad">min</span></span><span class="bot"><span class="eqt" data-k="n255" style="color:#2c3e50">255</span></span></span></div>
 <div class="eq-why eq-active" data-eqline="0">The scale <span class="eqt" style="color:#2a7fbf">s</span> is one bucket's width: the tensor's full range, <span class="eqt" style="color:#8e44ad">max</span> minus <span class="eqt" style="color:#8e44ad">min</span>, split into 255 equal steps, the number of steps between the 256 buckets of an 8-bit grid. The scale is what shrinks the float range down to the integer grid.</div>
 <div class="eq-line eq-active" data-eqline="1"><span class="eqt" style="color:#2c3e50">z</span> = round(<span class="frac"><span class="top">&#8722;<span class="eqt" style="color:#8e44ad">min</span></span><span class="bot"><span class="eqt" style="color:#2a7fbf">s</span></span></span>)</div>
-<div class="eq-why eq-active" data-eqline="1"><span class="eqt" style="color:#2c3e50">z</span> counts how many bucket widths the minimum sits below zero, rounded to a whole bucket. It is not clamped inside the integer range; the snapped values in the next line are what get clamped. It is the shift that makes the tensor's minimum land on the first bucket.</div>
+<div class="eq-why eq-active" data-eqline="1"><span class="eqt" style="color:#2c3e50">z</span> is the shift that makes the tensor's minimum land on the first bucket, rounded to a whole bucket. This tensor's minimum is +0.05, above zero, so minus min over the scale comes out negative and z is negative, minus 18 here: the grid shifts down by that many bucket widths so the minimum lands on bucket 0.</div>
 <div class="eq-line eq-active" data-eqline="2"><span class="eqt" data-k="xq" style="color:#d35400">x<sub>q</sub></span> = <span class="eqt" data-k="round" style="color:#2c3e50">round</span>(<span class="frac"><span class="top"><span class="eqt" data-k="x" style="color:#2a7fbf">x</span></span><span class="bot"><span class="eqt" data-k="s" style="color:#2a7fbf">s</span></span></span>)+<span class="eqt" data-k="z" style="color:#2c3e50">z</span></div>
-<div class="eq-why eq-active" data-eqline="2">Snap each float to a bucket: <span class="eqt" style="color:#d35400">x<sub>q</sub></span> is the integer bucket each float lands in. Dividing by the scale shrinks the float range down to the integer grid, round snaps each value to the nearest bucket, and adding <span class="eqt" style="color:#2c3e50">z</span>, the zero point, shifts the grid so float zero lands exactly on an integer; here the shift makes the tensor's minimum land on the first bucket.</div>
+<div class="eq-why eq-active" data-eqline="2">Snap each float to a bucket: <span class="eqt" style="color:#d35400">x<sub>q</sub></span> is the integer bucket each float lands in. Dividing by the scale shrinks the float range down to the integer grid, round snaps each value to the nearest bucket, and adding <span class="eqt" style="color:#2c3e50">z</span>, the zero point, shifts each value by that many buckets; here the shift makes the tensor's minimum land on the first bucket, and float zero is not on this grid at all, because every value in this tensor sits above zero, so zero would map to bucket minus 18, outside the 0 to 255 grid.</div>
 <div class="eq-line eq-active" data-eqline="3"><span class="eqt" data-k="xhat" style="color:#d35400">x&#770;</span> = <span class="eqt" data-k="s" style="color:#2a7fbf">s</span>&#183;(<span class="eqt" data-k="xq" style="color:#d35400">x<sub>q</sub></span>&#8722;<span class="eqt" data-k="z" style="color:#2c3e50">z</span>)</div>
 <div class="eq-why eq-active" data-eqline="3">Snap back to float: <span class="eqt" style="color:#d35400">x&#770;</span> is the snapped-back float. Run it backward, undo the zero-point shift, then multiply back up by the scale, to see what value the bucket actually represents.</div>
 <div class="eq-line eq-active" data-eqline="4"><span class="eqt" data-k="e" style="color:#c0392b">e</span> = <span class="eqt" data-k="x" style="color:#2a7fbf">x</span>&#8722;<span class="eqt" data-k="xhat" style="color:#d35400">x&#770;</span></div>
@@ -1965,6 +1965,7 @@ model.qconfig = qconfig_hist
        #qswStep .play-btn:disabled { opacity: .35; cursor: default; }
        #qswOutcome { min-height: 2.8em; margin: 0.5rem 0 0; text-align: center; }
        #qswSvg { width: 100%; max-width: 520px; height: auto; display: block; margin: 0 auto; }
+       @media (max-width:480px){ #qswStep .eq-card{margin:.7rem auto;padding:.7rem .8rem} }
        </style>
 <div class="qsw-dots">
          <button type="button" class="qsw-dot active" data-s="0" aria-label="Step 1: find min and max">1</button>
@@ -1983,7 +1984,7 @@ model.qconfig = qconfig_hist
          <div class="eq-line" data-eqline="0"><span class="eqt" data-k="s" style="color:#2a7fbf">s</span> = <span class="frac"><span class="top"><span class="eqt" data-k="max" style="color:#8e44ad">max</span>&#8722;<span class="eqt" data-k="min" style="color:#8e44ad">min</span></span><span class="bot"><span class="eqt" data-k="n255" style="color:#2c3e50">255</span></span></span></div>
         <div class="eq-why" data-eqline="0">Measure the bucket size: split the tensor's range into 255 equal steps. One scale squeezes six floats into 256 buckets, and each value rounds to within half a bucket. Steps 1 and 2 of the step-through above run this line: find min and max, then split into 256 buckets.</div>
          <div class="eq-line" data-eqline="1"><span class="eqt" data-k="z" style="color:#2c3e50">z</span> = round(<span class="frac"><span class="top">&#8722;<span class="eqt" style="color:#8e44ad">min</span></span><span class="bot"><span class="eqt" style="color:#2a7fbf">s</span></span></span>)</div>
-        <div class="eq-why" data-eqline="1">Set the zero point: <span class="eqt" style="color:#2c3e50">z</span> counts how many bucket widths the minimum sits below zero, rounded to a whole bucket. It is not clamped inside the integer range; the snapped values in the next line are what get clamped. It is the shift that makes the tensor's minimum land on the first bucket.</div>
+        <div class="eq-why" data-eqline="1">Set the zero point: <span class="eqt" style="color:#2c3e50">z</span> is the shift that makes the tensor's minimum land on the first bucket, rounded to a whole bucket. This tensor's minimum is +0.05, above zero, so minus min over the scale comes out negative and z is negative, minus 18 here: the grid shifts down by that many bucket widths so the minimum lands on bucket 0.</div>
          <div class="eq-line" data-eqline="2"><span class="eqt" data-k="xq" style="color:#d35400">x<sub>q</sub></span> = <span class="eqt" data-k="round" style="color:#2c3e50">round</span>(<span class="frac"><span class="top"><span class="eqt" data-k="x" style="color:#2a7fbf">x</span></span><span class="bot"><span class="eqt" data-k="s" style="color:#2a7fbf">s</span></span></span>)+<span class="eqt" data-k="z" style="color:#2c3e50">z</span></div>
         <div class="eq-why" data-eqline="2">Snap each float to a bucket: divide by the bucket size, round to the nearest whole number, and shift by the zero point, the shift that makes the tensor's minimum land on the first bucket. This is step 3 of the step-through above, snap floats to bucket centers.</div>
          <div class="eq-line" data-eqline="3"><span class="eqt" data-k="xhat" style="color:#d35400">x&#770;</span> = <span class="eqt" data-k="s" style="color:#2a7fbf">s</span>&#183;(<span class="eqt" data-k="xq" style="color:#d35400">x<sub>q</sub></span>&#8722;<span class="eqt" data-k="z" style="color:#2c3e50">z</span>)</div>
@@ -2206,7 +2207,7 @@ class ObserverCNN(nn.Module):
         self.relu1 = nn.ReLU()
         self.conv2 = nn.Conv2d(16, 32, 3, stride=1, padding=1)
         self.relu2 = nn.ReLU()
-        self.pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.pool = nn.AdaptiveAvgPool2d((1, 1)) # averages each channel down to a single number, shrinking the maps before the linear layer
         self.fc = nn.Linear(32, 10)
 
         # Manual observers
@@ -2384,7 +2385,7 @@ for name, module in model_prepared_qat.named_modules():
         <p>My rule of thumb: scale is <code>0</code> or <code>NaN</code>, the observers saw nothing. Scale is absurdly large or tiny, an outlier skewed the range.</p>
         
         <h3>Visualize activation ranges</h3>
-        <p>Plot the activations. Seriously, just look at them. Hook a layer, histogram the float values, and compare against what the observer claims. If the observer's range is way wider than the actual data, you know where your resolution went.</p>
+        <p>Plot the activations. Seriously, just look at them. Hook a layer, meaning attach a hook, a function the framework runs when that layer executes during a forward pass so it can record what the layer produced, histogram the float values, and compare against what the observer claims. If the observer's range is way wider than the actual data, you know where your resolution went.</p>
         <pre><code class="language-python">
 activation_histograms = {}
 def capture_activations_hook(name):

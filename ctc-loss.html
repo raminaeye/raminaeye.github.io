@@ -667,18 +667,18 @@
    <h1>CTC Loss</h1>
 <h2 id="alignment">The alignment problem: which frame said what</h2>
 
-   <p>If we had a sequence of input frames, and we knew the label for each frame <em>(we don't here)</em> then we could just score each frame against its known label and average over frames.</p>
+   <p>Say I have a sequence of input frames, a frame being one short slice of the audio at one time step, and say I knew the label for each frame <em>(I don't here)</em>. Then I could just score each frame against its known label and average over frames.</p>
 
 
-   <p>But this assumes a <strong>frame-to-label alignment</strong>. We don't have labels for every frame and the target tokens are much shorter than input. A token is one unit of the target output, a letter in the examples on this page. A speech sequence is typically <code>1000</code> frames for <code>10</code> seconds of audio, while the text it should produce is maybe <code>20</code> words, and we don't know which frames belong to which token.</p>
+   <p>But that easy version assumes a <strong>frame-to-label alignment</strong>, and I don't have one. I have no labels for the individual frames, and the target tokens are much shorter than the input. A token is one unit of the target output, a letter in the examples on this page. A speech sequence is typically <code>1000</code> frames for <code>10</code> seconds of audio, while the text it should produce is maybe <code>20</code> words, and I don't know which frames belong to which token.</p>
 
-   <p>We need a loss that doesn't require explicit alignment and can collapse variable length frame prediction into a shorter token length. This is where <strong>"Connectionist Temporal Classification" (CTC)</strong> loss comes to play.</p>
+   <p>So I need a loss that doesn't require explicit alignment and can collapse a variable length frame prediction into a shorter token length. That loss is <strong>"Connectionist Temporal Classification" (CTC)</strong>.</p>
 
    <h2 id="ctc">Connectionist Temporal Classification (CTC)</h2>
 
-   <p>CTC augments the vocabulary with a <strong>blank token</strong>, no label. This allows the frames to correspond to no output symbols. So, now you have <code>T</code> frames and each frame gets a probability distribution over <code>V+1</code> (tokens + blank).</p>
+   <p>CTC augments the vocabulary with a <strong>blank token</strong>, no label. The blank lets a frame correspond to no output symbol at all. So, now you have <code>T</code> frames and each frame gets a probability distribution over <code>V+1</code> (tokens + blank): one number per symbol, each between 0 and 1, and all of them adding up to 1.</p>
 
-   <p>To get final transcriptions from a frame sequence you have to merge their predictions. <em>You merge repeated tokens and remove blanks.</em> CTC loss uses dynamic programming to sum the probabilities of all possible alignments between frames and target tokens and does this efficiently.</p>
+   <p>To get a final transcription from a frame sequence, you have to merge the frame predictions. <em>You merge repeated tokens and remove blanks.</em> And the CTC loss uses dynamic programming to sum the probabilities of all possible alignments between frames and target tokens: dynamic programming means computing that big sum by reusing smaller sums, so the total comes out efficiently instead of by enumerating every path.</p>
 
    <div class="diagram">
      <p class="diag-label"><code>10</code> input frames, one prediction per frame</p>
@@ -707,7 +707,7 @@
        <div class="eq-line eq-active" data-eqline="2"><span class="eqt" data-k="loss" style="color:#c0392b">CTC loss</span> = &minus;log <span class="eqt" data-k="P" style="color:#3498db">P(y|x)</span></div>
         <div class="eq-why eq-active" data-eqline="2">The CTC loss is then just the negative log of that total probability: a total near 1 gives a loss near 0, and a small total gives a large loss, so the loss punishes the model most for the transcripts it rated unlikely.</div>
      </div>
-   <p>One such path is the <code>c c - a t t</code> path. The <code>ctc_forward</code> listing further down computes the total: its last line returns the final frame's two alpha values added, which is <code>P(y|x)</code>, and the loss is its negative log.</p>
+   <p>One such path is the <code>c c - a t t</code> path. The <code>ctc_forward</code> listing further down computes the total: its last line returns the final frame's two alpha values added, which is <code>P(y|x)</code>, and the loss is its negative log. Alpha is the forward table's cell value: the total probability of every way to reach that cell, and I build the table properly below.</p>
 
    <p>That diagram is the whole trick, but it is static. Every path, one cell per frame from left to right, collapses by the same rule the diagram shows:</p>
 
@@ -941,11 +941,11 @@
 
    <h3>The loss sums over every alignment</h3>
    
-   <p>Each frame has a probability mass over many tokens and thus can create multiple alignments. We sum over all valid alignments that lead to ground truth. <em>But, this is a lot of alignments.</em> Each frame can pick from the whole vocabulary plus a blank token, so over a long sequence the number of possible alignments explodes. Even with <code>50</code> symbols per frame and <code>100</code> frames, the path count is astronomically large.</p>
+   <p>Each frame spreads its probability mass, its probability shared out over the options, over many tokens, and thus can create multiple alignments. I sum over all valid alignments that lead to the ground truth. <em>But, this is a lot of alignments.</em> Each frame can pick from the whole vocabulary plus a blank token, so over a long sequence the number of possible alignments explodes. Even with <code>50</code> symbols per frame and <code>100</code> frames, the path count is astronomically large.</p>
 
-   <p>With CTC the model doesn't output one label, it outputs a probability distribution over all possible labels at each frame. Those probabilities come from softmax, which takes the model's raw scores for a frame, exponentiates each one so they are all positive, and divides by their total, so the scores become numbers between 0 and 1 that add up to 1. Alignments are not generated arbitrarily from predictions, <em>they are constrained by the ground truth.</em> An alignment is one possible frame-level sequence that, when collapsed, equals the ground truth.</p>
+   <p>With CTC, the model doesn't output one label. It outputs a probability distribution over all possible labels at each frame. Those probabilities come from softmax, which takes the model's raw scores for a frame, exponentiates each one so they are all positive, and divides by their total, so the scores become numbers between 0 and 1 that add up to 1. I don't generate alignments arbitrarily from those predictions, either: <em>they are constrained by the ground truth.</em> An alignment is one possible frame-level sequence that, when collapsed, equals the ground truth.</p>
 
-   <p>The predictions supply the probability at each frame and the ground truth constrain which sequence of choices we care about. We compute the total probability of the ground truth string by summing over all valid alignment paths.</p>
+   <p>The predictions supply the probability at each frame, and the ground truth constrains which sequence of choices I care about. I compute the total probability of the ground truth string by summing over all valid alignment paths.</p>
 
    
 
@@ -959,28 +959,28 @@
 
    <p><em>Same negative-log trick as cross-entropy, one level up.</em> Cross-entropy is the loss that scores one prediction by the negative log of the probability it gave the correct label; CTC takes the same negative log, but only after summing over every alignment. The toy table gives that sum, and the loss is its negative log.</p> If the model piles its mass onto alignments that collapse to the right transcript, the sum approaches <code>1</code> and the loss approaches <code>0</code>. If the mass leaks onto wrong transcripts, the loss grows. The DP just computes that sum without enumerating paths.</p>
 
-   <p>The big idea: find the alignments that collapse to the target word, and score each valid alignment with the model's probability predictions. CTC doesn't enumerate every single alignment though. It uses <strong>forward-backward dynamic programming algorithm</strong> to efficiently sum their probabilities.</p>
+   <p>The big idea: find the alignments that collapse to the target word, and score each valid alignment with the model's probability predictions. CTC doesn't enumerate every single alignment, though. It uses the <strong>forward-backward dynamic programming algorithm</strong> to efficiently sum their probabilities: a forward sweep that accumulates probability from the first frame toward the end, and a backward sweep that accumulates it from the last frame back, and I take the two sweeps in turn below.</p>
 
    <h3>Dynamic Programming for CTC</h3>
 
-   <p>At each input you can output either a symbol or a blank token. A <strong>valid alignment</strong> is any sequence of frame labels that collapses to the ground truth after merging consecutive duplicates and removing blanks. It comes down to counting paths: how many paths collapse to the target sequence and once we have that we can replace those counts with probabilities.</p>
+   <p>At each input, you output either a symbol or a blank token. A <strong>valid alignment</strong> is any sequence of frame labels that collapses to the ground truth after merging consecutive duplicates and removing blanks. I think of it as counting paths first: how many paths collapse to the target sequence? Once I have that count, I can replace those counts with probabilities.</p>
 
    <p>A naive CTC would be a softmax with repeat collapse. You take the single best-scoring alignment and collapse repeats accordingly. It's simple and fast and it <strong>doesn't work</strong>! It assumes each character or phoneme, a phoneme being one distinct unit of speech sound, is well aligned in time or clearly segmented. Misalignment and variable timing will cause errors.</p>
 
 
 
-   <p>CTC builds an extended target sequence with blanks inserted between every character.</p>
+   <p>So I build an extended target sequence with blanks inserted between every character.</p>
    
-   <p>That makes the extended length twice the target length, plus one. Now let's define a DP table. Our original target of length <code>3</code> has been extended to <code>7</code>. <em>Blanks are guard rails</em>, they allow for variable timing and disambiguating repeats. Now think of aligning the <code>6</code> frames to the <code>7</code> positions in the extended sequence. At each frame you stay on the same symbol or move to the next symbol. Each step you can:</p>
+   <p>That makes the extended length twice the target length, plus one. Now let me define a DP table. My original target of length <code>3</code> has been extended to <code>7</code>. <em>Blanks are guard rails</em>: they allow for variable timing and disambiguate repeats. Now think of aligning the <code>6</code> frames to the <code>7</code> positions in the extended sequence. At each frame you stay on the same symbol or move to the next symbol. Each step you can:</p>
    <ol>
        <li>Stay at the same position</li>
        <li>Move forward by <code>1</code> (always)</li>
        <li>Move forward by <code>2</code> (only if skipping a blank between different symbols)</li>
    </ol>
 
-   <p>This is like a <strong>lattice</strong>, each node is <code>(t,s)</code> at time <code>t</code> and target position <code>s</code>. So, now our table looks like <code>6</code> frames/rows by <code>7</code> alignments/columns. Number of rows are your input length and columns are the extended target length. Time axis is how far we have processed the input and the extended target axis is how far we've matched in to the target string. <em>A path through this grid is one alignment.</em></p>
+   <p>Picture a <strong>lattice</strong>: each node is <code>(t,s)</code>, at time <code>t</code> and target position <code>s</code>. My table now looks like <code>6</code> frames/rows by <code>7</code> alignments/columns. The number of rows is your input length and the columns are the extended target length. The time axis is how far I have processed the input, and the extended target axis is how far I have matched into the target string. <em>A path through this grid is one alignment.</em></p>
 
-   <p>From any cell, the DP table says: what is the probability (or count) of being aligned to this position in the extended target.</p>
+   <p>From any cell, the DP table tells me the probability (or count) of being aligned to this position in the extended target.</p>
 
    <div class="diagram" id="ctcPaperFig">
      <p class="caption">Figure 3 of Graves et al. (ICML 2006). <a href="https://dl.acm.org/doi/10.1145/1143844.1143891">doi:10.1145/1143844.1143891</a></p>
@@ -992,7 +992,7 @@
 
    <h3>Stay, step, skip: the transition rules</h3>
    
-   <p><strong>The transition rule:</strong> Each cell in the table adds up the ways to reach it: staying on the same symbol from the previous frame, advancing one symbol, or skipping over a blank token when that is valid. <em>This is the forward algorithm.</em> After filling the whole table the number of valid alignments is the sum of the two ways to finish: ending on the final character or on a trailing blank.</p>
+   <p>Here is the transition rule I fill the table with: each cell adds up the ways to reach it, staying on the same symbol from the previous frame, advancing one symbol, or skipping over a blank token when that is valid. <em>This is the forward algorithm.</em> After I fill the whole table, the number of valid alignments is the sum of the two ways to finish: ending on the final character or on a trailing blank.</p>
 
 <pre><code class="language-python">import numpy as np
 
@@ -1354,6 +1354,14 @@ function syncEq(cardId, lines, terms){
      }
      function render() {
        document.getElementById('dpStep').disabled = rowsFilled >= T;
+       /* The finale's flying "+" is garnish that removes itself on a 2.5s
+          timer. A Reset (or a Play restart) before that timer fires must
+          still restore the exact rest state, so clear any lingering plus
+          here instead of leaving it in the demo after the reset render. */
+       if (rowsFilled < T) {
+         var stalePlus = demo.querySelectorAll('.dp-fly-plus');
+         for (var fi = 0; fi < stalePlus.length; fi++) stalePlus[fi].parentNode.removeChild(stalePlus[fi]);
+       }
        syncEq('dpEq', EQMAP[rowsFilled].lines, EQMAP[rowsFilled].terms);
        var t, s, td;
        for (var i = 0; i < cells.length; i++) {
@@ -1450,7 +1458,7 @@ function syncEq(cardId, lines, terms){
 
 
 
-   <p>This is our <code>p(y|x)</code>, we just efficiently computed the sum. This is the probability of target under the model.</p>
+   <p>That is my <code>p(y|x)</code>: I just computed the sum efficiently. It is the probability of the target under the model.</p>
 
    <p><em>Okay, so does this actually work?</em> I didn't run this one myself, so here is the number from the literature instead. Graves et al. trained a bidirectional LSTM (long short-term memory, a recurrent network that reads a sequence step by step and carries a memory of what it has seen, with gates that let it choose what to keep and what to forget) with CTC on the TIMIT speech corpus (the speech dataset the results below are measured on) and reported label error rate, the share of labels the model gets wrong, on the core test set (the held-out scoring set the paper reports on, made of examples the model did not train on), mean over <code>5</code> runs. Bidirectional means this network reads the frames in both directions, forward through time and backward, so what it knows at each frame can use the frames after it as well as the ones before. The baselines in the table below are HMMs, hidden Markov models, the older family of speech models that move through a sequence of hidden states step by step, with each state emitting sounds at set probabilities. A hybrid pairs that state machine with the neural network, which scores how well each frame fits each state, and context dependent means a sound's model also depends on the sounds around it. The model card below gives the CTC model's size as blocks per direction, a block being one of the memory carrying units of that recurrent network, the parts that hold what it has seen so far as it reads. The prefix search row is a decoding method rather than a model: instead of taking only the single best path, it grows candidate label sequences prefix by prefix and keeps the ones whose total probability, summed over all the paths that collapse to them, is highest, which is why it scores a little better than best path decoding:</p>
 <p class="stat-note"><strong>Model:</strong> BLSTM + CTC, <code>100</code> blocks per direction. <strong>Dataset:</strong> TIMIT (<code>26</code> MFCC coeffs per frame: mel-frequency cepstral coefficients, the standard compact summary of a frame's spectrum (how much of each frequency the frame contains); <code>61</code> phonemes + blank). <strong>Source:</strong> Graves et al., "Connectionist Temporal Classification", ICML 2006, Table 1 (literature reference, not run here).</p>
@@ -1481,7 +1489,7 @@ function syncEq(cardId, lines, terms){
 
    <h2 id="forward-backward">Training with Forward-Backward</h2>
    
-   <p>But, we also need gradients with respect to the model's softmax outputs at each frame during training. We need to know at frame <code>1</code> how much probability was aligned "A" vs blank. This is the <strong>posterior probability</strong>.</p>
+   <p>But the total is not enough for training. I also need gradients with respect to the model's softmax outputs at each frame: a gradient is the correction training computes at a frame, built by comparing where the credit should go with what the model predicted, as the card below works out. To build it, I need to know at frame <code>1</code> how much probability was aligned "A" vs blank. That share, the frame's share of the credit for a target position, is the <strong>posterior probability</strong>.</p>
    
    <p>The forward gives you the <strong>prefix</strong> probability, all the probability mass up to this frame and target position. The backward gives you the <strong>suffix</strong> probability, all the mass from here to the end. Combine them and you get how likely this frame really belongs to this target position.</p>
 
@@ -1546,7 +1554,7 @@ def ctc_forward_backward(probs, target):
    <ol>
      <li>Forward DP: compute <code>alpha</code>, the prefix probability, all the probability mass up to this frame and target position.</li>
      <li>Backward DP: compute <code>beta</code>, the suffix probability, all the mass from here to the end.</li>
-     <li>The forward score is the prefix mass, the backward score the suffix mass; combined and normalized, they give each frame's share of the credit.</li>
+     <li>The forward score is the prefix mass, the backward score the suffix mass; combined and normalized (scaled so the shares add up to 1), they give each frame's share of the credit.</li>
      <li>The gradient at each frame is that share minus what the model predicted.</li>
    </ol>
    <div class="eq-card" id="ctcPostEq">
@@ -1787,7 +1795,7 @@ def ctc_forward_backward(probs, target):
 
    <h2 id="beam-search">Inference: Beam Search</h2>
    
-   <p>At inference, we need to figure out which output sequence to return. If the model is confident and the output space is small or constrained then a greedy decoding is okay. But, that would throw away a lot of probability mass. <strong>Beam search</strong> recovers some of it.</p>
+   <p>At inference, I need to figure out which output sequence to return. If the model is confident and the output space is small or constrained, then a greedy decoding is okay: greedy takes the best symbol at each frame and moves on. But that would throw away a lot of probability mass. <strong>Beam search</strong> recovers some of it: instead of committing to one path, it keeps several candidate sequences alive and merges the paths that collapse to the same answer, as the next section shows.</p>
 
 <pre><code class="language-python">import numpy as np
 
@@ -1865,7 +1873,7 @@ def simple_ctc_beam_search(probs, vocab, beam_size=3, top_k=3):
 
    <h3>Beam search merges hypotheses</h3>
 
-   <p>Greedy decoding is lazy. It takes the best symbol at each frame and calls it a day, which means it sees exactly one path: "ab". But fourteen other paths collapse to "ab" too, and greedy never looks at them. Fifteen paths collapse to "ab" in total; with beam width <code>3</code>, the beam merges fourteen of them into the one candidate and prunes the last (drops it from the candidates kept), which is why its mass falls just short of the full total. <em>That stacking IS beam search.</em> The code above does this in forty-five lines.</p>
+   <p>Greedy decoding is lazy. It takes the best symbol at each frame and calls it a day, which means it sees exactly one path: "ab". But fourteen other paths collapse to "ab" too, and greedy never looks at them. Beam search does: it keeps several hypotheses, the candidate sequences still in the running, and merges the paths that collapse to each one. Fifteen paths collapse to "ab" in total; with beam width <code>3</code> (the beam width is the number of candidates kept at each frame), the beam merges fourteen of them into the one candidate and prunes the last (drops it from the candidates kept), which is why its mass falls just short of the full total. <em>That stacking IS beam search.</em> The code above does this in forty-five lines.</p>
    <div class="eq-card" id="ctcBeamEq">
        <div class="eq-what">Beam search in one line: a candidate's score grows by every path that merges into it.</div>
        <div class="eq-line eq-active" data-eqline="0">score(new_prefix) after this frame = score already accumulated for new_prefix + <span class="eqt" data-k="prob" style="color:#3498db">prob</span> &#215; <span class="eqt" data-k="p" style="color:#d35400">p</span></div>
@@ -2159,7 +2167,7 @@ def simple_ctc_beam_search(probs, vocab, beam_size=3, top_k=3):
 
    <h2 id="beyond-ctc">Beyond CTC</h2>
 
-   <p>CTC assumes each frame's prediction is independent of the others: the model cannot use what it already output to help predict what comes next. When that independence hurts, the named follow-up is <strong>RNN-T</strong> (recurrent neural network transducer): it adds a prediction network that conditions on previous outputs, so the model learns a language model, a model of how likely each output token is after the ones that came before it, alongside the acoustics, the sound side of the model, what the audio itself says about which speech sounds are present. It earns its place wherever the output has strong sequence structure, like language.</p>
+   <p>One assumption runs through everything above: CTC treats each frame's prediction as independent of the others, so the model cannot use what it already output to help predict what comes next. When that independence hurts, the named follow-up is <strong>RNN-T</strong> (recurrent neural network transducer): it adds a prediction network that conditions on previous outputs, so the model learns a language model, a model of how likely each output token is after the ones that came before it, alongside the acoustics, the sound side of the model, what the audio itself says about which speech sounds are present. It earns its place wherever the output has strong sequence structure, like language.</p>
 
    <h2 id="references">References</h2>
 

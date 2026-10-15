@@ -767,18 +767,18 @@ figcaption { margin-top: 1rem; }
         <a class="tab-link" href="#gn-thermostat">Tasks that are behind get a louder target</a>
         <a class="tab-link" href="#gn-loop">Four steps, repeated every batch</a>
         <a class="tab-link" href="#gn-fig2">The quiet task catches up</a>
-        <a class="tab-link" href="#gn-replay">Watch the weights rebalance themselves</a>
+        <a class="tab-link" href="#gn-replay">GradNorm rebalancing frees the quiet task</a>
         <a class="tab-link" href="#gn-when">When GradNorm helps and when it does not</a>
         <a class="tab-link" href="#references">References</a>
     </div>
 
 <h2 id="loudness">One loud task drowns out the rest</h2>
 
-    <p>Picture several tasks sharing one <strong>trunk</strong>. Each task reports a loss, but the losses live on different planets: a depth loss near <code>800</code>, a classification loss near <code>2</code>. Add them up as-is and <em>the big one shouts while the others whisper</em>. And even after you fix the scales, one task can still dominate: its <strong>gradients</strong> are simply louder, so the shared weights move mostly for it. Hand-tuning a weight per task works, until the tasks' fortunes change mid-training and your tuned weights go stale.</p>
+    <p>Picture several tasks sharing one <strong>trunk</strong>, the shared part of the model that every task trains, with a small part of its own on top. Each task reports a loss, but the losses live on different planets: a depth loss near <code>800</code>, a classification loss near <code>2</code>. Add them up as-is and <em>the big one shouts while the others whisper</em>. And even after you fix the scales, one task can still dominate: its <strong>gradients</strong> are simply louder, so the shared weights move mostly for it. Hand-tuning a weight per task works, until the tasks' fortunes change mid-training and your tuned weights go stale.</p>
 
     <p>It is a loss-weighting method: it changes how loud each loss is, before any gradient surgery (methods that edit the gradients' directions instead of how loud each loss is).</p>
 
-    <p>The key fact: a task that dominates training necessarily expresses that dominance as large gradients. The classic case: one network learning segmentation, depth, and surface normals (the direction each point on a surface faces) together.</p>
+    <p>The key fact: a task that dominates training necessarily expresses that dominance as large gradients. The classic case: one network learning segmentation, labeling each part of an image by what it shows, depth, and surface normals (the direction each point on a surface faces) together.</p>
 
 <h2 id="gn-moderator">Turn down the loud tasks, turn up the ones that are behind</h2>
 
@@ -823,7 +823,7 @@ figcaption { margin-top: 1rem; }
 
 <h2 id="gn-thermostat">Tasks that are behind get a louder target</h2>
 
-    <p>Each task gets a target loudness: the average loudness across tasks, boosted for whoever is behind. Two fixes in one rule. The average pulls everyone toward the same volume, curing the scale problem. The boost turns the volume up for tasks that are behind, curing the speed problem. A strength dial sets <em>how hard the boost pushes</em>.</p>
+    <p>Each task gets a target loudness: the average loudness across tasks, boosted for whoever is behind. Two fixes in one rule. The average pulls everyone toward the same volume, curing the scale problem. The boost turns the volume up for tasks that are behind, curing the speed problem. A strength dial, written <code>α</code> in the line below, sets <em>how hard the boost pushes</em>.</p>
 
     <p>Set each task's target loudness: start from the average loudness, then scale it up for tasks that are falling behind.</p>
     <div class="eq-card" id="gnEqS4">
@@ -855,6 +855,8 @@ figcaption { margin-top: 1rem; }
 
     <p>GradNorm is a <strong>thermostat, not a guess</strong>: it re-measures after every correction, so the starting weights do not have to be lucky.</p>
 
+    <p>The listing starts after the forward pass, one run through the model in the forward direction that produces the predictions the losses are scored from, so the losses it opens with are already in hand.</p>
+
     <pre><code class="language-python"># after the forward pass: losses = [L_1..L_K]; w = trainable task weights
 G      = [norm(grad(w[i] * losses[i], W)) for i in range(K)]  # loudness per task
 ratio  = losses / losses_0            # progress so far, unit-free
@@ -869,7 +871,7 @@ w = w * K / sum(w)                    # fixed budget: one task up, another down<
 
 <h2 id="gn-loop">Four steps, repeated every batch</h2>
 
-    <p>GradNorm runs as a loop every training step: measure, set targets, nudge the weights, renormalize, then measure again. Walk through one step below.</p>
+    <p>GradNorm runs as a loop every training step: measure, set targets, nudge the weights, renormalize, then measure again. Walk through one step below. The walkthrough draws loudness on a log scale: equal distances along the axis mean equal multiples, each step multiplying the value by ten, so loudness <code>3</code> and loudness <code>300</code> can share one axis without the small bar vanishing.</p>
 
         <figure class="figure" style="margin:1.75rem 0;">
       <svg viewBox="0 0 460 290" role="img" aria-label="The GradNorm loop: sense, compare, correct, renormalize, repeated every training step" style="width:100%;max-width:520px;height:auto;display:block;margin:0 auto;">
@@ -1019,7 +1021,7 @@ w = w * K / sum(w)                    # fixed budget: one task up, another down<
         </ul>
       </div>
 
-<h2 id="gn-replay">Watch the weights rebalance themselves</h2>
+<h2 id="gn-replay">GradNorm rebalancing frees the quiet task</h2>
 
     <p>One shared trunk, two tasks, the second starting much louder.</p>
 
@@ -1078,7 +1080,7 @@ w = w * K / sum(w)                    # fixed budget: one task up, another down<
         </div>
       </div>
 
-    <p><strong>Reach for it when</strong> your tasks have very different loss scales or learning speeds. The classic case is dense prediction (segmentation + depth + normals).</p>
+    <p><strong>Reach for it when</strong> your tasks have very different loss scales or learning speeds. The classic case is dense prediction, a prediction for every pixel or point in the input rather than one answer for the whole input (segmentation + depth + normals).</p>
 
     <p><strong>Costs:</strong> one extra gradient-computation pass per task (a backward pass, the pass that computes the gradients) to get the per-task norms at the last shared layer, plus a second-order term through the penalty (the penalty is built from the gradients themselves, so training on it differentiates a derivative). Modest in practice.</p>
 

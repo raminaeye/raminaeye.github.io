@@ -693,7 +693,7 @@
    </div>
 
 
-   <p>Why would you quantize a model that already works? <em>Because smaller numbers are cheaper, in every way that matters.</em> Smaller model means less memory bandwidth. Fewer bits means fewer multiplies and faster inference. Integer ops burn less power than float on most hardware. Same model, smaller bills.</p>
+   <p>Why would you quantize a model that already works? <em>Because smaller numbers are cheaper, in every way that matters.</em> Smaller model means less memory bandwidth. Fewer bits means fewer multiplies and faster inference (inference is running the trained model on new inputs to get its predictions, as opposed to training it). Integer ops burn less power than float on most hardware. Same model, smaller bills. Two words carry the whole page, so here they are up front: a tensor is the array of numbers a layer holds or passes on, its weights or its activations, and an activation is a layer's output values, the numbers it hands to the next layer after an input runs through it.</p>
 
    <p>There are two ways to get there: <strong>Post-Training Quantization (PTQ)</strong>, where you quantize a model after training, and <strong>Quantization-Aware Training (QAT)</strong>, where the model trains with quantization in the loop. PTQ itself comes in two flavors, <strong>Dynamic</strong> and <strong>Static</strong>. I will start with the easy one.</p>
 
@@ -728,14 +728,14 @@ quantized_model = torch.quantization.quantize_dynamic(
          <div class="stat-note">barely moved the needle</div>
        </div>
      </div>
-     <p>But why doesn't it work well for CNNs? Because Conv2d is not matmul. Conv layers have gnarly memory access patterns and need pre-quantized activations to be efficient. Dynamic quantization doesn't do that. You'd be quantizing every sliding window patch per inference. Not fun. Not fast.</p>
-     <p>Also, dynamic quantization doesn't touch things like BatchNorm or ReLU. It just swaps in dynamic versions of Linear and LSTM layers. So, no fusion here. No point fusing layers if you're not touching them.</p>
+     <p>But why doesn't it work well for CNNs? Because Conv2d is not matmul. A convolution slides a small filter across the input and, at each stop, multiplies the filter by the patch under it and adds the products up, so one output value sums a whole little patch instead of one row. Conv layers have gnarly memory access patterns and need pre-quantized activations to be efficient. Dynamic quantization doesn't do that. You'd be quantizing every sliding window patch per inference. Not fun. Not fast.</p>
+     <p>Also, dynamic quantization doesn't touch things like BatchNorm (batch normalization, a layer that rescales each batch of activations to a steady range, then shifts them, so training stays stable) or ReLU (the activation that passes positive values through unchanged and zeroes out the negative ones, which is why its outputs span 0 upward in the tables below). It just swaps in dynamic versions of Linear and LSTM layers. So, no fusion here. No point fusing layers if you're not touching them.</p>
    </section>
 
    <section>
      <h2 id="static-quantization">Static quantization: calibrate first, run everything in int8</h2>
      <p>Static quantization is the version I actually deploy. Both weights and activations go to int8. But to quantize activations, you first need to know their range. That is where <strong>calibration</strong> comes in. You run some input data through the model (no labels needed) to collect min and max values of activations. PyTorch uses that to decide how to quantize.</p>
-     <p>This works great for CNNs and edge deployment. You get full int8 inference.</p>
+     <p>This works great for CNNs and edge deployment, running the model on the device at the edge, a phone or a small board, instead of a server in a data center. You get full int8 inference.</p>
      <p>The workflow looks like this. The listing picks a quantized kernel backend, the library that actually runs the int8 operations on the machine: fbgemm on x86 machines and qnnpack on ARM machines.</p>
      <pre><code class="language-python">
 model = YourCNN()
@@ -775,7 +775,7 @@ torch.quantization.convert(model, inplace=True)
      <h3>Fuse Conv+BN+ReLU into a single op first</h3>
      <p>Before quantizing, you fuse Conv + BatchNorm + ReLU into a single op. Why? It reduces memory overhead, speeds things up, and minimizes numerical errors.</p>
      <h3>QConfig tells PyTorch how to quantize each tensor</h3>
-     <p>QConfig tells PyTorch how to quantize: symmetric vs asymmetric, per-tensor (one scale for the whole tensor) vs per-channel (each channel gets its own scale, so one channel with a wide range does not set the grid for the rest). Example:</p>
+     <p>QConfig tells PyTorch how to quantize: symmetric vs asymmetric, per-tensor (one scale for the whole tensor) vs per-channel (each channel gets its own scale, a channel being one output sheet of a convolution layer, the grid of values one filter produces, so one channel with a wide range does not set the grid for the rest). Example:</p>
      <pre><code class="language-python">
 from torch.quantization import default_per_channel_weight_observer, MinMaxObserver
 import torch # Ensure torch is imported for dtypes
@@ -845,7 +845,7 @@ class MinMaxObserverExample(ObserverBase): # Conceptual
 import torch.quantization as tq 
 qconfig_hist = tq.QConfig(
     activation=tq.observer.HistogramObserver.with_args(
-        dtype=torch.quint8, qscheme=torch.per_tensor_affine
+        dtype=torch.quint8, qscheme=torch.per_tensor_affine  # qscheme sets how the grid is laid out: per_tensor_affine means one scale and zero-point for the whole tensor, placed anywhere (affine), not pinned symmetric around zero
     ),
     weight=tq.default_per_channel_weight_observer.with_args(dtype=torch.qint8)
 )
@@ -930,13 +930,13 @@ model.qconfig = qconfig_hist
 <div class="eq-line eq-active" data-eqline="0">scale = <span class="frac"><span class="top"><span class="eqt" style="color:#8e44ad">qmax</span> &#8722; <span class="eqt" style="color:#8e44ad">qmin</span></span><span class="bot"><span class="eqt" style="color:#2c3e50">15</span></span></span></div>
 <div class="eq-why eq-active" data-eqline="0">The scale is the clipping range being tried, from <span class="eqt" style="color:#8e44ad">qmin</span> to <span class="eqt" style="color:#8e44ad">qmax</span>, split into <span class="eqt" style="color:#2c3e50">15</span>, the number of steps in a 4-bit grid. Cut wide and the outliers are safe but the bins get fat; cut tight and the bins get fine but the outliers get beheaded.</div>
 <div class="eq-line eq-active" data-eqline="1">total MSE = clipping MSE + rounding MSE</div>
-<div class="eq-why eq-active" data-eqline="1">Each weight's squared gap between itself and its quantized then mapped back value is counted as clipping if the weight falls outside the range and as rounding if it falls inside, with both sums averaged over N, the weight count: the total is that same sum divided by the weight count.</div>
+<div class="eq-why eq-active" data-eqline="1">Each weight's squared gap between itself and its quantized then mapped back value is counted as clipping if the weight falls outside the range and as rounding if it falls inside, and each total is averaged over the weights that produced it: the total is the clipping average plus the rounding average, the two ways a weight can miss, added.</div>
 </div>
      
        <p>The same scale and zero-point arithmetic runs on real layers. The observer table below shows <code>conv.0</code>'s activations spanning <code>0</code> to <code>6.478520</code>, mapped to scale <code>0.025406</code> with zero-point <code>0</code>: float <code>0</code> lands exactly on int <code>0</code>, which is why ReLU outputs quantize so cleanly.</p>
      <div class="crp-paperbox">
        <h4>MSE beats min-max at 4 bits</h4>
-       <p>In the table headers, W8 means weights quantized to 8 bits and W4 means weights quantized to 4 bits. ImageNet validation accuracy, %, symmetric weight quantization with activations in FP32, averaged over <code>5</code> runs. FP32 baselines: ResNet18 <code>69.68</code>, MobileNetV2 <code>71.72</code>.</p>
+       <p>In the table headers, W8 means weights quantized to 8 bits and W4 means weights quantized to 4 bits. ImageNet validation accuracy, %, symmetric weight quantization with activations in FP32 (FP32 is float32, the model's original full-precision 32-bit float numbers, unquantized), averaged over <code>5</code> runs. FP32 baselines: ResNet18 (an 18-layer residual network for images) <code>69.68</code>, MobileNetV2 <code>71.72</code>.</p>
        <div class="table-scroll"><table class="datatable">
          <tr><th>Model (FP32)</th><th>W8 Min-Max</th><th>W8 MSE</th><th>W4 Min-Max</th><th>W4 MSE</th></tr>
          <tr><td>ResNet18 (69.68)</td><td>69.57</td><td>69.45</td><td>0.12</td><td>18.82</td></tr>
@@ -2447,7 +2447,7 @@ if hasattr(model_prepared_qat, 'conv1') and hasattr(model_prepared_qat.conv1, 'a
         <p>Anything outside [min, max] gets clipped. That is the trade.</p>
         
         <h3>Use <code>torch.ao.quantization.quant_debug</code></h3>
-        <p>When you want the full diff, this records float vs quantized activations layer by layer, with histograms of the differences. Fair warning, the API moves around between PyTorch versions.</p>
+        <p>When you want the full diff, this records float vs quantized activations layer by layer, with histograms of the differences. The line below is how you use it: <code>add_debug_observers_qat</code> takes a prepared QAT model and its qconfig dict and returns a copy of the model with those recording observers attached, so you run that copy and then read the recorded stats off it. Fair warning, the API moves around between PyTorch versions.</p>
         <pre><code class="language-python">
 debug_model = add_debug_observers_qat(model_prepared_qat, qconfig_dict_qat)
 print(debug_model.activation_debug_stats) # Or similar attribute, API might change

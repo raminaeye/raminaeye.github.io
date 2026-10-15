@@ -845,7 +845,7 @@ figcaption { margin-top: 1rem; }
 
   <h2 id="the-sequence-problem">Long dependencies break sequential models</h2>
   <p>
-    Here's the problem. Older sequence models like <strong>RNNs</strong> (recurrent neural networks) process one token at a time, so they
+    Here's the problem. Older sequence models like <strong>RNNs</strong> (recurrent neural networks) process one token at a time, a token being the small unit piece a model takes in, like a word or part of a word, so they
     struggle with long dependencies and cannot parallelize well. If the word that decides the
     meaning of your sentence showed up <code>50</code> words ago, an RNN has to carry that information
     through <code>50</code> sequential steps. <em>Every step is a chance to forget.</em>
@@ -1051,7 +1051,7 @@ figcaption { margin-top: 1rem; }
     <li><strong>Strips:</strong> each token's vector is a strip of component bars, where the heights are the vector's components (no numbers, just shapes). A striped strip is added to every token: the position pattern (the paper uses sine/cosine).</li>
     <li><strong>Heat grid:</strong> how strongly each pair of tokens matches; darker means stronger. The row we follow is "sat", and its darkest cell is "cat".</li>
     <li><strong>Weight bars:</strong> the same grid after the softmax, drawn as bars instead of heat. Every row is now a set of listening weights that sums to <code>1</code>.</li>
-    <li><strong>Flow:</strong> "cat"'s strip flows into "sat"'s rebuilt vector through the thick arrow: the blend is the main event. The residual skip adds "sat"'s own vector back in, then layer norm rescales every token's vector to the same overall length, matching the paper's add-then-normalize order.</li>
+    <li><strong>Flow:</strong> "cat"'s strip flows into "sat"'s rebuilt vector through the thick arrow: the blend is the main event. The residual skip adds "sat"'s own vector back in, then layer norm, which centers and rescales each token's own vector (subtract its own mean, divide by its own spread, so every token's vector lands on the same overall scale), matching the paper's add-then-normalize order.</li>
   </ol>
 
   <hr>
@@ -1060,7 +1060,7 @@ figcaption { margin-top: 1rem; }
   <p>
     Enough generalities. Here is one attention layer doing its job, one step at a time,
     on three tokens: <strong>"the cat sat"</strong>. This is a simplified toy: real models
-    slice words into subword pieces, use vectors of <code>512</code> numbers, and run
+    slice words into subword pieces, parts of a word rather than the whole word, use vectors of <code>512</code> numbers, and run
     <code>8</code> heads in parallel whose outputs get concatenated and re-mixed. <strong>One
     head is shown alone here</strong>, and the token we follow, "sat", is highlighted in every step.
   </p>
@@ -1289,7 +1289,7 @@ figcaption { margin-top: 1rem; }
   </p>
   <p>
     <strong>Multi-head attention</strong> runs <code>8</code> attention heads in parallel, each with its own learned
-    projections into a smaller subspace. Take a model width of <code>512</code> and <code>8</code> heads: each
+    projections into a smaller subspace, a slice of the model's dimensions that one head works in. Take a model width of <code>512</code> and <code>8</code> heads: each
     head works in <code>64</code> dimensions, like eight specialists each looking at
     the sentence through their own lens. Their outputs get concatenated and re-mixed with
     one final projection.
@@ -1662,7 +1662,7 @@ class MultiHeadAttention(nn.Module):
     </div>
     <p class="demo-stats" id="headParamStats"></p>
   </div>
-  <p class="caption">What changes is only the partition: sixteen <code>32</code>-dim specialists instead of one <code>512</code>-dim generalist. <em>Representational power goes up, the bill stays flat.</em></p>
+  <p class="caption">What changes is only the partition: sixteen <code>32</code>-dim specialists instead of one <code>512</code>-dim generalist. <em>Representational power, the range of relationships the model can represent at once, goes up, the bill stays flat.</em></p>
 <div class="howto capcard" id="headParamsHowto"><strong class="cap-title">How to play</strong>
       <ul>
         <li><strong>The point:</strong> Adding attention heads costs zero extra parameters, because the <code>512</code> dimensions just get re-sliced among more specialists.</li>
@@ -1816,7 +1816,7 @@ class MultiHeadAttention(nn.Module):
     token's position gets encoded in multiple frequency bands: a unique <strong>multi-frequency
     signature</strong>. High-frequency dimensions track local order, low-frequency dimensions
     track long-range order. Sine and cosine together encode each position as a point on a
-    circle, so relative offsets fall out of trig identities: the sine and cosine at a shifted position can be worked out from the sine and cosine at the original position and the size of the shift alone, so the model can recover how far apart two positions are from their encodings.
+    circle, so relative offsets fall out of trig identities, the angle addition rules that rewrite the sine and cosine of a shifted angle from the sine and cosine of its parts: the sine and cosine at a shifted position can be worked out from the sine and cosine at the original position and the size of the shift alone, so the model can recover how far apart two positions are from their encodings.
   </p>  <div class="diagram">
     <div class="chart-legend">
       <span><span class="sw"></span>first band: fast wave, period 2&#960;</span>
@@ -1914,7 +1914,7 @@ pe = positional_encoding(seq_len=8, d_model=16)
   </p>
   <p>
     At position <code>1</code>, a token sees only itself. At position <code>2</code>, itself and token <code>1</code>. And so on.
-    <em>That is what makes the model autoregressive.</em>
+    <em>That is what makes the model autoregressive, meaning it generates one token at a time and feeds its own output back in as the next input.</em>
   </p>
   <figure style="text-align:center; margin:1.75rem 0;">
   <svg width="360" height="294" viewBox="0 0 360 294" xmlns="http://www.w3.org/2000/svg" style="box-sizing:border-box;max-width:100%;height:auto;background:#fff;border:1px solid #bdc3c7;border-radius:4px">
@@ -2536,6 +2536,7 @@ masked = np.where(causal_mask(4), scores, -1e9)
     Each decoder position distributes its attention over all encoder positions, and the
     score matrix has one row per decoder position and one column per encoder position.
     At the top of the decoder, the final layer outputs logits, one raw score for every token in the vocabulary, before softmax turns those scores into probabilities.
+    The decoder's input, drawn in the diagram below, is the target tokens shifted right by one position: each position takes in the previous target token, so the model predicts the next target token instead of reading the one it is about to produce.
   </p>
   <div class="diagram">
   <svg width="860" height="330" viewBox="0 0 860 330" font-family="sans-serif" font-size="13" style="width:100%;height:auto;display:block">
@@ -2604,7 +2605,7 @@ masked = np.where(causal_mask(4), scores, -1e9)
     the higher dimension, so the model does its heavy per-token thinking there.
   </p>
   <p>
-    And the residuals. Why do this? Deep networks suffer from <strong>vanishing gradients</strong>, and the
+    And the residuals. Why do this? Deep networks suffer from <strong>vanishing gradients</strong>, where the gradient shrinks toward zero as it travels back through the layers until it is too small to teach anything, and the
     residual path gives gradients a shortcut straight back. With a residual connection, the
     gradient is the identity plus the sublayer's gradient: <em>the identity term means the gradient always has a clean road
     home.</em> We always try to hold on to the original information using residual connections.
@@ -2697,7 +2698,7 @@ masked = np.where(causal_mask(4), scores, -1e9)
     Why? For text generation, decoder-only models typically outperform encoder-decoder
     models because they can be scaled bigger. Everything is just context: you feed the
     prompt in, and the model predicts the next token, then the next, autoregressively. For
-    translation you just put a separator token between source and target and let the model
+    translation you just put a separator token, a special token that marks where the source ends and the target begins, between source and target and let the model
     figure out the boundary. <em>Source or target doesn't matter; it's all one sequence.</em>
   </p>
   <p>
@@ -2707,7 +2708,7 @@ masked = np.where(causal_mask(4), scores, -1e9)
   <div class="eq-card" id="tfLossEq">
       <div class="eq-what">The decoder-only training loss: cross entropy at every position, averaged.</div>
       <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="L" style="color:#c0392b">L</span> = &minus;<span class="frac"><span class="top">1</span><span class="bot"><span class="eqt" data-k="T" style="color:#2a7fbf">T</span></span></span>&#931;<sub>t=1</sub><sup><span class="eqt" data-k="T" style="color:#2a7fbf">T</span></sup> log P(x<sub>t</sub> | x<sub>&lt;t</sub>)</div>
-        <div class="eq-why eq-active" data-eqline="0">At each position, take the probability the model gave the token that actually came next, given all previous tokens, and take its negative log: the loss is the negative log of that one probability. &#931;, sigma, with t running from 1 to T under and over it, means add over every position, and the bar in P(x<sub>t</sub> | x<sub>&lt;t</sub>) reads given: the probability of the token at position t given every token before it. <span class="eqt" style="color:#2a7fbf">T</span> is the number of tokens in the sequence, the count of positions the loss is averaged over. Each position contributes one next-token prediction, and dividing by <span class="eqt" style="color:#2a7fbf">T</span> turns the total into an average loss per token.</div>
+        <div class="eq-why eq-active" data-eqline="0">At each position, take the probability the model gave the token that actually came next, given all previous tokens, and take its negative log: the loss is the negative log of that one probability. Log is the punisher here: it turns that probability into a cost that stays small when the model gave the true token a high probability and grows sharply as that probability drops toward zero, so confident wrong bets cost more. &#931;, sigma, with t running from 1 to T under and over it, means add over every position, and the bar in P(x<sub>t</sub> | x<sub>&lt;t</sub>) reads given: the probability of the token at position t given every token before it. <span class="eqt" style="color:#2a7fbf">T</span> is the number of tokens in the sequence, the count of positions the loss is averaged over. Each position contributes one next-token prediction, and dividing by <span class="eqt" style="color:#2a7fbf">T</span> turns the total into an average loss per token.</div>
     </div>
   <p>
     The generation code on this page runs the prediction this loss scores, one next token at a time.
@@ -2833,7 +2834,7 @@ for x, y in train_loader:            # x, y: (B, T), y = x shifted by one
     sample one token, append it, and repeat. The <strong>temperature</strong> controls how wild the
     sampling gets. Temperature is its own knob here, not the token count <code>T</code> from the loss:
     a temperature above <code>1</code> flattens the distribution (more random), a temperature below
-    <code>1</code> sharpens it (closer to greedy), temperature <code>1</code> is plain softmax.
+    <code>1</code> sharpens it (closer to greedy, always picking the single highest probability token), temperature <code>1</code> is plain softmax.
   </p>
 <pre><code class="language-python">@torch.no_grad()
 def generate(model, idx, max_new_tokens, temperature=1.0):
@@ -3057,7 +3058,7 @@ for i in range(n):
     mask[i, start:i+1] = 0
 </code></pre>
   <p>
-    Say your frames are <code>10</code> ms each and phonemes are <code>20 to 50</code> ms long, about <code>2 to 5</code> frames
+    Say your frames are <code>10</code> ms each and phonemes, the distinct units of sound in a language, are <code>20 to 50</code> ms long, about <code>2 to 5</code> frames
     per phoneme. You'd pick a window around <code>10</code> frames: enough to cover a whole phoneme
     plus blurry boundaries, without paying for word-level context you don't need. <em>The
     rule of thumb: find the smallest unit you must capture (a phoneme, a gesture, a word),
@@ -3083,7 +3084,7 @@ for i in range(n):
   <div class="eq-card" id="tfChunkEq">
       <div class="eq-what">The chunked-streaming bound, written with positions.</div>
       <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="j" style="color:#2a7fbf">j</span> &#8804; (&#8970;<span class="frac"><span class="top"><span class="eqt" data-k="i" style="color:#2a7fbf">i</span></span><span class="bot"><span class="eqt" data-k="C" style="color:#e67e22">C</span></span></span>&#8971; + 1) &#183; <span class="eqt" data-k="C" style="color:#e67e22">C</span> &minus; 1</div>
-        <div class="eq-why eq-active" data-eqline="0">A query may read a key exactly when the key position is at or before the end of the query's own chunk. <span class="eqt" style="color:#2a7fbf">i</span> is the query position, <span class="eqt" style="color:#2a7fbf">j</span> is the key position, and <span class="eqt" style="color:#e67e22">C</span> is the chunk size in tokens. The &#8970; &#8971; pair around i divided by C is the floor: it rounds that division down to the whole chunk number the query sits in. The right side is the last key position in the query's own chunk. Keys past that point are masked to negative infinity, the mechanism from Masking.</div>
+        <div class="eq-why eq-active" data-eqline="0">A query may read a key exactly when the key position is at or before the end of the query's own chunk. <span class="eqt" style="color:#2a7fbf">i</span> is the query position, <span class="eqt" style="color:#2a7fbf">j</span> is the key position, and <span class="eqt" style="color:#e67e22">C</span> is the chunk size in tokens. The &#8970; &#8971; pair around i divided by C is the floor: it rounds that division down to the whole chunk number the query sits in. The &#183; dot after the bracket is multiplication: that chunk number plus one, times C. The right side is the last key position in the query's own chunk. Keys past that point are masked to negative infinity, the mechanism from Masking.</div>
     </div>
   <p>
     And the waiting relation: emission of a chunk waits for all <code>C</code> tokens of that chunk, so you wait <code>C</code> tokens per chunk to buy that extra context.
@@ -3904,7 +3905,7 @@ for i in range(n):
   </div>
   <p>
     The training recipe was <strong>Adam</strong>, an optimizer that adapts each parameter's step size as training goes, based on how that parameter's gradients have been behaving
-    (first moment decay <code>0.9</code>, second moment decay <code>0.98</code>, stability constant <code>10<sup>-9</sup></code>) with a warmup of <code>4000</code> steps
+    (the moments being Adam's running averages, the first of the gradients and the second of the squared gradients, with first moment decay <code>0.9</code> and second moment decay <code>0.98</code>, the rates at which older values in those averages fade, and stability constant <code>10<sup>-9</sup></code>) with a warmup of <code>4000</code> steps
     and dropout <code>0.1</code>, meaning that during training a tenth of the activations are randomly set to zero on each pass, so the model cannot lean on any single one and memorizes less. The schedule: ramp the learning rate up linearly for the first <code>4000</code> steps, then decay it
     proportionally to the inverse square root of the step.
   </p>
@@ -3983,7 +3984,7 @@ for i in range(n):
       these are how you make it smaller and cheaper to serve.
     </li>
     <li>
-      <a href="adapter.html"><strong>Adapters</strong></a>: how to fine-tune one
+      <a href="adapter.html"><strong>Adapters</strong></a>: how to fine-tune one, train a trained model a little more on a narrower job,
       without retraining the whole thing.
     </li>
   </ul>

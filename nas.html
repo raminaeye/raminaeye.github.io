@@ -610,7 +610,7 @@ figcaption { margin-top: 1rem; }
    <div class="eq-card" id="nasSpaceEqStatic">
 <div class="eq-what">The search space: ops per layer, raised to the number of layers.</div>
 <div class="eq-line eq-active" data-eqline="0"><span class="eqt" style="color:#2c3e50">total architectures</span> = <span class="eqt" style="color:#2a7fbf">ops per layer</span><sup><span class="eqt" style="color:#2c3e50">layers</span></sup></div>
-<div class="eq-why eq-active" data-eqline="0">Total architectures equals ops per layer raised to the number of layers: the power is the multiplication itself, since each layer multiplies the possibilities by its ops. Five choices in each of eight spots already makes 390,625 architectures to search, which is why the search needs a strategy.</div>
+<div class="eq-why eq-active" data-eqline="0">Total architectures equals ops per layer raised to the number of layers: the power is the multiplication itself, since each layer multiplies the possibilities by its ops. With five choices in each of eight spots, the choices multiply spot by spot into a space far too big to try one by one, which is why the search needs a strategy.</div>
 </div>
    
         <p class="caption">Under the same GPU-hours budget, the strategy is everything. Random search is a lottery: it samples everywhere, so a peak counts only if a sample lands on it. Evolution keeps mutating the current winner. Hill climbing moves only uphill from its start, so a nearer small peak can trap it.</p>
@@ -1208,9 +1208,9 @@ figcaption { margin-top: 1rem; }
     }
 </style>
 
-   <p>The controller's update in one line: nudge the policy toward the sampled architecture, scaled by the reward it earned.</p>
+   <p>One update rule drives the whole controller.</p>
    <div class="eq-card" id="nasReinforceEqStatic">
-<div class="eq-what">The controller's update in one line: nudge the policy toward the sampled architecture, scaled by the reward it earned.</div>
+<div class="eq-what">The REINFORCE update: the reward times the gradient of the log-probability.</div>
 <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="nJ" style="color:#2a7fbf">&#8711;J</span> &#8776; <span class="eqt" data-k="R" style="color:#555">R</span> &#183; <span class="eqt" data-k="lp" style="color:#555">&#8711;log &#960;(a)</span></div>
 <div class="eq-why eq-active" data-eqline="0">The controller's update <span class="eqt" style="color:#2a7fbf">&#8711;J</span> is approximately the reward <span class="eqt" style="color:#555">R</span> times <span class="eqt" style="color:#555">&#8711;log &#960;(a)</span>, the gradient of the log-probability of the action it took, where &#960; (pi) is the policy, the controller's own odds of picking each action, so &#960;(a) is the probability it assigned to the action it took, the direction that makes that action more likely. A high reward means the controller picks that action more often; a low reward suppresses it. In practice you subtract a baseline, usually the running average reward, so the controller only gets excited about better-than-average picks.</div>
 </div>
@@ -1218,9 +1218,9 @@ figcaption { margin-top: 1rem; }
    
       <p>For the update, the standard choice is a policy-gradient method: <strong>PPO</strong> (Proximal Policy Optimization, which limits how far one update can move the policy, so a single lucky sample cannot swing it). The simpler intuition is the <strong>REINFORCE</strong> form: scale the log-probability of the action by the reward.</p>
 
-   <p>take the log-probability of the action the controller just took, negate it, and scale it by the reward. A high reward means the controller picks that action more often; a low reward suppresses it. <em>That is the whole update.</em> Backprop through that (backpropagation, the pass that computes gradients through the network) nudges the controller's logits (the raw scores it assigns each choice, before they are turned into probabilities) toward the rewarding action. In practice you subtract a <strong>baseline</strong>, usually the running average reward, so the controller only gets excited about better-than-average picks.</p>
+   <p>take the log-probability of the action the controller just took, negate it, and scale it by the reward. <em>That is the whole update.</em> Backprop through that (backpropagation, the pass that computes gradients through the network) nudges the controller's logits (the raw scores it assigns each choice, before they are turned into probabilities) toward the rewarding action.</p>
 
-   <p>The whole controller loop fits in a few lines. Two names in it are worth naming before you read it: Adam, the optimizer, is an adaptive method that adjusts each parameter's step size as it goes, and softmax, on the probs line, turns the raw scores into probabilities that add up to one, with a bigger score getting a bigger share. Here the "reward" is faked with a lookup table standing in for real training, so you can see the controller mechanics without the GPU bill:</p>
+   <p>The whole controller loop fits in a few lines. Three names in it are worth naming before you read it: Adam, the optimizer, is an adaptive method that adjusts each parameter's step size as it goes; softmax, on the probs line, turns the raw scores into probabilities that add up to one, with a bigger score getting a bigger share; and Categorical, on the dist line, is the distribution over the controller's choices, the object that holds those probabilities and whose sample call draws one choice from them. Here the "reward" is faked with a lookup table standing in for real training, so you can see the controller mechanics without the GPU bill:</p>
 
 <pre><code class="language-python">import torch
 import torch.nn.functional as F
@@ -1266,7 +1266,7 @@ for step in range(50):
 <p id="nasStepBody"></p>
 <p class="nas-step-label"><strong>Step through the loop:</strong></p>
 <div class="eq-card" id="nasStepToolEq">
-       <div class="eq-what">The controller's update in one line: nudge the policy toward the sampled architecture, scaled by the reward it earned.</div>
+       <div class="eq-what">The same REINFORCE update, now inside the step-by-step loop.</div>
        <div class="eq-line" data-eqline="0">
          <span class="eqt" data-k="nJ" style="color:#2a7fbf">&#8711;J</span> &#8776;
          <span class="eqt" data-k="R" style="color:#555">R</span> &#183;
@@ -1573,7 +1573,7 @@ for step in range(200):
    <ul>
      <li><strong>Search cost is real.</strong> The thousands of GPU-days in the results above are not typos. Unless you have a cluster lying around, the RL and evolution flavors are not for you. This is exactly why the field moved to weight sharing.</li>
      <li><strong>The supernet ranking is noisy.</strong> The supernet's ranking of architectures does not always match the true ranking after retraining from scratch. The shared weights couple everything together: an op can look good because it co-adapted with its neighbors (the ops around it adjusted to its quirks while they shared weights, and it adjusted to theirs, so the pair only looks strong together inside the supernet), not because it is actually good on its own. Treat the search phase as a rough filter, not an oracle. And remember that random search with early stopping (cutting a candidate's training short and judging it early to save cost) is embarrassingly competitive with several published NAS methods.</li>
-     <li><strong>DARTS has a crush on skip connections.</strong> Skip connections train fast early in the search, so the architecture weights drift toward them, and you can end up with a "discovered" cell that is mostly skip connections. That is a shallow network pretending to be deep. If you run DARTS and the final cell is all skips, that is not a discovery, that is a bug. Fixes exist (DARTS+ stops the search early before the skip collapse sets in, FairDARTS gives each operation its own independent weight through a sigmoid instead of making them compete for shares of one softmax, so skip connections get no unfair head start over the other operations, or just penalizing skips in the score), but watch for it.</li>
+     <li><strong>DARTS has a crush on skip connections.</strong> Skip connections train fast early in the search, so the architecture weights drift toward them, and you can end up with a "discovered" cell that is mostly skip connections. That is a shallow network pretending to be deep. If you run DARTS and the final cell is all skips, that is not a discovery, that is a bug. Fixes exist (DARTS+ stops the search early before the skip collapse sets in, FairDARTS gives each operation its own independent weight through a sigmoid (a function that squashes any score into a value between 0 and 1, so each weight stands on its own) instead of making them compete for shares of one softmax, so skip connections get no unfair head start over the other operations, or just penalizing skips in the score), but watch for it.</li>
      <li><strong>Reproducibility is shaky.</strong> Run the same search twice with different seeds (a seed is the fixed random starting setting that makes a run reproducible) and you can get two different architectures. Report the seed, report the variance, and be suspicious of papers that report one lucky run.</li>
      <li><strong>Hand design still wins sometimes.</strong> Small budget, weird hardware, a brand new domain: a human with one good idea beats a cluster searching the wrong space. And back to the menu problem: NAS cannot invent an op that is not in your search space.</li>
    </ul>

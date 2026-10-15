@@ -720,7 +720,7 @@
    <div class="eq-card" id="tsneEqStatic">
        <div class="eq-what">t-SNE in five lines: turn distances into neighbor probabilities, give the map the same job with a heavy tail, then pull and push until the two neighbor lists match.</div>
        <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="p" style="color:#34495e">p<sub>j|i</sub></span> = <span class="frac"><span class="top">exp(<span class="frac"><span class="top">−d<sub>ij</sub>²</span><span class="bot">2<span class="eqt" data-k="sig" style="color:#b3541e">σ<sub>i</sub></span>²</span></span>)</span><span class="bot">Σ<sub>k≠i</sub> exp(<span class="frac"><span class="top">−d<sub>ik</sub>²</span><span class="bot">2<span class="eqt" data-k="sig" style="color:#b3541e">σ<sub>i</sub></span>²</span></span>)</span></span></div>
-       <div class="eq-why eq-active" data-eqline="0">Turn high-dimensional distances into neighbor probabilities: point i's chance of picking j is j's distance decay, exp of minus the squared distance over twice i's kernel width <span class="eqt" style="color:#b3541e">σ<sub>i</sub></span>, divided by the total of that same decay over every other point, so the shares add up as probabilities and close points get the biggest shares. Σ means add over, and exp is e to the power of. The bar in p<sub>j|i</sub>, the | between j and i, reads given: the probability for j given i. The k&#8800;i under the Σ uses &#8800;, not equal to: the sum runs over every k not equal to i.</div>
+       <div class="eq-why eq-active" data-eqline="0">Turn high-dimensional distances into neighbor probabilities: point i's chance of picking j is j's distance decay, exp of minus the squared distance over twice i's kernel width <span class="eqt" style="color:#b3541e">σ<sub>i</sub></span> squared, divided by the total of that same decay over every other point, so the shares add up as probabilities and close points get the biggest shares. Σ means add over, and exp is e to the power of. The bar in p<sub>j|i</sub>, the | between j and i, reads given: the probability for j given i. The k&#8800;i under the Σ uses &#8800;, not equal to: the sum runs over every k not equal to i.</div>
        <div class="eq-line eq-active" data-eqline="1"><span class="eqt" data-k="sig" style="color:#b3541e">σ<sub>i</sub></span> ← set by perplexity</div>
        <div class="eq-why eq-active" data-eqline="1"><span class="eqt" style="color:#b3541e">σ<sub>i</sub></span>, point i's kernel width: the &#8592; arrow reads gets set by, so σ<sub>i</sub> gets set by perplexity, tuned per point so every point ends up with about the same number of effective neighbors: a point in a crowd gets a tight kernel, a lonely point a wide one.</div>
        <div class="eq-line eq-active" data-eqline="2"><span class="eqt" data-k="qij" style="color:#2a7fbf">q<sub>ij</sub></span> = <span class="frac"><span class="top"><span class="eqt" data-k="tail" style="color:#c0392b">(1+d²<sub>ij</sub>)<sup>−1</sup></span></span><span class="bot">Σ<sub>k≠l</sub>(1+d²<sub>kl</sub>)<sup>−1</sup></span></span></div>
@@ -1203,7 +1203,12 @@
        pcaTimer = null;
        pcaProgress = Math.min(1, pcaProgress + PCA_FRAME_MS / PCA_ANIM_MS);
        easePcaView();
-       if (pcaProgress >= 1) playBtn.textContent = 'Play';
+       if (pcaProgress >= 1) {
+         playBtn.textContent = 'Play';
+         /* snap exactly to the PCA rest state before the final draw, so the
+            replay ends on the rest frame itself, not an eased approximation */
+         snapPcaView();
+       }
        else pcaTimer = setTimeout(pcaFrame, PCA_FRAME_MS);
        draw(); updateStats();
      }
@@ -1232,9 +1237,13 @@
      var GRAYRGB = hexRgb(GRAY);
      var COLRGB = [hexRgb(COLORS[0]), hexRgb(COLORS[1]), hexRgb(COLORS[2]), hexRgb(COLORS[3])];
      function dotColor(i) {
-       if (colorFade <= 0) return GRAY;
-       if (colorFade >= 1) return COLORS[lab[i]];
-       var c = COLRGB[lab[i]], f = colorFade;
+       /* In PCA mode the colors key on the PCA arrival itself, not on the
+          t-SNE run's fade: full label colors at rest, fading in with the
+          eased progress as the replay forms the shadow. */
+       var f = (mode === 'pca') ? pcaEase(pcaProgress) : colorFade;
+       if (f <= 0) return GRAY;
+       if (f >= 1) return COLORS[lab[i]];
+       var c = COLRGB[lab[i]];
        var r = Math.round(GRAYRGB[0] + (c[0] - GRAYRGB[0]) * f);
        var g = Math.round(GRAYRGB[1] + (c[1] - GRAYRGB[1]) * f);
        var b = Math.round(GRAYRGB[2] + (c[2] - GRAYRGB[2]) * f);
@@ -1378,7 +1387,9 @@
      }
 
      function updateLegend() {
-       var revealed = colorFade >= 1;
+       /* PCA mode shows the label colors, so its legend is the color one;
+          in t-SNE mode the colors count as revealed only at full fade. */
+       var revealed = (mode === 'pca') || colorFade >= 1;
        legendGray.style.visibility = revealed ? 'hidden' : 'visible';
        legendColors.style.visibility = revealed ? 'visible' : 'hidden';
      }
@@ -1390,7 +1401,9 @@
        } else if (statsNote) {
          s = statsNote;
        } else if (mode === 'pca') {
-         s = 'PCA: the same 300 points in one straight linear shadow.';
+         s = (pcaProgress < 1)
+           ? 'PCA replay: the points glide from the random scatter into the linear shadow.'
+           : 'PCA: the same 300 points in one straight linear shadow.';
        } else if (stage === 'rest') {
          s = 'Rest: 300 gray dots, scattered.';
        } else if (stage === 's1' || stage === 's2' || stage === 's3') {
@@ -1413,6 +1426,7 @@
        'Rest: 300 gray dots, scattered.',
        'Computing neighbor probabilities... 100%',
        'PCA: the same 300 points in one straight linear shadow.',
+       'PCA replay: the points glide from the random scatter into the linear shadow.',
        'Perplexity changed: fresh gray scatter.',
        'Spreading out (iteration 1500 of 1500).',
        'Clusters forming (iteration 1500 of 1500).',

@@ -667,7 +667,7 @@
 
     <p><em>How do you teach a giant model a new trick without retraining the whole thing?</em> You know me, I do not like paying for compute twice.</p>
 
-    <p>Full fine-tuning a transformer is simple and brutal. A transformer is a stack of blocks that processes a sequence, where each block first lets the positions exchange information with each other and then processes each position on its own, and that stack is the model this whole page modifies. You take all <code>110</code> million parameters, you update all of them, and you keep one full copy of the weights per task. <em>Ten tasks means ten copies of the model on disk.</em> Worse, the optimizer keeps two extra numbers per parameter (Adam momentum and variance, where Adam is the optimizer that runs training and those two numbers are a running average of the direction each parameter has been moving and a running measure of how spread out its recent steps have been), so training needs roughly three times the model size in GPU memory just to hold the state. And there is the quiet part nobody likes to admit: the model learns your new task and starts forgetting the old ones. That is <strong>catastrophic forgetting</strong>, and it is exactly what it sounds like.</p>
+    <p>Full fine-tuning a transformer is simple and brutal. A transformer is a stack of blocks that processes a sequence, where each block first lets the positions exchange information with each other and then processes each position on its own, and that stack is the model this whole page modifies. You take all <code>110</code> million parameters, the learned numbers that make up the model's weights and that training adjusts, you update all of them, and you keep one full copy of the weights per task. <em>Ten tasks means ten copies of the model on disk.</em> Worse, the optimizer keeps two extra numbers per parameter (Adam momentum and variance, where Adam is the optimizer that runs training and those two numbers are a running average of the direction each parameter has been moving and a running measure of how spread out its recent steps have been), so training needs roughly three times the model size in GPU memory just to hold the state. And there is the quiet part nobody likes to admit: the model learns your new task and starts forgetting the old ones. That is <strong>catastrophic forgetting</strong>, and it is exactly what it sounds like.</p>
 
     <p><strong>Adapters</strong> flip the deal. Freeze the big model, bolt on tiny trainable modules, and train only those. The backbone never moves. You keep one frozen copy of the model and swap in a small adapter per task, <em>like changing lenses on a camera instead of buying a new camera body.</em></p>
 
@@ -681,7 +681,7 @@
 
     <p>They demonstrate it by transferring BERT (Bidirectional Encoder Representations from Transformers, a large pretrained language model that had already learned from general text) to <code>26</code> diverse text classification tasks including GLUE (a standard suite of language-understanding tests): <em>adapters land within <code>0.4%</code> of full fine-tuning while adding only <code>3.6%</code> parameters per task,</em> against <code>100%</code> for fine-tuning. That is the idea this whole page is built on.</p>
 
-    <p>Here is the entire module. Down project, nonlinear, up project, add it back to the input so <em>the frozen signal flows through untouched if the adapter does nothing</em>:</p>
+    <p>Here is the entire module. Down project, pass it through a nonlinearity, a bend that treats numbers unevenly instead of just scaling them, here the ReLU bend that passes positive values through unchanged and turns negative values to zero, up project, add it back to the input so <em>the frozen signal flows through untouched if the adapter does nothing</em>:</p>
 
 <pre><code class="language-python">class SimpleAdapter(nn.Module):
     def __init__(self, hidden_dim, bottleneck_dim):
@@ -973,7 +973,7 @@
 
     <h2 id="lora-shrink-the-update-not-the-model">LoRA: shrink the update, not the model</h2>
 
-    <p><strong>LoRA</strong> (low-rank adaptation) asks a different question. Instead of adding new modules, look at what fine-tuning actually does to a weight matrix. You start with the pretrained weight <code>W</code> and you end with <code>W</code> plus an update. The update is a big dense matrix, but <em>it turns out the useful part of it lives in a tiny subspace, a small low dimensional slice of the full space of possible updates, rather than needing the whole space.</em> So instead of learning the full update, you learn it as two skinny matrices multiplied together:</p>
+    <p><strong>LoRA</strong> (low-rank adaptation) asks a different question. Instead of adding new modules, look at what fine-tuning actually does to a weight matrix. You start with the pretrained weight <code>W</code> and you end with <code>W</code> plus an update. The update is a big dense matrix, a matrix whose entries are filled in rather than mostly zero as in a sparse matrix, but <em>it turns out the useful part of it lives in a tiny subspace, a small low dimensional slice of the full space of possible updates, rather than needing the whole space.</em> So instead of learning the full update, you learn it as two skinny matrices multiplied together:</p>
 
     <p>The idea is: freeze what the model already knows (<code>W</code>) and learn only the change, as a detour through a tiny bottleneck. <code>A</code> squeezes the signal down to rank <code>r</code>, <code>B</code> lifts it back up, and the two together add a small learned nudge on top of the frozen weight. <em>The rank <code>r</code> is the whole budget:</em> a smaller <code>r</code> means far fewer new parameters and a coarser approximation of the update.</p>
 
@@ -1011,7 +1011,7 @@
           <li><strong><code>3</code>.</strong> The lower orange slab is <code>A</code>, the down-projection: it squeezes the input into the bottleneck. Its <code>σ</code>, in the <code>N(0, σ²)</code> start from the list above, is the spread of the draw, a different <code>σ</code> from the adapter card above, where <code>σ</code> is the ReLU bend. The random start would be a problem except <code>B</code> fixes it.</li>
           <li><strong><code>4</code>.</strong> The upper orange slab is <code>B</code>, the up-projection: the zero start from the list above is why the model behaves exactly like the pretrained model at step one.</li>
           <li><strong><code>5</code>.</strong> The plus at the top merges the two paths.</li>
-          <li><strong><code>6</code>.</strong> Training wakes the side path up from zero: <code>B</code> leaves zero, the loss falls as it learns, and before serving you fold <code>BA</code> into <code>W</code> once, so inference runs like a normally fine-tuned model with no extra latency.</li>
+          <li><strong><code>6</code>.</strong> Training wakes the side path up from zero: <code>B</code> leaves zero, the loss, the number training pushes down as a score of how wrong the model still is, falls as it learns, and before serving you fold <code>BA</code> into <code>W</code> once, so inference, running the trained model to answer new inputs instead of training it, runs like a normally fine-tuned model with no extra latency, no extra waiting time added to each answer.</li>
         </ul>
       </div>
 
@@ -1279,14 +1279,9 @@
       var hwGeom = null, hwDyn = {};
       var dispH = 10, targetH = 10, targetR = 8;
       var dots = [];
-      function spreadAt(x, g) {
-        var c0 = g.cX, c1 = g.cX + g.cLen, z = 12;
-        if (x <= c0 - z || x >= c1 + z) return g.S;
-        if (x >= c0 + z && x <= c1 - z) return dispH;
-        var t = x < c0 + z ? (x - (c0 - z)) / (2 * z) : ((c1 + z) - x) / (2 * z);
-        t = t * t * (3 - 2 * t);
-        return g.S + (dispH - g.S) * t;
-      }
+      /* Dot positions are generated inside the corridor in placeDots
+         below, so no spread helper is needed: a dot outside the orange
+         hallway would teach the wrong containment. */
       function renderHallway() {
         while (hw.firstChild) hw.removeChild(hw.firstChild);
         dots = [];
@@ -1382,13 +1377,23 @@
       function placeDots() {
         var g = hwGeom, k;
         if (!g) { return; }
-        var x0 = g.inX + g.colW / 2, x1 = g.oX + g.colW / 2;
+        /* Every dot belongs to the update, so every dot is generated
+           inside the orange corridor itself: x stays within the corridor
+           length and y stays within the rank-scaled corridor height
+           (dispH), with the dot radius and a small pad kept inside the
+           stroke. At r = 1 the corridor is thinner than the dot spread
+           used before, so the usable half height floors at 0 and the dots
+           sit on the center line instead of escaping above or below. */
         for (k = 0; k < dots.length; k++) {
           var d = dots[k];
-          var x = x0 + d.p * (x1 - x0);
-          var sp = spreadAt(x, g);
+          var rDot = parseFloat(d.el.getAttribute('r')) || 3.4;
+          var pad = rDot + 1;
+          var usableW = Math.max(0, g.cLen - 2 * pad);
+          var usableHalfH = Math.max(0, dispH / 2 - pad);
+          var x = g.cX + pad + d.p * usableW;
+          var y = g.centerY + d.j * usableHalfH;
           d.el.setAttribute('cx', x.toFixed(1));
-          d.el.setAttribute('cy', (g.centerY + d.j * sp * 0.42).toFixed(1));
+          d.el.setAttribute('cy', y.toFixed(1));
           d.el.setAttribute('opacity', Math.min(1, d.p * 10, (1 - d.p) * 10).toFixed(2));
         }
       }
@@ -1573,7 +1578,7 @@
 
     <p>A quarter of one percent of the model, and it usually lands within a point of full fine-tuning on classification-style tasks. <em>That is stupid easy and gives you a fast win.</em></p>
 
-    <p>One more thing, and it matters at serving time: the frozen weight plus the learned update is just a matrix again. After training you can bake the update into <code>W</code> permanently and <em>the model runs exactly as fast as the original.</em> No extra layers in the graph, no latency cost. Bottleneck adapters cannot do this (their nonlinearity blocks the merge), so they stay in the graph forever.</p>
+    <p>One more thing, and it matters at serving time: the frozen weight plus the learned update is just a matrix again. After training you can bake the update into <code>W</code> permanently and <em>the model runs exactly as fast as the original.</em> No extra layers in the graph, the connected chain of layers and operations the input runs through when the model answers, no latency cost. Bottleneck adapters cannot do this (their nonlinearity blocks the merge), so they stay in the graph forever.</p>
 
     <h2 id="compacter-cheaper-matrices-inside-the-adapter">Compacter: cheaper matrices inside the adapter</h2>
 
@@ -1581,9 +1586,9 @@
 
     <p>The key property: each element of <code>A</code> scales a whole copy of <code>B</code>.</p>
 
-    <p>The authors were chasing a better trade-off than adapters alone could offer. Fine-tuning giant language models is sample inefficient, unstable in low-resource settings, and wasteful, since it stores a full copy per task. Existing parameter-efficient methods either still used a relatively large number of parameters or underperformed full fine-tuning.</p>
+    <p>The authors were chasing a better trade-off than adapters alone could offer. Fine-tuning giant language models is sample inefficient, needing many training examples to learn well, unstable in low-resource settings, where only a little task data is available, and wasteful, since it stores a full copy per task. Existing parameter-efficient methods either still used a relatively large number of parameters or underperformed full fine-tuning.</p>
 
-    <p>Compacter builds on adapters, low-rank optimization, and a construction where each adapter weight matrix becomes a sum of Kronecker products between shared "slow" weights and per-layer "fast" rank-one matrices, matrices that carry only one independent direction and so can be built from a single pair of vectors, so the big matrix is built out of small shared factors that are combined in a structured way instead of being learned entry by entry.</p>
+    <p>Compacter builds on adapters, low-rank optimization, and a construction where each adapter weight matrix becomes a sum of Kronecker products between shared "slow" weights, the common factors reused across layers, and per-layer "fast" rank-one matrices, the small factors that differ for each layer, matrices that carry only one independent direction and so can be built from a single pair of vectors, so the big matrix is built out of small shared factors that are combined in a structured way instead of being learned entry by entry.</p>
 
     <p><em>Training only <code>0.047%</code> of the model's parameters, it matches full fine-tuning on GLUE and beats it on SuperGLUE, GLUE's harder successor suite, and in low-resource settings.</em></p>
     <p>An <code>8 × 8</code> factor plus a <code>96 × 8</code> factor expands to a <code>768 × 64</code> adapter matrix, but <em>you only store <code>832</code> numbers instead of <code>49,152</code>.</em></p>
@@ -1664,7 +1669,7 @@ class CompacterAdapter(nn.Module):
       <li>On big datasets, full fine-tuning still wins sometimes. Adapters shine when data or compute is scarce, not when you have both in abundance.</li>
       <li>Adapt query and value first, skip the rest. Most of the gain comes from the attention projections; adapters on the feed-forward layers add parameters for less return on many tasks.</li>
       <li>Soft prompts look sad on small models. Prompt and prefix tuning, prefix tuning being the one that adds extra learned key and value vectors set in front of the sequence in each attention layer, need a big frozen model to steer. On base-size models, LoRA beats them cleanly.</li>
-      <li>Frozen does not mean forget-proof. The backbone is safe, but the adapter can still overfit <code>500</code> examples. Validate like always.</li>
+      <li>Frozen does not mean forget-proof. The backbone is safe, but the adapter can still overfit <code>500</code> examples, learning those few examples too closely instead of the pattern that carries to new examples. Validate like always.</li>
     </ul>
 
     <h2 id="other-ways-to-shrink-the-update">Other ways to shrink the update</h2>

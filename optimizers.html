@@ -721,7 +721,7 @@
     <h2 id="zoo">Each optimizer fixes a failure of plain SGD</h2>
     <h3>Gradient Descent and SGD</h3>
     <p>Gradient descent walks the parameters downhill. <strong>Stochastic Gradient Descent (SGD)</strong> does it on a random minibatch instead of the whole dataset: same update idea, noisier gradient, way faster per step.</p>
-    <p>This makes it noisy but much faster and allows for escaping local minima, the low points that are lowest only nearby, not overall. It can be sensitive to the learning rate; too large, and the optimization path can zigzag or diverge, and too small would make it very slow. Its learning rate is the same across all parameters; there's no adaptation. With a constant learning rate, SGD will bounce around near a local minimum. The stochasticity helps escape saddle points and poor local minima.</p>
+    <p>This makes it noisy but much faster and allows for escaping local minima, the low points that are lowest only nearby, not overall. It can be sensitive to the learning rate; too large, and the optimization path can zigzag or diverge, the steps overshooting so the loss rises instead of settling and the walk flies apart, and too small would make it very slow. Its learning rate is the same across all parameters; there's no adaptation. With a constant learning rate, SGD will bounce around near a local minimum. The stochasticity helps escape saddle points and poor local minima.</p>
     <p>A <strong>saddle point</strong> is a point in the parameter space where the gradient is zero, and the optimizer might think it's a stationary point, a point where the gradient is zero and the walk would stop moving, but it's not a good minimum. Along one direction, the surface curves up like a minimum, and along another, it curves down like a maximum, which makes it a saddle. High-dimensional loss surfaces are full of saddle points. <em>SGD can shake itself loose from saddles, while full-batch GD (gradient descent on the whole dataset at once) may get stuck because there's no noise.</em></p>
     
     <h3>SGD with Momentum</h3>
@@ -1198,7 +1198,7 @@
         <div class="eq-why eq-active" data-eqline="1">Then step by the whole velocity: the weights <span class="eqt" style="color:#2c3e50">&#952;</span> get replaced by themselves minus v. That is the glide: momentum glides down the ravine instead of zigzagging across it.</div>
       </div>
 
-    <p>Toy landscape: a stretched bowl, start (<code>-3.5</code>, <code>5</code>), <code>150</code> steps, full-batch gradients, no noise. momentum <code>mu</code> = <code>0.9</code>; Adam <code>beta1</code> = <code>0.9</code>, <code>beta2</code> = <code>0.999</code>, <code>eps</code> = <code>1e-8</code> (0.00000001).</p>
+    <p>Toy landscape: a stretched bowl, start (<code>-3.5</code>, <code>5</code>), <code>150</code> steps, full-batch gradients, no noise. momentum <code>mu</code> = <code>0.9</code>; Adam <code>beta1</code> = <code>0.9</code>, <code>beta2</code> = <code>0.999</code>, <code>eps</code> = <code>1e-8</code> (0.00000001). The small chart beside the race plots the loss on a log scale, where equal steps stand for multiplying by the same factor rather than adding the same amount.</p>
 
     <div class="diagram">
       <svg viewBox="0 0 640 360" role="img" aria-label="Static contour drawing of the stretched bowl: tall elliptical contours, with SGD zigzagging across the ravine, momentum gliding down it, and Adam fixing each axis separately">
@@ -1213,7 +1213,7 @@
         <text x="370" y="300" font-family="sans-serif" font-size="13" fill="#6c3483">momentum glides</text>
         <text x="130" y="130" font-family="sans-serif" font-size="13" fill="#117a65">Adam, each axis separately</text>
       </svg>
-      <p class="caption">The stretched bowl, drawn as contours from the race's own landscape. SGD zigzags across the ravine, momentum glides down it, Adam fixes each axis separately. Same start, same loss, three personalities.</p>
+      <p class="caption">The stretched bowl, drawn as contours, lines of equal loss, from the race's own landscape. SGD zigzags across the ravine, momentum glides down it, Adam fixes each axis separately. Same start, same loss, three personalities.</p>
     </div>
 
     <div class="demo" id="optRace">
@@ -1314,7 +1314,29 @@
         activeOpts().forEach(function (w) { states[w] = newState(); });
         step = 0; finished = false;
         playBtn.textContent = 'Play';
+        computePreview();
         draw(); updateStats();
+      }
+
+      var previewTrails = null, previewLosses = null;
+
+      /* At-rest preview: the full traces Play would run at the current
+         learning rate, simulated on throwaway states so the live race
+         stays untouched. Drawn dashed while the race sits at step 0. */
+      function computePreview() {
+        previewTrails = {}; previewLosses = {};
+        activeOpts().forEach(function (w) {
+          var st = newState();
+          var trail = st.trail.slice(), losses = st.losses.slice();
+          for (var s = 0; s < STEPS; s++) {
+            if (st.diverged) break;
+            stepOnce(st, w);
+            if (st.diverged && st.divStep < 0) st.divStep = s + 1;
+            trail.push([clamp(st.x, XMIN, XMAX), clamp(st.y, YMIN, YMAX)]);
+            losses.push(st.diverged ? NaN : f(st.x, st.y));
+          }
+          previewTrails[w] = trail; previewLosses[w] = losses;
+        });
       }
 
       function stop() {
@@ -1456,6 +1478,20 @@
             ctx.stroke();
           }
         });
+        if (step === 0 && !finished && !timer && previewTrails) {
+          activeOpts().forEach(function (w) {
+            var tr = previewTrails[w];
+            ctx.strokeStyle = hexA(COLORS[w], 0.55);
+            ctx.lineWidth = 2;
+            ctx.setLineDash([6, 4]);
+            ctx.beginPath();
+            tr.forEach(function (p, k) {
+              if (k === 0) ctx.moveTo(X(p[0]), Y(p[1])); else ctx.lineTo(X(p[0]), Y(p[1]));
+            });
+            ctx.stroke();
+            ctx.setLineDash([]);
+          });
+        }
         ctx.restore();
         /* head dots, drawn after the trails so edge dots stay whole */
         activeOpts().forEach(function (w) {
@@ -1528,6 +1564,24 @@
           }
           ctx.stroke();
         });
+        if (step === 0 && !finished && !timer && previewLosses) {
+          activeOpts().forEach(function (w) {
+            var ls = previewLosses[w];
+            ctx.strokeStyle = hexA(COLORS[w], 0.55); ctx.lineWidth = 2;
+            ctx.setLineDash([6, 4]);
+            ctx.beginPath();
+            var pStarted = false;
+            for (var k = 0; k < ls.length; k++) {
+              var pv = ls[k];
+              if (!isFinite(pv)) break;
+              var pxx = X(k), pyy = Yl(pv);
+              if (!pStarted) { ctx.moveTo(pxx, pyy); pStarted = true; }
+              else ctx.lineTo(pxx, pyy);
+            }
+            ctx.stroke();
+            ctx.setLineDash([]);
+          });
+        }
         ctx.restore();
       }
 
@@ -1581,6 +1635,7 @@
         rto = setTimeout(draw, 150);
       });
 
+      lr = Math.pow(10, parseFloat(lrSlider.value));
       buildField();
       reset();
     })();

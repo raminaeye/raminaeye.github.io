@@ -687,8 +687,6 @@
      <a class="tab-chip" href="#ptq-example-cnn-with-manual-observers">Post-training quantization on a CNN, with manual observers</a>
      <a class="tab-chip" href="#quantization-aware-training-qat">Quantization-Aware Training (QAT)</a>
      <a class="tab-chip" href="#qat-training-fakequantize-details">Warm up the observers, then freeze the quantization noise</a>
-     <a class="tab-chip" href="#quantization-bugs">When quantization breaks: what to check first</a>
-     <a class="tab-chip" href="#how-do-i-trace-these-bugs">When quantized accuracy drops: print, plot, and disable layers</a>
      <a class="tab-chip" href="#wrapping-up">The quantization checklist</a>
      <a class="tab-chip" href="#references">References</a>
    </div>
@@ -917,7 +915,7 @@ model.qconfig = qconfig_hist
    </section>
    <section>
      <h2 id="where-should-the-range-end">The clipping range decides the whole error tradeoff</h2>
-     <p>Here is the decision that makes or breaks low-bit quantization, and it is embarrassingly simple: <em>where do you cut the range?</em> Every weight outside your clipping range gets clipped, and every weight inside gets rounded to a <code>4-bit</code> grid. <em>Cut wide and the outliers are safe but the bins get fat. Cut tight and the bins get fine but the outliers get beheaded.</em></p>
+     <p>Here is the decision that makes or breaks low-bit quantization, and it is embarrassingly simple: <em>where do you cut the range?</em> The <code>4-bit</code> grid itself is settled; what you choose here is how much of the weight range it has to cover. <em>Cut wide and the outliers are safe but the bins get fat. Cut tight and the bins get fine but the outliers get beheaded.</em></p>
      <p>There are two named strategies for setting the clipping range. <strong>Min-max</strong> sets the range to the tensor's actual minimum and maximum: zero clipping error by construction, but one loud outlier stretches the bins for everyone. <strong>MSE</strong> searches for the range that minimizes the <strong>Frobenius norm</strong> (the size of the whole gap between the weights and their quantized version: the square root of the summed squared gaps) between the weights and their quantized version, outliers be damned: tight bins, but the outliers get clipped. A third trick (Nagel et al., 2021): when a layer has batch norm, set the range from the batch-norm parameters so only large outliers get clipped.</p>
      <div class="figure">
        <img src="figures/papers/quant-fig5-channel-ranges.png" alt="Figure 5 from the quantization whitepaper: boxplots of per-channel weight ranges for the first depthwise-separable layer of MobileNetV2 after BN folding. Most channels are tiny, a few span huge ranges." style="max-width:100%;height:auto;">
@@ -929,7 +927,7 @@ model.qconfig = qconfig_hist
 <div class="eq-card" id="quantClipEqStatic">
 <div class="eq-what">Where do you cut the range? The scale follows from the cut, and the total error splits into the two ways a weight can miss.</div>
 <div class="eq-line eq-active" data-eqline="0">scale = <span class="frac"><span class="top"><span class="eqt" style="color:#8e44ad">qmax</span> &#8722; <span class="eqt" style="color:#8e44ad">qmin</span></span><span class="bot"><span class="eqt" style="color:#2c3e50">15</span></span></span></div>
-<div class="eq-why eq-active" data-eqline="0">The scale is the clipping range being tried, from <span class="eqt" style="color:#8e44ad">qmin</span> to <span class="eqt" style="color:#8e44ad">qmax</span>, split into <span class="eqt" style="color:#2c3e50">15</span>, the number of steps in a 4-bit grid. Cut wide and the outliers are safe but the bins get fat; cut tight and the bins get fine but the outliers get beheaded.</div>
+<div class="eq-why eq-active" data-eqline="0">The scale is the clipping range being tried, from <span class="eqt" style="color:#8e44ad">qmin</span> to <span class="eqt" style="color:#8e44ad">qmax</span>, split into <span class="eqt" style="color:#2c3e50">15</span>, the number of steps in a 4-bit grid.</div>
 <div class="eq-line eq-active" data-eqline="1">total MSE = clipping MSE + rounding MSE</div>
 <div class="eq-why eq-active" data-eqline="1">Each weight's squared gap between itself and its quantized then mapped back value is counted as clipping if the weight falls outside the range and as rounding if it falls inside, and both terms are shares over all the weights: each term adds up its kind of squared gap, then divides by the total number of weights, so both terms share the same denominator and add up to the total, the two ways a weight can miss, added.</div>
 </div>
@@ -2266,16 +2264,7 @@ with torch.no_grad():
         </table>
         </div>
         <p><code>calculate_qparams()</code> is a method used by observers in PyTorch to compute scale and zero-point. That's the observer's job to begin with.</p>
-                <h3 class="subhead-sm">Symmetric quantization keeps the zero-point at 0</h3>
-        <ul>
-            <li>The scale is the largest absolute value divided by <code>127</code> (or <code>128</code>)</li>
-            <li>The zero-point is <code>0</code></li>
-        </ul>
-        <h3 class="subhead-sm">Asymmetric quantization shifts the zero-point to fit the range</h3>
-        <ul>
-            <li>The scale is the value range divided by the integer range</li>
-            <li>The zero-point is set by the same rounding rule as the grid section above</li>
-        </ul>
+        <p>Both grids from the refresher are now running on a whole model: symmetric keeps the zero-point at <code>0</code> with its scale set by the largest absolute value, and asymmetric shifts the zero-point to fit the range. The observers above reported exactly those two choices, layer by layer.</p>
         <p>Next up: Quantization-Aware Training, where instead of quantizing after the fact, you train the model to expect the quantization noise.</p>
     </section>
 
@@ -2331,138 +2320,7 @@ else:
     print("conv1 or activation_post_process not found in conceptual model_prepared_qat.")
         </code></pre>
         <p>So the full loop is: warm-up, observers on, ranges updating every batch, <code>FakeQuant</code> rounding your activations while STE handles the backward pass, and the model learning while the noise keeps shifting. Then you freeze scale and zero-point. Now the noise is fixed and the model just learns to live with it. That frozen phase is where most of the accuracy recovery happens.</p>
-    </section>
-
-    <section>
-        <h2 id="quantization-bugs">When quantization breaks: what to check first</h2>
-        <p>So you quantized your model and something broke. Been there. Here is how it usually shows up and what I check first:</p>
-        <ul>
-            <li><strong>Accuracy drops. A lot.</strong>
-                <ul>
-                    <li>Scale and zero-point are garbage because calibration saw the wrong data.</li>
-                    <li>Layers weren't fused, or you have pointless float-int-float boundaries.</li>
-                    <li>One layer's ReLU range is huge and skews the observer.</li>
-                    <li>Per-tensor quantization when one bad channel is ruining it for everyone. Try per-channel.</li>
-                </ul>
-            </li>
-            <li><strong>Layers behave abnormally.</strong>
-                <ul>
-                    <li>The observer calibrated on data that doesn't look like production.</li>
-                    <li>A quant-dequant boundary landed somewhere dumb.</li>
-                    <li>Clipping. Something got rounded or clamped into oblivion.</li>
-                </ul>
-            </li>
-            <li><strong><code>FakeQuant</code> not simulating, model not converging (QAT).</strong>
-                <ul>
-                    <li>Observers aren't updating, so the scale is stale.</li>
-                    <li>You froze the scale too early, before the ranges settled.</li>
-                    <li><code>FakeQuant</code> is clipping too hard and your activations are getting squashed.</li>
-                </ul>
-            </li>
-            <li><strong><code>convert_fx()</code> fails. This happens a lot!</strong>
-                <ul>
-                    <li>You forgot to fuse, or fused the wrong layers.</li>
-                    <li>A submodule is missing its qconfig.</li>
-                    <li>FX couldn't trace your model. Usually some data-dependent control flow.</li>
-                </ul>
-            </li>
-        </ul>
-    </section>
-
-    <section>
-        <h2 id="how-do-i-trace-these-bugs">When quantized accuracy drops: print, plot, and disable layers</h2>
-        
-        <h3>Print quantization parameters</h3>
-        <pre><code class="language-python">
-for name, module in model_prepared_qat.named_modules():
-    if isinstance(module, torch.ao.quantization.FakeQuantize):
-        # For FakeQuantize modules, scale and zero_point are attributes
-        print(f"{name} -- scale: {module.scale.item() if torch.is_tensor(module.scale) else module.scale}, "
-              f"zero_point: {module.zero_point.item() if torch.is_tensor(module.zero_point) else module.zero_point}")
-    elif hasattr(module, 'weight_fake_quant'): # For layers with separate weight fake_quant
-         print(f"{name}.weight_fake_quant -- scale: {module.weight_fake_quant.scale.item()}, "
-               f"zero_point: {module.weight_fake_quant.zero_point.item()}")
-        </code></pre>
-        <p>My rule of thumb: scale is <code>0</code> or <code>NaN</code> (NaN stands for not a number, the placeholder value that shows up when a computation had no usable numbers to work from), the observers saw nothing. Scale is absurdly large or tiny, an outlier skewed the range.</p>
-        
-        <h3>Visualize activation ranges</h3>
-        <p>Plot the activations. Seriously, just look at them. Hook a layer, meaning attach a hook, a function the framework runs when that layer executes during a forward pass so it can record what the layer produced, histogram the float values, and compare against what the observer claims. If the observer's range is way wider than the actual data, you know where your resolution went.</p>
-        <pre><code class="language-python">
-activation_histograms = {}
-def capture_activations_hook(name):
-    def hook(module, input_val, output_val):
-        data_to_log = output_val
-        if isinstance(output_val, tuple): data_to_log = output_val[0] # Handle tuple outputs
-        if torch.is_tensor(data_to_log):
-            activation_histograms[name] = data_to_log.detach().cpu().flatten().numpy()
-    return hook
-
-model_to_debug = ObserverCNN().eval() # Or your specific model, ensure ObserverCNN is defined
-hook_conv1 = model_to_debug.conv1.register_forward_hook(capture_activations_hook("conv1_output"))
-hook_relu1 = model_to_debug.relu1.register_forward_hook(capture_activations_hook("relu1_output"))
-
-with torch.no_grad():
-    _ = model_to_debug(torch.randn(1, 3, 32, 32)) # Adjust input shape as needed
-
-for name, data in activation_histograms.items():
-    plt.figure()
-    plt.hist(data, bins=100)
-    plt.title(f"Activation Histogram: {name}")
-    plt.xlabel("Value"); plt.ylabel("Frequency"); plt.grid(True)
-    plt.show()
-
-hook_conv1.remove() # Clean up hooks
-hook_relu1.remove()
-        </code></pre>
-        <p>Then compare float vs quantized outputs, layer by layer. When one layer's output suddenly diverges, you found your culprit.</p>
-        
-        <h3>Disable quantization from layers one by one</h3>
-        <pre><code class="language-python">
-if hasattr(model_prepared_qat, 'conv1') and \
-   hasattr(model_prepared_qat.conv1, 'activation_post_process') and \
-   hasattr(model_prepared_qat.conv1.activation_post_process, 'disable_fake_quant'):
-    model_prepared_qat.conv1.activation_post_process.disable_fake_quant()
-# Re-evaluate and then re-enable with .enable_fake_quant() or re-prepare the model.
-        </code></pre>
-        
-        <h3>Run FX <code>print_tabular()</code></h3>
-        <p>This dumps the FX graph with the observers attached. I use it to hunt for missing <code>activation_post_process</code> hooks and stray quant/dequant pairs, which usually means bad fusion.</p>
-        <pre><code class="language-python">
-if hasattr(model_prepared_qat, 'graph'):
-    model_prepared_qat.graph.print_tabular()
-else:
-    print("Model does not seem to be an FX graph module or 'graph' attribute is missing.")
-        </code></pre>
-        
-        <h3>Inspect <code>activation_post_process</code></h3>
-        <p>Remember, <code>activation_post_process</code> is just PyTorch's name for the <code>FakeQuantize</code> module that <code>prepare_qat_fx()</code> sticks on the layer. Print its scale and zero-point directly.</p>
-        <pre><code class="language-python">
-# Example:
-self.conv = nn.Conv2d(...)
-self.conv.activation_post_process = FakeQuantize(...)
-if hasattr(model_prepared_qat, 'conv1') and hasattr(model_prepared_qat.conv1, 'activation_post_process'):
-    fq_module_inspect = model_prepared_qat.conv1.activation_post_process
-    print(fq_module_inspect.scale, fq_module_inspect.zero_point)
-    if hasattr(fq_module_inspect, 'min_val'): # Check if min_val/max_val are directly on FakeQuant
-        print("Observed min/max by FakeQuant:", fq_module_inspect.min_val.item(), fq_module_inspect.max_val.item())
-        </code></pre>
-        <p>Anything outside [min, max] gets clipped. That is the trade.</p>
-        
-        <h3>Use <code>torch.ao.quantization.quant_debug</code></h3>
-        <p>When you want the full diff, this records float vs quantized activations layer by layer, with histograms of the differences. The line below is how you use it: <code>add_debug_observers_qat</code> takes a prepared QAT model and its qconfig dict and returns a copy of the model with those recording observers attached, so you run that copy and then read the recorded stats off it. Fair warning, the API moves around between PyTorch versions.</p>
-        <pre><code class="language-python">
-debug_model = add_debug_observers_qat(model_prepared_qat, qconfig_dict_qat)
-print(debug_model.activation_debug_stats) # Or similar attribute, API might change
-        </code></pre>
-        
-        <h3>Look for outliers and dead activations</h3>
-        <p>A dead activation is an output stuck at zero, a unit that produces nothing whatever comes in, so it carries no signal. A histogram like this one is how you spot the pile of values sitting exactly on zero.</p>
-        <pre><code class="language-python">
-tensor = torch.randn(1000) # Example tensor
-plt.hist(tensor.detach().cpu().flatten().numpy(), bins=100)
-plt.title("Tensor Value Histogram")
-plt.show()
-        </code></pre>
+        <p>When the accuracy still drops after all this, I stop retraining and start measuring. The checks and the layer-by-layer tracing live on <a href="quantization-debugging.html">Debugging a Quantized Model</a>.</p>
     </section>
 
     <section>

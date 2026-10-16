@@ -545,6 +545,7 @@
     #attnLayer .al-strip { display: inline-flex; align-items: flex-end; gap: 1px; height: 46px; }
     #attnLayer .al-bar { width: 5px; background: #3498db; border-radius: 2px; }
     #attnLayer .al-bar.pos { background: repeating-linear-gradient(45deg, #8e44ad, #8e44ad 3px, #d2b4de 3px, #d2b4de 6px); }
+    #attnLayer .al-bar.al-pre { background: #c9d2d9; }
     #attnLayer .al-bar.mix { background: #2ecc71; }
     #attnLayer .al-op { color: #555; font-weight: bold; font-size: 1.05em; }
     #attnLayer .al-legend { font-size: 0.9em; color: #555; margin: 0.7em 0 0; }
@@ -566,6 +567,34 @@
     #attnLayer .al-smallnote { font-size: 0.8em; color: #777; margin: 0.55em 0 0; }
     #attnLayer .al-arrow { font-size: 1.5em; color: #2c3e50; font-weight: bold; }
     #attnLayer .al-arrow.thick { font-size: 2em; color: #e67e22; }
+    /* attnLayer phone scene (max-width 480px): the four regions stack in a
+       compact geometry so the stepper and the full scene share one phone
+       screen. Strips also shrink in the script (bar heights scale 0.47). */
+    @media (max-width: 480px) {
+      #attnLayer .stepper { gap: .4rem; margin: .3rem 0; }
+      #attnLayer .stepper .play-btn { padding: .35rem .8rem; }
+      #attnLayer .dot { padding: .18em .5em; font-size: .8em; }
+      #attnLayer .al-canvas { margin: .45rem 0 .25rem; }
+      #attnLayer .al-scene { gap: .4rem; }
+      #attnLayer .al-region { padding: .3rem .45rem; }
+      #attnLayer .al-region-title { font-size: .72rem; margin: 0 0 .2rem; }
+      #attnLayer .al-row { margin: .3em 0; padding: .28em .4em; gap: .3rem; }
+      #attnLayer .al-strip { height: 24px; }
+      #attnLayer .al-bar { width: 4px; }
+      #attnLayer .al-token { min-width: 2.2em; padding: .2em .3em; font-size: .9em; }
+      #attnLayer .al-legend { font-size: .8em; margin: .35em 0 0; line-height: 1.4; }
+      #attnLayer .al-note { font-size: .86em; margin: 0 0 .3em; line-height: 1.35; }
+      #attnLayer .al-smallnote { font-size: .76em; margin: .35em 0 0; line-height: 1.35; }
+      #attnLayer .al-follow { line-height: 1.2; }
+      #attnLayer table.al-grid { margin: .2rem 0; }
+      #attnLayer table.al-grid td { width: 40px; height: 22px; }
+      #attnLayer table.al-grid th { padding: .08em .3em; font-size: .82em; }
+      #attnLayer .al-wfill { height: 10px; }
+      #attnLayer .al-flow { gap: .4rem; margin: .3rem 0; }
+      #attnLayer .al-flabel { font-size: .78em; margin-top: .25em; max-width: 12em; }
+      #attnLayer .al-arrow { font-size: 1.25em; }
+      #attnLayer .al-arrow.thick { font-size: 1.6em; }
+    }
     .head-key { display: flex; flex-wrap: wrap; gap: 1.2em; justify-content: center; margin: 0.4rem 0 0.6rem; font-size: 0.9em; color: #555; }
     .head-key .sw { display: inline-block; width: 1.4em; height: 0.9em; border-radius: 3px; margin-right: 0.4em; vertical-align: middle; }
     .head-key .sw.blue { background: #3498db; }
@@ -1130,10 +1159,26 @@ figcaption { margin-top: 1rem; }
       "<strong>Step 4, Blend.</strong> Each token's output blends everyone's words. \"cat\" flows into \"sat\"'s rebuilt vector: the blend is the main event. The residual skip adds \"sat\"'s own vector back in, and layer norm rescales every token's vector to the same overall length. The result is this sublayer's output."
     ];
 
+    /* On a phone the scene stacks in the compact geometry from the
+       max-width:480px CSS block, and the strip bars scale down with it.
+       SCALE is 1 everywhere else, so desktop rendering is unchanged. */
+    var SCALE = 1;
+    function phoneScale() {
+      return window.matchMedia('(max-width: 480px)').matches ? 0.47 : 1;
+    }
+
     function strip(vals, cls) {
       var h = '<span class="al-strip" aria-hidden="true">';
       for (var i = 0; i < vals.length; i++) {
-        h += '<span class="al-bar' + (cls ? ' ' + cls : '') + '" style="height:' + vals[i] + 'px"></span>';
+        h += '<span class="al-bar' + (cls ? ' ' + cls : '') + '" style="height:' + Math.max(2, Math.round(vals[i] * SCALE)) + 'px"></span>';
+      }
+      return h + '</span>';
+    }
+
+    function flatStrip(n) {
+      var h = '<span class="al-strip" aria-hidden="true">';
+      for ( var i = 0; i < n; i++) {
+        h += '<span class="al-bar al-pre" style="height:' + Math.round(24 * SCALE) + 'px"></span>';
       }
       return h + '</span>';
     }
@@ -1156,16 +1201,23 @@ figcaption { margin-top: 1rem; }
       return h;
     }
 
-    function regionScores() {
+    /* Gradual reveal: each region's answer encoding stays neutral until
+       its own step runs. Scores shade only from step 2, weight fills only
+       from step 3, the rebuilt blend strip only from step 4. */
+    function regionScores(revealed) {
       var min = 0.5, max = 3.6, span = max - min;
       var h = '<table class="al-grid" aria-label="Attention score grid">' +
         '<tr><th></th><th>"the"</th><th>"cat"</th><th>"sat"</th></tr>';
       TOK.forEach(function(q) {
         h += '<tr class="' + (q === "sat" ? "follow" : "") + '"><th class="rowhead">"' + q + '"</th>';
         TOK.forEach(function(k) {
-          var v = SCORES[q][TOK.indexOf(k)];
-          var a = 0.06 + 0.9 * (v - min) / span;
-          h += '<td style="background: rgba(52,152,219,' + a.toFixed(2) + ')"></td>';
+          if (revealed) {
+            var v = SCORES[q][TOK.indexOf(k)];
+            var a = 0.06 + 0.9 * (v - min) / span;
+            h += '<td style="background: rgba(52,152,219,' + a.toFixed(2) + ')"></td>';
+          } else {
+            h += '<td style="background: #eef1f4"></td>';
+          }
         });
         h += '</tr>';
       });
@@ -1173,14 +1225,14 @@ figcaption { margin-top: 1rem; }
       return h;
     }
 
-    function regionWeights() {
-      var h = '<p class="al-note">Every row is now a set of weights that sums to <code>1</code>.</p>' +
+    function regionWeights(revealed) {
+      var h = '<p class="al-note"' + (revealed ? '' : ' style="visibility:hidden"') + '>Every row is now a set of weights that sums to <code>1</code>.</p>' +
         '<table class="al-grid" aria-label="Attention weight grid">' +
         '<tr><th></th><th>"the"</th><th>"cat"</th><th>"sat"</th></tr>';
       TOK.forEach(function(q) {
         h += '<tr class="' + (q === "sat" ? "follow" : "") + '"><th class="rowhead">"' + q + '"</th>';
         TOK.forEach(function(k) {
-          var v = WEIGHTS[q][TOK.indexOf(k)];
+          var v = revealed ? WEIGHTS[q][TOK.indexOf(k)] : 0;
           h += '<td><span class="al-wtrack"><span class="al-wfill" style="width:' + Math.round(v * 100) + '%"></span></span></td>';
         });
         h += '</tr>';
@@ -1188,11 +1240,11 @@ figcaption { margin-top: 1rem; }
       return h + '</table>';
     }
 
-    function regionBlend() {
+    function regionBlend(revealed) {
       return '<div class="al-flow">' +
         '<div class="al-fnode">' + strip(BLEND.catFlow, "") + '<div class="al-flabel">"cat"\'s strip</div></div>' +
         '<span class="al-arrow thick" aria-hidden="true">&rarr;</span>' +
-        '<div class="al-fnode">' + strip(BLEND.rebuilt, "mix") + '<div class="al-flabel">"sat", rebuilt: the blend</div></div>' +
+        '<div class="al-fnode">' + (revealed ? strip(BLEND.rebuilt, "mix") : flatStrip(BLEND.rebuilt.length)) + '<div class="al-flabel">"sat", rebuilt: the blend</div></div>' +
         '</div>' +
         '<p class="al-smallnote">Small print: the residual skip adds "sat"\'s own strip back in, then layer norm, giving this sublayer\'s output.</p>';
     }
@@ -1205,14 +1257,15 @@ figcaption { margin-top: 1rem; }
       {lines:[3], terms:['out','A','V']}
     ];
 
-    /* One persistent scene: four fixed-geometry regions, always all drawn.
-       Only opacity/highlight changes per step; never pieces. */
-    function sceneHTML() {
+    /* The scene rebuilds on every step: regions before their step render
+       in the neutral pre-reveal state, the current region is lit, later
+       regions stay drawn but dimmed. Nothing is ever display:none. */
+    function sceneHTML(step) {
       return '<div class="al-scene">' +
         '<div class="al-region" id="alRegTokens" data-eqk="X Q K V"><p class="al-region-title">token strips</p>' + regionTokens() + '</div>' +
-        '<div class="al-region" id="alRegScores" data-eqk="S Q K"><p class="al-region-title">score grid</p>' + regionScores() + '</div>' +
-        '<div class="al-region" id="alRegWeights" data-eqk="A S"><p class="al-region-title">weight bars</p>' + regionWeights() + '</div>' +
-        '<div class="al-region" id="alRegBlend" data-eqk="out A V"><p class="al-region-title">blend flow</p>' + regionBlend() + '</div>' +
+        '<div class="al-region" id="alRegScores" data-eqk="S Q K"><p class="al-region-title">score grid</p>' + regionScores(step >= 1) + '</div>' +
+        '<div class="al-region" id="alRegWeights" data-eqk="A S"><p class="al-region-title">weight bars</p>' + regionWeights(step >= 2) + '</div>' +
+        '<div class="al-region" id="alRegBlend" data-eqk="out A V"><p class="al-region-title">blend flow</p>' + regionBlend(step >= 3) + '</div>' +
         '</div>';
     }
 
@@ -1259,20 +1312,22 @@ figcaption { margin-top: 1rem; }
     var nextBtn = document.getElementById("attnLayerNext");
     var dots = document.querySelectorAll('#attnLayer .dot');
 
+    function renderScene() {
+      canvas.innerHTML = sceneHTML(cur);
+      canvas.setAttribute('data-scene', '1');
+      for (var r = 0; r < REGION_IDS.length; r++) {
+        document.getElementById(REGION_IDS[r]).classList.toggle('eq-dim', r !== cur);
+      }
+    }
+
     function go(n) {
       cur = Math.max(0, Math.min(3, n));
-      if (!canvas.getAttribute('data-scene')) {
-        canvas.innerHTML = sceneHTML();
-        canvas.setAttribute('data-scene', '1');
-      }
+      renderScene();
       outcome.innerHTML = OUTCOMES[cur];
       prevBtn.disabled = (cur === 0);
       nextBtn.disabled = (cur === 3);
       for (var i = 0; i < dots.length; i++) {
         dots[i].classList.toggle("active", i === cur);
-      }
-      for (var r = 0; r < REGION_IDS.length; r++) {
-        document.getElementById(REGION_IDS[r]).classList.toggle('eq-dim', r !== cur);
       }
       syncEq('attnLayerEq', EQMAP[cur].lines, EQMAP[cur].terms);
     }
@@ -1281,6 +1336,11 @@ figcaption { margin-top: 1rem; }
     for (var d = 0; d < dots.length; d++) {
       (function(i) { dots[i].addEventListener("click", function() { go(i); }); })(d);
     }
+    SCALE = phoneScale();
+    window.addEventListener("resize", function() {
+      var ns = phoneScale();
+      if (ns !== SCALE) { SCALE = ns; renderScene(); }
+    });
     go(0);
   })();
   </script>

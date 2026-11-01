@@ -874,10 +874,9 @@ figcaption { margin-top: 1rem; }
 
   <p class="tabs-label">On this page</p>
   <div class="tab-strip">
-    <a class="tab-chip" href="#attention-recap">Attention, heads and the causal mask, the parts a block is built from</a>
     <a class="tab-chip" href="#the-full-block">Attention mixes, the FFN refines, residuals carry everything up</a>
     <a class="tab-chip" href="#pre-ln-vs-post-ln">Where the norm sits decides whether training needs warmup</a>
-    <a class="tab-chip" href="#layernorm-not-batchnorm">LayerNorm, not BatchNorm, because generation runs one token at a time</a>
+    <a class="tab-chip" href="#layernorm-not-batchnorm">LayerNorm, not BatchNorm, normalizes each token alone</a>
     <a class="tab-chip" href="#reading-the-full-transformer-diagram">Reading the full Transformer diagram</a>
     <a class="tab-chip" href="#one-base-model-beat-the-best-ensembles">One base model beat the best ensembles in half a day</a>
     <a class="tab-chip" href="#three-families">Encoder-only, encoder-decoder and decoder-only stacks</a>
@@ -888,31 +887,25 @@ figcaption { margin-top: 1rem; }
   <p>This page follows <a href="transformer-position-masking.html">Positional Encoding and Masking</a>.</p>
 
   <p>
-    One attention layer is not a model yet. Here I stack it into a block, stack the blocks into a model,
-    and end with a small GPT you can read in a few lines of code.
+    Here I stack attention into a block, the blocks into a model, and end with a small GPT in a few lines of code.
   </p>
 
-  <hr>
-
-  <h2 id="attention-recap">Attention, heads and the causal mask, the parts a block is built from</h2>
   <p>
-    Text enters as <strong>tokens</strong>, words or pieces of words, and each token is a vector of <code>d<sub>model</sub></code> numbers, the model width.
-    In attention, each token makes a <strong>query</strong> (what it looks for), a <strong>key</strong> (what it offers) and a <strong>value</strong> (what it carries), and blends the values of the tokens whose keys match its query.
-    A model runs several of these in parallel, called <strong>heads</strong>, each with its own projections.
-    A <strong>causal mask</strong> blocks every token from looking at tokens after it, so a model that writes text cannot peek at the answer.
+    From <a href="transformers.html">Attention</a>: each <strong>token</strong>, a word or word piece, is a vector of d<sub>model</sub> numbers that makes a <strong>query</strong>, a <strong>key</strong> and a <strong>value</strong>, stacked one row per token as Q, K and V (key length d<sub>k</sub>).
+    Several <strong>heads</strong> run attention side by side, and a <strong>causal mask</strong> stops each token from seeing later ones.
   </p>
   <div class="eq-card" id="tbAttnEq">
-      <div class="eq-what">The attention equation every block on this page reuses.</div>
-      <div class="eq-line eq-active" data-eqline="0">Attention(<span class="eqt" style="color:#2a7fbf">Q</span>, <span class="eqt" style="color:#2a7fbf">K</span>, <span class="eqt" style="color:#1e8449">V</span>) = softmax<span class="frac"><span class="top"><span class="eqt" style="color:#2a7fbf">Q</span><span class="eqt" style="color:#2a7fbf">K</span><sup>T</sup></span><span class="bot"><span class="rad"><span class="rad-sym">&#8730;</span><span class="rad-body">d<sub>k</sub></span></span></span></span><span class="eqt" style="color:#1e8449">V</span></div>
-        <div class="eq-why eq-active" data-eqline="0">Read it right to left as a recipe: score every query against every key, scale the scores, turn each row of scores into weights, and use the weights to blend the values. <span class="eqt" style="color:#2a7fbf">Q</span>, <span class="eqt" style="color:#2a7fbf">K</span> and <span class="eqt" style="color:#1e8449">V</span> are the queries, keys and values stacked as rows, one row per token. The superscript T is the transpose, which flips K so every query meets every key in one matrix product. Dividing by the square root of d<sub>k</sub>, the key length, keeps the scores from growing with the vector size. Softmax turns each row of scores into positive weights that add up to 1. The job of the whole line: each output row is a new version of one token, built from the tokens it listened to. In the code on this page this line hides inside the attention layer of the block.</div>
+      <div class="eq-what">Attention, the layer every block on this page reuses.</div>
+      <div class="eq-line eq-active" data-eqline="0">Attention(<span class="eqt" style="color:#2a7fbf">Q</span>, <span class="eqt" style="color:#2a7fbf">K</span>, <span class="eqt" style="color:#1e8449">V</span>) = softmax(<span class="frac"><span class="top"><span class="eqt" style="color:#2a7fbf">Q</span><span class="eqt" style="color:#2a7fbf">K</span><sup>T</sup></span><span class="bot"><span class="rad"><span class="rad-sym">&#8730;</span><span class="rad-body">d<sub>k</sub></span></span></span></span>)<span class="eqt" style="color:#1e8449">V</span></div>
+        <div class="eq-why eq-active" data-eqline="0">Score every query against every key (the superscript T is the transpose), divide by &#8730;d<sub>k</sub>, softmax each row into weights that sum to 1, and blend the values.</div>
     </div>
 
   <hr>
 
   <h2 id="the-full-block">Attention mixes, the FFN refines, residuals carry everything up</h2>
   <p>
-    A <strong>block</strong> does two jobs in turn. Attention mixes information between tokens. Then a small <strong>feed-forward network</strong> (FFN), two linear layers with a bend between them, refines each token on its own.
-    Neither job overwrites the token. Each one reads the token's vector and adds its result back, so the vector that enters the model flows straight up through every block. That running vector is called the <strong>residual stream</strong>.
+    A <strong>block</strong> runs two <strong>sublayers</strong> in turn: attention mixes information between tokens, then a small <strong>feed-forward network</strong> (FFN), two linear layers with a bend between them, refines each token alone.
+    Each job adds its result back onto the token's vector instead of replacing it, so that running vector, the <strong>residual stream</strong>, flows straight up through every block.
   </p>
   <figure class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 372" style="max-width:440px" role="img" aria-label="The residual stream: x flows straight up; one branch normalizes it, runs attention and adds the result back; a second branch normalizes it, runs the FFN and adds the result back; a final LayerNorm sits before the output">
     <line x1="96" y1="352" x2="96" y2="48" style="stroke:#7d3c98;stroke-width:7px;stroke-linecap:butt"/>
@@ -945,28 +938,28 @@ figcaption { margin-top: 1rem; }
     <text x="118" y="94" text-anchor="start" class="mtd-sub" style="font-size:13px">refines each token</text>
   </svg><figcaption class="caption">Each sublayer reads the stream and adds its result back; nothing replaces x, so the input still reaches the top.</figcaption></figure>
   <p>
-    Before each sublayer the vector is rescaled by <strong>LayerNorm</strong> (LN), which gives each token's vector the same overall scale; its own section, <a href="#layernorm-not-batchnorm">LayerNorm, not BatchNorm</a>, shows how.
-    Written out, one block is two lines, plus one LayerNorm after the last block:
+    Before each sublayer, <strong>LayerNorm</strong> (LN) rescales the token's vector to a standard scale, as <a href="#layernorm-not-batchnorm">its own section</a> shows.
+    With LN placed before each sublayer, a layout called <strong>Pre-LN</strong>, one block is two lines plus one final LayerNorm:
   </p>
   <div class="eq-card" id="tbPreLnEq">
-      <div class="eq-what">One Pre-LN block, the layout most models use today: normalize, run the sublayer, add back.</div>
+      <div class="eq-what">One Pre-LN block, the layout most models use today.</div>
       <div class="eq-line eq-active" data-eqline="0"><span class="eqt" style="color:#7d3c98">x</span> = <span class="eqt" style="color:#7d3c98">x</span> + <span class="eqt" style="color:#e67e22">Attn</span>(LN(<span class="eqt" style="color:#7d3c98">x</span>))</div>
-        <div class="eq-why eq-active" data-eqline="0">Read the equals sign as "becomes": the stream <span class="eqt" style="color:#7d3c98">x</span> becomes itself plus what attention found. LN(x) is the normalized copy that attention reads; <span class="eqt" style="color:#e67e22">Attn</span> is the attention layer from the card above, with its heads. The job: bring in information from other tokens without erasing the token's own. In the block code this is the line commented "mix between tokens".</div>
+        <div class="eq-why eq-active" data-eqline="0">Read = as "becomes": the stream <span class="eqt" style="color:#7d3c98">x</span> keeps itself and adds what <span class="eqt" style="color:#e67e22">Attn</span> found in other tokens, reading a normalized copy LN(<span class="eqt" style="color:#7d3c98">x</span>).</div>
       <div class="eq-line eq-active" data-eqline="1"><span class="eqt" style="color:#7d3c98">x</span> = <span class="eqt" style="color:#7d3c98">x</span> + <span class="eqt" style="color:#1e8449">FFN</span>(LN(<span class="eqt" style="color:#7d3c98">x</span>))</div>
-        <div class="eq-why eq-active" data-eqline="1">Same shape, second sublayer: the stream becomes itself plus what the <span class="eqt" style="color:#1e8449">FFN</span> computes from a normalized copy. The FFN sees one token at a time, so this line thinks about each token alone. It is the code line commented "refine each token alone".</div>
+        <div class="eq-why eq-active" data-eqline="1">Same shape for the <span class="eqt" style="color:#1e8449">FFN</span>: each token adds what the FFN computes from its own normalized copy, one token at a time.</div>
       <div class="eq-line eq-active" data-eqline="2">y = LN(<span class="eqt" style="color:#7d3c98">x</span><sub>N</sub>)</div>
-        <div class="eq-why eq-active" data-eqline="2">After the last of the N blocks, x<sub>N</sub> gets one final LayerNorm, and y is what goes to the output layer. Pre-LN needs this extra norm because nothing inside the blocks ever normalizes the stream itself (Xiong et al. 2020, section 1). In the model code it is the LayerNorm applied just before the output layer.</div>
+        <div class="eq-why eq-active" data-eqline="2">After the last of the N blocks, one final LayerNorm rescales x<sub>N</sub>, because no block normalizes the stream itself; y goes to the output layer.</div>
     </div>
   <p>
-    Why add instead of replace? Training sends a <strong>gradient</strong>, the signal that tells each weight which way to move, backward from the loss through every layer. Through a long chain of layers it can shrink toward zero, the <strong>vanishing gradient</strong> problem. The plus sign gives it a path that skips the sublayer entirely, so even the bottom block hears the loss clearly.
+    Why add instead of replace? Training sends a <strong>gradient</strong>, the signal telling each weight which way to move, backward through every layer, and through a long chain it can shrink toward zero, the <strong>vanishing gradient</strong>. The plus sign gives it a path around every sublayer, so even the bottom block hears the loss.
   </p>
   <p>The FFN itself is one line:</p>
   <div class="eq-card" id="tbFfnEq">
-      <div class="eq-what">The position-wise feed-forward network, applied to every token separately with the same weights.</div>
+      <div class="eq-what">The FFN, applied to every token separately with the same weights; the original model used d<sub>model</sub> = 512 and d<sub>ff</sub> = 2048.</div>
       <div class="eq-line eq-active" data-eqline="0"><span class="eqt" style="color:#1e8449">FFN</span>(x) = max(0, x<span class="eqt" style="color:#1e8449">W<sub>1</sub></span> + b<sub>1</sub>)<span class="eqt" style="color:#1e8449">W<sub>2</sub></span> + b<sub>2</sub></div>
-        <div class="eq-why eq-active" data-eqline="0">Read it inside out. x<span class="eqt" style="color:#1e8449">W<sub>1</sub></span> + b<sub>1</sub> widens the token from d<sub>model</sub> numbers to d<sub>ff</sub> numbers (W is a weight matrix, b a bias vector added after it). max(0, &#8230;) is ReLU: it keeps positive numbers and sets negative ones to zero, the bend that lets the network learn more than a straight line. Then <span class="eqt" style="color:#1e8449">W<sub>2</sub></span> and b<sub>2</sub> bring it back to d<sub>model</sub> so it can be added to the stream. The original model used d<sub>model</sub> = 512 and d<sub>ff</sub> = 2048, four times wider (Vaswani et al. 2017, section 3.3). In code it is the Linear, ReLU, Linear stack named ffn.</div>
+        <div class="eq-why eq-active" data-eqline="0">x<span class="eqt" style="color:#1e8449">W<sub>1</sub></span> + b<sub>1</sub> widens the token from d<sub>model</sub> to d<sub>ff</sub> numbers (W a weight matrix, b a bias), max(0, &#8230;), called ReLU, zeroes negatives, and <span class="eqt" style="color:#1e8449">W<sub>2</sub></span>, b<sub>2</sub> bring it back.</div>
     </div>
-  <p>In PyTorch the whole block is a few lines; the two residual lines are the two lines of the card above.</p>
+  <p>In PyTorch the block's two residual lines are the two lines of the Pre-LN card.</p>
 <pre><code class="language-python">class Block(nn.Module):                        # Pre-LN block, x: (B, T, d_model)
     def __init__(self, d_model, n_heads, d_ff):
         super().__init__()
@@ -980,7 +973,7 @@ figcaption { margin-top: 1rem; }
         x = x + self.ffn(self.ln2(x))          # refine each token alone
         return x                               # (B, T, d_model), same shape as the input
 </code></pre>
-  <p>B is the batch size and T the number of tokens. Passing the same normalized tensor three times as query, key and value is what makes this self-attention.</p>
+  <p>B is the batch size and T the number of tokens; passing one normalized tensor as query, key and value makes this self-attention.</p>
 
   <hr>
 
@@ -989,9 +982,9 @@ figcaption { margin-top: 1rem; }
     The 2017 paper put LayerNorm after the add, on the stream itself. That layout is called <strong>Post-LN</strong>:
   </p>
   <div class="eq-card" id="tbPostLnEq">
-      <div class="eq-what">The Post-LN block of the original Transformer, for one sublayer.</div>
+      <div class="eq-what">The Post-LN block of the original Transformer.</div>
       <div class="eq-line eq-active" data-eqline="0"><span class="eqt" style="color:#7d3c98">x</span> = LN(<span class="eqt" style="color:#7d3c98">x</span> + Sublayer(<span class="eqt" style="color:#7d3c98">x</span>))</div>
-        <div class="eq-why eq-active" data-eqline="0">The stream becomes the normalized sum of itself and the sublayer's output, where Sublayer is attention or the FFN. Compare it with the Pre-LN card: here LN wraps the whole sum, so every block's output, the skip path included, passes through a LayerNorm. The skip path is no longer a clean copy.</div>
+        <div class="eq-why eq-active" data-eqline="0">LN wraps the whole sum, so even the copy of x that bypasses the sublayer passes through a LayerNorm in every block; Sublayer is attention or the FFN.</div>
     </div>
   <figure class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 274" style="max-width:480px" role="img" aria-label="Post-LN puts LayerNorm on the stream after the add; Pre-LN puts it inside the branch and leaves the stream clean">
     <text x="100" y="20" text-anchor="middle" style="font-size:15px;font-weight:700">Post-LN (2017)</text>
@@ -1030,22 +1023,23 @@ figcaption { margin-top: 1rem; }
     <text x="300" y="230" text-anchor="middle" style="font-size:14px">output</text>
   </svg><figcaption class="caption">Same parts, one moved box. f is attention or the FFN; the purple line is the stream.</figcaption></figure>
   <p>
-    The difference shows up in training. Xiong et al. (2020) proved that at initialization, before any training, the expected gradients of the weights near the output are large in a Post-LN Transformer, so a full-size learning rate (the step size of each weight update) makes training unstable. That is why Post-LN needs <strong>warmup</strong>: start with a tiny learning rate and ramp it up over the first few thousand steps. With Pre-LN the gradients are well-behaved at initialization, and in their experiments Pre-LN without warmup reached comparable results with significantly less training time. Comparable, not better: the gain is speed and fewer settings to tune.
+    Xiong et al. (2020) proved that at initialization a Post-LN Transformer has large gradients near the output, so a full-size <strong>learning rate</strong> (the step size of each update) is unstable and training needs <strong>warmup</strong>: a tiny rate ramped up over the first few thousand steps.
+    With Pre-LN and no warmup they reached comparable results in significantly less training time.
   </p>
 
   <hr>
 
-  <h2 id="layernorm-not-batchnorm">LayerNorm, not BatchNorm, because generation runs one token at a time</h2>
+  <h2 id="layernorm-not-batchnorm">LayerNorm, not BatchNorm, normalizes each token alone</h2>
   <p>
     LayerNorm normalizes each token using only that token's own numbers:
   </p>
   <div class="eq-card" id="tbLnEq">
       <div class="eq-what">LayerNorm on one token's vector x of d<sub>model</sub> features.</div>
       <div class="eq-line eq-active" data-eqline="0">LN(x) = <span class="eqt" style="color:#7d3c98">&#947;</span> &#8857; <span class="frac"><span class="top">x &#8722; <span class="eqt" style="color:#2a7fbf">&#956;</span></span><span class="bot"><span class="rad"><span class="rad-sym">&#8730;</span><span class="rad-body"><span class="eqt" style="color:#2a7fbf">&#963;</span><sup>2</sup> + &#949;</span></span></span></span> + <span class="eqt" style="color:#7d3c98">&#946;</span></div>
-        <div class="eq-why eq-active" data-eqline="0">Read the fraction first: subtract the token's own mean <span class="eqt" style="color:#2a7fbf">&#956;</span> (mu, the average of its features) and divide by its own spread, the square root of its variance <span class="eqt" style="color:#2a7fbf">&#963;</span><sup>2</sup> (sigma squared, the average squared distance from the mean). &#949; (epsilon) is a tiny constant that keeps the division safe when the spread is near zero. Then <span class="eqt" style="color:#7d3c98">&#947;</span> (gamma) rescales and <span class="eqt" style="color:#7d3c98">&#946;</span> (beta) shifts, two learned vectors, and &#8857; means multiply feature by feature. The job: every token enters each sublayer at the same scale, whatever the layers below did to it. In code it is nn.LayerNorm(d_model), and its mean is the ln_mean line of the next snippet.</div>
+        <div class="eq-why eq-active" data-eqline="0">Subtract the token's own mean <span class="eqt" style="color:#2a7fbf">&#956;</span>, divide by its spread (<span class="eqt" style="color:#2a7fbf">&#963;</span><sup>2</sup> is its variance, &#949; a tiny safety constant), then learned <span class="eqt" style="color:#7d3c98">&#947;</span> and <span class="eqt" style="color:#7d3c98">&#946;</span> rescale and shift; &#8857; multiplies feature by feature.</div>
     </div>
   <p>
-    <strong>BatchNorm</strong>, the usual choice in image models, averages each feature over the whole batch instead. The two differ only in which axes they average over:
+    <strong>BatchNorm</strong>, the usual choice in image models, instead averages each feature over every token of every sequence in the batch:
   </p>
 <pre><code class="language-python">x = torch.randn(32, 10, 512)          # (batch, tokens, features)
 ln_mean = x.mean(dim=-1)              # LayerNorm: one mean per token, shape (32, 10)
@@ -1161,7 +1155,9 @@ bn_mean = x.mean(dim=(0, 1))          # BatchNorm: one mean per feature, shape (
     <text x="300" y="174" text-anchor="middle" style="font-size:13px;font-weight:600">one feature, every token</text><text x="300" y="192" text-anchor="middle" style="font-size:13px;font-weight:600">of every sentence</text>
   </svg><figcaption class="caption">Orange cells are averaged together. LayerNorm never looks outside one token.</figcaption></figure>
   <p>
-    That is the whole reason. When a model writes text it produces one token at a time, often for one user, so there is no batch to average over and the batch statistics BatchNorm relies on do not exist. LayerNorm does not care: one token is enough.
+    Batch averages suit text badly. In training, a token's result depends on the other sequences in its batch, padding included, and with variable-length text those averages are noisy.
+    At inference BatchNorm uses running averages saved in training, which can differ from what a given sequence needs.
+    LayerNorm uses only the token's own features, so it behaves the same in training and inference, for any batch size or length.
   </p>
 
   <hr>
@@ -1174,8 +1170,9 @@ bn_mean = x.mean(dim=(0, 1))          # BatchNorm: one mean per feature, shape (
     <p class="caption">Verbatim caption: "The Transformer - model architecture."</p>
   </div>
   <ul>
-    <li>Data flows bottom to top. Tokens become vectors at Input Embedding, and the small plus circle adds the position signal. The left stack is the encoder, N identical blocks of attention and feed-forward, each wrapped in Add &amp; Norm, the Post-LN layout from the card above. Nx means the block is repeated N times.</li>
-    <li>The right stack is the decoder. Its bottom attention is masked with the causal mask. Its middle attention takes its keys and values from the encoder, the arrow crossing over from the left.</li>
+    <li>Data flows bottom to top. Input Embedding turns tokens into vectors, and the plus circle adds the position signal.</li>
+    <li>The left stack is the <strong>encoder</strong>, the part that reads the input: N blocks (Nx) of attention and feed-forward, each wrapped in the Post-LN Add &amp; Norm.</li>
+    <li>The right stack is the <strong>decoder</strong>, the part that writes the output. Its bottom attention uses the causal mask; its middle attention takes keys and values from the encoder.</li>
     <li>Linear and Softmax at the top turn the decoder's last vector into a probability for every word in the vocabulary.</li>
   </ul>
 
@@ -1183,7 +1180,8 @@ bn_mean = x.mean(dim=(0, 1))          # BatchNorm: one mean per feature, shape (
 
   <h2 id="one-base-model-beat-the-best-ensembles">One base model beat the best ensembles in half a day</h2>
   <p>
-    The setup first. Vaswani et al. trained on WMT 2014 English to German and English to French, the standard translation benchmarks, and scored the output with <strong>BLEU</strong>, a translation-quality score that counts how many word sequences the machine's output shares with human translations. Higher is better. They trained two sizes of the same encoder-decoder model on 8 NVIDIA P100 GPUs.
+    The setup first. Vaswani et al. trained on WMT 2014 English to German and English to French translation, on 8 NVIDIA P100 GPUs, and scored the output with <strong>BLEU</strong>, which counts word sequences shared with human translations; higher is better.
+    The baselines included <strong>ensembles</strong> (several models combined) of ConvS2S, a convolutional translation model.
   </p>
   <div class="stat-grid">
     <div class="stat-card">
@@ -1200,15 +1198,16 @@ bn_mean = x.mean(dim=(0, 1))          # BatchNorm: one mean per feature, shape (
     </div>
   </div>
   <p>
-    An <strong>ensemble</strong> combines several models into one system, and ConvS2S is a convolutional translation model. So the finding is one base model, trained in about half a day, beating the best published ensembles. The big model then shows what the same recipe does at scale.
+    One base model, trained in about half a day, beat the best published ensembles.
   </p>
   <p>
-    The recipe used <strong>Adam</strong>, an optimizer that adapts each weight's step size from running averages of its past gradients (decay rates 0.9 and 0.98, stability constant 10<sup>-9</sup>), and <strong>dropout</strong> 0.1, which zeroes a random tenth of the activations on each training pass so the model cannot lean on any single one. The learning rate followed a warmup schedule, needed because this is the Post-LN model from <a href="#pre-ln-vs-post-ln">Where the norm sits</a>:
+    Training used <strong>Adam</strong>, an optimizer that adapts each weight's step size from running averages of its past gradients (decay rates 0.9 and 0.98, stability constant 10<sup>-9</sup>), and <strong>dropout</strong> 0.1, which zeroes a random tenth of the activations on each pass.
+    Being Post-LN (see <a href="#pre-ln-vs-post-ln">Where the norm sits</a>), it needed a warmup schedule:
   </p>
   <div class="eq-card" id="tbLrEq">
-      <div class="eq-what">The learning rate at each training step, from the original paper.</div>
+      <div class="eq-what">The learning rate at each training step, from the original paper (warmup = 4000).</div>
       <div class="eq-line eq-active" data-eqline="0">lrate = <span class="eqt" style="color:#7f8c8d">d<sub>model</sub></span><sup>&#8722;0.5</sup> &#183; min(<span class="eqt" style="color:#e67e22">step</span><sup>&#8722;0.5</sup>, <span class="eqt" style="color:#2a7fbf">step</span> &#183; <span class="eqt" style="color:#2a7fbf">warmup</span><sup>&#8722;1.5</sup>)</div>
-        <div class="eq-why eq-active" data-eqline="0">Read min(a, b) as "take whichever is smaller". Early on the second term, <span class="eqt" style="color:#2a7fbf">step</span> times a constant, is smaller, so the rate climbs in a straight line. After <span class="eqt" style="color:#2a7fbf">warmup</span> steps the first term, one over the square root of the <span class="eqt" style="color:#e67e22">step</span>, becomes smaller, so the rate decays slowly. A power of &#8722;0.5 means one over the square root. The <span class="eqt" style="color:#7f8c8d">d<sub>model</sub></span><sup>&#8722;0.5</sup> factor scales the whole curve down for wider models. The paper used warmup = 4000. The job: tiny steps while the gradients are large and unreliable, then the largest step the model tolerates, then smaller steps as it settles. The function below is the same line.</div>
+        <div class="eq-why eq-active" data-eqline="0">min takes the smaller term: <span class="eqt" style="color:#2a7fbf">step</span> &#183; <span class="eqt" style="color:#2a7fbf">warmup</span><sup>&#8722;1.5</sup> climbs in a straight line for the first 4000 steps, then <span class="eqt" style="color:#e67e22">step</span><sup>&#8722;0.5</sup>, one over its square root, decays it.</div>
     </div>
 <pre><code class="language-python">def lrate(step, d_model=512, warmup=4000):
     step = max(step, 1)                       # step 0 would divide by zero
@@ -1241,11 +1240,11 @@ bn_mean = x.mean(dim=(0, 1))          # BatchNorm: one mean per feature, shape (
     The same block builds three kinds of model. What changes is the mask on self-attention and whether a second stream comes in.
   </p>
   <ul>
-    <li>An <strong>encoder</strong> stack lets every token see every other token, past and future. It is for understanding a whole input. BERT (Devlin et al. 2019) is encoder-only: it conditions on left and right context in every layer and gives back one vector per token for a task layer to use.</li>
-    <li>A <strong>decoder</strong> stack uses the causal mask, so each token sees only itself and earlier tokens. It is for writing, one token at a time. GPT, OpenAI&#8217;s family of text generators, is decoder-only.</li>
-    <li>The 2017 translation model uses both. Its decoder blocks add a <strong>cross-attention</strong> sublayer, whose queries come from the decoder and whose keys and values come from the encoder's output, so every word being written can look at the whole source sentence. <a href="cross-attention.html">Cross-Attention and the Q-Former</a> covers it in depth.</li>
+    <li>An <strong>encoder</strong> stack lets every token see every other token, past and future, to understand a whole input. BERT (Devlin et al. 2019) is encoder-only: it conditions on both left and right context in all layers.</li>
+    <li>A <strong>decoder</strong> stack uses the causal mask, so each token sees only itself and earlier tokens, to write one token at a time. GPT, OpenAI&#8217;s family of text generators, is decoder-only.</li>
+    <li>The 2017 translator uses both. Its decoder blocks add a <strong>cross-attention</strong> sublayer, with queries from the decoder and keys and values from the encoder's output; <a href="cross-attention.html">Cross-Attention and the Q-Former</a> covers it.</li>
   </ul>
-  <figure class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 362" style="max-width:480px" role="img" aria-label="Three stacks built from the same block: encoder-only with a full mask, encoder-decoder where the encoder output feeds the decoder cross-attention as keys and values, and decoder-only with a causal mask">
+  <figure class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 378" style="max-width:480px" role="img" aria-label="Three stacks built from the same block: encoder-only with a full mask, encoder-decoder where the encoder output feeds the decoder cross-attention as keys and values, and decoder-only with a causal mask">
     <text x="4" y="18" text-anchor="start" style="font-size:14px;font-weight:700">Encoder-only, e.g. BERT</text>
     <rect x="4" y="28" width="66" height="56" rx="6" style="fill:#eaf2f8;stroke:#3498db;stroke-width:1.5px"/>
     <text x="37" y="61" text-anchor="middle" style="font-size:13px">tokens</text>
@@ -1273,9 +1272,9 @@ bn_mean = x.mean(dim=(0, 1))          # BatchNorm: one mean per feature, shape (
     <rect x="286" y="28" width="110" height="56" rx="6" style="fill:#f9ebea;stroke:#c0392b;stroke-width:1.5px"/>
     <text x="341" y="53" text-anchor="middle" style="font-size:13px">a vector</text>
     <text x="341" y="69" text-anchor="middle" style="font-size:13px">per token</text>
-    <polygon points="71.0,51.0 79.0,56.0 71.0,61.0" style="fill:#2c3e50"/>
-    <polygon points="185.0,51.0 193.0,56.0 185.0,61.0" style="fill:#2c3e50"/>
-    <polygon points="277.0,51.0 285.0,56.0 277.0,61.0" style="fill:#2c3e50"/>
+    <polygon points="71.0,51 79.0,56 71.0,61" style="fill:#2c3e50"/>
+    <polygon points="185.0,51 193.0,56 185.0,61" style="fill:#2c3e50"/>
+    <polygon points="277.0,51 285.0,56 277.0,61" style="fill:#2c3e50"/>
     <text x="4" y="112" text-anchor="start" style="font-size:14px;font-weight:700">Encoder-decoder, the 2017 translator</text>
     <rect x="4" y="122" width="66" height="56" rx="6" style="fill:#eaf2f8;stroke:#3498db;stroke-width:1.5px"/>
     <text x="37" y="155" text-anchor="middle" style="font-size:13px">source</text>
@@ -1300,8 +1299,8 @@ bn_mean = x.mean(dim=(0, 1))          # BatchNorm: one mean per feature, shape (
     <text x="122" y="167" text-anchor="start" class="mtd-sub" style="font-size:12px">all</text>
     <rect x="194" y="122" width="82" height="56" rx="6" style="fill:#eaf2f8;stroke:#3498db;stroke-width:1.5px"/>
     <text x="235" y="155" text-anchor="middle" style="font-size:13px">FFN</text>
-    <polygon points="71.0,145.0 79.0,150.0 71.0,155.0" style="fill:#2c3e50"/>
-    <polygon points="185.0,145.0 193.0,150.0 185.0,155.0" style="fill:#2c3e50"/>
+    <polygon points="71.0,145 79.0,150 71.0,155" style="fill:#2c3e50"/>
+    <polygon points="185.0,145 193.0,150 185.0,155" style="fill:#2c3e50"/>
     <text x="341" y="155" text-anchor="middle" class="mtd-sub" style="font-size:13px">encoder</text>
     <line x1="235.0" y1="178" x2="235.0" y2="198" style="stroke:#ca6f1e;stroke-width:3px"/>
     <polygon points="228.0,196 242.0,196 235.0,206" style="fill:#ca6f1e"/>
@@ -1336,56 +1335,56 @@ bn_mean = x.mean(dim=(0, 1))          # BatchNorm: one mean per feature, shape (
     <rect x="346" y="206" width="50" height="56" rx="6" style="fill:#f9ebea;stroke:#c0392b;stroke-width:1.5px"/>
     <text x="371" y="231" text-anchor="middle" style="font-size:13px">next</text>
     <text x="371" y="247" text-anchor="middle" style="font-size:13px">token</text>
-    <polygon points="71.0,229.0 79.0,234.0 71.0,239.0" style="fill:#2c3e50"/>
-    <polygon points="185.0,229.0 193.0,234.0 185.0,239.0" style="fill:#2c3e50"/>
-    <polygon points="277.0,229.0 285.0,234.0 277.0,239.0" style="fill:#2c3e50"/>
-    <polygon points="337.0,229.0 345.0,234.0 337.0,239.0" style="fill:#2c3e50"/>
+    <polygon points="71.0,229 79.0,234 71.0,239" style="fill:#2c3e50"/>
+    <polygon points="185.0,229 193.0,234 185.0,239" style="fill:#2c3e50"/>
+    <polygon points="277.0,229 285.0,234 277.0,239" style="fill:#2c3e50"/>
+    <polygon points="337.0,229 345.0,234 337.0,239" style="fill:#2c3e50"/>
     <text x="341" y="279" text-anchor="middle" class="mtd-sub" style="font-size:13px">decoder</text>
-    <text x="4" y="290" text-anchor="start" style="font-size:14px;font-weight:700">Decoder-only, e.g. GPT</text>
-    <rect x="4" y="300" width="66" height="56" rx="6" style="fill:#fef9e7;stroke:#d4a017;stroke-width:1.5px"/>
-    <text x="37" y="325" text-anchor="middle" style="font-size:13px">tokens</text>
-    <text x="37" y="341" text-anchor="middle" style="font-size:13px">so far</text>
-    <rect x="80" y="300" width="104" height="56" rx="6" style="fill:#fef9e7;stroke:#d4a017;stroke-width:1.5px"/>
-    <text x="132" y="319" text-anchor="middle" style="font-size:13px">self-attention</text>
-    <rect x="90" y="326" width="6" height="6" style="fill:#2a7fbf;stroke:#95a5a6;stroke-width:.6px"/>
-    <rect x="96" y="326" width="6" height="6" style="fill:#ffffff;stroke:#95a5a6;stroke-width:.6px"/>
-    <rect x="102" y="326" width="6" height="6" style="fill:#ffffff;stroke:#95a5a6;stroke-width:.6px"/>
-    <rect x="108" y="326" width="6" height="6" style="fill:#ffffff;stroke:#95a5a6;stroke-width:.6px"/>
-    <rect x="90" y="332" width="6" height="6" style="fill:#2a7fbf;stroke:#95a5a6;stroke-width:.6px"/>
-    <rect x="96" y="332" width="6" height="6" style="fill:#2a7fbf;stroke:#95a5a6;stroke-width:.6px"/>
-    <rect x="102" y="332" width="6" height="6" style="fill:#ffffff;stroke:#95a5a6;stroke-width:.6px"/>
-    <rect x="108" y="332" width="6" height="6" style="fill:#ffffff;stroke:#95a5a6;stroke-width:.6px"/>
-    <rect x="90" y="338" width="6" height="6" style="fill:#2a7fbf;stroke:#95a5a6;stroke-width:.6px"/>
-    <rect x="96" y="338" width="6" height="6" style="fill:#2a7fbf;stroke:#95a5a6;stroke-width:.6px"/>
-    <rect x="102" y="338" width="6" height="6" style="fill:#2a7fbf;stroke:#95a5a6;stroke-width:.6px"/>
-    <rect x="108" y="338" width="6" height="6" style="fill:#ffffff;stroke:#95a5a6;stroke-width:.6px"/>
-    <rect x="90" y="344" width="6" height="6" style="fill:#2a7fbf;stroke:#95a5a6;stroke-width:.6px"/>
-    <rect x="96" y="344" width="6" height="6" style="fill:#2a7fbf;stroke:#95a5a6;stroke-width:.6px"/>
-    <rect x="102" y="344" width="6" height="6" style="fill:#2a7fbf;stroke:#95a5a6;stroke-width:.6px"/>
-    <rect x="108" y="344" width="6" height="6" style="fill:#2a7fbf;stroke:#95a5a6;stroke-width:.6px"/>
-    <text x="122" y="345" text-anchor="start" class="mtd-sub" style="font-size:12px">past only</text>
-    <rect x="194" y="300" width="82" height="56" rx="6" style="fill:#fef9e7;stroke:#d4a017;stroke-width:1.5px"/>
-    <text x="235" y="333" text-anchor="middle" style="font-size:13px">FFN</text>
-    <rect x="286" y="300" width="110" height="56" rx="6" style="fill:#f9ebea;stroke:#c0392b;stroke-width:1.5px"/>
-    <text x="341" y="333" text-anchor="middle" style="font-size:13px">next token</text>
-    <polygon points="71.0,323.0 79.0,328.0 71.0,333.0" style="fill:#2c3e50"/>
-    <polygon points="185.0,323.0 193.0,328.0 185.0,333.0" style="fill:#2c3e50"/>
-    <polygon points="277.0,323.0 285.0,328.0 277.0,333.0" style="fill:#2c3e50"/>
+    <text x="4" y="306" text-anchor="start" style="font-size:14px;font-weight:700">Decoder-only, e.g. GPT</text>
+    <rect x="4" y="316" width="66" height="56" rx="6" style="fill:#fef9e7;stroke:#d4a017;stroke-width:1.5px"/>
+    <text x="37" y="341" text-anchor="middle" style="font-size:13px">tokens</text>
+    <text x="37" y="357" text-anchor="middle" style="font-size:13px">so far</text>
+    <rect x="80" y="316" width="104" height="56" rx="6" style="fill:#fef9e7;stroke:#d4a017;stroke-width:1.5px"/>
+    <text x="132" y="335" text-anchor="middle" style="font-size:13px">self-attention</text>
+    <rect x="90" y="342" width="6" height="6" style="fill:#2a7fbf;stroke:#95a5a6;stroke-width:.6px"/>
+    <rect x="96" y="342" width="6" height="6" style="fill:#ffffff;stroke:#95a5a6;stroke-width:.6px"/>
+    <rect x="102" y="342" width="6" height="6" style="fill:#ffffff;stroke:#95a5a6;stroke-width:.6px"/>
+    <rect x="108" y="342" width="6" height="6" style="fill:#ffffff;stroke:#95a5a6;stroke-width:.6px"/>
+    <rect x="90" y="348" width="6" height="6" style="fill:#2a7fbf;stroke:#95a5a6;stroke-width:.6px"/>
+    <rect x="96" y="348" width="6" height="6" style="fill:#2a7fbf;stroke:#95a5a6;stroke-width:.6px"/>
+    <rect x="102" y="348" width="6" height="6" style="fill:#ffffff;stroke:#95a5a6;stroke-width:.6px"/>
+    <rect x="108" y="348" width="6" height="6" style="fill:#ffffff;stroke:#95a5a6;stroke-width:.6px"/>
+    <rect x="90" y="354" width="6" height="6" style="fill:#2a7fbf;stroke:#95a5a6;stroke-width:.6px"/>
+    <rect x="96" y="354" width="6" height="6" style="fill:#2a7fbf;stroke:#95a5a6;stroke-width:.6px"/>
+    <rect x="102" y="354" width="6" height="6" style="fill:#2a7fbf;stroke:#95a5a6;stroke-width:.6px"/>
+    <rect x="108" y="354" width="6" height="6" style="fill:#ffffff;stroke:#95a5a6;stroke-width:.6px"/>
+    <rect x="90" y="360" width="6" height="6" style="fill:#2a7fbf;stroke:#95a5a6;stroke-width:.6px"/>
+    <rect x="96" y="360" width="6" height="6" style="fill:#2a7fbf;stroke:#95a5a6;stroke-width:.6px"/>
+    <rect x="102" y="360" width="6" height="6" style="fill:#2a7fbf;stroke:#95a5a6;stroke-width:.6px"/>
+    <rect x="108" y="360" width="6" height="6" style="fill:#2a7fbf;stroke:#95a5a6;stroke-width:.6px"/>
+    <text x="122" y="361" text-anchor="start" class="mtd-sub" style="font-size:12px">past only</text>
+    <rect x="194" y="316" width="82" height="56" rx="6" style="fill:#fef9e7;stroke:#d4a017;stroke-width:1.5px"/>
+    <text x="235" y="349" text-anchor="middle" style="font-size:13px">FFN</text>
+    <rect x="286" y="316" width="110" height="56" rx="6" style="fill:#f9ebea;stroke:#c0392b;stroke-width:1.5px"/>
+    <text x="341" y="349" text-anchor="middle" style="font-size:13px">next token</text>
+    <polygon points="71.0,339 79.0,344 71.0,349" style="fill:#2c3e50"/>
+    <polygon points="185.0,339 193.0,344 185.0,349" style="fill:#2c3e50"/>
+    <polygon points="277.0,339 285.0,344 277.0,349" style="fill:#2c3e50"/>
   </svg><figcaption class="caption">The small grids are the self-attention masks; each stack repeats its block N times.</figcaption></figure>
 
   <hr>
 
   <h2 id="decoder-only-gpt">A decoder-only model predicts the next token at every position</h2>
   <p>
-    Most models in use today, GPT among them, are decoder-only: no encoder and no cross-attention. Everything is one sequence. The prompt goes in, the model predicts the next token, appends it, and predicts again, which is called <strong>autoregressive</strong> generation. For translation you put the source, a separator token, and then let the model write the target.
+    Most models in use today, GPT among them, are decoder-only: one sequence, no encoder. The model predicts the next token, appends it and predicts again, which is <strong>autoregressive</strong> generation.
   </p>
   <p>
-    Training asks the model to give a high probability to each actual next token, given all the tokens before it. That is <strong>cross entropy</strong> at every position, averaged:
+    Training rewards a high probability for each actual next token given the tokens before it, which is <strong>cross entropy</strong> averaged over positions:
   </p>
   <div class="eq-card" id="tfLossEq">
       <div class="eq-what">The decoder-only training loss: cross entropy at every position, averaged.</div>
       <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="L" style="color:#c0392b">L</span> = &minus;<span class="frac"><span class="top">1</span><span class="bot"><span class="eqt" data-k="T" style="color:#2a7fbf">T</span></span></span>&#931;<sub>t=1</sub><sup><span class="eqt" data-k="T" style="color:#2a7fbf">T</span></sup> log P(x<sub>t</sub> | x<sub>&lt;t</sub>)</div>
-        <div class="eq-why eq-active" data-eqline="0">P(x<sub>t</sub> | x<sub>&lt;t</sub>) reads "the probability the model gave the token at position t, given every token before it". The log turns that probability into a cost that is small when the probability is high and grows sharply as it drops toward zero, so confident wrong bets cost the most; the minus sign makes the cost positive. &#931; (sigma) with t from 1 to <span class="eqt" style="color:#2a7fbf">T</span> means add over every position, and dividing by <span class="eqt" style="color:#2a7fbf">T</span>, the number of tokens, makes it an average per token. The job: one training example gives <span class="eqt" style="color:#2a7fbf">T</span> graded predictions at once, because the causal mask stops each position from seeing its own answer. In the training code below this is the cross_entropy line.</div>
+        <div class="eq-why eq-active" data-eqline="0">P(x<sub>t</sub> | x<sub>&lt;t</sub>) is the probability the model gives the true token at position t from the tokens before it; &#8722;log punishes confident misses, and the sum over <span class="eqt" style="color:#2a7fbf">T</span> positions, divided by <span class="eqt" style="color:#2a7fbf">T</span>, averages them.</div>
     </div>
   <figure class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 168" style="max-width:460px" role="img" aria-label="Three positions of the sentence the cat sat on: each sees only the words before it and is graded on the next word">
     <text x="8" y="18" text-anchor="start" class="mtd-sub" style="font-size:13px">what the model sees</text>
@@ -1416,7 +1415,7 @@ bn_mean = x.mean(dim=(0, 1))          # BatchNorm: one mean per feature, shape (
     <text x="350" y="144" text-anchor="middle" style="font-size:14px;font-weight:700">on</text>
   </svg><figcaption class="caption">Each row is one position, graded on the orange word; the loss averages the rows.</figcaption></figure>
   <p>
-    The model is short because the block does the work. It adds a token <strong>embedding</strong>, a learned table that turns each token id into a vector, a learned position table of the kind described in <a href="transformer-position-masking.html">Positional Encoding and Masking</a>, and an output layer that turns the last vector into <strong>logits</strong>, one raw score per vocabulary word.
+    MiniGPT adds a token <strong>embedding</strong> (a learned table from token id to vector), a learned position table as in <a href="transformer-position-masking.html">Positional Encoding and Masking</a>, and an output layer giving <strong>logits</strong>, one raw score per vocabulary word.
   </p>
 <pre><code class="language-python">class MiniGPT(nn.Module):
     def __init__(self, vocab_size, d_model, n_heads, d_ff, n_layers, max_len):
@@ -1432,10 +1431,10 @@ bn_mean = x.mean(dim=(0, 1))          # BatchNorm: one mean per feature, shape (
         return self.head(self.ln(x))                   # final LayerNorm, then logits (B, T, vocab_size)
 </code></pre>
   <p>
-    <strong>Weight tying</strong> means the output layer reuses the embedding table: both are vocabulary size by model width, so a word's input vector and its output scorer are the same row, and the model saves a large block of weights.
+    <strong>Weight tying</strong> makes the output layer reuse the embedding table (both are vocabulary size by model width), saving a large block of weights.
   </p>
   <p>
-    Training shifts the sequence by one: the prediction at each position is graded against the token one step later. The optimizer here is <strong>AdamW</strong>, Adam with weight decay, a small shrink of every weight on each step, applied directly to the weights.
+    Training grades each position against the token one step later. <strong>AdamW</strong> is Adam with <strong>weight decay</strong>, a small shrink of every weight on each step.
   </p>
 <pre><code class="language-python">vocab_size = 10000
 model = MiniGPT(vocab_size, d_model=256, n_heads=8, d_ff=1024, n_layers=4, max_len=128)
@@ -1444,16 +1443,16 @@ for x in train_loader:                                 # x: (B, T) token ids
     logits = model(x)                                  # (B, T, vocab_size)
     pred = logits[:, :-1].reshape(-1, vocab_size)      # predictions at positions 0 to T-2
     target = x[:, 1:].reshape(-1)                      # the token one step later at each
-    loss = F.cross_entropy(pred, target)               # the loss card above, averaged
+    loss = F.cross_entropy(pred, target)               # L from the loss card, averaged
     opt.zero_grad(); loss.backward(); opt.step()
 </code></pre>
   <p>
-    At generation nothing learns. The model takes the logits at the last position, turns them into probabilities, draws one token, appends it and repeats. A knob called <strong>temperature</strong> divides the logits before the softmax:
+    At generation the model takes the logits at the last position, turns them into probabilities, draws one token, appends it and repeats. A knob called <strong>temperature</strong> divides the logits first:
   </p>
   <div class="eq-card" id="tbTempEq">
       <div class="eq-what">Softmax with temperature: the probability of word i as the next token.</div>
       <div class="eq-line eq-active" data-eqline="0"><span class="eqt" style="color:#1e8449">p<sub>i</sub></span> = <span class="frac"><span class="top">exp(<span class="eqt" style="color:#2a7fbf">z<sub>i</sub></span> / <span class="eqt" style="color:#c0392b">&#964;</span>)</span><span class="bot">&#931;<sub>j</sub> exp(<span class="eqt" style="color:#2a7fbf">z<sub>j</sub></span> / <span class="eqt" style="color:#c0392b">&#964;</span>)</span></span></div>
-        <div class="eq-why eq-active" data-eqline="0"><span class="eqt" style="color:#2a7fbf">z<sub>i</sub></span> is word i's logit and <span class="eqt" style="color:#c0392b">&#964;</span> (tau) is the temperature. Divide every logit by &#964;, raise e to each (exp), and divide by the sum over all words j, so the <span class="eqt" style="color:#1e8449">p<sub>i</sub></span> are positive and add up to 1. With &#964; = 1 this is plain softmax. A &#964; below 1 stretches the gaps between logits, so the top word takes more of the probability; a &#964; above 1 shrinks the gaps, so the words even out. Dividing by a positive number never reorders the logits, so the ranking of the words stays the same. In the generate code below it is the division by temperature.</div>
+        <div class="eq-why eq-active" data-eqline="0">Divide each logit <span class="eqt" style="color:#2a7fbf">z<sub>i</sub></span> by the temperature <span class="eqt" style="color:#c0392b">&#964;</span> (tau) before the softmax: &#964; below 1 sharpens toward the top word, above 1 evens the words out, and the ranking never changes.</div>
     </div>
 <pre><code class="language-python">@torch.no_grad()                                       # generation: no gradients needed
 def generate(model, idx, max_new_tokens, temperature=1.0):   # idx: (B, T) prompt ids
@@ -1464,7 +1463,7 @@ def generate(model, idx, max_new_tokens, temperature=1.0):   # idx: (B, T) promp
         idx = torch.cat([idx, nxt], dim=1)             # append and repeat
     return idx                                         # (B, T + max_new_tokens)
 </code></pre>
-  <p>torch.multinomial draws one token at random with the given probabilities, so a likely word comes up often but not always.</p>
+  <p>torch.multinomial draws a token at random by those probabilities. Each step also recomputes every earlier token's keys and values; <a href="transformer-cost.html">Transformer Cost and Efficiency</a> shows how a cache removes that.</p>
   <div class="demo" id="temperatureBars">
     <div class="demo-controls">
       <label for="tbTemp">temperature</label>
@@ -1474,8 +1473,7 @@ def generate(model, idx, max_new_tokens, temperature=1.0):   # idx: (B, T) promp
     <div class="tb-bars" id="tbBars" role="img" aria-label="Next-word probabilities for mat, floor, sofa, roof and moon"></div>
   </div>
   <p class="caption">Temperature sharpens or flattens the same distribution; the order of the words never changes.</p>
-  <p>Generating one token at a time this way recomputes the keys and values of every earlier token at each step. <a href="transformer-cost.html">Transformer Cost and Efficiency</a> shows how a cache removes that repeated work.</p>
-  <p>Next: <a href="cross-attention.html">Cross-Attention and the Q-Former</a>.</p>
+  <p>Next, <a href="cross-attention.html">Cross-Attention and the Q-Former</a>, which lets one stream read another, such as text reading an image.</p>
 
   <hr>
 

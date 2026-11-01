@@ -576,7 +576,7 @@
 
    <p>What does "people who liked this also liked that" actually mean? It means taste has a shape. Put every movie as a point in user space: two movies are close if the same users rated them the same way. Or put every movie as a point in genre space: two movies are close if they share genres. Either way, "recommend" becomes "find the <strong>nearest neighbors</strong>." <em>That is all a recommender is: geometry plus a similarity score.</em></p>
 
-   <p>My notebook (in the model-optimization repo) tries three geometries on MovieLens, a public collection of movie ratings: similarity from ratings, similarity from genres, and learned embeddings, short lists of numbers learned per user and movie. They do not always agree, <em>and the disagreements are the interesting part</em>.</p>
+   <p>My notebook (in the Machine-Learning-Concepts repo) tries three geometries on MovieLens, a public collection of movie ratings: similarity from ratings, similarity from genres, and learned embeddings, short lists of numbers learned per user and movie. They do not always agree, <em>and the disagreements are the interesting part</em>.</p>
 
    <h2 id="three-ways">Three ways to say similar</h2>
 
@@ -1228,7 +1228,7 @@ const RECO_PAYLOAD = {"meta":{"note":"Real MovieLens small-latest (notebook's ow
 
    <p>The learned model and the genre similarity capture different things, so the notebook combines them: a learned model plus the genre-cosine score as an extra signal. Learned taste plus stated content.</p>
 
-   <p>The scoreboard is <strong>RMSE</strong>, scored on ratings from users held out of training:</p>
+   <p>The scoreboard is <strong>RMSE</strong>, scored on ratings held out of training. One rating in five is held out, and every user keeps the rest in training:</p>
 
    <div class="eq-card" id="recoEqRmse">
        <div class="eq-what">Root mean squared error: the typical miss, in stars.</div>
@@ -1236,22 +1236,23 @@ const RECO_PAYLOAD = {"meta":{"note":"Real MovieLens small-latest (notebook's ow
        <div class="eq-why eq-active" data-eqline="0">Each error, prediction <span style="color:#2c3e50">r&#770;<sub>ui</sub></span> minus true rating r<sub>ui</sub>, is squared so big misses hurt more, averaged over the N held-out ratings, then square-rooted back to rating units. Lower is better. Without the root it is the MSE training loss.</div>
      </div>
 
-   <p>The setup in code, on MovieLens small-latest, as in the notebook. One epoch is one pass over the rated cells in shuffled batches of 128, and Adam is a gradient descent method that adapts each weight's step size. I reran it to check the two RMSE numbers.</p>
+   <p>The setup in code, on MovieLens small-latest, as in the notebook. One epoch is one pass over the rated cells in shuffled batches of 128, and Adam is a gradient descent method that adapts each weight's step size.</p>
 
 <pre><code class="language-python">df = movies.merge(ratings, on="movieId")       # movies.csv + ratings.csv
-R = df.pivot_table(index="userId", columns="title", values="rating").fillna(0).to_numpy()  # blanks = 0
-R_train, R_test = train_test_split(torch.tensor(R, dtype=torch.float32),
-                                   test_size=0.2, random_state=42)  # split by user rows
-u, i = torch.where(R_train &gt; 0)                 # train on rated cells only
-loader = DataLoader(TensorDataset(u, i, R_train[u, i]), batch_size=128, shuffle=True)
+R = torch.tensor(df.pivot_table(index="userId", columns="title", values="rating")
+                 .fillna(0).to_numpy(), dtype=torch.float32)  # blanks = 0
+u, i = torch.where(R &gt; 0)                       # every rated cell: real user and movie index
+test = torch.rand(len(u)) &lt; 0.2                 # hold out 1 rating in 5, not whole users
+loader = DataLoader(TensorDataset(u[~test], i[~test], R[u[~test], i[~test]]),
+                    batch_size=128, shuffle=True)  # train on the other 4 in 5
 opt = torch.optim.Adam(model.parameters(), lr=0.001)  # model: forward() above, dim 20
 loss_fn = torch.nn.MSELoss()
-for epoch in range(50):                         # the hybrid: 20 full-batch steps
+for epoch in range(50):
     for bu, bi, br in loader:
         loss = loss_fn(model(bu, bi), br)
         opt.zero_grad(); loss.backward(); opt.step()</code></pre>
 
-   <p>Collaborative filtering alone gets test RMSE 2.54, a typical miss of about two and a half stars. The notebook's hybrid run gets 2.47.</p>
+   <p>The hybrid trains its own fresh model and optimizer for 20 full-batch steps. The notebook's earlier split held out whole users and then scored them with other users' vectors, so its old RMSE numbers did not measure the model. They are gone until the fixed notebook is rerun.</p>
 
    <h2 id="when">When it helps and when it does not</h2>
 

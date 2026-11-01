@@ -703,7 +703,7 @@
      <a class="tab-chip" href="#disable-quantization">Disable quantization from layers one by one</a>
      <a class="tab-chip" href="#run-fx-print-tabular">Run FX print_tabular()</a>
      <a class="tab-chip" href="#inspect-activation-post-process">Inspect activation_post_process</a>
-     <a class="tab-chip" href="#use-quant-debug">Use torch.ao.quantization.quant_debug</a>
+     <a class="tab-chip" href="#use-quant-debug">Compare layers with the Numeric Suite</a>
      <a class="tab-chip" href="#look-for-outliers">Look for outliers and dead activations</a>
      <a class="tab-chip" href="#references">References</a>
    </div>
@@ -834,11 +834,21 @@ if hasattr(model_prepared_qat, 'conv1') and hasattr(model_prepared_qat.conv1, 'a
         </code></pre>
         <p>Anything outside [min, max] gets clipped by the clamp in the round trip. That is the trade.</p>
         
-        <h3 id="use-quant-debug">Use <code>torch.ao.quantization.quant_debug</code></h3>
-        <p>When you want the full diff, this records float vs quantized activations layer by layer, with histograms of the differences. <code>add_debug_observers_qat</code> takes a prepared QAT model and its qconfig dict and returns a copy with recording observers attached; run that copy and read the stats off it. Fair warning, the API moves around between PyTorch versions.</p>
+        <h3 id="use-quant-debug">Compare layers with the Numeric Suite</h3>
+        <p>When you want the full diff, PyTorch's Numeric Suite (<code>torch.ao.ns._numeric_suite_fx</code>) logs every layer's output in a float copy and an int8 copy on the same input, then scores each pair with SQNR, the signal-to-quantization-noise ratio in decibels. The layer where SQNR drops is where the information goes. Fair warning, the leading underscore means the API can move between PyTorch versions.</p>
         <pre><code class="language-python">
-debug_model = add_debug_observers_qat(model_prepared_qat, qconfig_dict_qat)
-print(debug_model.activation_debug_stats) # Or similar attribute, API might change
+import copy, torch.ao.ns._numeric_suite_fx as ns
+from torch.ao.ns.fx.utils import compute_sqnr
+fp = copy.deepcopy(model_prepared_qat).eval()
+fp.apply(torch.ao.quantization.disable_fake_quant)  # float reference: no rounding
+q = convert_fx(copy.deepcopy(model_prepared_qat).eval())  # int8 copy
+fp, q = ns.add_loggers("fp32", fp, "int8", q, ns.OutputLogger)
+x = torch.randn(1, 3, 32, 32)  # use a real calibration batch here
+fp(x); q(x)
+acts = ns.extract_logger_info(fp, q, ns.OutputLogger, "int8")
+ns.extend_logger_results_with_comparison(acts, "fp32", "int8", compute_sqnr, "sqnr")
+for layer, r in acts.items():  # where SQNR first drops is the culprit
+    print(layer, r["node_output"]["int8"][0]["sqnr"][0].item())
         </code></pre>
         
         <h3 id="look-for-outliers">Look for outliers and dead activations</h3>

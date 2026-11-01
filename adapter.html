@@ -710,8 +710,13 @@
 
     <p><em>How do you teach a giant model a new trick without retraining the whole thing?</em> You know me, I do not like paying for compute twice.</p>
 
-    <p>Full fine-tuning a transformer is simple and brutal. A transformer is a stack of blocks that processes a sequence, where each block first lets the positions exchange information with each other and then processes each position on its own, and that stack is the model this whole page modifies. You take all <code>110</code> million parameters, the learned numbers that make up the model's weights and that training adjusts, you update all of them, and you keep one full copy of the weights per task. <em>Ten tasks means ten copies of the model on disk.</em></p>
-    <p>Worse, the optimizer keeps two extra numbers per parameter (Adam, the optimizer that runs training, keeps a running average of each parameter's direction and of how spread out its recent steps have been), so training needs roughly three times the model size in GPU (graphics processing unit, the chip that trains large models fast) memory just to hold the state.</p>
+    <p>Full fine-tuning a transformer is simple and brutal. A transformer is a stack of blocks where the positions of a sequence first exchange information and then each position is processed on its own; that stack is what this page modifies. You update all <code>110</code> million parameters, the learned numbers that make up its weights, and keep one full copy per task. <em>Ten tasks means ten copies of the model on disk.</em></p>
+    <p>Worse, Adam, the optimizer that runs training, keeps extra state for every parameter:</p>
+<div class="eq-card">
+<div class="eq-what">GPU memory needed just to hold the weights and the optimizer state.</div>
+<div class="eq-line eq-active">weights + Adam state &#8776; <span style="white-space:nowrap"><span class="eqt" style="color:#2c3e50">P</span> + <span class="eqt" style="color:#b45309">2P</span> = 3<span class="eqt" style="color:#2c3e50">P</span></span></div>
+<div class="eq-why eq-active"><span class="eqt" style="color:#2c3e50">P</span> is the model size in parameters. Adam adds <span class="eqt" style="color:#b45309">2</span> numbers per parameter, a running average of its direction and of how spread out its recent steps have been. Weights plus Adam state take about three times the model size in GPU (graphics processing unit) memory, and the gradients add one more <span class="eqt" style="color:#2c3e50">P</span>.</div>
+</div>
     <p>And there is the quiet part nobody likes to admit: the model learns your new task and starts forgetting the old ones. That is <strong>catastrophic forgetting</strong>, and it is exactly what it sounds like.</p>
 
     <p><strong>Adapters</strong> flip the deal. Freeze the big model, bolt on tiny trainable modules, and train only those. The backbone never moves. One frozen copy, a small adapter per task, <em>like changing lenses on a camera instead of buying a new camera body.</em></p>
@@ -720,15 +725,15 @@
 
     <h2 id="the-bottleneck-adapter">Bottleneck adapters add tiny trainable layers</h2>
 
-    <p>The original idea (Houlsby et al.) is almost embarrassingly simple. Inside each transformer layer, after the attention block, where each position mixes in information from the other positions, and after the feed-forward block, which processes each position on its own without mixing anything across positions, you insert a small two-layer MLP (multilayer perceptron) with a <strong>bottleneck</strong>. The hidden state, the vector of numbers that carries one position's information through the layer, is <code>768</code> numbers wide. You squeeze it down through a <code>64</code>-wide hallway and expand it back. <em>The squeeze is the whole trick: the hallway is the only thing that learns.</em></p>
+    <p>The original idea (Houlsby et al.) is almost embarrassingly simple. Each transformer layer has an attention block, where each position mixes in information from the other positions, and a feed-forward block, which processes each position on its own. After each one you insert a small two-layer MLP (multilayer perceptron) with a <strong>bottleneck</strong>: the hidden state, the vector that carries one position through the layer, is <code>768</code> numbers wide, and you squeeze it through a <code>64</code>-wide hallway and expand it back. <em>The squeeze is the whole trick: the hallway is the only thing that learns.</em></p>
 
-    <p>The authors were trying to solve the many-tasks problem. A pretrained model is one that was already trained beforehand on a large general body of text, so its weights already carry useful language knowledge before any task training starts. Fine-tuning a large pretrained model works well, but it is parameter inefficient: with many downstream tasks, the later tasks the pretrained model gets adapted to after its general training, you need an entire new copy of the model per task.</p>
+    <p>They were solving the many-tasks problem. A pretrained model, one already trained on a large body of general text, fine-tunes well, but every downstream task (each later task it gets adapted to) needs its own full copy. With adapters the base stays frozen and a new task never revisits the old ones.</p>
 
-    <p>Their alternative is transfer with adapter modules. The base network stays frozen, each task gets a few small trainable modules, and new tasks can be added without revisiting the old ones.</p>
+    
 
-    <p>They demonstrate it by transferring BERT (Bidirectional Encoder Representations from Transformers, a large pretrained language model that had already learned from general text) to <code>26</code> diverse text classification tasks including GLUE (a standard suite of language-understanding tests): <em>adapters land within <code>0.4%</code> of full fine-tuning while adding only <code>3.6%</code> parameters per task,</em> against <code>100%</code> for fine-tuning. That is the idea this whole page is built on.</p>
+    <p>Transferring BERT (Bidirectional Encoder Representations from Transformers, a large pretrained language model) to <code>26</code> text classification tasks including GLUE (a standard suite of language-understanding tests), <em>adapters land within <code>0.4%</code> of full fine-tuning while adding only <code>3.6%</code> parameters per task,</em> against <code>100%</code> for fine-tuning.</p>
 
-    <p>Here is the entire module. Down project, pass it through a nonlinearity, a bend that treats numbers unevenly instead of just scaling them, here the ReLU bend that passes positive values through unchanged and turns negative values to zero, up project, add it back to the input so <em>the frozen signal flows through untouched if the adapter does nothing</em>:</p>
+    <p>Here is the entire module: down project, ReLU (positive values pass unchanged, negative values become zero), up project, and add the input back so <em>the frozen signal flows through untouched if the adapter does nothing</em>:</p>
 
 <pre><code class="language-python">class SimpleAdapter(nn.Module):
     def __init__(self, hidden_dim, bottleneck_dim):
@@ -741,7 +746,7 @@
         return x + self.up_proj(self.relu(self.down_proj(x)))
 </code></pre>
 
-    <p>The listing above, written as two lines: squeeze the input down to a small bottleneck, bend it with a nonlinearity, then lift it back up to full size.</p>
+    <p>The same module as two lines:</p>
 <div class="eq-card" id="adapterEqStatic">
 <div class="eq-what">The adapter's whole job in two lines: squeeze the frozen features down, bend them, lift them back, and add the result as a small nudge on top.</div>
 <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="h" style="color:#2c3e50">h</span> = <span class="eqt" data-k="Wup" style="color:#b45309">W<sub>up</sub></span>&#183;<span class="eqt" data-k="sigma" style="color:#5d6d7e">&#963;</span>(<span class="eqt" data-k="Wdown" style="color:#b45309">W<sub>down</sub></span>&#183;<span class="eqt" data-k="x" style="color:#2a7fbf">x</span>)</div>
@@ -749,7 +754,7 @@
 <div class="eq-line eq-active" data-eqline="1"><span class="eqt" data-k="y" style="color:#2a7fbf">y</span> = <span class="eqt" data-k="x" style="color:#2a7fbf">x</span> + <span class="eqt" data-k="h" style="color:#2c3e50">h</span></div>
 <div class="eq-why eq-active" data-eqline="1"><span class="eqt" style="color:#2a7fbf">y</span> is the frozen input <span class="eqt" style="color:#2a7fbf">x</span> plus the learned nudge <span class="eqt" style="color:#2c3e50">h</span>: I add it back to the input so the frozen signal flows through untouched if the adapter does nothing.</div>
 </div>
-<p>In the listing above, <code>down_proj</code>, <code>relu</code> and <code>up_proj</code> are the three pieces of the first line, in that order, and adding the input back at the front of that same line is the second line.</p>
+<p>In the listing, <code>down_proj</code>, <code>relu</code> and <code>up_proj</code> are the first line, read inside out, and adding <code>x</code> back is the second.</p>
     
 
     <p><em>Where do these things actually plug in?</em> Here is one transformer block. The first frozen block in it is self-attention, the attention block from the paragraph above, where each position mixes in information from the other positions:</p>
@@ -793,7 +798,7 @@
       </div>
     </div>
 
-    <p>Two percent. You train two percent of the model and leave the other <code>98</code> percent exactly where pretraining put it. <em>That is why the model does not forget:</em> the old knowledge is still sitting there, frozen, untouched.</p>
+    <p>You train two percent of the model and leave the other <code>98</code> percent where pretraining put it. <em>That is why the model does not forget.</em></p>
 
     <p>And the training loop is <em>one loop with a filter.</em> Everything frozen except the adapters:</p>
 
@@ -1020,9 +1025,9 @@
 
     <h2 id="lora-shrink-the-update-not-the-model">LoRA: shrink the update, not the model</h2>
 
-    <p><strong>LoRA</strong> (low-rank adaptation) asks a different question. Instead of adding new modules, look at what fine-tuning actually does to a weight matrix. You start with the pretrained weight <code>W</code> and you end with <code>W</code> plus an update. The update is a big dense matrix, a matrix whose entries are filled in rather than mostly zero as in a sparse matrix, but <em>it turns out the useful part of it lives in a tiny subspace, a small low dimensional slice of the full space of possible updates, rather than needing the whole space.</em> So instead of learning the full update, you learn it as two skinny matrices multiplied together:</p>
+    <p><strong>LoRA</strong> (low-rank adaptation) looks at what fine-tuning does to a weight matrix. You start with the pretrained weight <code>W</code> and end with <code>W</code> plus a big dense update, dense meaning its entries are filled in rather than mostly zero. <em>The useful part of that update lives in a tiny subspace,</em> a low dimensional slice of all possible updates, so LoRA learns it as two skinny matrices multiplied together.</p>
 
-    <p>The idea is: freeze what the model already knows (<code>W</code>) and learn only the change, as a detour through a tiny bottleneck. <code>A</code> squeezes the signal down to rank <code>r</code>, <code>B</code> lifts it back up, and the two together add a small learned nudge on top of the frozen weight. <em>The rank <code>r</code> is the whole budget:</em> a smaller <code>r</code> means far fewer new parameters and a coarser approximation of the update.</p>
+    
 
     <p>Rebuilt from the LoRA paper's Figure 1, this picture holds the whole method.</p>
 
@@ -1039,25 +1044,26 @@
 <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="W" style="color:#2c3e50">W</span> + <span class="eqt" data-k="BA" style="color:#b45309">BA</span></div>
 <div class="eq-why eq-active" data-eqline="0">Read <span class="eqt" style="color:#b45309">BA</span> as one learned update: <span class="eqt" style="color:#b45309">A</span> squeezes the input down to rank r, <span class="eqt" style="color:#b45309">B</span> lifts it back up, and the pair is added to the frozen pretrained weight <span class="eqt" style="color:#2c3e50">W</span>.</div>
 </div>
-    <p>The <code>LoRALinear</code> listing below runs this line: <code>self.linear</code> is <code>W</code> at work, and the side path that sends the input through <code>A</code> and then <code>B</code> is the <code>BA</code> side path, with <code>W</code> staying frozen and <code>B</code> starting at zero so <code>BA = 0</code> at init. The code carries an extra <code>scale</code> factor that this line leaves out. That factor is <code>alpha</code> in the listing, used as <code>alpha / rank</code>: it multiplies the whole side path, so it sets how large the learned update is next to the frozen path, and turning <code>alpha</code> up strengthens the update without widening the rank hallway.</p>
-    <ol>
-      <li><code>A</code> starts from a random Gaussian, the <code>N(0, σ²)</code> written on the slab: each entry drawn from a bell curve centered at <code>0</code> with spread <code>σ</code>.</li>
-      <li><code>B</code> is initialized to exact zeros: so at step one the side path contributes nothing.</li>
-      <li>The plus at the top is the merge: both paths adding coordinate by coordinate.</li>
-      <li>Before serving you fold <code>BA</code> into <code>W</code> once.</li>
-    </ol>
 
-    <p>The <code>r</code> brace between the slabs is the rank, the entire budget of new parameters: <code>r</code> times (<code>d</code> + <code>k</code>) numbers against <code>d</code> times <code>k</code> in the full weight, where <code>d</code> is the size of the input and <code>k</code> the size of the output.</p>
-    <p>Now the numbers. Take a <code>768 × 768</code> attention projection at rank <code>8</code>: <code>A</code> holds <code>6,144</code> parameters and <code>B</code> holds <code>6,144</code>, so the whole update is <code>12,288</code> parameters instead of <code>589,824</code> for the full matrix, about <code>2</code> percent of the matrix it modifies. <em>The update is a shadow of the original weight, and a shadow is all you need.</em></p>
+
+    <p>The <code>r</code> brace between the slabs is the rank, the entire budget of new parameters:</p>
+<div class="eq-card">
+<div class="eq-what">What LoRA trains for one weight matrix, against the full update.</div>
+<div class="eq-line eq-active">LoRA: <span class="eqt" style="color:#b45309">r</span>(<span class="eqt" style="color:#2a7fbf">d</span> + <span class="eqt" style="color:#2c3e50">k</span>) &nbsp;&nbsp; full: <span class="eqt" style="color:#2a7fbf">d</span> &#183; <span class="eqt" style="color:#2c3e50">k</span></div>
+<div class="eq-why eq-active"><span class="eqt" style="color:#2a7fbf">d</span> is the input size and <span class="eqt" style="color:#2c3e50">k</span> the output size of the weight, and <span class="eqt" style="color:#b45309">r</span> is the rank. A smaller r means far fewer new parameters and a coarser approximation of the update.</div>
+<div class="eq-line eq-active"><span class="frac"><span class="top">8 &#183; (768 + 768)</span><span class="bot">768 &#183; 768</span></span> &#8776; 2%</div>
+<div class="eq-why eq-active">A 768 by 768 attention projection at rank 8: A and B hold 6,144 numbers each, 12,288 in all against 589,824, about 2 percent of the matrix they modify.</div>
+</div>
+    <p><em>The update is a shadow of the original weight, and a shadow is all you need.</em></p>
 
 <div class="cap-card" style="margin-top:1rem;">
         <strong>What this shows</strong>
         <ul>
           <li><strong><code>1</code>.</strong> Input goes in at the bottom, both paths feed the plus at the top.</li>
           <li><strong><code>2</code>.</strong> The blue box on the left is the pretrained weight <code>W</code>: input <code>x</code> feeds straight through it, exactly as it did before fine-tuning.</li>
-          <li><strong><code>3</code>.</strong> The lower orange slab is <code>A</code>, the down-projection: it squeezes the input into the bottleneck. Its <code>σ</code>, in the <code>N(0, σ²)</code> start from the list above, is the spread of the draw, a different <code>σ</code> from the adapter card above, where <code>σ</code> is the ReLU bend. The random start would be a problem except <code>B</code> fixes it.</li>
-          <li><strong><code>4</code>.</strong> The upper orange slab is <code>B</code>, the up-projection: the zero start from the list above is why the model behaves exactly like the pretrained model at step one.</li>
-          <li><strong><code>5</code>.</strong> The plus at the top merges the two paths.</li>
+          <li><strong><code>3</code>.</strong> The lower orange slab is <code>A</code>, the down-projection: it squeezes the input into the bottleneck. It starts from a random Gaussian, the <code>N(0, σ²)</code> on the slab: each entry is drawn from a bell curve centered at <code>0</code> with spread <code>σ</code>, a different <code>σ</code> from the adapter card above, where <code>σ</code> is the ReLU bend. The random start would be a problem except <code>B</code> fixes it.</li>
+          <li><strong><code>4</code>.</strong> The upper orange slab is <code>B</code>, the up-projection: it starts at exact zeros, so the side path adds nothing and the model behaves exactly like the pretrained model at step one.</li>
+          <li><strong><code>5</code>.</strong> The plus at the top merges the two paths, adding them coordinate by coordinate.</li>
           <li><strong><code>6</code>.</strong> Training wakes the side path up from zero: <code>B</code> leaves zero, the loss, the number training pushes down as a score of how wrong the model still is, falls as it learns, and before serving you fold <code>BA</code> into <code>W</code> once, so inference, running the trained model to answer new inputs instead of training it, runs like a normally fine-tuned model with no extra latency, no extra waiting time added to each answer.</li>
         </ul>
       </div>
@@ -1065,7 +1071,7 @@
 
 
 
-    <p>The code wraps a frozen linear layer and adds the low-rank path alongside it:</p>
+    <p>The code wraps a frozen linear layer: <code>self.linear</code> is <code>W</code>, the side path through <code>A</code> then <code>B</code> is <code>BA</code>, and <code>B</code> starts at zero. The extra <code>scale</code>, <code>alpha / rank</code>, multiplies the side path, so turning <code>alpha</code> up strengthens the update without widening the rank hallway.</p>
 
 <pre><code class="language-python">class LoRALinear(nn.Module):
     def __init__(self, linear, rank=8, alpha=16.0):
@@ -1081,7 +1087,21 @@
         return self.linear(x) + self.scale * (x @ self.A.T @ self.B.T)
 </code></pre>
 
-    <p>In practice you wrap the query and value projections of each attention block and leave the rest frozen. A projection here is a learned matrix that turns each position into a new vector. The query is the vector a position uses to say what it is looking for, the key is the vector a position advertises so other positions can match against it, and the value is the vector a position offers to others if they attend to it, so adapting the query and value projections changes what positions look for and what they pass along. For a <code>12</code>-layer, <code>768</code>-wide model with <code>r = 8</code> on query and value:</p>
+    <p>Before serving, fold <code>BA</code> into <code>W</code> once and call the plain layer, so inference costs nothing extra:</p>
+
+<pre><code class="language-python">with torch.no_grad():
+    lora.linear.weight += lora.scale * (lora.B @ lora.A)   # (k, r) @ (r, d) = (k, d)
+merged = lora.linear                                       # serve this, no side path
+</code></pre>
+
+    <p>In practice you wrap the query and value projections of each attention block and leave the rest frozen. A projection is a learned matrix that turns each position into a new vector: the query says what a position is looking for, the key is what it advertises so others can match against it, and the value is what it passes along to positions that attend to it. In a BERT-base model:</p>
+
+<pre><code class="language-python">model.requires_grad_(False)                  # freeze everything
+for block in model.encoder.layer:            # BertModel; unfreeze your task head
+    attn = block.attention.self
+    attn.query = LoRALinear(attn.query, rank=8)
+    attn.value = LoRALinear(attn.value, rank=8)
+</code></pre>
 
     <div class="stat-grid">
       <div class="stat-card">
@@ -1101,9 +1121,9 @@
       </div>
     </div>
 
-    <p>Rank is the dial that sets those numbers.</p>
+    
 
-    <p>Here is the sweep, in words first. Pick a rank and count its parameters with the count formula above. Then compare the two task curves across ranks: as rank grows from <code>1</code> to <code>64</code>, the easy and hard curves separate. The tool below puts rank on a log scale, a scale where each step multiplies the value instead of adding the same amount, so the doubling ranks <code>1</code>, <code>2</code>, <code>4</code>, <code>8</code>, <code>16</code>, <code>32</code>, <code>64</code> get equal spacing even though the gaps between them grow.</p>
+    <p>Rank is the dial that sets those numbers. The plot and tool below put rank on a log scale, each step doubling it, so the ranks <code>1</code>, <code>2</code>, <code>4</code>, <code>8</code>, <code>16</code>, <code>32</code>, <code>64</code> get equal spacing.</p>
 
     <div class="diagram">
       <svg viewBox="0 0 640 380" role="img" aria-label="Static accuracy versus LoRA rank plot: easy task curve flat after rank 4, hard task curve keeps climbing to rank 64">
@@ -1121,7 +1141,7 @@
       <p class="caption">Accuracy versus rank, drawn from the same illustrative curves the tool below sweeps. Honest labeling: these curves are illustrative, not measured runs.</p>
     </div>
 
-    <p class="caption">Rank is a dial, not a magic number. The easy task is done at <code>r</code> = <code>4</code> and never looks back. The hard task keeps buying accuracy with every notch, and at r = <code>64</code> you are training as many parameters as a bottleneck adapter, which is still only a sixth of the dense matrix. Pick the rank your task needs, not the biggest one that fits.</p>
+    <p class="caption">The easy task is done at <code>r</code> = <code>4</code>; the hard task keeps buying accuracy, and at r = <code>64</code> you train as many parameters as a bottleneck adapter, still only a sixth of the dense matrix. Pick the rank your task needs, not the biggest one that fits.</p>
     <p>Start at <code>8</code>, go up only if the loss says so.</p>
 
     <div class="demo" id="rankDemo">
@@ -1161,7 +1181,7 @@
         <ul>
           <li><strong>The point:</strong> Every notch on the rank dial has a visible price: the param bill for each notch is written right under the hallway, and the hard task's accuracy curve shows what the money buys.</li>
           <li><strong>What you'll see:</strong> Rank is a dial: the easy task is already done at <code>r = 4</code>, and the hard task keeps buying accuracy with each higher rank.</li>
-          <li><strong>Rank sweep:</strong> As rank grows from <code>1</code> to <code>64</code>, the easy and hard curves separate: the easy curve flatlines while the hard curve keeps climbing.</li>
+          
         </ul>
       </div>
 
@@ -1625,7 +1645,7 @@
 
     <p>A quarter of one percent of the model, and it usually lands within a point of full fine-tuning on classification-style tasks. <em>That is stupid easy and gives you a fast win.</em></p>
 
-    <p>One more thing, and it matters at serving time: the frozen weight plus the learned update is just a matrix again. After training you can bake the update into <code>W</code> permanently and <em>the model runs exactly as fast as the original.</em> No extra layers in the graph, the connected chain of layers and operations the input runs through when the model answers, no latency cost. Bottleneck adapters cannot do this (their nonlinearity blocks the merge), so they stay in the graph forever.</p>
+    <p>After the merge shown above, <em>the model runs exactly as fast as the original;</em> bottleneck adapters cannot merge, because their nonlinearity blocks it, so their extra layers stay forever.</p>
 
     <h2 id="compacter-cheaper-matrices-inside-the-adapter">Compacter: cheaper matrices inside the adapter</h2>
 
@@ -1635,13 +1655,27 @@
 
     <figure class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 352 254" style="max-width:460px" role="img" aria-label="Kronecker product: a 2 by 2 factor A times a 3 by 3 tile B gives a 6 by 6 matrix made of four copies of B, each copy scaled by one entry of A"><text class="mtd-pu" x="44.0" y="36.0" text-anchor="middle" style="font-size:19px;font-weight:700">A</text><rect class="mtd-kron-a" x="8" y="90" width="36" height="36"/><text class="mtd-pu" x="26.0" y="113.0" text-anchor="middle" style="font-size:15px;font-weight:600">1</text><rect class="mtd-kron-a" x="44" y="90" width="36" height="36"/><text class="mtd-pu" x="62.0" y="113.0" text-anchor="middle" style="font-size:15px;font-weight:600">0.5</text><rect class="mtd-kron-a" x="8" y="126" width="36" height="36"/><text class="mtd-pu" x="26.0" y="149.0" text-anchor="middle" style="font-size:15px;font-weight:600">0.25</text><rect class="mtd-kron-a" x="44" y="126" width="36" height="36"/><text class="mtd-pu" x="62.0" y="149.0" text-anchor="middle" style="font-size:15px;font-weight:600">0</text><text class="mtd-sub" x="44.0" y="186.0" text-anchor="middle" style="font-size:16px">2 × 2</text><text class="" x="96.0" y="134.0" text-anchor="middle" style="font-size:24px">⊗</text><text class="mtd-t2" x="140.0" y="36.0" text-anchor="middle" style="font-size:19px;font-weight:700">B</text><rect class="mtd-kron-on" x="116" y="102.0" width="16" height="16"/><rect class="mtd-kron-off" x="132" y="102.0" width="16" height="16"/><rect class="mtd-kron-on" x="148" y="102.0" width="16" height="16"/><rect class="mtd-kron-off" x="116" y="118.0" width="16" height="16"/><rect class="mtd-kron-on" x="132" y="118.0" width="16" height="16"/><rect class="mtd-kron-off" x="148" y="118.0" width="16" height="16"/><rect class="mtd-kron-on" x="116" y="134.0" width="16" height="16"/><rect class="mtd-kron-on" x="132" y="134.0" width="16" height="16"/><rect class="mtd-kron-off" x="148" y="134.0" width="16" height="16"/><text class="mtd-sub" x="140.0" y="186.0" text-anchor="middle" style="font-size:16px">3 × 3</text><text class="" x="186.0" y="134.0" text-anchor="middle" style="font-size:24px">=</text><text class="" x="276.0" y="30.0" text-anchor="middle" style="font-size:19px;font-weight:700">A ⊗ B</text><rect class="mtd-kron-on" x="210" y="66" width="22" height="22" style="opacity:1"/><rect class="mtd-kron-off" x="232" y="66" width="22" height="22"/><rect class="mtd-kron-on" x="254" y="66" width="22" height="22" style="opacity:1"/><rect class="mtd-kron-off" x="210" y="88" width="22" height="22"/><rect class="mtd-kron-on" x="232" y="88" width="22" height="22" style="opacity:1"/><rect class="mtd-kron-off" x="254" y="88" width="22" height="22"/><rect class="mtd-kron-on" x="210" y="110" width="22" height="22" style="opacity:1"/><rect class="mtd-kron-on" x="232" y="110" width="22" height="22" style="opacity:1"/><rect class="mtd-kron-off" x="254" y="110" width="22" height="22"/><rect class="mtd-kron-blk" x="210" y="66" width="66" height="66"/><text class="mtd-pu" x="243.0" y="58.0" text-anchor="middle" style="font-size:15px;font-weight:700">1 B</text><rect class="mtd-kron-on" x="276" y="66" width="22" height="22" style="opacity:0.5"/><rect class="mtd-kron-off" x="298" y="66" width="22" height="22"/><rect class="mtd-kron-on" x="320" y="66" width="22" height="22" style="opacity:0.5"/><rect class="mtd-kron-off" x="276" y="88" width="22" height="22"/><rect class="mtd-kron-on" x="298" y="88" width="22" height="22" style="opacity:0.5"/><rect class="mtd-kron-off" x="320" y="88" width="22" height="22"/><rect class="mtd-kron-on" x="276" y="110" width="22" height="22" style="opacity:0.5"/><rect class="mtd-kron-on" x="298" y="110" width="22" height="22" style="opacity:0.5"/><rect class="mtd-kron-off" x="320" y="110" width="22" height="22"/><rect class="mtd-kron-blk" x="276" y="66" width="66" height="66"/><text class="mtd-pu" x="309.0" y="58.0" text-anchor="middle" style="font-size:15px;font-weight:700">0.5 B</text><rect class="mtd-kron-on" x="210" y="132" width="22" height="22" style="opacity:0.25"/><rect class="mtd-kron-off" x="232" y="132" width="22" height="22"/><rect class="mtd-kron-on" x="254" y="132" width="22" height="22" style="opacity:0.25"/><rect class="mtd-kron-off" x="210" y="154" width="22" height="22"/><rect class="mtd-kron-on" x="232" y="154" width="22" height="22" style="opacity:0.25"/><rect class="mtd-kron-off" x="254" y="154" width="22" height="22"/><rect class="mtd-kron-on" x="210" y="176" width="22" height="22" style="opacity:0.25"/><rect class="mtd-kron-on" x="232" y="176" width="22" height="22" style="opacity:0.25"/><rect class="mtd-kron-off" x="254" y="176" width="22" height="22"/><rect class="mtd-kron-blk" x="210" y="132" width="66" height="66"/><text class="mtd-pu" x="243.0" y="218.0" text-anchor="middle" style="font-size:15px;font-weight:700">0.25 B</text><rect class="mtd-kron-off" x="276" y="132" width="22" height="22"/><rect class="mtd-kron-off" x="298" y="132" width="22" height="22"/><rect class="mtd-kron-off" x="320" y="132" width="22" height="22"/><rect class="mtd-kron-off" x="276" y="154" width="22" height="22"/><rect class="mtd-kron-off" x="298" y="154" width="22" height="22"/><rect class="mtd-kron-off" x="320" y="154" width="22" height="22"/><rect class="mtd-kron-off" x="276" y="176" width="22" height="22"/><rect class="mtd-kron-off" x="298" y="176" width="22" height="22"/><rect class="mtd-kron-off" x="320" y="176" width="22" height="22"/><rect class="mtd-kron-blk" x="276" y="132" width="66" height="66"/><text class="mtd-pu" x="309.0" y="218.0" text-anchor="middle" style="font-size:15px;font-weight:700">0 B</text><text class="mtd-sub" x="276.0" y="244.0" text-anchor="middle" style="font-size:16px">6 × 6</text></svg><figcaption class="caption">The ⊗ sign marks the Kronecker product. Each entry of A scales one whole copy of the tile B, and only A and B are stored.</figcaption></figure>
 
-    <p>The authors were chasing a better trade-off than adapters alone could offer. Fine-tuning giant language models is sample inefficient, needing many training examples to learn well, unstable in low-resource settings, where only a little task data is available, and wasteful, since it stores a full copy per task. Existing parameter-efficient methods either still used a relatively large number of parameters or underperformed full fine-tuning.</p>
+    <p>One factor pair is enough to build a full adapter matrix:</p>
+<div class="eq-card">
+<div class="eq-what">A big adapter matrix from two small factors.</div>
+<div class="eq-line eq-active"><span class="eqt" style="color:#2c3e50">W<sub>768&#215;64</sub></span> = <span class="eqt" style="color:#b45309">A<sub>8&#215;8</sub></span> &#8855; <span class="eqt" style="color:#2a7fbf">B<sub>96&#215;8</sub></span></div>
+<div class="eq-why eq-active"><span class="eqt" style="color:#2c3e50">W</span> is one adapter weight matrix, &#8855; is the Kronecker product, and the subscripts are the shapes: every entry of <span class="eqt" style="color:#b45309">A</span> scales a whole copy of <span class="eqt" style="color:#2a7fbf">B</span>.</div>
+<div class="eq-line eq-active">stored: 8&#183;8 + 96&#183;8 = 832 &nbsp;&nbsp; dense: 768&#183;64 = 49,152</div>
+<div class="eq-why eq-active"><em>You only store the factors,</em> not the big matrix.</div>
+</div>
 
-    <p>Compacter builds on adapters and low-rank optimization. Each adapter weight matrix becomes a sum of Kronecker products between shared "slow" weights, the common factors reused across layers, and per-layer "fast" rank-one matrices, small factors that carry only one independent direction and so can be built from a single pair of vectors. The big matrix is built from small shared factors instead of being learned entry by entry.</p>
+    <p>Earlier parameter-efficient methods either still used many parameters or underperformed full fine-tuning. Compacter builds each adapter matrix as a sum of these products:</p>
+<div class="eq-card">
+<div class="eq-what">Compacter's adapter weight: shared slow factors times per-layer fast factors.</div>
+<div class="eq-line eq-active"><span class="eqt" style="color:#2c3e50">W</span> = &#931;<sub>i=1..n</sub> <span class="eqt" style="color:#b45309">A<sub>i</sub></span> &#8855; <span class="eqt" style="color:#2a7fbf">B<sub>i</sub></span></div>
+<div class="eq-why eq-active">The <span class="eqt" style="color:#b45309">A<sub>i</sub></span> are shared "slow" weights, reused across layers; the <span class="eqt" style="color:#2a7fbf">B<sub>i</sub></span> are per-layer "fast" weights; &#931; adds the n products.</div>
+<div class="eq-line eq-active"><span class="eqt" style="color:#2a7fbf">B<sub>i</sub></span> = <span class="eqt" style="color:#5d6d7e">s<sub>i</sub></span> <span class="eqt" style="color:#5d6d7e">t<sub>i</sub><sup>T</sup></span></div>
+<div class="eq-why eq-active">Each fast factor is rank one: built from a single pair of vectors <span class="eqt" style="color:#5d6d7e">s<sub>i</sub></span> and <span class="eqt" style="color:#5d6d7e">t<sub>i</sub></span>, where T lays t<sub>i</sub> flat as a row.</div>
+</div>
 
-    <p><em>Training only <code>0.047%</code> of the model's parameters, it matches full fine-tuning on GLUE and beats it on SuperGLUE, GLUE's harder successor suite, and in low-resource settings.</em></p>
-    <p>An <code>8 × 8</code> factor plus a <code>96 × 8</code> factor expands to a <code>768 × 64</code> adapter matrix, but <em>you only store <code>832</code> numbers instead of <code>49,152</code>.</em></p>
-    <p><em>You never build the big matrix;</em> you apply it with a reshape and two small multiplications:</p>
+    <p><em>Training only <code>0.047%</code> of the model's parameters, it matches full fine-tuning on GLUE and beats it on SuperGLUE, GLUE's harder successor suite, and in low-resource settings,</em> where only a little task data is available.</p>
+
+    <p>The code below keeps the simplest case, one product with a full <code>B</code>. <em>You never build the big matrix;</em> a reshape and two small multiplications apply it:</p>
 
 <pre><code class="language-python">def kron_linear(x, A, B):
     # computes x @ (A ⊗ B) without ever building A ⊗ B
@@ -1684,7 +1718,7 @@ class CompacterAdapter(nn.Module):
 
     <h2 id="what-happens-on-a-real-task">Half a point of accuracy from 0.27% of the parameters</h2>
 
-    <p>So what do you actually get? Representative numbers for sentiment classification (SST-2) on a BERT-base sized model, rounded from published adapter and LoRA runs. <em>Treat these as the pattern, not gospel;</em> your dataset will differ, but the ordering is stable. The last row needs one term explained before you read it. A soft prompt is a short set of learned vectors placed at the front of the input, in front of the real words, and only those vectors learn while the model itself stays frozen, so they steer the frozen model toward the task:</p>
+    <p>Representative SST-2 sentiment accuracy on a BERT-base sized model, rounded from published adapter and LoRA runs. <em>Treat these as the pattern, not gospel;</em> the ordering is stable. The last row uses a soft prompt: a short set of learned vectors placed in front of the real words, the only part that learns, steering the frozen model toward the task.</p>
 
     <div class="stat-grid">
       <div class="stat-card">
@@ -1725,7 +1759,7 @@ class CompacterAdapter(nn.Module):
     <p>LoRA and Compacter are not the only way to keep the update small.</p>
     <ul>
       <li><strong>Prompt tuning</strong> trains a soft prompt of about <code>20K</code> parameters. On base-size models it trails LoRA on SST-2, and it only pays off with a much bigger frozen model to steer.</li>
-      <li><strong>Prefix tuning</strong> prepends learned keys and values to each attention layer, meaning each layer gets extra learned key and value vectors that every position can attend to, on top of the keys and values it builds from the real input, a similar parameter budget, with the same catch: it needs a big frozen model to steer.</li>
+      <li><strong>Prefix tuning</strong> prepends learned keys and values to each attention layer, a similar parameter budget, with the same catch: it needs a big frozen model to steer.</li>
     </ul>
 
     <h2 id="what-is-next">Next: quantize the frozen 98%</h2>

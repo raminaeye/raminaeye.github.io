@@ -577,36 +577,29 @@ figcaption { margin-top: 1rem; }
    </div>
 
    <p>
-     You have a giant model that works great and costs a fortune to run. How do you squeeze it into a small one without tanking performance? That is what <strong>Knowledge Distillation (KD)</strong> does, and the trick is <em>embarrassingly simple</em>: take a big, accurate, pre-trained model, call it the teacher, and train the small model, the student, to copy the teacher's behavior.
+     You have a giant model that works great and costs a fortune to run. How do you squeeze it into a small one? <strong>Knowledge Distillation (KD)</strong> is <em>embarrassingly simple</em>: train the small model, the student, to copy a big pre-trained model, the teacher.
    </p>
    <p>
-     This is not a toy trick. <code>DistilBERT</code> is <code>BERT-base</code> (BERT: Bidirectional Encoder Representations from Transformers, a pretrained language model that learned what text means by reading it in both directions) with <code>40%</code> of the parameters chopped off, and it still keeps <code>97%</code> of BERT's performance on GLUE, a standard language-understanding benchmark suite. Same story with the distilled <code>MobileNet</code> variants (MobileNet is a family of small networks built for phones and tight hardware) taught by <code>ResNet-50</code> (a ResNet is a deep residual network, one whose blocks learn the change to add to their input instead of a whole new transformation). The pattern is always the same: <em>the big model you cannot afford to serve teaches the small model you can</em>.
+     DistilBERT is BERT-base (a pretrained language model that reads text in both directions) with 40% of the parameters chopped off, and it keeps 97% of BERT's performance on the GLUE language benchmark. Same story with distilled MobileNet variants (small networks for phones) taught by ResNet-50 (a deep residual network). <em>The big model you cannot afford to serve teaches the small model you can</em>.
    </p>
 
-      <p>The problem is a deployment problem. The most reliable way to squeeze more accuracy out of a model is to train a whole <strong>ensemble</strong> and average the predictions, but an ensemble is too expensive to serve, especially when the individual models are large neural nets. Earlier work showed an ensemble's knowledge could be compressed into a single model (Bucila et al.); distillation is the simplest version of that idea: train one small model that behaves like the big one.</p>
-   <p>The key insight: the teacher's soft outputs <em>carry information the hard labels never will</em>. A model that says an image is <code>90%</code> cat, <code>8%</code> dog, <code>2%</code> car is telling you which mistakes are reasonable, and that ranking, the <strong>"dark knowledge"</strong>, is what the student should learn.</p>
-   <p>Soften the teacher's softmax, the step that turns raw scores into probabilities that sum to <code>1</code>, with a <strong>temperature</strong> and train the small model to match those soft targets, alongside the usual hard-label loss.</p>
-   <p>The results in Hinton et al.'s distillation paper (in my References at the end of this page) sold the field on the idea: on MNIST (the handwritten-digit dataset) the distilled student surprised even its authors by nearly matching the big ensemble it learned from, and the same compression significantly improved the acoustic model (the part of a speech system that turns sound into words, scoring which words the audio most likely contains) of a heavily used commercial speech system.</p>
+      <p>The problem is deployment. An <strong>ensemble</strong> of averaged models is the most reliable accuracy boost, but too expensive to serve. Bucila et al. showed an ensemble's knowledge could be compressed into one model; distillation is the simplest version of that idea.</p>
+   <p>The key insight: the teacher's soft outputs <em>carry information the hard labels never will</em>. A teacher that says 90% cat, 8% dog, 2% car is telling you which mistakes are reasonable. That ranking, the <strong>"dark knowledge"</strong>, is what the student learns, from the teacher's softmax (the step that turns raw scores into probabilities) softened with a <strong>temperature</strong>, alongside the usual hard-label loss.</p>
+   <p>In Hinton et al.'s paper the distilled student nearly matched the big ensemble on MNIST (handwritten digits), and the same compression significantly improved the acoustic model (the part that scores which words the audio contains) of a heavily used commercial speech system.</p>
 
    <h2 id="soft-predictions-what-the-teacher-really-knows">Soft predictions: what the teacher really knows</h2>
    <p>
-     I do not train my student on the hard ground-truth labels alone (the label that just says "this image is a cat"). I also train it on the <strong>"soft" predictions</strong> my teacher produces: the probability distribution over all classes, which reveals how the teacher "thinks" (for example, "this image is <code>90%</code> likely a cat, <code>8%</code> a dog, and <code>2%</code> a car").
+     Besides the hard label ("this is a cat"), I train the student on the teacher's <strong>soft predictions</strong>, its probability over all classes. To make them more useful I soften the teacher's logits, its raw score per class, with <strong>temperature scaling</strong>:
    </p>
+   <div class="eq-card">
+     <div class="eq-what">Temperature scaling: divide the logits by T, then softmax.</div>
+     <div class="eq-line eq-active" data-eqline="0">s<sub>i</sub> = <span class="frac"><span class="top">z<sub>i</sub></span><span class="bot"><span style="color:#8e44ad">T</span></span></span></div>
+     <div class="eq-why eq-active" data-eqline="0">z<sub>i</sub> is the teacher's logit for class i and <span style="color:#8e44ad">T</span> the temperature; s<sub>i</sub> is the softened score.</div>
+     <div class="eq-line eq-active" data-eqline="1">p<sub>i</sub> = <span class="frac"><span class="top">exp(s<sub>i</sub>)</span><span class="bot">&#931;<sub>j</sub> exp(s<sub>j</sub>)</span></span></div>
+     <div class="eq-why eq-active" data-eqline="1">The softmax turns the scores into soft probabilities p<sub>i</sub>; the sum over all classes j makes them add to 1. At T = 1 this is the standard softmax. Above 1 the distribution softens and shows class similarities (a truck is closer to a car than to a cat). Below 1 it sharpens toward one-hot, all probability on one class.</div>
+   </div>
    <p>
-     To make that information more useful, I soften the teacher's output logits with <strong>temperature scaling</strong>:
-   </p>
-   <p>
-     The <strong>temperature</strong> controls how smooth that output distribution is.
-     I take the teacher's raw scores for each class, the logits, divide them by the temperature, then run the usual
-     softmax to get probabilities.
-   </p>
-   <ul>
-     <li>At a temperature of <code>1</code>, you get the standard <code>softmax</code> output.</li>
-     <li>Above <code>1</code>, the distribution becomes softer, shrinking the differences between class probabilities. This better reveals the teacher's knowledge about class similarities (e.g., that a truck is more similar to a car than to a cat).</li>
-     <li>Below <code>1</code>, the distribution becomes sharper, approaching a one-hot encoding (all the probability on one class and none on the rest).</li>
-   </ul>
-   <p>
-     When I use a higher temperature, my student picks up the teacher's <strong>inductive biases</strong> (the tendencies its architecture and training baked in) and gets a much better training signal, especially when true labels are sparse or noisy.
+     With a higher temperature the student picks up the teacher's <strong>inductive biases</strong> (tendencies its architecture and training baked in) and gets a much better signal, especially when labels are sparse or noisy.
    </p>
 
 
@@ -614,19 +607,14 @@ figcaption { margin-top: 1rem; }
 <figure class="diagram"><svg viewBox="0 0 660 190" role="img" aria-label="Teacher distribution at temperatures 0.5, 2 and 20 for classes cat, dog, car and bird" style="width:100%;max-width:660px;height:auto;display:block"><text x="110" y="18" text-anchor="middle" font-size="13" font-weight="700">T = 0.5</text><rect x="30" y="31.13801088016109" width="32" height="128.8619891198389" fill="#3498db"/><text x="46" y="178" text-anchor="middle" font-size="11">cat</text><rect x="75" y="158.93949842531015" width="32" height="1.0605015746898463" fill="#2ecc71"/><text x="91" y="178" text-anchor="middle" font-size="11">dog</text><rect x="120" y="159.93551083282898" width="32" height="0.06448916717103181" fill="#e67e22"/><text x="136" y="178" text-anchor="middle" font-size="11">car</text><rect x="165" y="159.98697986169978" width="32" height="0.013020138300206565" fill="#9b59b6"/><text x="181" y="178" text-anchor="middle" font-size="11">bird</text><text x="330" y="18" text-anchor="middle" font-size="13" font-weight="700">T = 2</text><rect x="250" y="76.18427897731867" width="32" height="83.81572102268133" fill="#3498db"/><text x="266" y="178" text-anchor="middle" font-size="11">cat</text><rect x="295" y="134.7551899607205" width="32" height="25.244810039279503" fill="#2ecc71"/><text x="311" y="178" text-anchor="middle" font-size="11">dog</text><rect x="340" y="147.46379833748796" width="32" height="12.536201662512035" fill="#e67e22"/><text x="356" y="178" text-anchor="middle" font-size="11">car</text><rect x="385" y="151.59673272447287" width="32" height="8.403267275527124" fill="#9b59b6"/><text x="401" y="178" text-anchor="middle" font-size="11">bird</text><text x="550" y="18" text-anchor="middle" font-size="13" font-weight="700">T = 20</text><rect x="470" y="122.94621141136372" width="32" height="37.05378858863628" fill="#3498db"/><text x="486" y="178" text-anchor="middle" font-size="11">cat</text><rect x="515" y="127.13623764294148" width="32" height="32.86376235705852" fill="#2ecc71"/><text x="531" y="178" text-anchor="middle" font-size="11">dog</text><rect x="560" y="129.3580310794209" width="32" height="30.6419689205791" fill="#e67e22"/><text x="576" y="178" text-anchor="middle" font-size="11">car</text><rect x="605" y="130.5595198662739" width="32" height="29.440480133726112" fill="#9b59b6"/><text x="621" y="178" text-anchor="middle" font-size="11">bird</text></svg><figcaption>At 0.5 the teacher is almost one-hot, with barely any ranking to copy; at 2, a crisp ranking; at 20, the bars wash out toward uniform.</figcaption></figure>
       <h2 id="how-it-works-the-distillation-loss">Distillation loss: match the teacher's soft targets</h2>
    <p>
-     <em>The student answers to two bosses at once</em>: the true labels, and the teacher's soft predictions. One loss term for each, mixed together. The labels' term is cross-entropy, the loss that measures how badly the student's prediction misses the true label and punishes a confident wrong answer hardest:
+     <em>The student answers to two bosses</em>: the true labels, through cross-entropy (the loss that punishes a confident wrong answer hardest), and the teacher's soft predictions, through KL divergence (one number for how far apart two probability distributions sit). A <strong>mixing weight</strong> &#945; (alpha) blends them:
    </p>
-   <p>
-     The final loss is a weighted average of these two components, controlled by a single <strong>mixing weight</strong>, written <code>α</code> (alpha) in the equation:
-   </p>
-   <p>That blend, written as one line:</p>
 <div class="eq-card" id="kdEqStatic">
 <div class="eq-what">One distillation step in one line: the total loss blends the teacher's soft lesson with the true labels.</div>
 <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="L" style="color:#2c3e50">L</span> = (1&#8722;<span class="eqt" data-k="alpha" style="color:#2c3e50">&#945;</span>)&#183;<span class="eqt" data-k="Lce" style="color:#5d6d7e">L<sub>CE</sub></span>(student_logits, true_labels) + <span class="eqt" data-k="alpha" style="color:#2c3e50">&#945;</span>&#183;<span class="eqt" data-k="T" style="color:#8e44ad">T</span><sup>2</sup>&#183;<span class="eqt" data-k="Lkl" style="color:#2a7fbf">L<sub>KL</sub></span>(student_logits<sub>T</sub>, teacher_logits<sub>T</sub>)</div>
-<div class="eq-why eq-active" data-eqline="0">Read it left to right: the total loss <span class="eqt" style="color:#2c3e50">L</span> is the labels' share, 1 minus <span class="eqt" style="color:#2c3e50">&#945;</span>, of <span class="eqt" style="color:#5d6d7e">L<sub>CE</sub></span>, the cross-entropy of the student's logits against the true labels, plus <span class="eqt" style="color:#2c3e50">&#945;</span>'s share of <span class="eqt" style="color:#2a7fbf">L<sub>KL</sub></span>, which compares the student's temperature-softened logits against the teacher's, its term carrying <span class="eqt" style="color:#8e44ad">T</span><sup>2</sup>, read as T squared. The true labels keep the student honest, and the <span class="eqt" style="color:#8e44ad">T</span><sup>2</sup> matters because without it the teacher's signal would barely move the weights.</div>
+<div class="eq-why eq-active" data-eqline="0">Read it left to right: the total loss <span class="eqt" style="color:#2c3e50">L</span> is the labels' share, 1 minus <span class="eqt" style="color:#2c3e50">&#945;</span>, of <span class="eqt" style="color:#5d6d7e">L<sub>CE</sub></span>, the cross-entropy of the student's logits against the true labels, plus <span class="eqt" style="color:#2c3e50">&#945;</span>'s share of <span class="eqt" style="color:#2a7fbf">L<sub>KL</sub></span>, which compares the student's temperature-softened logits against the teacher's, its term carrying <span class="eqt" style="color:#8e44ad">T</span><sup>2</sup>, read as T squared. The true labels keep the student honest.</div>
 </div>
-<p>The code listing below is this line in a few lines: its numbered parts are the distillation soft target loss, the hard loss, and the weighted combination that returns the blend.</p>
-   <p>The subscript <code>T</code> on the two logits terms is the temperature from <a href="#soft-predictions-what-the-teacher-really-knows">Soft predictions: what the teacher really knows</a>: both sets of logits are softened at that temperature before the KL term compares them. KL divergence is one number for how far apart two probability distributions sit.</p>
+<p>The subscript T means both sets of logits are softened at the same temperature T (see <a href="#soft-predictions-what-the-teacher-really-knows">the soft predictions section</a>) before the KL term compares them.</p>
    <svg id="kdSetupSvg" viewBox="0 0 340 210" role="img" aria-label="Setup diagram: the frozen teacher supplies soft targets, the dataset supplies the true label, the mixed loss trains only the student" style="width:100%;max-width:520px;height:auto;display:block;margin:0 auto;">
      <rect x="6" y="92" width="58" height="32" rx="6" fill="#ffffff" stroke="#2c3e50" stroke-width="1.5"/><text x="35" y="112" text-anchor="middle" font-size="12" font-weight="700" fill="#2c3e50">image</text>
      <rect x="94" y="26" width="108" height="36" rx="6" fill="#ffffff" stroke="#2c3e50" stroke-width="1.5"/><text x="148" y="48" text-anchor="middle" font-size="12" font-weight="700" fill="#2c3e50">frozen teacher</text>
@@ -647,15 +635,12 @@ figcaption { margin-top: 1rem; }
      <text x="206" y="124" text-anchor="end" font-size="12" fill="#5d6d7e">trains the student</text>
    </svg>
    <p class="caption">
-     The point: the student learns from two signals at once. The frozen teacher supplies soft targets; the dataset supplies the true label; the mixed loss blends them at weight <code>0.7</code> and <code>0.3</code> and trains only the student.
+     The frozen teacher supplies soft targets, the dataset supplies the true label, and the mixed loss blends them at weights 0.7 and 0.3 and trains only the student.
    </p>
    <p>
-     The loss blends two lessons: the true labels keep the student honest, and the teacher's softened outputs show it the shape of the answer. The <strong>mixing weight</strong> decides how much of each lesson the student hears. <em>The extremes tell the story</em>: lean fully toward the teacher and the student learns pure imitation; lean fully toward the labels and the teacher fades out entirely.
+     At the extremes, &#945; = 1 is pure imitation of the teacher and &#945; = 0 drops the teacher entirely. In PyTorch the equation takes a few lines, numbered as soft loss, hard loss, blend:
    </p>
-   <p>
-     In code it is a few lines:
-   </p>
-   <pre><code>def blended_distillation_loss(student_logits, teacher_logits, labels, T=2.0, alpha=0.7):
+   <pre><code class="language-python">def blended_distillation_loss(student_logits, teacher_logits, labels, T=2.0, alpha=0.7):
     # 1. Distillation (soft target) loss: KL divergence between softened distributions
     soft_targets = F.softmax(teacher_logits / T, dim=1)
     student_log_probs = F.log_softmax(student_logits / T, dim=1)
@@ -667,12 +652,12 @@ figcaption { margin-top: 1rem; }
     # 3. Weighted combination
     return alpha * soft_loss + (1.0 - alpha) * hard_loss</code></pre>
    <p>
-     One detail worth noticing: the KL term is multiplied by the temperature squared. Dividing logits by the temperature shrinks the gradients by roughly the temperature squared, so the original paper suggests multiplying it back to keep the two loss terms on a comparable scale. <em>Without it, the teacher's signal would barely move the weights.</em>
+     The T squared is there because dividing logits by T shrinks the soft term's gradients by roughly T squared, so the original paper multiplies it back to keep the two terms on a comparable scale.
    </p>
 
    <h2 id="one-training-step">One training step, walked through</h2>
    <p>
-     Distillation runs as a loop every training step: the teacher sets the soft targets, the student guesses, the loss mixes both lessons, the student updates. One pass through that loop is the walkthrough in this section.
+     Every training step the teacher sets soft targets, the student guesses, the loss mixes both lessons, and the student updates. Step through one pass:
    </p>
    <div class="demo" id="kdStep">
 <style>
@@ -968,9 +953,15 @@ figcaption { margin-top: 1rem; }
 </script>
 
      <p class="caption">
-       The student learns the teacher's ranking, not just its answer. A hard label would teach only "cat". The temperature sets the lesson: below a temperature of <code>1</code> the teacher sharpens toward one-hot, with barely any ranking to copy; at high temperatures it is nearly uniform and the ranking washes out.
+       The student learns the teacher's ranking, not just its answer; a hard label would teach only "cat".
      </p>
-   <p>The gap between the two distributions is <strong>KL divergence</strong>, the one number from earlier in the page for how far apart two distributions sit: zero when the student's softened bars match the teacher's exactly, and larger the further apart the two sit. That gap is what the distillation loss trains on. The teacher bars stay frozen at the chosen temperature and the student scores start at zero, so the gap starts wide; each gradient step on the loss, one update that nudges the student's scores a small step downhill on the loss, pulls the student's bars toward the teacher's, and the gap shrinks toward zero.</p>
+   <p>The gap the distillation loss trains on is the <strong>KL divergence</strong> between the teacher's soft targets and the student's softened guess:</p>
+   <div class="eq-card">
+     <div class="eq-what">KL divergence: how far the student's bars sit from the teacher's.</div>
+     <div class="eq-line eq-active" data-eqline="0">KL(p &#8214; q) = &#931;<sub>i</sub> p<sub>i</sub> log <span class="frac"><span class="top">p<sub>i</sub></span><span class="bot">q<sub>i</sub></span></span></div>
+     <div class="eq-why eq-active" data-eqline="0">p<sub>i</sub> is the teacher's soft probability for class i and q<sub>i</sub> the student's. Each class adds p<sub>i</sub> times the log of their ratio; the total is zero when the bars match exactly and grows as they move apart.</div>
+   </div>
+   <p>In the toy below the student's scores start at zero, so the gap starts wide; each gradient step, a small nudge downhill on the loss, pulls the student's bars toward the teacher's and the gap shrinks toward zero.</p>
       <div class="demo" id="tempToy">
      <div class="demo-controls">
        <label for="temp">Temperature <code>T</code>: <span id="tempVal">2.0</span></label>
@@ -1311,8 +1302,19 @@ figcaption { margin-top: 1rem; }
    </script>
    <h2 id="what-happens-distilling-a-resnet-18-into-a-small-cnn">What happens: distilling a ResNet-18 into a small CNN</h2>
    <p>
-     The full experiment lives in the companion notebook. The setup: the <strong>student</strong> is <code>DeeperStudentCNN</code>, a plain <code>4</code>-block CNN (convolutional neural network) with a fraction of the teacher's size, and the <strong>teacher</strong> is a ResNet-18 (ImageNet-pretrained, that is, pretrained on ImageNet, a large labeled image dataset; classifier fine-tuned on STL-10, that is, trained further on STL-10 after the ImageNet pretraining, STL-10 being a dataset of 96&#215;96 color images in 10 classes). Distillation runs with temperature <code>2.0</code>, mixing weight <code>0.7</code>, Adam (an adaptive optimizer, one that adjusts each weight's step size as training goes) at learning rate <code>1e-3</code> (0.001), for <code>10</code> epochs (one epoch is one full pass over the training data).
+     The full experiment lives in the companion notebook. The <strong>teacher</strong> is a ResNet-18 pretrained on ImageNet (a large labeled image dataset) with its classifier fine-tuned on STL-10 (96&#215;96 color images in 10 classes). The <strong>student</strong> is <code>DeeperStudentCNN</code>, a plain 4-block CNN (convolutional neural network) a fraction of the teacher's size. The run, with Adam (an optimizer that adapts each weight's step size) over 10 epochs (full passes over the data), in outline:
    </p>
+   <pre><code class="language-python">teacher.eval()                                   # frozen ResNet-18
+opt = torch.optim.Adam(student.parameters(), lr=1e-3)
+for epoch in range(10):
+    for x, y in train_loader:                    # STL-10 batches
+        with torch.no_grad():
+            teacher_logits = teacher(x)
+        loss = blended_distillation_loss(student(x), teacher_logits, y,
+                                         T=2.0, alpha=0.7)
+        opt.zero_grad()
+        loss.backward()
+        opt.step()</code></pre>
    <p>First, the teacher's accuracy, which is the target we are chasing:</p>
    <div class="stat-grid">
      <div class="stat-card">
@@ -1330,9 +1332,9 @@ figcaption { margin-top: 1rem; }
      </div>
    </div>
    <p>
-     <code>53%</code> is a long way from <code>93%</code>, but keep perspective: this student is tiny, trained for only <code>10</code> epochs, and it learned entirely by watching the teacher. The loss fell steadily the whole way, so it was still improving when training stopped. Distillation got a small model somewhere meaningful in <code>10</code> epochs. <em>That is a fast win.</em>
+     53% is a long way from 93%, but this student is tiny, trained for only 10 epochs, and learned entirely by watching the teacher. Its loss was still falling when training stopped. <em>That is a fast win.</em>
    </p>
-   <p>I also tried forcing the student to mimic the teacher's intermediate features, adding an MSE (mean squared error) term between feature maps, the intermediate layer outputs of the two networks, alongside the CE and KL terms (mixing weights <code>0.5</code>, <code>0.3</code>, <code>0.2</code> across the three terms, temperature <code>2.0</code>, same <code>10</code> epochs):</p>
+   <p>I also tried making the student mimic the teacher's intermediate features, adding an MSE (mean squared error) term between the two networks' feature maps alongside the CE and KL terms (mixing weights 0.5, 0.3, 0.2 across the three terms, temperature 2.0, same 10 epochs):</p>
    <div class="stat-grid">
      <div class="stat-card">
        <div class="stat-num">42.48<span class="stat-unit">%</span></div>
@@ -1341,20 +1343,20 @@ figcaption { margin-top: 1rem; }
      </div>
    </div>
    <p>
-     <em>Worse, not better.</em> More supervision is not always better supervision. Matching raw activations (the numbers each layer outputs) across very different architectures is hard: feature scales differ, and forcing a small network to reproduce a big network's internals can fight the classification objective. More on that in the caveats.
+     <em>Worse, not better.</em> Matching raw activations (each layer's outputs) across very different architectures is hard: feature scales differ, and copying a big network's internals can fight the classification objective.
    </p>
 
    <h2 id="other-flavors-of-distillation">Beyond logits: feature, relation, and self-distillation</h2>
    <h3>Response-Based Distillation (Logit Distillation)</h3>
    <p>
-     This is the one I used in <a href="#what-happens-distilling-a-resnet-18-into-a-small-cnn">my ResNet-18 experiment</a>, and it is the most common form of KD you will run into. The student only watches the teacher's final outputs, <em>nothing internal</em>. You never see the teacher's reasoning process, but you rarely need to: the softened logits already carry most of the signal. <code>DistilBERT</code> did exactly this, and later distilled <code>MobileNet</code> variants too. The distillation loss is the KL divergence between the temperature-scaled outputs of the teacher and the student. Minimizing it drags the student's bars onto the teacher's, the same motion as the temperature toy's training run.
+     The form in <a href="#what-happens-distilling-a-resnet-18-into-a-small-cnn">my ResNet-18 experiment</a>, and the most common. The student watches only the teacher's final outputs, <em>nothing internal</em>, and the loss is the KL divergence above. The softened logits already carry most of the signal; DistilBERT and later distilled MobileNet variants did exactly this.
    </p>
    <h3>Feature-Based Distillation</h3>
-   <p>Here you make the student copy the teacher's <strong>intermediate features</strong>, not just the final answers. It sounds like strictly more supervision, and sometimes it helps. But remember the experiment above: forcing a tiny student to reproduce a ResNet's internals backfired. Feature scales differ across architectures, and the extra objective can fight your classification loss. If you try this, normalize the features and pick the layer carefully.</p>
+   <p>The student copies the teacher's <strong>intermediate features</strong>, not just the final answers. Sometimes it helps, but it backfired in the experiment above. If you try it, normalize the features and pick the layer carefully.</p>
    <h3>Relation-Based Distillation</h3>
-   <p>Instead of copying absolute values, the student copies relationships: which examples the teacher thinks are similar, how classes sit relative to each other in the teacher's space. Think of it as <em>learning the teacher's map of the world rather than its exact coordinates</em>. It is more forgiving when the student is too small to match the teacher's exact numbers.</p>
+   <p>The student copies relationships: which examples the teacher thinks are similar, how classes sit relative to each other. <em>The teacher's map of the world, not its exact coordinates</em>, which is more forgiving for a student too small to match the teacher's numbers.</p>
    <h3>Self-Distillation</h3>
-   <p>The weird one: the model teaches itself. Train a teacher, then train a student with the exact same architecture on the teacher's outputs, and you somehow get a better model. It sounds like a free lunch, <em>and it almost is</em>: the soft targets act as a regularizer, something that keeps the model from overfitting, that is, memorizing the noise in the labels instead of learning the pattern underneath it, and smooth out the optimization. People usually iterate it once or twice and just bank the gains.</p>
+   <p>The weird one: a student with the teacher's exact architecture, trained on the teacher's outputs, somehow ends up better. <em>Almost a free lunch</em>: the soft targets act as a regularizer (they keep the model from memorizing label noise) and smooth the optimization. People usually iterate once or twice and bank the gains.</p>
 
     <figure class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 380" style="max-width:480px" role="img" aria-label="Four kinds of distillation: response-based copies the teacher's final outputs, feature-based copies a middle layer, relation-based copies which examples the teacher sees as alike, and self-distillation uses a student the same size as the teacher"><text class="" x="100.0" y="24.0" text-anchor="middle" style="font-size:18px;font-weight:700">Response</text><text class="mtd-sub" x="100.0" y="46.0" text-anchor="middle" style="font-size:16px">final outputs</text><rect class="mtd-kd-lt" x="18.0" y="62.0" width="70.0" height="18.0" rx="3"/><rect class="mtd-kd-lt" x="18.0" y="87.0" width="70.0" height="18.0" rx="3"/><rect class="mtd-kd-lt" x="18.0" y="112.0" width="70.0" height="18.0" rx="3"/><rect class="mtd-kd-lt" x="18.0" y="137.0" width="70.0" height="18.0" rx="3"/><rect class="mtd-kd-ls" x="136.0" y="74.5" width="46.0" height="18.0" rx="3"/><rect class="mtd-kd-ls" x="136.0" y="99.5" width="46.0" height="18.0" rx="3"/><rect class="mtd-kd-ls" x="136.0" y="124.5" width="46.0" height="18.0" rx="3"/><rect class="mtd-kd-hl" x="15.0" y="59.0" width="76.0" height="24.0" rx="4"/><rect class="mtd-kd-hl" x="133.0" y="71.5" width="52.0" height="24.0" rx="4"/><line class="mtd-s mtd-cp" x1="93.0" y1="71.0" x2="120.6" y2="80.1" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cp" points="131.0,83.5 118.8,85.3 122.3,74.8"/><text class="mtd-t1" x="53.0" y="170.0" text-anchor="middle" style="font-size:16px;font-weight:600">teacher</text><text class="mtd-t2" x="159.0" y="170.0" text-anchor="middle" style="font-size:16px;font-weight:600">student</text><text class="" x="300.0" y="24.0" text-anchor="middle" style="font-size:18px;font-weight:700">Feature</text><text class="mtd-sub" x="300.0" y="46.0" text-anchor="middle" style="font-size:16px">middle layers</text><rect class="mtd-kd-lt" x="218.0" y="62.0" width="70.0" height="18.0" rx="3"/><rect class="mtd-kd-lt" x="218.0" y="87.0" width="70.0" height="18.0" rx="3"/><rect class="mtd-kd-lt" x="218.0" y="112.0" width="70.0" height="18.0" rx="3"/><rect class="mtd-kd-lt" x="218.0" y="137.0" width="70.0" height="18.0" rx="3"/><rect class="mtd-kd-ls" x="336.0" y="74.5" width="46.0" height="18.0" rx="3"/><rect class="mtd-kd-ls" x="336.0" y="99.5" width="46.0" height="18.0" rx="3"/><rect class="mtd-kd-ls" x="336.0" y="124.5" width="46.0" height="18.0" rx="3"/><rect class="mtd-kd-hl" x="215.0" y="109.0" width="76.0" height="24.0" rx="4"/><rect class="mtd-kd-hl" x="333.0" y="96.5" width="52.0" height="24.0" rx="4"/><line class="mtd-s mtd-cp" x1="293.0" y1="121.0" x2="320.6" y2="111.9" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cp" points="331.0,108.5 322.3,117.2 318.8,106.7"/><text class="mtd-t1" x="253.0" y="170.0" text-anchor="middle" style="font-size:16px;font-weight:600">teacher</text><text class="mtd-t2" x="359.0" y="170.0" text-anchor="middle" style="font-size:16px;font-weight:600">student</text><text class="" x="100.0" y="214.0" text-anchor="middle" style="font-size:18px;font-weight:700">Relation</text><text class="mtd-sub" x="100.0" y="236.0" text-anchor="middle" style="font-size:16px">which examples are alike</text><polygon class="mtd-kd-tri mtd-kd-teach" points="52.0,268.0 22.0,322.0 86.0,318.0"/><circle class="mtd-dot" cx="52.0" cy="268.0" r="5"/><circle class="mtd-dot" cx="22.0" cy="322.0" r="5"/><circle class="mtd-dot" cx="86.0" cy="318.0" r="5"/><polygon class="mtd-kd-tri mtd-kd-stud" points="152.0,282.2 131.0,320.0 175.8,317.2"/><circle class="mtd-dot" cx="152.0" cy="282.2" r="5"/><circle class="mtd-dot" cx="131.0" cy="320.0" r="5"/><circle class="mtd-dot" cx="175.8" cy="317.2" r="5"/><line class="mtd-s mtd-cp" x1="92.0" y1="302.0" x2="109.0" y2="302.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cp" points="120.0,302.0 109.0,307.5 109.0,296.5"/><text class="mtd-t1" x="52.0" y="360.0" text-anchor="middle" style="font-size:16px;font-weight:600">teacher</text><text class="mtd-t2" x="152.0" y="360.0" text-anchor="middle" style="font-size:16px;font-weight:600">student</text><text class="" x="300.0" y="214.0" text-anchor="middle" style="font-size:18px;font-weight:700">Self</text><text class="mtd-sub" x="300.0" y="236.0" text-anchor="middle" style="font-size:16px">same-size student</text><rect class="mtd-kd-lt" x="218.0" y="252.0" width="70.0" height="18.0" rx="3"/><rect class="mtd-kd-lt" x="218.0" y="277.0" width="70.0" height="18.0" rx="3"/><rect class="mtd-kd-lt" x="218.0" y="302.0" width="70.0" height="18.0" rx="3"/><rect class="mtd-kd-lt" x="218.0" y="327.0" width="70.0" height="18.0" rx="3"/><rect class="mtd-kd-ls" x="312.0" y="252.0" width="70.0" height="18.0" rx="3"/><rect class="mtd-kd-ls" x="312.0" y="277.0" width="70.0" height="18.0" rx="3"/><rect class="mtd-kd-ls" x="312.0" y="302.0" width="70.0" height="18.0" rx="3"/><rect class="mtd-kd-ls" x="312.0" y="327.0" width="70.0" height="18.0" rx="3"/><rect class="mtd-kd-hl" x="215.0" y="249.0" width="76.0" height="24.0" rx="4"/><rect class="mtd-kd-hl" x="309.0" y="249.0" width="76.0" height="24.0" rx="4"/><line class="mtd-s mtd-cp" x1="293.0" y1="261.0" x2="296.0" y2="261.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cp" points="307.0,261.0 296.0,266.5 296.0,255.5"/><text class="mtd-t1" x="253.0" y="360.0" text-anchor="middle" style="font-size:16px;font-weight:600">teacher</text><text class="mtd-t2" x="347.0" y="360.0" text-anchor="middle" style="font-size:16px;font-weight:600">student</text><line class="mtd-sep" x1="200" y1="6" x2="200" y2="374"/><line class="mtd-sep" x1="4" y1="186" x2="396" y2="186"/><text x="53" y="75.5" text-anchor="middle" style="font-size:13px;font-weight:600;fill:#1b4f72">output</text><text x="159" y="88.0" text-anchor="middle" style="font-size:13px;font-weight:600;fill:#a04000">output</text><text x="253" y="75.5" text-anchor="middle" style="font-size:13px;font-weight:600;fill:#1b4f72">output</text><text x="359" y="88.0" text-anchor="middle" style="font-size:13px;font-weight:600;fill:#a04000">output</text><text x="253" y="265.5" text-anchor="middle" style="font-size:13px;font-weight:600;fill:#1b4f72">output</text><text x="347" y="265.5" text-anchor="middle" style="font-size:13px;font-weight:600;fill:#a04000">output</text></svg><figcaption class="caption">What the student copies in each kind of distillation.</figcaption></figure>
 
@@ -1364,10 +1366,10 @@ figcaption { margin-top: 1rem; }
        Feature distillation backfired in my notebook (the experiment above).
      </li>
      <li>
-       Mind the capacity gap. A student that is far smaller than the teacher may simply be unable to mimic it, and distillation stalls. When the gap is huge, an intermediate "teacher assistant" model, one sized between the teacher and the student that first learns from the teacher and then teaches the student, sometimes helps more than distilling directly.
+       Mind the capacity gap. A student far smaller than the teacher may be unable to mimic it. A "teacher assistant" sized in between, taught by the teacher and then teaching the student, sometimes helps more than distilling directly.
      </li>
      <li>
-       Temperature needs tuning. Too low and you get hard labels with no dark knowledge; too high and every class looks equally likely, washing out the signal. Values between <code>2</code> and <code>5</code> are the usual starting range.
+       Temperature needs tuning. Too low and you get hard labels with no dark knowledge; too high and every class looks equally likely. Values between 2 and 5 are the usual starting range.
      </li>
      <li>
        The student inherits the teacher's mistakes. Whatever biases and blind spots the teacher has get baked into the soft targets, so distill from a teacher you trust.

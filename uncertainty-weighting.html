@@ -777,7 +777,7 @@ figcaption { margin-top: 1rem; }
     <p class="dek">Set each task's loss weight from the data's noise. Noisy tasks count less, automatically.</p>
 
 <p>
-        On the <a href="gradnorm.html">GradNorm</a> page I set each task's loss weight, its volume, by watching training dynamics. Here I set them <em>from the data itself</em>: some tasks are just noisier than others, and a <em>noisy task should count less</em>.
+        A task's loss is the error score that task is trying to lower. On the <a href="gradnorm.html">GradNorm</a> page I set each task's loss weight, its volume, by watching training dynamics. Here I set them <em>from the data itself</em>: some tasks are just noisier than others, and a <em>noisy task should count less</em>.
         The model learns exactly how much less.
     </p>
 
@@ -797,12 +797,12 @@ figcaption { margin-top: 1rem; }
 <h2 id="uw-paper">Hand-tuning the weights is slow and costly</h2>
     <p>Take <strong>scene understanding</strong> on Cityscapes, a benchmark dataset of street scenes: one monocular (one camera) image in, three tasks out. Per-pixel depth is a regression task, which means it predicts a number on a scale, how far away each pixel is. Instance segmentation, telling individual objects apart pixel by pixel, is regression too: for each pixel the model predicts an arrow pointing to the center of the object it belongs to. Semantic segmentation, labeling every pixel by what it shows, is a classification task, which means it picks which label fits. Different units, different scales, one shared representation, meaning one learned picture of the image that all three tasks read from.</p>
     <p>The problem is that the loss weights strongly affect performance, and tuning them by hand is a difficult and expensive process. That can make multitask learning prohibitive in practice.</p>
-    <p>The way out, proposed by Kendall and colleagues in 2018 when they introduced uncertainty weighting, is to derive the weights from how uncertain each task is, instead of guessing them. One number per task, its <strong>task uncertainty</strong>, is learned as a parameter during training, and it tells the model how much to trust each loss.</p>
+    <p>The way out, proposed by Kendall and colleagues in 2018 when they introduced uncertainty weighting, is to derive the weights from how uncertain each task is, instead of guessing them. One number per task, its <strong>task uncertainty</strong>, is learned during training as a parameter, one of the numbers training adjusts, and it tells the model how much to trust each loss.</p>
 
     
 <h2 id="uw-intuition">Set how loud each loss is, before touching gradients</h2>
 
-    <p><a href="gradnorm.html">GradNorm</a> sets the loss weights from the size of each task's gradient, the arrow that says how each shared parameter should move to lower that task's loss. It measures those sizes during training, watching who falls behind. Uncertainty weighting also sets how loud each loss is, but it reads a different signal, how noisy each task's data is, and it never measures a gradient. It answers with a principle from probabilistic modeling, which treats each task's output as a probability spread over possible answers rather than one fixed answer: a loss that is inherently noisier should count less.</p>
+    <p><a href="gradnorm.html">GradNorm</a> sets the loss weights from the size of each task's gradient, the arrow that points where that task's loss rises fastest, the direction training steps against. It measures those sizes during training, watching who falls behind. Uncertainty weighting also sets how loud each loss is, but it reads a different signal, how noisy each task's data is, and it never measures a gradient. It answers with a principle from probabilistic modeling, which treats each task's output as a probability spread over possible answers rather than one fixed answer: a loss that is inherently noisier should count less.</p>
 
     
 <h2 id="uw-noise">Turn down the tasks you can't trust</h2>
@@ -858,9 +858,10 @@ figcaption { margin-top: 1rem; }
     
 <h2 id="uw-algorithm">One training step: measure, price, learn</h2>
 
-    <p>One training step ends with one backward pass, the pass that works out a gradient for every parameter, showing which way each one should move to lower the total, and then an optimizer step, where the optimizer is the routine that applies those updates to the parameters. The listing keeps each task's noise in log form, as log &#963;, the logarithm of that task's &#963;. Kendall and colleagues store log &#963;&#178; instead, which is the same number doubled. The exponential function undoes the log, so applying it to twice log &#963; gives &#963; squared back, and log &#963; itself is what the total line adds as the honesty price.</p>
+    <p>One training step ends with one backward pass, the pass that works out a gradient for every parameter, showing which way the total rises fastest, and then an optimizer step, where the optimizer is the routine that moves each parameter the other way. The listing keeps each task's noise in log form, as log &#963;, the logarithm of that task's &#963;. Kendall and colleagues store log &#963;&#178; instead, which is the same number doubled. The exponential function undoes the log, so applying it to twice log &#963; gives &#963; squared back, and log &#963; itself is what the total line adds as the honesty price.</p>
 
-    <pre><code class="language-python"># log_sigma = learnable vector, one entry per task, init 0
+    <pre><code class="language-python"># K = number of tasks
+# log_sigma = learnable vector, one entry per task, init 0
 # (regression form shown; classification uses w_i = 1 / sigma2, no 1/2)
 total = 0
 for i in range(K):

@@ -1,0 +1,1331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Gradient Balancing Inside the Training Loop</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+            line-height: 1.6;
+            color: #333;
+        }
+        h1, h2, h3, h4 {
+            color: #2c3e50;
+            margin-top: 1.5em;
+            margin-bottom: 0.5em;
+        }
+        h1 { font-size: 2.5em; border-bottom: 2px solid #3498db; padding-bottom: 0.3em;}
+        .dek { font-size: 1.15em; color: #555; margin-top: 0.2em; }
+        .crumb { margin: 0 0 0.8em; }
+        .crumb a {
+            display: inline-block;
+            padding: 4px 14px;
+            border: 1px solid #dee2e6;
+            border-radius: 999px;
+            background: #f8f9fa;
+            color: #0056b3;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+        .crumb a:hover { border-color: #007bff; color: #007bff; }
+    /* Section tab strip: one slim row, scrolls sideways when it overflows. */
+    .tabs-label {
+        float: left;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #6c757d;
+        font-weight: 700;
+        line-height: 1.2;
+        margin: 0;
+        padding: 8px 12px 0 0;
+    }
+    .tab-strip {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 2px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        margin: 0 0 1.25rem;
+        max-width: 100%;
+    }
+    .tab-strip::-webkit-scrollbar { display: none; }
+    .tab-strip a.tab-chip,
+    .tab-strip a.tab-link {
+        display: inline-block;
+        flex: 0 0 auto;
+        padding: 6px 10px;
+        border-radius: 999px;
+        color: #495057;
+        text-decoration: none;
+        font-size: 0.82rem;
+        font-weight: 500;
+        line-height: 1.35;
+        white-space: nowrap;
+    }
+    .tab-strip a.tab-chip:hover,
+    .tab-strip a.tab-link:hover { color: #007bff; }
+    .tab-strip a.tab-chip.active,
+    .tab-strip a.tab-link.active { background: #007bff; color: #ffffff; }
+    @media (max-width: 768px) {
+        .tabs-label { display: none; }
+        .tab-strip {
+            width: 100vw;
+            max-width: 100vw;
+            box-sizing: border-box;
+            margin-left: calc((100% - 100vw) / 2);
+            padding-left: calc((100vw - 100%) / 2);
+        }
+        .tab-strip a.tab-chip,
+        .tab-strip a.tab-link { font-size: 0.75rem; padding: 6px 8px; }
+    }
+        h2 { font-size: 2em; border-bottom: 1px solid #bdc3c7; padding-bottom: 0.2em;}
+        h3 { font-size: 1.5em; }
+
+    /* Shared site nav (matches index.html topnav) */
+    body { padding-top: calc(64px + 1.5rem); }
+    h1, h2, h3 { scroll-margin-top: 84px; }
+    .topnav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        z-index: 1000;
+        background: rgba(255, 255, 255, 0.65);
+        backdrop-filter: blur(18px) saturate(1.5);
+        -webkit-backdrop-filter: blur(18px) saturate(1.5);
+        border-bottom: 1px solid transparent;
+        transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+    .topnav.scrolled {
+        background: rgba(255, 255, 255, 0.88);
+        border-bottom-color: #dee2e6;
+        box-shadow: 0 6px 24px rgba(33, 37, 41, 0.07);
+    }
+    .nav-inner {
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 0 1.5rem;
+        height: 64px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+    .wordmark {
+        font-weight: 700;
+        color: #212529;
+        text-decoration: none;
+        font-size: 1.05rem;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+    }
+    .nav-links {
+        display: flex;
+        gap: 2px;
+        align-items: center;
+    }
+    .nav-links a {
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        font-size: 0.95rem;
+        padding: 8px 14px;
+        border-radius: 999px;
+        transition: color 0.18s ease, background-color 0.18s ease;
+    }
+    .nav-links a:hover {
+        color: #007bff;
+        background-color: #e7f1ff;
+    }
+    .nav-links a.active {
+        color: #007bff;
+        background-color: #e7f1ff;
+        font-weight: 600;
+    }
+    .nav-toggle {
+        display: none;
+        width: 42px;
+        height: 42px;
+        padding: 0;
+        background: none;
+        border: 0;
+        border-radius: 10px;
+        cursor: pointer;
+        flex: 0 0 auto;
+    }
+    .nav-panel {
+        display: grid;
+        grid-template-rows: 0fr;
+        visibility: hidden;
+        transition: grid-template-rows 0.32s ease, visibility 0s linear 0.32s;
+    }
+    .nav-panel.open {
+        grid-template-rows: 1fr;
+        visibility: visible;
+        transition: grid-template-rows 0.32s ease, visibility 0s;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner {
+        min-height: 0;
+        overflow: hidden;
+    }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link:hover {
+        background-color: #e7f1ff;
+        color: #007bff;
+    }
+    .nav-panel a.panel-link.active {
+        color: #007bff;
+        font-weight: 600;
+        background-color: #e7f1ff;
+    }
+    .panel-social a:hover {
+        border-color: #007bff;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner {
+        min-height: 0;
+        overflow: hidden;
+    }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link:hover {
+        background-color: #e7f1ff;
+        color: #007bff;
+    }
+    .nav-panel a.panel-link.active {
+        color: #007bff;
+        font-weight: 600;
+        background-color: #e7f1ff;
+    }
+    .panel-social a:hover {
+        border-color: #007bff;
+    }
+    .nav-links a:focus-visible,
+    .wordmark:focus-visible,
+    .nav-toggle:focus-visible,
+    .panel-link:focus-visible,
+    .panel-social a:focus-visible {
+        outline: 2px solid #007bff;
+        outline-offset: 2px;
+    }
+    @media (hover: hover) {
+        .nav-toggle:hover { background-color: #e7f1ff; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .topnav,
+        .nav-links a,
+        .nav-toggle span,
+        .nav-panel,
+        .nav-panel a.panel-link {
+            transition: none;
+        }
+    }
+    @media (hover: hover) {
+        .nav-toggle:hover { background-color: #e7f1ff; }
+    }
+    .nav-panel a.panel-link {
+        display: flex;
+        align-items: center;
+        padding: 0.8rem 0.75rem;
+        margin: 0 0.25rem;
+        border-radius: 10px;
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        min-height: 48px;
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+    .panel-social {
+        display: flex;
+        gap: 0.5rem;
+        padding: 0.9rem 1rem 0.25rem;
+        flex-wrap: wrap;
+    }
+    .panel-social a {
+        color: #007bff;
+        text-decoration: none;
+        font-weight: 500;
+        font-size: 0.9rem;
+        padding: 6px 12px;
+        border: 1px solid #dee2e6;
+        border-radius: 999px;
+        transition: border-color 0.15s ease;
+    }
+    @media (max-width: 768px) {
+        .nav-links { display: none; }
+        .nav-toggle { display: block; }
+    }
+
+        pre {
+          background: #0d1117;
+          color: #e6edf3;
+          padding: 14px 16px;
+          overflow-x: auto;
+          border-radius: 8px;
+          font-size: 0.9em;
+          margin: 1em 0;
+          font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+        }
+        /* P52 canonical inline items in prose: numbers and variables wear the body
+           font at body size and read as part of the sentence (keeps P50's quiet
+           treatment, no pill; code blocks and eq-cards keep the mono treatment). */
+        code {
+            font-family: inherit;
+            font-size: 1em;
+            color: #1a1a1a;
+            background: none;
+            padding: 0 0.08em;
+            overflow-wrap: break-word;
+        }
+        pre code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 1em; }
+        .eq-card code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 0.92em; }
+        pre code {
+            background: none;
+            padding: 0;
+            font-size: 1em;
+            color: inherit;
+        }
+        ul, ol {
+            padding-left: 20px;
+        }
+        li {
+            margin-bottom: 0.5em;
+        }
+        strong {
+            color: #2980b9;
+        }
+        .math-display {
+            font-size: 1.38rem;
+            text-align: center;
+            margin: 1.4rem 0;
+            overflow-x: auto;
+            max-width: 100%;
+        }
+        .mjx-chtml.MJXc-display {
+            overflow-x: auto;
+            max-width: 100%;
+        }
+        .caption {
+            max-width: 640px;
+            margin: 1rem auto 1.5em auto;
+            font-size: 0.9em;
+            color: #555;
+            text-align: center;
+        }
+        /* Interactive demo */
+        .demo {
+            border: 1px solid #e1e4e8;
+            border-radius: 8px;
+            padding: 1.25rem;
+            margin: 1.75rem 0;
+            background: #fbfcfd;
+        }
+        .demo-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem 1.5rem;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        .demo-controls label { font-weight: bold; color: #2c3e50; }
+        .demo-controls label span { color: #2980b9; }
+        .demo-controls input[type=range] { width: 220px; max-width: 100%; accent-color: #3498db; }
+        .demo-hint { font-size: 0.85em; color: #7f8c8d; }
+        .play-btn {
+            background: #3498db;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            padding: 0.5rem 1.2rem;
+            font-size: 0.95em;
+            font-weight: bold;
+            cursor: pointer;
+            min-height: 40px;
+            min-width: 94px;
+        }
+        .play-btn:hover { background: #2980b9; }
+        .play-btn.playing { background: #e67e22; }
+        .play-btn.playing:hover { background: #d35400; }
+        /* Caption card, shared by every widget. */
+        .cap-card {
+            font-size: 15px;
+            line-height: 1.65;
+            color: #2c3e50;
+            background: #ffffff;
+            border: 1px solid #e3e8ee;
+            border-left: 3px solid #2c3e50;
+            border-radius: 10px;
+            padding: 18px;
+            margin: 14px 0 0;
+        }
+        .cap-card > strong { display: block; font-size: 15px; margin-bottom: 6px; }
+        .cap-card ul { list-style: none; margin: 0; padding: 0; }
+        .cap-card li { position: relative; padding-left: 18px; margin: 7px 0; }
+        .cap-card li::before {
+            content: ""; position: absolute; left: 0; top: 9px;
+            width: 6px; height: 6px; border-radius: 50%; background: #2c3e50;
+        }
+        .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 1.2em 0; }
+        .stat-card { border: 1px solid #bdc3c7; border-radius: 8px; padding: 14px 16px; background: #f7f9fb; }
+        .stat-num { font-size: 1.9em; font-weight: 800; color: #2c3e50; line-height: 1.15; }
+        .stat-unit { font-size: .55em; font-weight: 600; color: #7f8c8d; } .stat-vs { font-size: max(12px, .55em); font-weight: 600; color: #7f8c8d; }
+        .stat-label { font-size: .92em; font-weight: 600; margin-top: 6px; color: #2c3e50; }
+        .stat-note { font-size: .82em; color: #7f8c8d; margin-top: 3px; }
+        /* Shared walkthrough equation-card contract (verbatim, all pages) */
+        
+        .eq-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+
+          padding:1rem 1.2rem;margin:1.75rem auto;max-width:640px;overflow-x:auto}
+
+        .eq-what{font-size:.95rem;color:#334155;margin:0 0 .6rem;line-height:1.55}
+
+        .eq-line{font-size:1.38rem;line-height:2.0;letter-spacing:.015em;padding:.5rem .6rem;white-space:normal;font-weight:500;opacity:.38;border-left:3px solid transparent}
+
+        .eq-line.eq-active{opacity:1;border-left-color:#2c3e50}
+.eq-line sub,.eq-line sup{font-size:.68em}
+.frac{display:inline-flex;flex-direction:column;text-align:center;vertical-align:middle;margin:0 .18em;font-size:.8em;line-height:1.3}
+.frac .top{padding:0 .3em .1em}
+.frac .bot{border-top:2px solid currentColor;padding:.1em .3em 0}
+      .eq-why{display:none;visibility:hidden;font-size:1rem;color:#475569;padding:.15rem .35rem .4rem;line-height:1.65}
+      .eq-why.eq-active{display:block;visibility:visible}
+      .eq-card.eq-stepped .eq-line{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-line.eq-active{display:block;opacity:1;visibility:visible}
+      .eq-card.eq-stepped .eq-legend .eq-item{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-legend .eq-item.eq-active{display:block;visibility:visible}
+
+        .eqt{font-weight:600;padding:0 .1em;border-radius:3px}
+
+        .eqt.eqt-active{text-decoration:underline;text-underline-offset:2px}
+
+        .eq-legend{font-size:.85rem;color:#475569;margin-top:.6rem;line-height:1.75}
+
+        .eq-legend .eq-item{display:block}
+
+        .eq-legend .eq-item code{white-space:nowrap}
+
+        .eq-sw{display:inline-block;width:.7em;height:.7em;border-radius:2px;
+
+          margin:0 .25em 0 .6em;vertical-align:baseline}
+
+        @media (max-width:480px){.eq-card{padding:.85rem .9rem}.eq-line{font-size:1.24rem;line-height:1.95}}
+        /* diagram-side dim/highlight (SVG/DOM). Do NOT use .hl/.dim: taken. */
+        .eq-dim{opacity:.32}
+        .eq-hl{filter:drop-shadow(0 0 3px currentColor)}
+/* canonical spacing: display math */
+.MathJax_Display, mjx-container[display="true"] { margin: 1.4rem 0 !important; }
+    /* Compact phone walkthrough layout (canonical block, every tutorial page):
+       two-column eq legends, tightened demo spacing, and diagrams capped so
+       controls and diagram share the first phone screen. Phone widths only;
+       desktop rendering and equation typography are unchanged. */
+    @media (max-width:480px){
+      .demo{padding:.75rem}
+      .demo>*{margin-top:.6rem;margin-bottom:.6rem}
+      .demo>*:first-child{margin-top:0}
+      .demo .eq-card{margin:1rem auto;padding:.7rem .8rem}
+      .demo .cap-card,.demo .capcard{padding:.85rem .95rem}
+      .eq-legend{display:grid;grid-template-columns:1fr 1fr;column-gap:.9rem;row-gap:.1rem;line-height:1.5}
+      .eq-legend .eq-item:has(> code ~ code){grid-column:1/-1}
+      .demo svg,.demo canvas{max-height:55vh}
+    }
+</style>
+<style>
+/* multitask-training-loop.html page CSS (builder newpage). Colors live in classes, never in SVG attributes. */
+.tl-stages li, .tl-log li { margin: 0 0 .7em 0; }
+.figure.tlf-fig { margin: 1.75rem 0; }
+.figure.tlf-fig .caption { margin-top: 1rem; }
+.tlf-panels { display: flex; flex-wrap: wrap; justify-content: center; gap: 1rem 1.25rem; }
+.tlf-panels > svg { flex: 1 1 260px; max-width: 340px; width: 100%; height: auto; display: block; }
+.tlf-panels.tlf-three > svg { flex: 1 1 200px; max-width: 260px; }
+.tlf-one > svg { display: block; width: 100%; max-width: 520px; height: auto; margin: 0 auto; }
+.tlf-one.tlf-narrow > svg { max-width: 400px; }
+.tlf-key { display: flex; flex-direction: column; gap: .3rem; max-width: 520px; margin: .9rem auto 0; font-size: .92em; color: #2c3e50; }
+.tlf-key span, .t2-legend span, .t3-legend span { display: inline-flex; align-items: center; gap: .45rem; }
+i.sw { display: inline-block; flex: 0 0 auto; width: 26px; height: 0; border-top: 4px solid #2c3e50; border-radius: 2px; }
+i.sw-thick { border-top-width: 7px; }
+i.sw-bal { border-top-color: #7d3c98; }
+i.sw-adam { border-top-color: #2980b9; }
+i.sw-trail { border-top-color: rgba(44,62,80,.28); border-top-width: 5px; }
+i.sw-guide { border-top: 0; height: 2px; background: repeating-linear-gradient(90deg, #8b979b 0 6px, transparent 6px 12px); }
+i.sw-adam.sw-dash { border-top: 0; height: 3px; background: repeating-linear-gradient(90deg, #2980b9 0 7px, transparent 7px 11px); }
+i.sw-gn { border-top-color: #b9770e; border-top-width: 6px; }
+i.sw-pc { border-top-color: #7d3c98; border-top-width: 4.5px; }
+i.sw-mg { border-top-color: #148f77; border-top-width: 3px; }
+@media (max-width: 480px) {
+  .tlf-panels > svg { max-width: 300px; }
+  .tlf-panels.tlf-three > svg { flex-basis: 100%; max-width: 190px; }
+}
+
+/* static figure SVG classes */
+.tlf-svg text { fill: #2c3e50; font-family: sans-serif; }
+.tlf-svg line, .tlf-svg path, .tlf-svg polyline { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.tlf-svg .tlf-ttl { fill: #2c3e50; }
+.tlf-svg .tlf-cap { fill: #555; }
+.tlf-svg .tlf-l1 { fill: #1f618d; } .tlf-svg .tlf-l2 { fill: #ca6f1e; }
+.tlf-svg .tlf-balt { fill: #7d3c98; } .tlf-svg .tlf-adamt { fill: #2980b9; }
+.tlf-svg .tlf-route2t { fill: #148f77; } .tlf-svg .tlf-cutt { fill: #c0392b; }
+.tlf-svg .tlf-frontlab { fill: #2c3e50; stroke: #ffffff; stroke-width: 5px; stroke-linejoin: round; paint-order: stroke; }
+.tlf-t1 { stroke: #1f618d; } .tlf-t1-h { fill: #1f618d; }
+.tlf-t2 { stroke: #ca6f1e; } .tlf-t2-h { fill: #ca6f1e; }
+.tlf-t1thin { stroke: #1f618d; opacity: .85; } .tlf-t1thin-h { fill: #1f618d; opacity: .85; }
+.tlf-t2thin { stroke: #ca6f1e; opacity: .85; } .tlf-t2thin-h { fill: #ca6f1e; opacity: .85; }
+.tlf-t1ghost { stroke: #1f618d; opacity: .25; } .tlf-t1ghost-h { fill: #1f618d; opacity: .25; }
+.tlf-bal { stroke: #7d3c98; } .tlf-bal-h { fill: #7d3c98; }
+.tlf-bal2 { stroke: #7d3c98; opacity: .45; } .tlf-bal2-h { fill: #7d3c98; opacity: .45; }
+.tlf-bal-old { stroke: #7d3c98; opacity: .25; } .tlf-bal-old-h { fill: #7d3c98; opacity: .25; }
+.tlf-adam { stroke: #2980b9; } .tlf-adam-h { fill: #2980b9; }
+.tlf-adam-old { stroke: #2980b9; opacity: .25; } .tlf-adam-old-h { fill: #2980b9; opacity: .25; }
+.tlf-route2 { stroke: #148f77; } .tlf-route2-h { fill: #148f77; }
+.tlf-ghost { stroke: #7d3c98; opacity: .22; } .tlf-ghost-h { fill: #7d3c98; opacity: .22; }
+.tlf-clip { stroke: #c0392b; } .tlf-clip-h { fill: #c0392b; }
+.tlf-trail { stroke: #2c3e50; opacity: .22; } .tlf-trail-h { fill: #2c3e50; opacity: .22; }
+.tlf-cut { stroke: #c0392b; stroke-dasharray: 6 5; } .tlf-cut-h { fill: #c0392b; }
+.tlf-svg .tlf-arc { stroke: #2c3e50; stroke-width: 2.2px; }
+.tlf-svg .tlf-arc-turn { stroke-width: 4px; }
+.tlf-svg .tlf-wedge { fill: #2c3e50; fill-opacity: .16; stroke: none; }
+.tlf-svg .tlf-limit { fill: none; stroke: #7f8c8d; stroke-width: 1.4px; stroke-dasharray: 5 4; }
+.tlf-svg .tlf-sep { stroke: #e1e4e8; stroke-width: 1px; }
+.tlf-dot { fill: #2c3e50; }
+.tlf-svg .tlf-g2guide { stroke: #ca6f1e; stroke-width: 1.6px; stroke-dasharray: 6 5; opacity: .6; }
+.tlf-svg .tlf-g2guide-h { fill: #ca6f1e; opacity: .6; }
+.tlf-svg .tlf-g1guide { stroke: #1f618d; stroke-width: 1.6px; stroke-dasharray: 6 5; opacity: .6; }
+.tlf-plotbg { fill: #ffffff; stroke: #e1e4e8; }
+.tlf-svg .tlf-c1 { fill: none; stroke: #1f618d; stroke-width: 1px; opacity: .35; }
+.tlf-svg .tlf-c2 { fill: none; stroke: #ca6f1e; stroke-width: 1px; opacity: .35; }
+.tlf-svg .tlf-front { stroke: #2c3e50; stroke-width: 3px; }
+.tlf-svg .tlf-sgdpath { stroke: #7d3c98; stroke-width: 2.6px; }
+.tlf-svg .tlf-adampath { stroke: #2980b9; stroke-width: 2.6px; stroke-dasharray: 7 4; }
+.tlf-sgd-end { fill: #ffffff; stroke: #7d3c98; stroke-width: 3px; }
+.tlf-adam-end { fill: #2980b9; stroke: #ffffff; stroke-width: 1.5px; }
+.tlf-l1-f { fill: #1f618d; } .tlf-l2-f { fill: #ca6f1e; }
+.tlf-inset { fill: #fbfcfd; stroke: #bdc3c7; stroke-width: 1.2px; }
+.tlf-inpt { fill: none; stroke: #2c3e50; stroke-width: 2px; }
+.tlf-svg .tlf-lead, .tlf-svg .tlf-zoommark { fill: none; stroke: #95a5a6; stroke-width: 1.2px; stroke-dasharray: 3 3; }
+
+/* tool 1: core step walkthrough (shared diagram classes t1-) */
+.t1-controls { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: .4rem; }
+.t1-dots { display: inline-flex; flex-wrap: nowrap; gap: .3rem; }
+.t1-btn, .t1-dot, .t2-b {
+  min-height: 44px; padding: 0 14px; border: 1px solid #bdc3c7; border-radius: 999px;
+  background: #ffffff; color: #2c3e50; font-weight: 700; font-size: 1em; cursor: pointer;
+}
+.t1-dot { min-width: 40px; padding: 0; }
+.t1-btn { background: #f8f9fa; }
+.t1-btn:hover:not(:disabled), .t1-dot:hover, .t2-b:hover { border-color: #3498db; color: #3498db; }
+.t1-dot.active, .t2-b.active { background: #2c3e50; border-color: #2c3e50; color: #ffffff; }
+.t1-btn:disabled { opacity: .4; cursor: default; }
+.t1-figure svg, .t1-static svg { display: block; width: 100%; max-width: 340px; height: auto; margin: 0 auto; }
+.t1-read { min-height: 7.2em; margin: .6rem auto 0; max-width: 640px; color: #333; }
+@media (min-width: 700px) { .t1-read { min-height: 3.3em; } }
+.t1-read strong { color: #2c3e50; }
+.t1-svg text { font-family: sans-serif; }
+.t1-box { fill: #ffffff; stroke: #95a5a6; stroke-width: 1.5px; }
+.t1-part.on .t1-box { fill: #eef5fb; stroke: #2c3e50; stroke-width: 3px; }
+.t1-title { fill: #2c3e50; } .t1-sub { fill: #555; }
+.t1-chip-lw { fill: #fdf2e0; stroke: #b9770e; stroke-width: 1.2px; }
+.t1-chip-gn { fill: #fdf2e0; stroke: #b9770e; stroke-width: 1.2px; stroke-dasharray: 3 2; }
+.t1-chip-gm { fill: #7d3c98; }
+.t1-chip-wd { fill: #eaf4ec; stroke: #1e8449; stroke-width: 1.2px; }
+.t1-chiptext { fill: #2c3e50; } .t1-chiptext-w { fill: #ffffff; }
+.t1-gnpath { fill: none; stroke: #b9770e; stroke-dasharray: 5 3; }
+.t1-gnpath-h { fill: #b9770e; }
+.t1-flow { stroke: #7f8c8d; } .t1-flow-h { fill: #7f8c8d; }
+.t1-tap { fill: #2c3e50; stroke: #ffffff; stroke-width: 2px; }
+.t1-taptext { fill: #ffffff; }
+.t1-part { transition: opacity .25s; }
+/* inactive stages use the canonical walkthrough class .eq-dim (opacity from the eq-card block) */
+@media (prefers-reduced-motion: reduce) { .t1-part { transition: none; } }
+
+/* tool 2: Adam momentum loop */
+.t2-controls { text-align: center; }
+.t2-label { font-weight: 700; color: #2c3e50; margin-bottom: .45rem; }
+.t2-btns { display: inline-flex; gap: .35rem; flex-wrap: wrap; justify-content: center; }
+.t2-b { min-width: 56px; }
+.t2-hint { font-size: .85em; color: #7f8c8d; margin-top: .45rem; }
+.t2-figure { display: flex; justify-content: center; }
+#t2Canvas { display: block; box-sizing: border-box; width: 100%; max-width: 400px; aspect-ratio: 1 / 1; height: auto; border: 1px solid #e1e4e8; border-radius: 8px; background: #ffffff; }
+.t2-legend, .t3-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: .35rem 1.1rem; font-size: .9em; color: #2c3e50; }
+@media (max-width: 480px) { #t2Canvas { max-width: min(100%, 55vh); } }
+/* round 13 (N13-13): on phones the legends list one entry per row, left-aligned as one centered block */
+@media (max-width: 480px) { .t2-legend, .t3-legend { flex-direction: column; align-items: flex-start; width: fit-content; max-width: 100%; margin-left: auto; margin-right: auto; } }
+
+/* tool 3: loss scale slider */
+.t3-controls { max-width: 460px; margin: 0 auto; }
+.t3-label { display: block; font-weight: 700; color: #2c3e50; margin-bottom: .3rem; }
+.t3-row { display: flex; align-items: center; gap: .8rem; }
+.t3-row input[type=range] { flex: 1 1 auto; min-width: 0; accent-color: #3498db; }
+.t3-val { min-width: 4.2em; flex: none; text-align: right; font-weight: 700; color: #2c3e50; font-variant-numeric: tabular-nums; }
+.t3-barrow { display: flex; align-items: center; gap: .6rem; margin-top: .45rem; font-size: .85em; color: #7f8c8d; }
+.t3-bartrack { flex: 1 1 auto; height: 8px; border-radius: 4px; background: #eef1f3; position: relative; overflow: hidden; }
+.t3-bar { position: absolute; left: 0; top: 0; bottom: 0; width: 50%; background: #1f618d; border-radius: 4px; }
+.t3-figure svg { display: block; width: 100%; max-width: 420px; height: auto; margin: 0 auto; }
+.t3-svg text { font-family: sans-serif; font-size: 13px; font-weight: 600; }
+.t3-guide1 { stroke: #1f618d; stroke-width: 1.6px; stroke-dasharray: 6 5; opacity: .5; }
+.t3-guide2 { stroke: #566573; stroke-width: 1.6px; stroke-dasharray: 6 5; opacity: .5; }
+.t3-gl1 { fill: #1f618d; } .t3-gl2 { fill: #566573; }
+.t3-origin { fill: #2c3e50; }
+.t3-gn { stroke: #b9770e; } .t3-gn-h { fill: #b9770e; }
+.t3-pc { stroke: #7d3c98; } .t3-pc-h { fill: #7d3c98; }
+.t3-mg { stroke: #148f77; } .t3-mg-h { fill: #148f77; }
+.t3-svg line { stroke-linecap: round; }
+
+/* tool 2 caption: one sentence per motion mode */
+.t2-cap-still { display: none; }
+@media (prefers-reduced-motion: reduce) { .t2-cap-anim { display: none; } .t2-cap-still { display: inline; } }
+/* round 6: at phone width the six stage chips take their own row; Prev and Next sit together below them */
+@media (max-width: 520px) { .t1-dots { order: -1; flex-basis: 100%; justify-content: center; } }
+</style>
+
+    <script type="text/javascript" async
+      src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML">
+    </script>
+    <script type="text/x-mathjax-config">
+      MathJax.Hub.Config({
+        tex2jax: {
+          inlineMath: [['$','$'], ['\\(','\\)']],
+          displayMath: [['$$','$$'], ['\\[','\\]']],
+          processEscapes: true
+        },
+        showProcessingMessages: false,
+        messageStyle: "none"
+      });
+    </script>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script>if (window.hljs) hljs.highlightAll();</script>
+</head>
+<body>
+<nav class="topnav" aria-label="Site">
+    <div class="nav-inner">
+        <a class="wordmark" href="index.html">Ramin Anushiravani</a>
+        <div class="nav-links">
+            <a href="tutorial.html" class="active">Tutorials</a>
+            <a href="pubs.html">Publications</a>
+            <a href="index.html">About</a>
+            <a href="work.html">Projects</a>
+        </div>
+        <button class="nav-toggle" id="navToggle" aria-expanded="false" aria-controls="navPanel" aria-label="Menu"><span></span><span></span><span></span></button>
+    </div>
+    <div class="nav-panel" id="navPanel">
+        <div class="nav-panel-inner">
+            <div class="nav-panel-body">
+                <a class="panel-link active" href="tutorial.html">Tutorials</a>
+                <a class="panel-link" href="pubs.html">Publications</a>
+                <a class="panel-link" href="index.html">About</a>
+                <a class="panel-link" href="work.html">Projects</a>
+                <div class="panel-social">
+                    <a href="https://linkedin.com/in/raminanushiravani" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+                    <a href="https://github.com/raminaeye/" target="_blank" rel="noopener noreferrer">GitHub</a>
+                    <a href="https://scholar.google.com/citations?user=kouXx8gAAAAJ&hl=en" target="_blank" rel="noopener noreferrer">Google Scholar</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</nav>
+    <p class="crumb"><a href="tutorial.html">&larr; All tutorials</a></p>
+    <h1>Gradient Balancing Inside the Training Loop</h1>
+    <p class="dek">What the loss, the optimizer, clipping and logging do to a balanced gradient.</p>
+
+    <p>The balancer is the method that decides how the tasks' gradients, the directions in which each task's error rises fastest, are combined instead of simply adding them up. It produces one combined gradient, which I call the balanced gradient, and hands it to the optimizer, the rule that turns a gradient into a change of the weights, the network's parameters. This page follows the balanced gradient on from that hand-off. What happens to it?</p>
+
+    <p class="tabs-label">On this page</p>
+    <div class="tab-strip">
+        <a class="tab-link" href="#unbalanced-step">A balanced gradient can still give an unbalanced step</a>
+        <a class="tab-link" href="#around-the-balancer">The balancer sits inside a loop it does not control</a>
+        <a class="tab-link" href="#core-step">One training step, in six stages</a>
+        <a class="tab-link" href="#loss-scale">The loss sets the scale every balancer sees</a>
+        <a class="tab-link" href="#optimizer">Adam's step comes from an average of past balanced gradients</a>
+        <a class="tab-link" href="#per-axis-scale">Adam's per-axis scale reshapes the balanced step</a>
+        <a class="tab-link" href="#promises">What each balancer promises, and where the optimizer comes in</a>
+        <a class="tab-link" href="#balancer-numbers">The optimizer and the balancer's own numbers</a>
+        <a class="tab-link" href="#clipping">Only global clipping keeps the balanced direction</a>
+        <a class="tab-link" href="#mixed-precision">Mixed precision multiplies every gradient by one number</a>
+        <a class="tab-link" href="#batch-split">Balance each micro-batch, or balance their average</a>
+        <a class="tab-link" href="#logging">What to log to see each interaction</a>
+        <a class="tab-link" href="#where-each-acts">Loss weights act before the backward pass, gradient methods after it</a>
+        <a class="tab-link" href="#references">References</a>
+    </div>
+
+    <h2 id="unbalanced-step">A balanced gradient can still give an unbalanced step</h2>
+
+    <p>Suppose a balancer does exactly what it promises with the gradients it receives. Why can the step your model actually takes still come out unbalanced?</p>
+
+    <p>A small worked example shows it. A task is one job the shared model learns, such as guessing how far away each pixel is or labeling the object at each pixel, and each task has its own loss, the error score that task tries to lower. Training steps against each task's gradient, downhill on that task's loss. On this page an arrow labeled as a step points the way the weights move, and every other arrow is a gradient, pointing uphill. The way a plain step against the balanced gradient moves is what I call the balanced direction. In the example, two tasks share a layer with two weights. Task 1's gradient is (8, 1), about 8 long, and task 2's is (&#8722;0.5, 0.6), about 0.8 long. The same PCGrad step runs twice: once on the raw gradients and once after clipping. PCGrad, from the <a href="pcgrad.html">PCGrad page</a>, removes from each task's gradient the part that points against the other task's gradient, then adds what is left. Clipping caps a gradient's length at a set maximum; here each task's gradient is capped separately at a length of 1, before PCGrad combines them.</p>
+
+    <figure class="figure tlf-fig">
+        <div class="tlf-panels"><svg class="tlf-svg" viewBox="0 0 260 280" role="img" aria-label="Raw gradients: task 1 much longer than task 2, and the PCGrad result"><text class="tlf-ttl" x="130.0" y="22.0" text-anchor="middle" style="font-size:18px;font-weight:700" >Raw gradients</text><text class="tlf-cap" x="130.0" y="44.0" text-anchor="middle" style="font-size:16px" >task 1 dwarfs task 2</text><line class="tlf-t1" x1="70.0" y1="215.0" x2="243.1" y2="193.4" style="stroke-width:3.5px" /><polygon class="tlf-t1-h" points="254.0,192.0 243.8,199.4 242.3,187.4" /><line class="tlf-t2" x1="70.0" y1="215.0" x2="63.0" y2="206.6" style="stroke-width:2.5px" /><polygon class="tlf-t2-h" points="58.5,201.2 65.9,204.1 60.0,209.0" /><line class="tlf-bal" x1="70.0" y1="215.0" x2="179.4" y2="108.5" style="stroke-width:5px" /><polygon class="tlf-bal-h" points="188.0,100.1 184.0,113.2 174.8,103.7" /><text class="tlf-l1" x="254.0" y="218.0" text-anchor="end" style="font-size:16px;font-weight:600" >task 1</text><text class="tlf-l2" x="52.5" y="193.2" text-anchor="end" style="font-size:16px;font-weight:600" >task 2</text><text class="tlf-balt" x="174.0" y="96.1" text-anchor="end" style="font-size:16px;font-weight:700" >PCGrad</text><circle class="tlf-dot" cx="70" cy="215" r="3.5"/></svg><svg class="tlf-svg" viewBox="0 0 260 280" role="img" aria-label="Each task gradient capped at length 1: only task 1 shrinks, and the PCGrad result turns"><text class="tlf-ttl" x="130.0" y="22.0" text-anchor="middle" style="font-size:18px;font-weight:700" >Each capped at 1</text><text class="tlf-cap" x="130.0" y="44.0" text-anchor="middle" style="font-size:16px" >the result turns</text><circle class="tlf-limit" cx="100" cy="180" r="95.0"/><path class="tlf-wedge" d="M100.0,180.0 L143.0,138.1 A60,60 0 0 0 125.7,125.8 Z"/><line class="tlf-t1" x1="100.0" y1="180.0" x2="183.4" y2="169.6" style="stroke-width:3.5px" /><polygon class="tlf-t1-h" points="194.3,168.2 184.1,175.6 182.6,163.6" /><line class="tlf-t2" x1="100.0" y1="180.0" x2="59.5" y2="131.5" style="stroke-width:3.5px" /><polygon class="tlf-t2-h" points="52.5,123.0 64.2,127.6 54.9,135.3" /><line class="tlf-ghost" x1="100.0" y1="180.0" x2="181.9" y2="100.3" style="stroke-width:3.5px" /><polygon class="tlf-ghost-h" points="189.7,92.6 186.1,104.6 177.6,96.0" /><line class="tlf-clip" x1="100.0" y1="180.0" x2="148.5" y2="77.7" style="stroke-width:5px" /><polygon class="tlf-clip-h" points="153.7,66.8 154.5,80.5 142.6,74.9" /><path class="tlf-arc tlf-arc-turn" d="M143.0,138.1 A60,60 0 0 0 125.7,125.8"/><text class="tlf-ttl" x="120.9" y="114.0" text-anchor="end" style="font-size:16px;font-weight:700" >20&#176;</text><text class="tlf-l1" x="201.0" y="196.0" text-anchor="start" style="font-size:16px;font-weight:600" >task 1,</text><text class="tlf-l1" x="201.0" y="216.0" text-anchor="start" style="font-size:16px;font-weight:600" >capped</text><text class="tlf-l2" x="60.5" y="159.0" text-anchor="end" style="font-size:16px;font-weight:600" >task 2</text><circle class="tlf-dot" cx="100" cy="180" r="3.5"/></svg></div>
+        <figcaption class="caption">The opening example, each panel drawn at its own scale. Purple is PCGrad's result on the raw pair. After each task gradient is capped at length 1, the dashed circle, only task 1 shrinks; red is PCGrad's result on the capped pair, over a faint copy of the raw result's direction, and the shaded wedge marks the turn of about 20 degrees.</figcaption>
+    </figure>
+
+    <p>The cap shortened only the loud task and left the quiet one alone. The quiet task's share of the two tasks' summed lengths rose from 9 percent to 44 percent. The PCGrad direction turned by about 20 degrees. Nothing about PCGrad changed. A step placed before it quietly did some balancing of its own, so PCGrad received a different pair, balanced that pair correctly, and produced a different result. This is a worked example built for this page, not a failure measured in a real training run, but the same thing can happen wherever a per-task cap sits before the balancer and catches one task but not the other. The per-task panel of the clipping figure under <a href="#clipping">&#8220;Only global clipping keeps the balanced direction&#8221;</a> draws this kind of turn.</p>
+
+    <h2 id="around-the-balancer">The balancer sits inside a loop it does not control</h2>
+
+    <p>The balancer sits in the middle of a loop. Before it, the loss decides how large each task's gradient is, and so what the balancer sees. After it, clipping can shorten or turn its result, and the optimizer does not simply step against it. Adam, the most common optimizer, averages it with past results and rescales it axis by axis; an axis is one coordinate of the gradient, one number per weight. Logging is how you see any of this happening. At each stage of that loop the question is the same: what does this stage do to the balancing?</p>
+
+    <h2 id="core-step">One training step, in six stages</h2>
+
+    <p>A multitask training step has six stages, and each family of balancers acts at a different one. The shared layers are the part of the network every task uses; each task also has a head, a small set of layers only that task uses. Loss-weighting methods, GradNorm and Uncertainty Weighting, change how much each task's loss counts. Gradient methods, PCGrad, GradVac, CAGrad and MGDA, change how the task gradients are combined. GradVac, which the <a href="gradvac.html">GradVac page</a> teaches, nudges each pair of task gradients toward the level of agreement that pair usually shows. CAGrad, which the <a href="cagrad.html">CAGrad page</a> teaches, takes the step that helps the worst-off task most while staying close to the average gradient.</p>
+
+    <ol class="tl-stages">
+        <li>In the forward pass, the model runs on a batch, the group of data items one step processes, and each task computes its loss. Loss-weighting methods act here. They multiply each task's loss by a learned task weight, which this series calls the task's volume knob, so they shape every gradient that follows.</li>
+        <li>In the backward pass, a reverse run through the network called backpropagation turns the losses into gradients. Gradient methods need each task's gradient on the shared layers separately. That costs one backward pass per task, or K passes for K tasks. Gradient methods edit only the shared-layer gradients; each head keeps its own task's gradient. Loss-weighting methods do reach the heads. Uncertainty Weighting backpropagates the weighted loss, so each head's gradient is scaled by its task's weight, and GradNorm, as its paper writes it, also trains on the weighted loss.</li>
+        <li>In the balance stage, gradient methods replace the plain sum of the task gradients with their own combination. GradNorm sits on both sides of the backward pass: it also reads each task's gradient size at W, the last shared layer, with one extra gradient read there, and uses those sizes to update its task weights.</li>
+        <li>In the clip stage, clipping caps the gradient's length at a threshold called max norm.</li>
+        <li>In the optimizer step, the optimizer turns the gradient into a change of the weights. Plain SGD, stochastic gradient descent, moves the weights against the gradient by a fixed multiple of it, the learning rate. Momentum keeps a running average of past gradients and steps against that average instead; a running average updates itself every step by keeping a share of its old value and mixing in the new one. Adam keeps that average too and divides it, axis by axis, by a running measure of gradient size, which the <a href="optimizers.html#adam">optimizers page</a> calls the per-axis scale. Weight decay, which shrinks the weights a little every step, enters here in one of two forms. Coupled L2, named after the L2 penalty, a cost proportional to the squared size of the weights, adds a small multiple of the weights to the gradient inside this step; decoupled decay shrinks the weights directly.</li>
+        <li>In the log stage, you record what the step did, so the interactions on this page become visible. One number you will see often is the cosine between two gradients: 1 when they point the same way, 0 at a right angle, and negative when they point against each other.</li>
+    </ol>
+
+    <p>One shortcut avoids the K backward passes. MGDA picks the shortest blend of the task gradients, a weighted average whose weights add up to one. MGDA-UB, whose UB stands for upper bound, runs the same search on an upper bound of the blend's length, a stand-in that never comes out smaller. It needs only one pass that stops at the shared representation, the output of the shared layers that every head reads. The <a href="mgda.html">MGDA page</a> explains it.</p>
+
+    <p>The six-stage walkthrough lights one stage at a time on a single diagram, with loss-weighting methods in amber and gradient methods in purple.</p>
+
+    <div class="demo" id="t1Demo">
+        <div class="t1-controls">
+            <button type="button" class="t1-btn" data-act="prev" aria-label="Previous stage">Prev</button>
+            <span class="t1-dots" role="group" aria-label="Stages">
+                <button type="button" class="t1-dot" data-i="0" aria-label="Stage 1">1</button><button type="button" class="t1-dot" data-i="1" aria-label="Stage 2">2</button><button type="button" class="t1-dot" data-i="2" aria-label="Stage 3">3</button><button type="button" class="t1-dot" data-i="3" aria-label="Stage 4">4</button><button type="button" class="t1-dot" data-i="4" aria-label="Stage 5">5</button><button type="button" class="t1-dot" data-i="5" aria-label="Stage 6">6</button>
+            </span>
+            <button type="button" class="t1-btn" data-act="next" aria-label="Next stage">Next</button>
+        </div>
+        <div class="t1-figure"><svg class="t1-svg" viewBox="0 0 300 474" role="img" aria-label="One training step: forward, backward, balance, clip, optimizer step, log" id="t1Svg"><g class="t1-part" data-part="fwd"><rect class="t1-box t1-box-fwd" x="14" y="10" width="246" height="62" rx="10" ry="10"/><text class="t1-title" x="26.0" y="31.0" text-anchor="start" style="font-size:15px;font-weight:700" >1 &#183; Forward</text><text class="t1-sub" x="26.0" y="47.0" text-anchor="start" style="font-size:13px" >each task computes its loss</text></g><g class="t1-part" data-part="bwd"><rect class="t1-box t1-box-bwd" x="14" y="92" width="246" height="62" rx="10" ry="10"/><text class="t1-title" x="26.0" y="113.0" text-anchor="start" style="font-size:15px;font-weight:700" >2 &#183; Backward</text><text class="t1-sub" x="26.0" y="129.0" text-anchor="start" style="font-size:13px" >per-task gradients, shared layers</text></g><g class="t1-part" data-part="bal"><rect class="t1-box t1-box-bal" x="14" y="174" width="246" height="62" rx="10" ry="10"/><text class="t1-title" x="26.0" y="195.0" text-anchor="start" style="font-size:15px;font-weight:700" >3 &#183; Balance</text><text class="t1-sub" x="26.0" y="211.0" text-anchor="start" style="font-size:13px" >combine the task gradients</text></g><g class="t1-part" data-part="clip"><rect class="t1-box t1-box-clip" x="14" y="256" width="246" height="46" rx="10" ry="10"/><text class="t1-title" x="26.0" y="277.0" text-anchor="start" style="font-size:15px;font-weight:700" >4 &#183; Clip</text><text class="t1-sub" x="26.0" y="293.0" text-anchor="start" style="font-size:13px" >cap the length at max norm</text></g><g class="t1-part" data-part="opt"><rect class="t1-box t1-box-opt" x="14" y="322" width="246" height="76" rx="10" ry="10"/><text class="t1-title" x="26.0" y="343.0" text-anchor="start" style="font-size:15px;font-weight:700" >5 &#183; Optimizer step</text><text class="t1-sub" x="26.0" y="359.0" text-anchor="start" style="font-size:13px" >momentum, per-axis scale</text></g><g class="t1-part" data-part="log"><rect class="t1-box t1-box-log" x="14" y="418" width="246" height="46" rx="10" ry="10"/><text class="t1-title" x="26.0" y="439.0" text-anchor="start" style="font-size:15px;font-weight:700" >6 &#183; Log</text><text class="t1-sub" x="26.0" y="455.0" text-anchor="start" style="font-size:13px" >record what this step did</text></g><g class="t1-part" data-part="lw"><rect class="t1-chip-lw" x="22" y="52" width="230" height="17" rx="4"/><text class="t1-chiptext" x="28.0" y="65.0" text-anchor="start" style="font-size:12px" >loss-weighting methods act here</text></g><g class="t1-part" data-part="gn"><rect class="t1-chip-gn" x="22" y="134" width="230" height="17" rx="4"/><text class="t1-chiptext" x="28.0" y="147.0" text-anchor="start" style="font-size:12px" >GradNorm also reads sizes at layer W</text><path class="t1-gnpath" d="M260.0,142.5 H280.0 V41.0 H271.0" style="stroke-width:2.5px"/><polygon class="t1-gnpath-h" points="260.0,41.0 271.0,35.0 271.0,47.0"/></g><g class="t1-part" data-part="gm"><rect class="t1-chip-gm" x="22" y="216" width="230" height="17" rx="4"/><text class="t1-chiptext-w" x="28.0" y="229.0" text-anchor="start" style="font-size:12px;font-weight:700" >gradient methods act here</text></g><g class="t1-part" data-part="wd"><rect class="t1-chip-wd" x="22" y="368" width="111.0" height="24" rx="4"/><text class="t1-chiptext" x="77.5" y="384.0" text-anchor="middle" style="font-size:12px" >coupled L2</text><rect class="t1-chip-wd" x="141.0" y="368" width="111.0" height="24" rx="4"/><text class="t1-chiptext" x="196.5" y="384.0" text-anchor="middle" style="font-size:12px" >decoupled decay</text></g><g class="t1-part" data-part="a0"><line class="t1-flow" x1="54.0" y1="72.0" x2="54.0" y2="82.0" style="stroke-width:3.5px" /><polygon class="t1-flow-h" points="54.0,92.0 48.5,82.0 59.5,82.0" /></g><g class="t1-part" data-part="a1"><line class="t1-flow" x1="54.0" y1="154.0" x2="54.0" y2="164.0" style="stroke-width:3.5px" /><polygon class="t1-flow-h" points="54.0,174.0 48.5,164.0 59.5,164.0" /></g><g class="t1-part" data-part="a2"><line class="t1-flow" x1="54.0" y1="236.0" x2="54.0" y2="246.0" style="stroke-width:3.5px" /><polygon class="t1-flow-h" points="54.0,256.0 48.5,246.0 59.5,246.0" /></g><g class="t1-part" data-part="a3"><line class="t1-flow" x1="54.0" y1="302.0" x2="54.0" y2="312.0" style="stroke-width:3.5px" /><polygon class="t1-flow-h" points="54.0,322.0 48.5,312.0 59.5,312.0" /></g><g class="t1-part" data-part="a4"><line class="t1-flow" x1="54.0" y1="398.0" x2="54.0" y2="408.0" style="stroke-width:3.5px" /><polygon class="t1-flow-h" points="54.0,418.0 48.5,408.0 59.5,408.0" /></g></svg></div>
+        <p class="t1-read" aria-live="polite"></p>
+        <p class="caption">Loss-weighting methods act through the loss, gradient methods replace the summed gradient, then clipping and the optimizer act.</p>
+    </div>
+
+    <h2 id="loss-scale">The loss sets the scale every balancer sees</h2>
+
+    <p>Does it matter whether a loss is averaged over the batch or summed? To a balancer, yes. A loss's reduction is how it combines the per-item errors in a batch: a mean averages them and a sum adds them. Summing over 10 items instead of averaging multiplies that loss, and its gradient, by 10. Any constant factor in front of a loss, its scale, does the same. The gradient's direction does not change; its length does, and length is what balancers compare.</p>
+
+    <figure class="figure tlf-fig">
+        <div class="tlf-panels"><svg class="tlf-svg" viewBox="0 0 300 200" role="img" aria-label="Task 1&#39;s loss averaged"><text class="tlf-ttl" x="150.0" y="22.0" text-anchor="middle" style="font-size:15px;font-weight:700" >Task 1&#39;s loss averaged</text><rect class="tlf-inset" x="112" y="36" width="182" height="152" rx="8"/><text class="tlf-cap" x="120.0" y="53.0" text-anchor="start" style="font-size:12px;font-weight:600" >the same pair, 4 times larger</text><line class="tlf-t1" x1="178.0" y1="150.0" x2="270.8" y2="119.1" style="stroke-width:3.5px" /><polygon class="tlf-t1-h" points="281.2,115.6 272.7,124.8 268.9,113.3" /><line class="tlf-t2" x1="178.0" y1="150.0" x2="148.5" y2="91.0" style="stroke-width:3.5px" /><polygon class="tlf-t2-h" points="143.6,81.2 153.9,88.3 143.1,93.7" /><circle class="tlf-dot" cx="178" cy="150" r="3.5"/><text class="tlf-l1" x="277.2" y="147.6" text-anchor="end" style="font-size:14px;font-weight:600" >task 1</text><text class="tlf-l2" x="153.6" y="85.2" text-anchor="start" style="font-size:14px;font-weight:600" >task 2</text><rect class="tlf-zoommark" x="37.4" y="144.8" width="46.4" height="29.2"/><line class="tlf-lead" x1="83.8" y1="144.8" x2="112.0" y2="76.0"/><line class="tlf-t1" x1="52.0" y1="168.0" x2="71.2" y2="161.6" style="stroke-width:2.5px" /><polygon class="tlf-t1-h" points="77.8,159.4 72.4,165.3 69.9,158.0" /><line class="tlf-t2" x1="52.0" y1="168.0" x2="46.5" y2="157.1" style="stroke-width:2.5px" /><polygon class="tlf-t2-h" points="43.4,150.8 50.0,155.3 43.1,158.8" /><circle class="tlf-dot" cx="52" cy="168" r="2.5"/><text class="tlf-cap" x="35.4" y="192.0" text-anchor="start" style="font-size:12px;font-weight:600" >true size</text></svg>
+<svg class="tlf-svg" viewBox="0 0 300 200" role="img" aria-label="Summed over 10 items"><text class="tlf-ttl" x="150.0" y="22.0" text-anchor="middle" style="font-size:15px;font-weight:700" >Summed over 10 items</text><line class="tlf-g2guide" x1="21.4" y1="154.8" x2="5.3" y2="122.6"/><line class="tlf-t1" x1="30.0" y1="172.0" x2="277.6" y2="89.5" style="stroke-width:3.5px" /><polygon class="tlf-t1-h" points="288.0,86.0 279.5,95.2 275.7,83.7" /><line class="tlf-t2" x1="30.0" y1="172.0" x2="25.4" y2="162.8" style="stroke-width:3.5px" /><polygon class="tlf-t2-h" points="21.4,154.8 29.9,160.6 21.0,165.1" /><circle class="tlf-dot" cx="30" cy="172" r="3.5"/><text class="tlf-l1" x="286.0" y="74.0" text-anchor="end" style="font-size:14px;font-weight:600" >task 1, ten times longer</text><text class="tlf-l2" x="31.4" y="148.8" text-anchor="start" style="font-size:14px;font-weight:600" >task 2</text></svg></div>
+        <figcaption class="caption">Both panels use one ruler, and the framed copy in the first panel draws the same averaged pair 4 times larger. Summing task 1's loss over 10 items keeps its gradient's direction and makes it ten times longer, while task 2 is unchanged, so the balancer now sees a very different pair. The faint dashed line only continues task 2's short arrow past its tip.</figcaption>
+    </figure>
+
+    <p>What the scale does depends on the family. Loss-weighting methods absorb a constant scale once their task weights have adapted. Uncertainty Weighting weights each task by one over twice its sigma squared for a regression task, one that predicts a number, and by one over its sigma squared for a classification task, one that picks a category, where sigma is a noise level the method learns for each task (the <a href="uncertainty-weighting.html">Uncertainty Weighting page</a> explains it). For a regression task, the sigma squared at which that task's weighted loss is lowest equals the task's loss. So switching a loss from mean to sum moves sigma squared by the same factor and leaves the weighted term unchanged.</p>
+
+    <p>GradNorm moves each task's weighted gradient size toward a target set by the average size across tasks and by how slowly that task is training compared with the others: its loss relative to its value at the start of training, divided by the same ratio averaged over all tasks (the <a href="gradnorm.html">GradNorm page</a> teaches it). A constant factor on one loss moves every target by the same factor and leaves their ratios alone, so once the task weights adapt, the combined direction is unchanged.</p>
+
+    <p>Before their task weights adapt, both methods act like a plain weighted sum and feel the scale.</p>
+
+    <p>Gradient methods feel the scale directly. Take a worked example built for this page, with two task gradients (3, 1) and (&#8722;1, 2), and multiply task 1's loss by 10. The PCGrad direction turns 28.5 degrees toward task 1, because PCGrad adds the two edited gradients and the sum leans toward the longer one. MGDA's shortest blend, which the <a href="mgda.html">MGDA page</a> shows, gives more weight to the shorter gradient. Its weight on task 1 drops almost to zero, and its direction turns by the same 28.5 degrees, away from task 1. Once their task weights have adapted, the weighting methods turn 0 degrees.</p>
+
+    <p>One more scale hides inside gradient methods: whether you sum the edited task gradients or average them. That is one constant factor on the whole combined gradient. Adam cancels it, and SGD feels it as a change of learning rate; the reason Adam cancels it is under <a href="#adam-scale">&#8220;Adam cancels a steady scale, and absorbs a sudden change only slowly&#8221;</a>.</p>
+
+    <p>The loss-scale tool puts GradNorm, PCGrad and MGDA side by side on the same pair of gradients, with task 1's loss multiplied by anything from 0.1 to 100. GradNorm stands in for the loss-weighting family; Uncertainty Weighting at its balance point would hold its direction in the same way. The GradNorm arrow assumes both tasks have the same target, so once its task weights adapt it adds the two task gradients at equal length. The three arrows show directions only, drawn at different lengths so their heads stay apart. The faint lines are the two task gradients' directions, which a loss's scale never changes. The length bar uses a log scale, so each tenfold change in task 1's loss adds the same length.</p>
+
+    <div class="demo" id="t3Demo">
+        <div class="t3-controls">
+            <label class="t3-label" for="t3Slider">Multiply task 1's loss by this number.</label>
+            <div class="t3-row">
+                <input type="range" id="t3Slider" min="-1" max="2" step="0.01" value="0" aria-describedby="t3Val">
+                <span class="t3-val" id="t3Val">1&#215;</span>
+            </div>
+            <div class="t3-barrow"><span class="t3-barlab">task 1's gradient length (log scale)</span><span class="t3-bartrack"><span class="t3-bar" id="t3Bar"></span></span></div>
+        </div>
+        <div class="t3-figure">
+            <svg class="t3-svg" id="t3Svg" viewBox="0 0 320 250" role="img" aria-label="Three balanced gradients as task 1's loss is scaled">
+                <line class="t3-guide1" id="t3G1" x1="0" y1="0" x2="0" y2="0"/>
+                <line class="t3-guide2" id="t3G2" x1="0" y1="0" x2="0" y2="0"/>
+                <text class="t3-gl1" id="t3G1t" x="0" y="0">task 1</text>
+                <text class="t3-gl2" id="t3G2t" x="0" y="0">task 2</text>
+                <g id="t3Arrows"></g>
+                <circle class="t3-origin" cx="160" cy="215" r="4"/>
+            </svg>
+        </div>
+        <div class="t3-legend">
+            <span><i class="sw sw-gn"></i>GradNorm, after its task weights adapt (equal targets)</span>
+            <span><i class="sw sw-pc"></i>PCGrad</span>
+            <span><i class="sw sw-mg"></i>MGDA</span>
+            <span><svg width="28" height="8" aria-hidden="true"><line x1="1" y1="4" x2="27" y2="4" style="stroke:#566573;stroke-width:1.6px;stroke-dasharray:6 5"/></svg>dashed, each task's own gradient direction</span>
+        </div>
+        <p class="caption">Once their task weights adapt, weighting methods hold their direction while PCGrad and MGDA turn. PCGrad leans toward the louder task, and MGDA leans away from it, toward the quieter one.</p>
+    </div>
+
+    <h2 id="optimizer">Adam's step comes from an average of past balanced gradients</h2>
+
+    <p>Hand Adam a balanced gradient. Does it step straight against it? Not exactly. Adam keeps two running averages, and in each one every older value's weight shrinks by a fixed factor every step. The <a href="optimizers.html#adam">optimizers page</a> calls that factor the memory rate.</p>
+
+    <p>The first average, the first moment, averages past gradients; it is Adam's momentum. Its memory rate is &#946;<sub>1</sub> (beta one), 0.9 by default, so each older gradient's weight shrinks by 0.9 every step. That spans about ten steps, and this step's balanced gradient gets only 10 percent of the weight. The second average, the second moment, averages squared gradients with memory rate &#946;<sub>2</sub>, 0.999 by default, which spans about 1000 steps. The square root of the second moment is a running measure of how large the gradient is along each axis, and Adam divides by it, axis by axis; that is the per-axis scale. Adam adds a tiny constant to the divisor so it never divides by zero.</p>
+
+    <p>Both averages start at zero, so in the first steps they come out too small. Bias correction enlarges each average by an amount that fades as the steps go on, so the early averages are not pulled toward zero. With it, this step's gradient carries the full weight at step 1, about 53 percent at step 2, and about 10 percent by step 50.</p>
+
+    <p>So Adam steps against the momentum, a roughly ten-step average of past balanced gradients, after dividing it axis by axis by a roughly thousand-step memory of gradient size. The balancer's choice on any one step is diluted in that average. When the balanced direction barely changes from step to step, this costs almost nothing. In a noise-free worked example where the balanced direction turns about 0.02 degrees per step, the momentum sits about 0.18 degrees behind this step's balanced gradient.</p>
+
+    <p>When the balanced direction turns, the momentum follows late. Take a noise-free worked example in which the balanced gradient points one way for 200 steps and then turns 90 degrees, with both axes the same size before and after, so the second moment stays level. The momentum needs 7 steps to turn 45 degrees, and Adam's actual step turns on the same schedule. With &#946;<sub>1</sub> at 0.99 the same turn takes about nine times as long; with &#946;<sub>1</sub> at 0 it is immediate.</p>
+
+    <p>A second worked example has a different setup. The gradient points along one axis for 200 steps, then turns 90 degrees onto the other axis, which had almost no gradient before, with the same length. Adam divides the new axis by its tiny running size, so the per-axis scale overrides the lag: Adam's actual step turns 45 degrees in 1 step, while the momentum still needs 7. That is why I call the lagging average the momentum and never the step Adam takes.</p>
+
+    <p>The averaging also helps. A mini-batch is the small random sample of data one step uses, so each step's gradient is a noisy estimate. With noise, a single step's balanced gradient can point well away from its noise-free direction, while the momentum, an average of about ten of them, stays much closer to it. A longer memory smooths noise better and lags a turn more.</p>
+
+    <h3 id="momentum-turn">Watching the momentum follow a turn</h3>
+
+    <p>The animation replays one stored run. A sequence of balanced gradients points one way for 150 steps; then its noise-free direction turns 90 degrees and holds for 250 more. Both axes keep the same size before and after the turn, so the second moment stays level and Adam's step follows the momentum's direction. Every step adds noise, sized so each step's balanced gradient has a median cosine of about 0.5 with the noise-free direction. Because of that noise, the step counts from the noise-free example do not carry over: the noise can pull the momentum off the dashed direction before the turn and carry it to the new one sooner or later than the noise-free count.</p>
+
+    <p>What you see depends on the memory rate. At 0 the momentum is just this step's gradient, and it jumps around with the noise; at 0.5 it still jitters a lot. At 0.9, the default, the noise still pulls it well off the dashed direction before the turn, at times more than a right angle away. Once the turn comes, it settles near the new direction within a few steps, though the noise still swings it far off at times afterwards, as it did before the turn. At 0.99 it holds steady but lags: for a while after the turn it keeps pointing near its old heading, then it swings slowly toward the new direction and is roughly halfway there about 50 steps after the turn. Adam's momentum averages many past balanced gradients, about ten at its default, and each older gradient in the trail is faded by its weight in that average, so a longer memory leaves a longer trail.</p>
+
+    <div class="demo" id="t2Demo">
+        <div class="t2-controls">
+            <div class="t2-label" id="t2Label">How far back Adam's momentum remembers</div>
+            <div class="t2-btns" role="radiogroup" aria-labelledby="t2Label">
+                <button type="button" class="t2-b" role="radio" data-b="0.0">0</button><button type="button" class="t2-b" role="radio" data-b="0.5">0.5</button><button type="button" class="t2-b" role="radio" data-b="0.9">0.9</button><button type="button" class="t2-b" role="radio" data-b="0.99">0.99</button>
+            </div>
+            <div class="t2-hint">&#946;<sub>1</sub>, the memory rate. 0 keeps only this step, 0.9 about ten steps, 0.99 about a hundred.</div>
+        </div>
+        <div class="t2-figure"><canvas id="t2Canvas" aria-label="This step's balanced gradient and Adam's momentum, turning with the noise-free direction" role="img"></canvas></div>
+        <div class="t2-legend">
+            <span><i class="sw sw-bal sw-thick"></i>this step's balanced gradient</span>
+            <span><i class="sw sw-adam"></i>Adam's momentum, the average before the per-axis scale</span>
+            <span><i class="sw sw-trail"></i>older balanced gradients, fading with age</span>
+            <span><i class="sw sw-guide"></i>the noise-free direction of the balanced gradient</span>
+        </div>
+        <p class="caption"><span class="t2-cap-anim">The animation plays at 6 steps per second. The first pass opens 21 steps before the turn; each repeat plays the whole run from the start.</span><span class="t2-cap-still">With reduced motion turned on, this is one still frame, 19 steps after the turn.</span></p>
+    </div>
+
+    <p>The second moment, Adam's thousand-step memory of gradient size, stays level in this run, and bias correction only keeps the average from starting too small right after the start. Adam's actual step divides the momentum axis by axis by its memory of gradient size, so it can turn sooner than the blue arrow when the axes differ in size; here they do not. The per-axis scale on its own is measured under <a href="#adam-tilt">&#8220;The per-axis scale tilts each step off the balanced direction&#8221;</a>.</p>
+
+    <h2 id="per-axis-scale">Adam's per-axis scale reshapes the balanced step</h2>
+
+    <p>Adam's division by each axis's running gradient size is the part of Adam that interacts most with balancing. It cancels some changes the balancer makes, delays others, and tilts every step.</p>
+
+    <h3 id="adam-scale">Adam cancels a steady scale, and absorbs a sudden change only slowly</h3>
+
+    <p>Because Adam divides each axis by that axis's running gradient size, multiplying the whole combined gradient by a constant cancels: the per-axis scale grows by the same factor. That is why summing versus averaging the edited task gradients does not change Adam's step. The cancelling has two limits. First, the scale must hold steady over the second moment's memory of about 1000 steps. Take a noise-free worked example with Adam's default memory rates, 0.9 and 0.999, in which a gradient held constant for thousands of steps suddenly becomes 10 times larger. Adam's step overshoots to about 5 times its old size within a few dozen steps and comes back within 10 percent of its old size only after about 1700 steps. Second, for very small gradients the tiny constant added to the divisor is no longer negligible, so a scale there does not fully cancel.</p>
+
+    <p>A change in the task mix, which is exactly what the balancer sets, is different. When the mix changes suddenly, Adam's step turns with the balanced gradient at first. Then, as Adam's running gradient size on each axis catches up with the new mix, the step turns back, so in the end Adam cancels much of the change. With noisy gradients the running sizes never match the new mix exactly, so part of the turn stays.</p>
+
+    <p>The panels &#8220;Ten times larger from the start&#8221; and &#8220;The task mix changes&#8221; show a noise-free worked example with Adam's default memory rates. The balanced gradient is PCGrad's result for the loss-scale pair, (3, 1) and (&#8722;1, 2), and both panels draw steps, the way the weights move. &#8220;Ten times larger from the start&#8221; compares two separate runs of 300 steps, one of them with a balanced gradient ten times larger from its very first step. In &#8220;The task mix changes&#8221;, one run holds the balanced gradient fixed for 300 steps and then triples task 1's gradient.</p>
+
+    <figure class="figure tlf-fig">
+        <div class="tlf-panels"><svg class="tlf-svg" viewBox="0 0 300 262" role="img" aria-label="Ten times the balanced gradient from the start: the plain SGD step is ten times longer, Adam&#39;s step is the same"><text class="tlf-ttl" x="150.0" y="22.0" text-anchor="middle" style="font-size:15px;font-weight:700" >Ten times larger from the start</text><line class="tlf-bal2" x1="118.0" y1="46.0" x2="25.9" y2="199.5" style="stroke-width:3.5px" /><polygon class="tlf-bal2-h" points="20.2,208.9 20.7,196.4 31.1,202.6" /><line class="tlf-bal" x1="118.0" y1="46.0" x2="112.9" y2="54.6" style="stroke-width:5px" /><polygon class="tlf-bal-h" points="108.2,62.3 108.6,52.0 117.1,57.1" /><text class="tlf-cap" x="32.2" y="212.9" text-anchor="start" style="font-size:14px;font-weight:700" >10 &#215;</text><text class="tlf-cap" x="120.2" y="66.3" text-anchor="start" style="font-size:14px;font-weight:700" >1 &#215;</text><circle class="tlf-dot" cx="118" cy="46" r="3.5"/><line class="tlf-adam" x1="262.0" y1="46.0" x2="213.9" y2="94.1" style="stroke-width:6px" /><polygon class="tlf-adam-h" points="205.4,102.6 209.2,89.4 218.6,98.8" /><circle class="tlf-dot" cx="262" cy="46" r="3.5"/><text class="tlf-balt" x="70.0" y="236.0" text-anchor="middle" style="font-size:13px;font-weight:700" >plain SGD step</text><text class="tlf-adamt" x="232.0" y="236.0" text-anchor="middle" style="font-size:13px;font-weight:700" >Adam&#39;s step</text><text class="tlf-cap" x="232.0" y="254.0" text-anchor="middle" style="font-size:13px" >same at 1 &#215; and 10 &#215;</text></svg>
+<svg class="tlf-svg" viewBox="0 0 300 262" role="img" aria-label="When the task mix changes, the plain SGD step turns and Adam&#39;s step turns at first"><text class="tlf-ttl" x="150.0" y="22.0" text-anchor="middle" style="font-size:15px;font-weight:700" >The task mix changes</text><line class="tlf-bal-old" x1="128.0" y1="88.0" x2="71.4" y2="182.3" style="stroke-width:3px" /><polygon class="tlf-bal-old-h" points="66.3,190.9 66.7,179.5 76.1,185.2" /><line class="tlf-bal" x1="128.0" y1="88.0" x2="44.4" y2="156.4" style="stroke-width:5px" /><polygon class="tlf-bal-h" points="35.1,164.0 40.2,151.3 48.6,161.5" /><circle class="tlf-dot" cx="128" cy="88" r="3.5"/><line class="tlf-adam-old" x1="272.0" y1="88.0" x2="215.4" y2="144.6" style="stroke-width:3px" /><polygon class="tlf-adam-old-h" points="208.4,151.6 211.5,140.7 219.3,148.5" /><line class="tlf-adam" x1="272.0" y1="88.0" x2="206.5" y2="130.3" style="stroke-width:5px" /><polygon class="tlf-adam-h" points="196.4,136.8 202.9,124.8 210.1,135.9" /><circle class="tlf-dot" cx="272" cy="88" r="3.5"/><text class="tlf-balt" x="72.0" y="236.0" text-anchor="middle" style="font-size:13px;font-weight:700" >plain SGD step</text><text class="tlf-adamt" x="232.0" y="236.0" text-anchor="middle" style="font-size:13px;font-weight:700" >Adam&#39;s step</text><text class="tlf-cap" x="232.0" y="254.0" text-anchor="middle" style="font-size:13px" >turns at first</text></svg></div>
+        <figcaption class="caption">In &#8220;Ten times larger from the start&#8221;, the plain SGD step is ten times longer in the larger run, while Adam's step has the same direction and length in both runs. In &#8220;The task mix changes&#8221;, tripling task 1's gradient turns the balanced gradient, and the plain SGD step with it, about 20 degrees, and ten steps later Adam's step has turned about 12 degrees. In that panel, faint arrows are the steps before the change, and every arrow shows direction only: after the change the plain SGD step is also about 2.4 times longer, and ten steps later Adam's step is about 1.9 times longer.</figcaption>
+    </figure>
+
+    <p>The 12 degree turn in &#8220;The task mix changes&#8221; does not last: without noise it fades to about 1 degree after 500 steps, as the running gradient sizes catch up. Before any change, in both panels of this loss-scale pair example, Adam's step also sits about 14 degrees off the plain SGD step. That is the per-axis tilt. Its size depends on the gradients, and it is about 8 degrees in the two-bowl example under <a href="#adam-tilt">&#8220;The per-axis scale tilts each step off the balanced direction&#8221;</a>.</p>
+
+    <h3 id="adam-tilt">The per-axis scale tilts each step off the balanced direction</h3>
+
+    <p>Adam's per-axis scale rescales each axis separately, so the step it takes points off the direction the balancer chose. A noise-free worked example shows how much; <a href="#mgda-stop">&#8220;MGDA's shrinking gradient is not a clean stop signal&#8221;</a> and <a href="#batch-split">&#8220;Balance each micro-batch, or balance their average&#8221;</a> reuse it as the two-bowl example. Two tasks share two weights. Each task's loss is a bowl with its lowest point, a loss of 0, at (3, 0) for task 1 and at (0, 3) for task 2. The loss adds up, over the two weights, half the curvature times the squared distance from the lowest point along that weight. Task 1's curvature is 1 along the first weight and 10 along the second, and task 2's is the other way round, so each bowl's cross-sections are ellipses ten times steeper along one axis than the other. PCGrad balances the two gradients at every step. SGD and Adam, with memory rates 0.9 and 0.999, both start at (&#8722;4, &#8722;5) with learning rate 0.01 and run for 20,000 steps; SGD steps straight against the balanced gradient, so its path shows where the balancer leads. The figure is drawn in weight space, with weight 1 across and weight 2 up. In weight space, the curve of best trade-offs is the Pareto set, the weights at which neither task's loss can improve without the other's getting worse. Their losses, plotted against each other, form the Pareto front that the <a href="mgda.html">MGDA page</a> draws.</p>
+
+    <p>In the two-bowl example the tilt comes from the per-axis scale, not from the averaging. Take every step along Adam's own path before the two task gradients first conflict, and measure the angle between the step and that step's balanced gradient. The median tilt is 7.8 degrees. Along the same steps, the momentum, before the per-axis scale divides it, sits a median of only 0.25 degrees off the balanced gradient. A run with the per-axis scale but no averaging (memory rate &#946;<sub>1</sub> = 0) has a median tilt of 7.5 degrees.</p>
+
+    <figure class="figure tlf-fig">
+        <div class="tlf-one"><svg class="tlf-svg tlf-sq" viewBox="0 0 446 494" role="img" aria-label="Contour plot over weight 1 and weight 2: SGD and Adam paths end at different points of the Pareto set"><g transform="translate(26 0)"><defs><clipPath id="tlf-tilt-clip"><rect x="14" y="14" width="392" height="440" rx="6"/></clipPath></defs><rect class="tlf-plotbg" x="14" y="14" width="392" height="440" rx="6"/><g clip-path="url(#tlf-tilt-clip)"><ellipse class="tlf-c1" cx="377.3" cy="186.2" rx="95.6" ry="30.2"/><ellipse class="tlf-c2" cx="233.9" cy="42.7" rx="30.2" ry="95.7"/><ellipse class="tlf-c1" cx="377.3" cy="186.2" rx="191.2" ry="60.5"/><ellipse class="tlf-c2" cx="233.9" cy="42.7" rx="60.5" ry="191.3"/><ellipse class="tlf-c1" cx="377.3" cy="186.2" rx="302.3" ry="95.7"/><ellipse class="tlf-c2" cx="233.9" cy="42.7" rx="95.6" ry="302.5"/><ellipse class="tlf-c1" cx="377.3" cy="186.2" rx="453.5" ry="143.5"/><ellipse class="tlf-c2" cx="233.9" cy="42.7" rx="143.4" ry="453.7"/><ellipse class="tlf-c1" cx="377.3" cy="186.2" rx="641.4" ry="202.9"/><ellipse class="tlf-c2" cx="233.9" cy="42.7" rx="202.8" ry="641.7"/></g><polyline class="tlf-front" points="233.9,42.7 234.0,49.6 234.0,55.9 234.1,61.7 234.2,67.0 234.3,72.0 234.3,76.6 234.4,80.9 234.5,84.9 234.6,88.6 234.7,92.2 234.7,95.5 234.8,98.6 234.9,101.5 235.0,104.3 235.1,106.9 235.1,109.4 235.2,111.8 235.3,114.0 235.4,116.2 235.5,118.2 235.6,120.2 235.7,122.0 235.7,123.8 235.8,125.5 235.9,127.1 236.0,128.7 236.1,130.1 236.2,131.6 236.3,133.0 236.4,134.3 236.5,135.6 236.6,136.8 236.7,138.0 236.8,139.1 236.9,140.2 237.0,141.3 237.1,142.3 237.2,143.3 237.3,144.3 237.4,145.2 237.5,146.1 237.6,147.0 237.7,147.8 237.8,148.6 237.9,149.4 238.1,150.2 238.2,150.9 238.3,151.7 238.4,152.4 238.5,153.1 238.6,153.7 238.8,154.4 238.9,155.0 239.0,155.6 239.1,156.2 239.3,156.8 239.4,157.4 239.5,158.0 239.7,158.5 239.8,159.0 239.9,159.5 240.1,160.1 240.2,160.5 240.3,161.0 240.5,161.5 240.6,162.0 240.8,162.4 240.9,162.8 241.1,163.3 241.2,163.7 241.4,164.1 241.5,164.5 241.7,164.9 241.9,165.3 242.0,165.7 242.2,166.0 242.4,166.4 242.5,166.8 242.7,167.1 242.9,167.5 243.0,167.8 243.2,168.1 243.4,168.4 243.6,168.8 243.8,169.1 244.0,169.4 244.2,169.7 244.3,170.0 244.5,170.3 244.7,170.5 245.0,170.8 245.2,171.1 245.4,171.4 245.6,171.6 245.8,171.9 246.0,172.1 246.2,172.4 246.5,172.6 246.7,172.9 246.9,173.1 247.2,173.4 247.4,173.6 247.7,173.8 247.9,174.0 248.2,174.3 248.4,174.5 248.7,174.7 249.0,174.9 249.2,175.1 249.5,175.3 249.8,175.5 250.1,175.7 250.4,175.9 250.7,176.1 251.0,176.3 251.3,176.5 251.6,176.7 251.9,176.9 252.3,177.0 252.6,177.2 253.0,177.4 253.3,177.6 253.7,177.7 254.0,177.9 254.4,178.1 254.8,178.2 255.2,178.4 255.5,178.5 256.0,178.7 256.4,178.8 256.8,179.0 257.2,179.1 257.7,179.3 258.1,179.4 258.6,179.6 259.0,179.7 259.5,179.9 260.0,180.0 260.5,180.1 261.0,180.3 261.6,180.4 262.1,180.5 262.7,180.7 263.2,180.8 263.8,180.9 264.4,181.1 265.0,181.2 265.7,181.3 266.3,181.4 267.0,181.5 267.7,181.7 268.4,181.8 269.1,181.9 269.9,182.0 270.6,182.1 271.4,182.2 272.3,182.3 273.1,182.5 274.0,182.6 274.9,182.7 275.8,182.8 276.8,182.9 277.8,183.0 278.8,183.1 279.9,183.2 281.0,183.3 282.1,183.4 283.3,183.5 284.5,183.6 285.8,183.7 287.1,183.8 288.5,183.9 289.9,184.0 291.4,184.1 293.0,184.2 294.6,184.2 296.3,184.3 298.0,184.4 299.9,184.5 301.8,184.6 303.9,184.7 306.0,184.8 308.3,184.9 310.6,184.9 313.1,185.0 315.7,185.1 318.5,185.2 321.4,185.3 324.6,185.3 327.9,185.4 331.4,185.5 335.1,185.6 339.1,185.7 343.4,185.7 348.0,185.8 353.0,185.9 358.4,186.0 364.2,186.0 370.5,186.1 377.3,186.2"/><circle class="tlf-l1-f" cx="377.3" cy="186.2" r="4"/><circle class="tlf-l2-f" cx="233.9" cy="42.7" r="4"/><text class="tlf-l1" x="381.3" y="214.2" text-anchor="end" style="font-size:18px;font-weight:700" >task 1&#39;s best</text><text class="tlf-l2" x="243.9" y="48.7" text-anchor="start" style="font-size:18px;font-weight:700" >task 2&#39;s best</text><polyline class="tlf-sgdpath" points="42.7,425.3 247.1,174.1 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7 247.5,173.7"/><polyline class="tlf-adampath" points="42.7,425.3 61.6,406.3 79.7,388.0 96.9,370.4 113.1,353.6 128.2,337.7 142.3,322.5 155.3,308.2 167.2,294.8 178.1,282.2 188.0,270.4 196.8,259.5 204.6,249.4 211.6,240.2 217.6,231.8 222.8,224.1 227.3,217.2 231.0,211.0 234.2,205.5 236.8,200.6 239.0,196.3 240.8,192.6 242.4,189.1 244.3,185.5 246.4,182.4 248.2,180.1 249.6,178.7 250.4,177.8 250.9,177.3 251.2,177.0 251.4,176.8 251.5,176.8 251.5,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7 251.6,176.7"/><circle class="tlf-dot" cx="42.7" cy="425.3" r="4.5"/><text class="tlf-cap" x="54.7" y="431.3" text-anchor="start" style="font-size:18px;font-weight:700" >start</text><text class="tlf-frontlab" x="398.0" y="160.4" text-anchor="end" style="font-size:18px;font-weight:700" >Pareto set</text><rect class="tlf-inset" x="222" y="296" width="180" height="156" rx="8"/><text class="tlf-cap" x="312.0" y="318.0" text-anchor="middle" style="font-size:17px;font-weight:700" >one step, far away</text><line class="tlf-bal" x1="252.0" y1="434.0" x2="303.1" y2="357.5" style="stroke-width:4.5px" /><polygon class="tlf-bal-h" points="309.7,347.5 308.6,361.1 297.6,353.8" /><line class="tlf-adam" x1="252.0" y1="434.0" x2="297.9" y2="382.3" style="stroke-width:4.5px" /><polygon class="tlf-adam-h" points="305.9,373.3 302.8,386.7 293.0,377.9" /><circle class="tlf-dot" cx="252" cy="434" r="3.5"/><path class="tlf-arc" d="M289.2,392.1 A56,56 0 0 0 283.1,387.4"/><circle class="tlf-inpt" cx="161.4" cy="301.4" r="6"/><line class="tlf-lead" x1="167.4" y1="304.4" x2="222.0" y2="326.0"/><defs><clipPath id="tlf-zoom-clip"><rect x="22" y="22" width="180" height="144" rx="8"/></clipPath></defs><rect class="tlf-inset" x="22" y="22" width="180" height="144" rx="8"/><g clip-path="url(#tlf-zoom-clip)"><polyline class="tlf-front" points="-65.3,-1415.8 -64.5,-1337.5 -63.6,-1265.7 -62.8,-1199.6 -61.9,-1138.5 -61.1,-1081.9 -60.2,-1029.3 -59.4,-980.3 -58.5,-934.5 -57.6,-891.7 -56.7,-851.6 -55.8,-813.8 -54.9,-778.3 -54.0,-744.8 -53.0,-713.1 -52.1,-683.1 -51.2,-654.7 -50.2,-627.8 -49.2,-602.2 -48.3,-577.8 -47.3,-554.6 -46.3,-532.4 -45.3,-511.3 -44.3,-491.1 -43.3,-471.8 -42.2,-453.3 -41.2,-435.5 -40.1,-418.5 -39.1,-402.1 -38.0,-386.4 -36.9,-371.3 -35.8,-356.8 -34.7,-342.8 -33.6,-329.3 -32.4,-316.3 -31.3,-303.7 -30.1,-291.6 -29.0,-279.9 -27.8,-268.6 -26.6,-257.6 -25.4,-247.0 -24.1,-236.7 -22.9,-226.8 -21.6,-217.1 -20.4,-207.8 -19.1,-198.7 -17.8,-189.9 -16.5,-181.3 -15.2,-173.0 -13.8,-164.9 -12.5,-157.1 -11.1,-149.4 -9.7,-142.0 -8.3,-134.8 -6.9,-127.7 -5.5,-120.9 -4.0,-114.2 -2.5,-107.6 -1.1,-101.3 0.4,-95.1 2.0,-89.0 3.5,-83.1 5.1,-77.4 6.7,-71.7 8.3,-66.2 9.9,-60.9 11.5,-55.6 13.2,-50.5 14.9,-45.5 16.6,-40.6 18.3,-35.8 20.1,-31.1 21.9,-26.5 23.7,-21.9 25.5,-17.5 27.4,-13.2 29.2,-9.0 31.1,-4.8 33.1,-0.8 35.0,3.2 37.0,7.1 39.0,10.9 41.1,14.7 43.1,18.4 45.2,22.0 47.4,25.5 49.5,29.0 51.7,32.4 53.9,35.8 56.2,39.1 58.5,42.3 60.8,45.5 63.2,48.6 65.6,51.7 68.0,54.7 70.5,57.7 73.0,60.6 75.6,63.5 78.2,66.3 80.8,69.1 83.5,71.8 86.2,74.5 89.0,77.1 91.8,79.7 94.7,82.3 97.6,84.8 100.6,87.3 103.6,89.7 106.6,92.1 109.8,94.5 112.9,96.8 116.2,99.1 119.5,101.3 122.8,103.6 126.3,105.8 129.7,107.9 133.3,110.1 136.9,112.2 140.6,114.2 144.3,116.3 148.2,118.3 152.1,120.3 156.1,122.2 160.1,124.1 164.3,126.0 168.5,127.9 172.8,129.8 177.2,131.6 181.7,133.4 186.3,135.2 191.0,136.9 195.8,138.7 200.7,140.4 205.8,142.1 210.9,143.7 216.1,145.4 221.5,147.0 227.0,148.6 232.6,150.2 238.4,151.8 244.3,153.3 250.4,154.8 256.6,156.3 262.9,157.8 269.4,159.3 276.1,160.7 283.0,162.2 290.0,163.6 297.3,165.0 304.7,166.4 312.3,167.8 320.2,169.1 328.3,170.5 336.6,171.8 345.2,173.1 354.0,174.4 363.0,175.7 372.4,176.9 382.0,178.2 392.0,179.4 402.3,180.6 412.9,181.8 423.8,183.0 435.2,184.2 446.9,185.4 459.0,186.6 471.6,187.7 484.6,188.8 498.1,190.0 512.1,191.1 526.6,192.2 541.7,193.3 557.4,194.3 573.8,195.4 590.8,196.5 608.5,197.5 627.0,198.5 646.4,199.6 666.6,200.6 687.7,201.6 709.8,202.6 733.1,203.5 757.4,204.5 783.0,205.5 810.0,206.4 838.4,207.4 868.4,208.3 900.0,209.2 933.5,210.2 969.1,211.1 1006.8,212.0 1047.0,212.9 1089.8,213.8 1135.6,214.6 1184.5,215.5 1237.1,216.4 1293.7,217.2 1354.8,218.1 1421.0,218.9 1492.8,219.7 1571.1,220.5"/><polyline class="tlf-sgdpath" points="89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0 89.9,78.0"/><polyline class="tlf-adampath" points="136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0 136.6,112.0"/><circle class="tlf-sgd-end" cx="89.9" cy="78.0" r="7"/><circle class="tlf-adam-end" cx="136.6" cy="112.0" r="7"/><text class="tlf-balt" x="101.9" y="68.0" text-anchor="start" style="font-size:17px;font-weight:700" >SGD ends</text><text class="tlf-adamt" x="140.6" y="142.0" text-anchor="end" style="font-size:17px;font-weight:700" >Adam ends</text></g><rect class="tlf-zoommark" x="241.6" y="168.8" width="15.8" height="12.6"/><line class="tlf-lead" x1="241.6" y1="168.8" x2="202.0" y2="166.0"/></g><text class="tlf-cap" x="236.0" y="486.0" text-anchor="middle" style="font-size:17px;font-weight:700" >weight 1 &#8594;</text><text class="tlf-cap" x="0.0" y="0.0" text-anchor="middle" style="font-size:17px;font-weight:700" transform="translate(18 234.0) rotate(-90)">weight 2 &#8594;</text></svg></div>
+        <div class="tlf-key">
+            <span><i class="sw sw-bal"></i>SGD, which steps straight against the balanced gradient, ends with task 1 loss 4.03 and task 2 loss 4.15</span>
+            <span><i class="sw sw-adam sw-dash"></i>Adam settles at task 1 loss 3.66 and task 2 loss 4.61 by step 5000</span>
+        </div>
+        <figcaption class="caption">Adam's per-axis scale tilts each step off the balanced direction, so it can settle at a different point of the Pareto set. In this two-bowl example, far from the Pareto set, Adam's step sits about 8 degrees off the balanced direction. The lower inset shows that one step, step 301, taken at the ringed point on Adam's path, with both losses still falling. Its two arrows show directions only; Adam's is drawn shorter so the heads stay apart. The upper inset zooms in on where the two runs stop: two different points of the same Pareto set, one trading task 1's loss for task 2's. The thin ellipses are each task's loss contours.</figcaption>
+    </figure>
+
+    <h2 id="promises">What each balancer promises, and where the optimizer comes in</h2>
+
+    <p>Which promise can the optimizer bend? It helps to state each balancer's promise plainly. &#8220;To first order&#8221; in this section means judged only by the slope at the current point, which is what a small enough step sees.</p>
+
+    <p>With two tasks, PCGrad's step never raises either task's loss, to first order, because after PCGrad removes the conflicting parts, neither edited gradient has anything left pointing against the other task's gradient. With three or more tasks this can fail. In a worked example with random gradients for three tasks sharing two weights, every coordinate drawn from a standard normal distribution, the bell curve with mean 0 and standard deviation 1, one task's loss would rise to first order in about one case in four; with ten weights it happens in well under 1 percent of cases, so the failure is real but rarer when there are many weights. PCGrad's one-step guarantee is a different promise: after one step, the total loss is no higher than plain gradient descent reaches from the same point, when three conditions hold together. The two task gradients must conflict strongly enough for how different their sizes are, the loss surface must curve sharply enough, and the step must be large enough. The first two carry the tragic triad the <a href="pcgrad.html#tragic-triad">PCGrad page</a> teaches: conflicting gradients, one task much louder than the other, and high curvature. The third, a large enough step, sits outside the triad, and that is where the optimizer comes in.</p>
+
+    <p>MGDA, for a small enough step, lowers every task's loss, unless its direction is zero, which means the point is Pareto-stationary: no single small step lowers every task's loss at once. For the shortcut MGDA-UB, the paper proves this when every change of the shared representation can be made by some change of the shared weights, as the <a href="mgda.html#shortest-blend">MGDA page</a> explains.</p>
+
+    <p>CAGrad picks, within a ball around the average gradient, the direction that does best for the worst-off task, judged for a small enough step; that is not a guarantee that the worst-off task improves. The ball's size is set by CAGrad's radius c, a setting you choose, which the <a href="cagrad.html">CAGrad page</a> explains. The convergence guarantee needs c below 1. Then, with a small enough step, CAGrad converges to a point where the average loss's gradient is zero. For c of 1 or more, the paper proves less. It shows that any point where CAGrad stops moving is then Pareto-stationary. For c above 1, it adds only an either-or result, and only under two conditions: the step size is recomputed at every iteration from the gradients' sizes, and no task's loss can fall below some fixed number. Then, over training, either the step size shrinks to zero or one of the two gradients behind CAGrad's update does, the average gradient or the blend of task gradients that CAGrad adds to it.</p>
+
+    <p>These promises are about the direction the balancer hands over and, for PCGrad and CAGrad, about the size of the step. Adam tilts the direction and sets the step's size axis by axis, so its step is not the one the promises describe. Noise matters too. Rerun the two-bowl example with PCGrad for 3000 steps, and add mini-batch noise to each task's gradient, drawn from a normal distribution with standard deviation 1 or 3 on each weight. Both SGD and Adam then raise a task's true loss, its loss over all the data rather than over one batch, on most steps, because the balancers' promises are about the batch gradient, not the true one.</p>
+
+    <h3 id="momentum-returns">Momentum can bring back a direction PCGrad removed</h3>
+
+    <p>Plain momentum keeps a running average of past gradients and steps against it; the <a href="optimizers.html#momentum">optimizers page</a> calls it SGD with momentum. Because it mixes this step's balanced gradient with past ones, a direction PCGrad removed this step can come back through the average. Adam's first moment does the same, since it is the very average drawn in <a href="#momentum-turn">&#8220;Watching the momentum follow a turn&#8221;</a>. Take a two-step worked example with two tasks sharing two weights and a memory rate of 0.9. On the first step the two task gradients do not conflict, so PCGrad leaves them alone. On the second step they conflict and PCGrad cuts the conflicting part. PCGrad's output on the second step has a positive cosine with task 2's gradient, as PCGrad intends, but the momentum average has a negative one: it still points partly against task 2.</p>
+
+    <figure class="figure tlf-fig">
+        <div class="tlf-one tlf-narrow"><svg class="tlf-svg tlf-mom" viewBox="0 0 360 300" role="img" aria-label="Momentum still carries the direction PCGrad cut this step"><line class="tlf-g2guide" x1="175.0" y1="165.0" x2="90.9" y2="80.9" style="stroke-width:2px" /><polygon class="tlf-g2guide-h" points="83.1,73.1 95.1,76.6 86.6,85.1" /><text class="tlf-l2" x="83.1" y="63.1" text-anchor="middle" style="font-size:13.5px;font-weight:700" >task 2&#39;s gradient</text><line class="tlf-trail" x1="175.0" y1="165.0" x2="257.4" y2="219.9" style="stroke-width:4px" /><polygon class="tlf-trail-h" points="266.5,226.0 254.0,224.9 260.7,214.9" /><text class="tlf-cap" x="270.5" y="242.0" text-anchor="start" style="font-size:12.5px" >last step&#39;s</text><text class="tlf-cap" x="270.5" y="257.0" text-anchor="start" style="font-size:12.5px" >PCGrad output</text><line class="tlf-bal" x1="175.0" y1="165.0" x2="205.0" y2="74.9" style="stroke-width:8px" /><polygon class="tlf-bal-h" points="209.8,60.6 212.9,77.5 197.2,72.3" /><text class="tlf-balt" x="217.8" y="62.6" text-anchor="start" style="font-size:12.5px;font-weight:700" >this step&#39;s</text><text class="tlf-balt" x="217.8" y="77.6" text-anchor="start" style="font-size:12.5px;font-weight:700" >PCGrad output</text><line class="tlf-adam" x1="175.0" y1="165.0" x2="272.6" y2="174.1" style="stroke-width:4.5px" /><polygon class="tlf-adam-h" points="284.5,175.3 272.0,180.7 273.2,167.6" /><text class="tlf-adamt" x="290.5" y="167.3" text-anchor="start" style="font-size:12.5px;font-weight:700" >momentum</text><line class="tlf-cut" x1="175.0" y1="165.0" x2="211.8" y2="201.8" style="stroke-width:3px" /><polygon class="tlf-cut-h" points="218.8,208.8 207.9,205.7 215.7,197.9" /><text class="tlf-cutt" x="214.8" y="226.8" text-anchor="end" style="font-size:12.5px;font-weight:600" >the part PCGrad cut</text><circle class="tlf-dot" cx="175" cy="165" r="3.5"/></svg></div>
+        <figcaption class="caption">This step's PCGrad output no longer fights task 2, but the momentum still carries last step's direction, which points partly against task 2. The red dashed arrow is what PCGrad cut this step, the piece of task 1's gradient that pointed straight against task 2.</figcaption>
+    </figure>
+
+    <p>That does not mean training fails. Yu and coauthors prove that for two tasks whose losses are smooth and strongly bowl-shaped (strongly convex, in the paper's terms), PCGrad with plain momentum, with its step size and momentum chosen at each step, still converges with exact gradients, either to the lowest value of the total loss or to the same stall point as plain PCGrad, where the two gradients point in exactly opposite directions. The proof says nothing about Adam or mini-batch noise. The point is that one step's removal does not stick, not that training breaks.</p>
+
+    <h3 id="mgda-stop">MGDA's shrinking gradient is not a clean stop signal</h3>
+
+    <p>MGDA's combined gradient shrinks toward zero as training nears the front, which makes its size tempting as a stop signal. The optimizer changes how that looks. Take the two-bowl example from <a href="#adam-tilt">&#8220;The per-axis scale tilts each step off the balanced direction&#8221;</a>, with MGDA in place of PCGrad and both optimizers at learning rate 0.02, run for 6000 steps. Without noise the step shrinks under both optimizers; under Adam it shrinks later and more gently. Now add mini-batch noise to each task's gradient, drawn from a normal distribution with standard deviation 1 or 3 on each weight. The size of the batch MGDA gradient levels off at the noise level under both optimizers. Averaged over the last 1000 steps and 5 random runs, Adam's step stays a larger share of its first step's size, 13 to 19 percent, than SGD's, 2 to 5 percent. So neither the gradient's size nor the step's is a clean stop signal on its own; the list under <a href="#logging">&#8220;What to log to see each interaction&#8221;</a> says what to watch instead.</p>
+
+    <h2 id="balancer-numbers">The optimizer and the balancer's own numbers</h2>
+
+    <p>GradNorm's task weights and Uncertainty Weighting's sigmas are numbers the balancer learns while the network trains. The optimizer and weight decay act on them too, and that changes the balancing.</p>
+
+    <h3 id="gradnorm-sum">GradNorm keeps its task weights summing to the task count</h3>
+
+    <p>GradNorm rescales its task weights after every update so they sum to K, the number of tasks. Chen and coauthors do this, in their words, &#8220;to decouple gradient normalization from the global learning rate&#8221;: balancing changes how the total task weight is split between tasks, not the overall learning rate. GradNorm holds each task's target fixed when it updates the task weights, often called a detached target because no gradient flows through it, and the paper gives the reason as keeping the task weights from drifting toward zero. Even so, each task weight moves on its own and nothing makes the changes cancel, so without renormalizing the sum can wander far from K, and nothing pulls it back. Renormalizing pins it to K. So the fixed sum is what keeps GradNorm's balancing from also acting as a change of learning rate.</p>
+
+    <h3 id="weight-decay">Weight decay skips the balancer, unless it decays the balancer's own numbers</h3>
+
+    <p>Weight decay applied by the optimizer never passes through the balancer. Decoupled decay, as in AdamW, the version of Adam built around it, shrinks the weights directly. Coupled L2 adds a small multiple of the weights, which is the gradient of an L2 penalty, to the gradient inside the optimizer step, as weight decay does in SGD or in plain Adam; that is still after the balancer has run. An L2 penalty written into a task's loss instead goes through the backward pass and the balancer like any other part of the loss.</p>
+
+    <p>The two forms differ in what they pass through. Under plain SGD with no momentum they are the same thing, up to a factor of the learning rate in the coefficient. With momentum, coupled L2 is added before the momentum average and gets carried along in it, while decoupled decay acts on the weights directly. Under plain Adam, coupled L2 also goes through the per-axis scale, so the two differ there too.</p>
+
+    <p>Decay on a balancer's own numbers does change the balancing. Uncertainty Weighting learns log sigma, the logarithm of each task's sigma. Decay pulls log sigma toward 0, that is sigma toward 1, which pulls each task's loss weight back toward its own value at sigma 1: one half for a regression task and 1 for a classification task, the factor of two the <a href="uncertainty-weighting.html#uw-pricing">Uncertainty Weighting page</a> teaches. It does not pull the tasks toward one shared loss weight. The paper itself learns the logarithm of sigma squared instead, which is also 0 at sigma 1, so the pull points the same way in either form; only its strength differs.</p>
+
+    <h3 id="sigma-lr">As sigma falls, a task's effective learning rate rises under SGD</h3>
+
+    <p>Uncertainty Weighting's sigma also interacts with the optimizer. As a task's sigma falls, its loss weight rises. A task's effective learning rate is how far one step moves the weights in response to that task's error. Under SGD, with or without momentum, it rises with the task's loss weight, since SGD's step is the learning rate times the weighted gradient. Kendall and coauthors trained one network on street-scene images to learn three tasks at once: labeling each pixel's object class, telling apart the individual objects, and estimating each pixel's depth. They trained with SGD with momentum and describe the typical case: the noise terms fall during training, every task's loss weight rises, and so does the effective learning rate; they lowered the learning rate on a schedule to compensate. That reading holds per task only for a task whose sigma falls; a task whose sigma rises gets a smaller loss weight. In their run all three task uncertainties fell.</p>
+
+    <p>Under Adam, a slow change is largely absorbed by the per-axis scale on that task's own head, and what remains is the change in the task mix on the shared layers. Picture one task head that receives only its own task's noisy gradient, times a task weight. If that weight rises slowly to 4 times its start over many thousands of steps, under SGD, with or without momentum, the head's update ends about 4 times larger than with the weight held fixed; under Adam it ends almost unchanged. If the weight jumps to 4 times at once, Adam's update grows over the next few dozen steps to a peak of a few times its old size, then fades back over a few thousand steps as Adam's thousand-step memory of gradient size catches up. Sigma falls fast early in training, then usually keeps drifting slowly, so the task weights keep changing all through training.</p>
+
+    <h2 id="clipping">Only global clipping keeps the balanced direction</h2>
+
+    <p>Clipping has three common forms, and they treat a balanced gradient very differently. Global-norm clipping measures the length of the whole gradient over every parameter it is given and, if that length is above max norm, multiplies all of it by one number so its length becomes max norm. Max norm is the same threshold the <a href="optimizers.html#clipping">optimizers page</a> calls c; I call it max norm here because c is CAGrad's radius. One number times every coordinate keeps the direction, so global clipping after the balancer does not undo the balancing, over exactly the parameters it is given.</p>
+
+    <p>Per-task clipping caps each task's gradient before balancing. It shortens the lengths above max norm and leaves shorter ones alone, so it re-balances on its own and changes what the balancer sees, as in <a href="#unbalanced-step">&#8220;A balanced gradient can still give an unbalanced step&#8221;</a>. Per-value clipping clamps each number of the gradient separately to the range from minus the clip value to plus the clip value, which changes the direction; in the figure it clamps PCGrad's combined result. And a clip factor that changes from step to step is a changing overall scale, which Adam does not fully cancel; the reason is under <a href="#adam-scale">&#8220;Adam cancels a steady scale, and absorbs a sudden change only slowly&#8221;</a>.</p>
+
+    <p>The clipping figure uses the same pair as the loss-scale tool, task gradients (3, 1) and (&#8722;1, 2), whose lengths are about 3.16 and 2.24. Max norm is 2.3, between the two, and the per-value clip value is also 2.3. With a max norm of 5, above every length here, no clip would change anything.</p>
+
+    <figure class="figure tlf-fig">
+        <div class="tlf-panels tlf-three"><svg class="tlf-svg" viewBox="0 0 260 260" role="img" aria-label="Global clip"><text class="tlf-ttl" x="130.0" y="22.0" text-anchor="middle" style="font-size:18px;font-weight:700" >Global clip</text><text class="tlf-cap" x="130.0" y="44.0" text-anchor="middle" style="font-size:16px" >shorter, same direction</text><circle class="tlf-limit" cx="100" cy="172" r="78.2"/><line class="tlf-ghost" x1="100.0" y1="172.0" x2="165.7" y2="62.4" style="stroke-width:3.5px" /><polygon class="tlf-ghost-h" points="171.4,53.0 170.9,65.5 160.6,59.3" /><line class="tlf-clip" x1="100.0" y1="172.0" x2="134.1" y2="115.2" style="stroke-width:5px" /><polygon class="tlf-clip-h" points="140.2,104.9 139.7,118.6 128.4,111.8" /><circle class="tlf-dot" cx="100" cy="172" r="3.5"/></svg>
+<svg class="tlf-svg" viewBox="0 0 260 260" role="img" aria-label="Per-task clip"><text class="tlf-ttl" x="130.0" y="22.0" text-anchor="middle" style="font-size:18px;font-weight:700" >Per-task clip</text><text class="tlf-cap" x="130.0" y="44.0" text-anchor="middle" style="font-size:16px" >the result turns</text><path class="tlf-wedge" d="M100.0,172.0 L141.2,103.4 A80,80 0 0 0 131.5,98.5 Z"/><circle class="tlf-limit" cx="100" cy="172" r="78.2"/><line class="tlf-t1ghost" x1="100.0" y1="172.0" x2="192.5" y2="141.2" style="stroke-width:3px" /><polygon class="tlf-t1ghost-h" points="202.0,138.0 194.3,146.4 190.8,135.9" /><line class="tlf-t1" x1="100.0" y1="172.0" x2="163.8" y2="150.7" style="stroke-width:3.5px" /><polygon class="tlf-t1-h" points="174.2,147.3 165.7,156.5 161.8,145.0" /><line class="tlf-t2" x1="100.0" y1="172.0" x2="70.9" y2="113.8" style="stroke-width:3.5px" /><polygon class="tlf-t2-h" points="66.0,104.0 76.3,111.1 65.5,116.5" /><line class="tlf-ghost" x1="100.0" y1="172.0" x2="165.7" y2="62.4" style="stroke-width:3.5px" /><polygon class="tlf-ghost-h" points="171.4,53.0 170.9,65.5 160.6,59.3" /><line class="tlf-clip" x1="100.0" y1="172.0" x2="140.7" y2="77.0" style="stroke-width:5px" /><polygon class="tlf-clip-h" points="145.4,66.0 146.8,79.6 134.6,74.4" /><text class="tlf-l1" x="184.2" y="163.0" text-anchor="start" style="font-size:16px;font-weight:600" >task 1,</text><text class="tlf-l1" x="184.2" y="181.0" text-anchor="start" style="font-size:16px;font-weight:600" >capped</text><text class="tlf-l2" x="58.0" y="100.0" text-anchor="end" style="font-size:16px;font-weight:600" >task 2</text><path class="tlf-arc tlf-arc-turn" d="M141.2,103.4 A80,80 0 0 0 131.5,98.5"/><text class="tlf-ttl" x="125.7" y="82.4" text-anchor="end" style="font-size:16px;font-weight:700" >7.8&#176;</text><circle class="tlf-dot" cx="100" cy="172" r="3.5"/></svg>
+<svg class="tlf-svg" viewBox="0 0 260 260" role="img" aria-label="Per-value clip"><text class="tlf-ttl" x="130.0" y="22.0" text-anchor="middle" style="font-size:18px;font-weight:700" >Per-value clip</text><text class="tlf-cap" x="130.0" y="44.0" text-anchor="middle" style="font-size:16px" >the result turns</text><path class="tlf-wedge" d="M100.0,172.0 L153.9,112.9 A80,80 0 0 0 141.2,103.4 Z"/><rect class="tlf-limit" x="21.8" y="93.8" width="156.4" height="156.4"/><line class="tlf-ghost" x1="100.0" y1="172.0" x2="165.7" y2="62.4" style="stroke-width:3.5px" /><polygon class="tlf-ghost-h" points="171.4,53.0 170.9,65.5 160.6,59.3" /><line class="tlf-clip" x1="100.0" y1="172.0" x2="163.3" y2="102.7" style="stroke-width:5px" /><polygon class="tlf-clip-h" points="171.4,93.8 168.2,107.1 158.4,98.2" /><path class="tlf-arc tlf-arc-turn" d="M153.9,112.9 A80,80 0 0 0 141.2,103.4"/><text class="tlf-ttl" x="138.2" y="86.8" text-anchor="end" style="font-size:16px;font-weight:700" >11.4&#176;</text><circle class="tlf-dot" cx="100" cy="172" r="3.5"/></svg></div>
+        <figcaption class="caption">Red is the clipped result over a faint copy of the unclipped PCGrad result, and the shaded wedge marks the turn: 7.8 degrees when each task gradient is capped before PCGrad, 11.4 when each number of PCGrad's combined result, (2.1, 3.5), is clamped to (2.1, 2.3). The dashed circle has radius max norm, 2.3; the dashed square is the per-value limit, also 2.3.</figcaption>
+    </figure>
+
+    <h2 id="mixed-precision">Mixed precision multiplies every gradient by one number</h2>
+
+    <p>Mixed precision trains with some numbers stored in a shorter, lower-precision format to save memory and time. Small gradients can round to zero in that format, so a loss scaler multiplies the loss by a large number, its current scale, before the backward pass, and every gradient comes out multiplied by that scale. Unscaling means dividing the gradients by the current scale to get the true values back.</p>
+
+    <p>Within one step this does not disturb balancing. Every task's loss carries the same scale, so the ratios between tasks and the cosines are unaffected, and no balancer's direction changes. In a worked example with every task gradient multiplied by 65,536, PCGrad with two and with three tasks, MGDA, CAGrad and one GradVac step all give 65,536 times their unscaled outputs, to within rounding error, with MGDA's and CAGrad's blend weights found by a solve that does not depend on gradient size, either a formula that gives the weights directly or a check of a fixed grid of candidate weights.</p>
+
+    <p>The scale does change sizes, so anything that compares a size with a fixed number must see unscaled values: clipping's max norm, logged gradient sizes, Adam's tiny constant in the divisor, the stopping tolerance of a solver that finds MGDA's or CAGrad's blend weights step by step, and GradNorm's weight step, the change it makes to its task weights at each update. GradNorm's targets are built from the tasks' own average, so the ratios it compares ignore a common scale, but the size of its weight step does not. Under SGD that step grows with the scale at once, and under Adam it feels every change of the scale, since Adam cancels only a scale that holds steady over its second-moment memory and the scaler changes its scale by design. GradNorm reads its per-task gradients outside any optimizer, so their sizes must be compared after dividing by the current scale.</p>
+
+    <p>The scaler changes the scale between steps. It shrinks the scale after a step it had to skip and grows it after a run of steps with no skip. A step is skipped when a gradient contains inf or NaN, an overflow to infinity or a &#8220;not a number&#8221; value. GradNorm's task weights have their own gradients, so on a step where the network's update is skipped they can still update. Like any balancer state, they should change only on steps where the network's update went through. The same goes for state the balancer keeps outside any optimizer, such as GradVac's target agreement level for each pair of tasks and the running averages you log, which nothing skips automatically. </p>
+
+    <h2 id="batch-split">Balance each micro-batch, or balance their average</h2>
+
+    <p>When one batch is too big for memory, it is split into micro-batches, smaller pieces processed one after another with their gradients added up, or spread across several GPUs, the graphics processors that run the training. That leaves a choice: run the balancer on each part and average the results, or average the parts and balance once. With no noise the two give the same step. Balancing is not linear, meaning that balancing an average does not give the average of the balanced parts, so with noise the two differ. Take the two-bowl example at the point (1, 1), where each task's gradient is about 10 long, and split one batch into 4 micro-batches. Each micro-batch adds its own noise to each task's gradient, drawn from a normal distribution with standard deviation 10 on each weight, so the noise is about as large as the gradient. Over 500 random draws the two routes differ by a median of about 8 degrees for PCGrad and about 20 degrees for MGDA.</p>
+
+    <figure class="figure tlf-fig">
+        <div class="tlf-one tlf-narrow"><svg class="tlf-svg tlf-split" viewBox="0 0 420 255" role="img" aria-label="Balancing each micro-batch then averaging ends in a different place than averaging then balancing"><text class="tlf-ttl" x="80.0" y="26.0" text-anchor="middle" style="font-size:15px;font-weight:700" >micro-batch A</text><line class="tlf-t1thin" x1="60.0" y1="140.0" x2="147.5" y2="110.8" style="stroke-width:2.5px" /><polygon class="tlf-t1thin-h" points="156.0,108.0 149.0,115.5 145.9,106.2" /><line class="tlf-t2thin" x1="60.0" y1="140.0" x2="32.0" y2="84.0" style="stroke-width:2.5px" /><polygon class="tlf-t2thin-h" points="28.0,76.0 36.5,81.8 27.6,86.3" /><circle class="tlf-dot" cx="60" cy="140" r="3.5"/><text class="tlf-ttl" x="215.0" y="26.0" text-anchor="middle" style="font-size:15px;font-weight:700" >micro-batch B</text><line class="tlf-t1thin" x1="215.0" y1="140.0" x2="189.4" y2="165.6" style="stroke-width:2.5px" /><polygon class="tlf-t1thin-h" points="183.0,172.0 185.9,162.1 192.9,169.1" /><line class="tlf-t2thin" x1="215.0" y1="140.0" x2="215.0" y2="85.0" style="stroke-width:2.5px" /><polygon class="tlf-t2thin-h" points="215.0,76.0 219.9,85.0 210.1,85.0" /><circle class="tlf-dot" cx="215" cy="140" r="3.5"/><line class="tlf-sep" x1="160" y1="40" x2="160" y2="185"/><line class="tlf-sep" x1="270" y1="40" x2="270" y2="185"/><text class="tlf-ttl" x="345.0" y="26.0" text-anchor="middle" style="font-size:15px;font-weight:700" >the two routes</text><line class="tlf-bal" x1="345.0" y1="140.0" x2="346.3" y2="80.0" style="stroke-width:5px" /><polygon class="tlf-bal-h" points="346.6,68.0 352.9,80.1 339.7,79.9" /><line class="tlf-route2" x1="345.0" y1="140.0" x2="370.5" y2="79.5" style="stroke-width:5px" /><polygon class="tlf-route2-h" points="375.1,68.5 376.5,82.1 364.4,77.0" /><circle class="tlf-dot" cx="345" cy="140" r="3.5"/><line class="tlf-bal" x1="30.0" y1="212.0" x2="50.0" y2="212.0" style="stroke-width:5px" /><polygon class="tlf-bal-h" points="62.0,212.0 50.0,218.6 50.0,205.4" /><text class="tlf-balt" x="72.0" y="217.0" text-anchor="start" style="font-size:15px;font-weight:700" >balance each part with PCGrad, then average</text><line class="tlf-route2" x1="30.0" y1="238.0" x2="50.0" y2="238.0" style="stroke-width:5px" /><polygon class="tlf-route2-h" points="62.0,238.0 50.0,244.6 50.0,231.4" /><text class="tlf-route2t" x="72.0" y="243.0" text-anchor="start" style="font-size:15px;font-weight:700" >average the parts, then balance once</text></svg></div>
+        <figcaption class="caption">This sketch splits the batch into two micro-batches, A and B, instead of four. Each has its own pair of task gradients, thin blue for task 1 and orange for task 2. Balancing each part with PCGrad and then averaging ends in a different place than averaging the parts and balancing once.</figcaption>
+    </figure>
+
+    <h2 id="logging">What to log to see each interaction</h2>
+
+    <p>Every interaction on this page is invisible in the one number most training loops print, the weighted total loss. Here is what to log to see each one, where in the six-stage step to record it, and how often.</p>
+
+    <ol class="tl-log">
+        <li>The raw, unweighted loss of each task, after the forward pass, every step, next to runs where each task is trained alone. It shows whether the balancer, a loss's scale or the optimizer is starving a task; the weighted total hides it.</li>
+        <li>Each task's gradient size on the shared layers, the cosines between task gradients, and the share of steps on which two tasks conflict (a negative cosine), recorded after the per-task backward pass and before the balancer. For PCGrad, GradVac, CAGrad and full MGDA this is free every step, since they compute those gradients anyway. For MGDA-UB and the loss-weighting methods, record it only on some steps, such as one step in every few hundred, since per-task shared-layer gradients cost extra backward passes there; GradNorm already reads per-task sizes at W every step. It shows what the balancer sees, including a loss's scale.</li>
+        <li>The balancer's own numbers, the task weights or the sigmas, after the balancer, every step. They show how a loss's scale and weight decay move the balancer.</li>
+        <li>The combined gradient's total length, at the clip stage before clipping, every step. Clipping acts whenever that length is above max norm.</li>
+        <li>A running average of the combined gradient's size, after the balancer, every step, since every method computes the combined gradient anyway. It shows MGDA nearing the front, under noise and under either optimizer.</li>
+        <li>Which steps the loss scaler skipped, under mixed precision, recorded at the optimizer step on every step. The skipped steps are the ones on which no balancer state should change.</li>
+        <li>How much each logged number varies across the logging window, not just its average. That variation is the noise, and the noise decides whether splitting a batch changes the step.</li>
+    </ol>
+
+    <h2 id="where-each-acts">Loss weights act before the backward pass, gradient methods after it</h2>
+
+    <p>Loss-weighting methods change each task's loss before the backward pass, so every gradient that follows carries their task weights. Gradient methods wait for the per-task gradients after the backward pass and replace their plain sum. <a href="#core-step">&#8220;One training step, in six stages&#8221;</a> lays out both, and the table sums up what each method does.</p>
+
+    <p>The two weighting methods, the volume knobs that learn each task's loss weight (GradNorm and Uncertainty Weighting), the three steering methods (PCGrad, GradVac, and CAGrad), and MGDA, which lands on the Pareto front, side by side:</p>
+
+    <table class="cmp">
+        <thead><tr><th>Method</th><th>The question it answers</th></tr></thead>
+        <tbody>
+            <tr><td><a href="gradnorm.html"><strong>GradNorm</strong></a></td><td>How loud should each task be, to keep progress balanced? (learned, driven by training dynamics)</td></tr>
+            <tr><td><a href="uncertainty-weighting.html"><strong>Uncertainty Weighting</strong></a></td><td>How loud should each task be, given how noisy it inherently is? (learned, driven by the data)</td></tr>
+            <tr><td><a href="pcgrad.html"><strong>PCGrad</strong></a></td><td>How should the directions be edited so tasks stop fighting?</td></tr>
+            <tr><td><a href="gradvac.html"><strong>GradVac</strong></a></td><td>How should each pair of tasks be nudged back to the agreement level where it learns best?</td></tr>
+            <tr><td><a href="cagrad.html"><strong>CAGrad</strong></a></td><td>How do we protect the worst-off task and stay near the average, with a guarantee?</td></tr>
+            <tr><td><a href="mgda.html"><strong>MGDA</strong></a></td><td>What direction helps every task at once, and where does the run land on the Pareto front?</td></tr>
+        </tbody>
+    </table>
+
+    <h2 id="references">References</h2>
+    <ol class="brefs">
+        <li>Chen, Z., et al. (2018). GradNorm: Gradient Normalization for Adaptive Loss Balancing in Deep Multitask Networks. ICML. arXiv:1711.02257.</li>
+        <li>Kendall, A., et al. (2018). Multi-Task Learning Using Uncertainty to Weigh Losses for Scene Geometry and Semantics. CVPR. arXiv:1705.07115.</li>
+        <li>Sener, O., et al. (2018). Multi-Task Learning as Multi-Objective Optimization. NeurIPS. arXiv:1810.04650.</li>
+        <li>Yu, T., et al. (2020). Gradient Surgery for Multi-Task Learning. NeurIPS. arXiv:2001.06782.</li>
+        <li>Wang, Z., et al. (2021). Gradient Vaccine: Investigating and Improving Multi-task Optimization in Massively Multilingual Models. ICLR. arXiv:2010.05874.</li>
+        <li>Liu, B., et al. (2021). Conflict-Averse Gradient Descent for Multi-task Learning. NeurIPS. arXiv:2110.14048.</li>
+        <li>Kingma, D. P., et al. (2015). Adam: A Method for Stochastic Optimization. ICLR. arXiv:1412.6980.</li>
+        <li>Loshchilov, I., et al. (2019). Decoupled Weight Decay Regularization. ICLR. arXiv:1711.05101.</li>
+        <li>PyTorch documentation. Automatic Mixed Precision examples, and gradient clipping utilities.</li>
+    </ol>
+
+<script>
+/* Tool 2 data: headings in degrees of the stored balanced gradient (g) and bias-corrected
+   first moment (m + beta1) for 400 steps, from training-loop-toys/tool2-turn-paths.npz,
+   rounded to 0.01 degree. turn = first 0-based step after the 90 degree turn. */
+window.T2DATA = {"turn":150,"g":[22.04,23.51,108.84,37.9,-112.47,132.16,177.48,-155.64,-177.86,61.96,83.9,118.5,18.34,-125.37,105.9,172.03,80.09,51.77,152.83,58.78,117.59,33.37,-0.65,52.1,37.57,-53.57,72.55,144.39,53.69,-158.0,-98.51,-5.26,4.39,40.72,-63.61,70.07,-13.32,-25.44,105.91,81.23,-33.3,-95.11,135.97,60.98,102.62,89.39,-106.32,67.4,-30.7,-133.38,58.01,-79.43,-39.5,113.6,160.35,123.35,65.54,-24.24,30.88,51.98,46.44,-71.11,-69.54,153.1,-109.87,141.94,67.77,77.73,40.45,143.26,48.49,45.48,-4.69,172.9,109.68,87.27,-159.46,-75.9,18.32,-112.79,0.69,162.24,6.92,-71.53,32.07,14.49,28.99,9.57,131.12,177.63,-82.03,6.64,98.89,95.69,-14.21,-148.57,10.44,89.29,-164.08,100.47,-139.33,141.38,-8.63,-64.46,95.57,80.39,118.39,82.7,-40.21,99.43,-82.33,109.1,96.59,6.75,-103.29,-108.61,51.46,-137.34,-155.81,-163.39,-1.37,-8.88,13.77,91.49,-91.07,27.8,-24.09,46.21,127.43,101.16,-159.84,-177.08,74.33,158.13,-154.88,23.76,-114.71,156.84,-51.93,119.51,-5.05,-68.66,170.86,-137.66,107.75,-127.45,48.26,126.83,88.51,129.9,12.31,-78.02,-30.37,-80.3,16.09,-86.76,-42.59,-5.58,-129.75,149.03,-52.83,-179.59,-18.42,-43.28,-57.94,-71.69,-29.45,-44.2,-65.54,-53.34,-174.4,-0.95,-88.03,-70.46,8.95,125.4,-94.22,-11.33,-124.07,30.76,122.27,-28.7,-111.83,-65.73,132.24,-46.25,45.5,-130.83,18.22,58.01,-113.61,-161.7,-121.59,-125.73,175.08,-35.56,-83.57,-14.59,-36.42,11.52,100.87,121.98,149.38,133.97,-117.43,65.54,-90.25,-164.71,106.05,-18.99,137.67,-23.57,-15.2,-150.82,-41.94,-28.06,10.64,78.78,138.63,-74.0,35.46,57.52,35.11,-139.16,-20.49,11.02,-19.55,-92.14,124.04,65.07,-113.79,131.47,1.02,-138.47,-89.15,-152.07,84.46,66.82,-98.76,177.51,59.6,-130.06,-105.02,-121.87,-10.4,-161.08,-61.91,-56.55,75.29,177.01,5.22,-143.17,-0.34,24.2,-44.65,-84.09,-118.21,-38.46,35.13,-162.31,-58.68,-128.52,-38.04,-0.47,79.83,3.79,90.9,-24.53,177.05,-112.46,-42.55,-0.9,-54.01,-32.75,-9.29,-36.14,9.17,-172.03,-90.33,-27.87,-128.51,69.63,49.38,7.66,-29.67,-18.72,-43.49,116.16,-80.51,-68.88,-43.52,14.14,-79.63,168.12,154.89,-144.67,-77.57,-18.77,-111.75,-168.48,-116.93,87.78,37.91,42.43,-144.53,-29.77,-83.24,-87.4,-144.61,57.93,-5.67,26.57,-100.86,-80.72,92.38,-166.11,2.0,35.84,-4.37,-13.59,178.23,-108.72,-96.58,-75.28,80.06,-104.11,8.13,-27.3,-43.27,141.92,122.33,-36.45,118.69,79.23,178.05,-46.8,-67.31,125.08,-18.51,10.56,-123.0,-5.53,-38.26,1.29,17.01,-102.7,120.11,-22.14,89.55,-85.05,6.16,-164.31,21.07,-64.02,-3.77,-86.68,-38.8,-91.03,31.55,35.49,2.68,-36.34,-23.68,154.85,-30.43,-78.29,-105.64,-147.95,-142.92,-122.74,147.15,-69.85,-106.49,-102.33,-33.52,15.79,-51.59,25.17,67.02,45.09,117.53,-57.93,-14.17,-57.93,153.46,2.57,161.16,-91.61,15.67,108.77,-113.85,127.25,-79.04,-74.82,-111.98,35.08,-174.79,-51.74,-98.25,-168.19],"m0.0":[22.04,23.51,108.84,37.9,-112.47,132.16,177.48,-155.64,-177.86,61.96,83.9,118.5,18.34,-125.37,105.9,172.03,80.09,51.77,152.83,58.78,117.59,33.37,-0.65,52.1,37.57,-53.57,72.55,144.39,53.69,-158.0,-98.51,-5.26,4.39,40.72,-63.61,70.07,-13.32,-25.44,105.91,81.23,-33.3,-95.11,135.97,60.98,102.62,89.39,-106.32,67.4,-30.7,-133.38,58.01,-79.43,-39.5,113.6,160.35,123.35,65.54,-24.24,30.88,51.98,46.44,-71.11,-69.54,153.1,-109.87,141.94,67.77,77.73,40.45,143.26,48.49,45.48,-4.69,172.9,109.68,87.27,-159.46,-75.9,18.32,-112.79,0.69,162.24,6.92,-71.53,32.07,14.49,28.99,9.57,131.12,177.63,-82.03,6.64,98.89,95.69,-14.21,-148.57,10.44,89.29,-164.08,100.47,-139.33,141.38,-8.63,-64.46,95.57,80.39,118.39,82.7,-40.21,99.43,-82.33,109.1,96.59,6.75,-103.29,-108.61,51.46,-137.34,-155.81,-163.39,-1.37,-8.88,13.77,91.49,-91.07,27.8,-24.09,46.21,127.43,101.16,-159.84,-177.08,74.33,158.13,-154.88,23.76,-114.71,156.84,-51.93,119.51,-5.05,-68.66,170.86,-137.66,107.75,-127.45,48.26,126.83,88.51,129.9,12.31,-78.02,-30.37,-80.3,16.09,-86.76,-42.59,-5.58,-129.75,149.03,-52.83,-179.59,-18.42,-43.28,-57.94,-71.69,-29.45,-44.2,-65.54,-53.34,-174.4,-0.95,-88.03,-70.46,8.95,125.4,-94.22,-11.33,-124.07,30.76,122.27,-28.7,-111.83,-65.73,132.24,-46.25,45.5,-130.83,18.22,58.01,-113.61,-161.7,-121.59,-125.73,175.08,-35.56,-83.57,-14.59,-36.42,11.52,100.87,121.98,149.38,133.97,-117.43,65.54,-90.25,-164.71,106.05,-18.99,137.67,-23.57,-15.2,-150.82,-41.94,-28.06,10.64,78.78,138.63,-74.0,35.46,57.52,35.11,-139.16,-20.49,11.02,-19.55,-92.14,124.04,65.07,-113.79,131.47,1.02,-138.47,-89.15,-152.07,84.46,66.82,-98.76,177.51,59.6,-130.06,-105.02,-121.87,-10.4,-161.08,-61.91,-56.55,75.29,177.01,5.22,-143.17,-0.34,24.2,-44.65,-84.09,-118.21,-38.46,35.13,-162.31,-58.68,-128.52,-38.04,-0.47,79.83,3.79,90.9,-24.53,177.05,-112.46,-42.55,-0.9,-54.01,-32.75,-9.29,-36.14,9.17,-172.03,-90.33,-27.87,-128.51,69.63,49.38,7.66,-29.67,-18.72,-43.49,116.16,-80.51,-68.88,-43.52,14.14,-79.63,168.12,154.89,-144.67,-77.57,-18.77,-111.75,-168.48,-116.93,87.78,37.91,42.43,-144.53,-29.77,-83.24,-87.4,-144.61,57.93,-5.67,26.57,-100.86,-80.72,92.38,-166.11,2.0,35.84,-4.37,-13.59,178.23,-108.72,-96.58,-75.28,80.06,-104.11,8.13,-27.3,-43.27,141.92,122.33,-36.45,118.69,79.23,178.05,-46.8,-67.31,125.08,-18.51,10.56,-123.0,-5.53,-38.26,1.29,17.01,-102.7,120.11,-22.14,89.55,-85.05,6.16,-164.31,21.07,-64.02,-3.77,-86.68,-38.8,-91.03,31.55,35.49,2.68,-36.34,-23.68,154.85,-30.43,-78.29,-105.64,-147.95,-142.92,-122.74,147.15,-69.85,-106.49,-102.33,-33.52,15.79,-51.59,25.17,67.02,45.09,117.53,-57.93,-14.17,-57.93,153.46,2.57,161.16,-91.61,15.67,108.77,-113.85,127.25,-79.04,-74.82,-111.98,35.08,-174.79,-51.74,-98.25,-168.19],"m0.5":[22.04,23.24,68.93,43.78,-11.46,102.64,173.39,-171.15,-172.44,85.06,84.22,97.57,50.18,20.0,99.92,153.62,102.37,70.9,100.48,64.97,98.61,60.63,44.51,50.29,42.84,15.31,41.2,100.5,69.91,139.72,-123.71,-15.17,-7.34,29.78,-26.46,15.85,-2.72,-18.58,30.14,70.02,45.76,-33.7,133.62,75.74,93.68,91.29,97.38,76.43,45.03,-132.59,63.12,-38.76,-39.39,52.68,154.07,143.97,110.81,1.23,25.97,41.91,44.24,-1.74,-27.9,153.8,-136.46,164.0,85.15,80.64,53.68,111.47,87.55,67.65,39.98,150.85,121.69,112.17,152.37,-95.96,-26.97,-105.03,-64.8,-85.52,0.45,-38.63,13.38,13.94,21.47,16.69,92.07,151.46,-158.59,-3.62,79.55,92.57,55.31,-157.24,-1.76,78.67,138.47,114.14,153.66,143.53,54.41,-51.03,83.52,81.01,95.02,89.97,69.7,96.19,82.06,106.98,99.19,48.03,-9.68,-99.09,42.52,-136.92,-154.07,-161.24,-106.38,-25.35,5.57,67.68,44.2,34.67,-10.67,26.39,56.49,93.71,109.3,146.27,98.15,116.03,-175.37,28.28,-27.64,162.66,-63.94,119.93,65.63,27.57,169.0,-167.37,148.74,-154.85,75.58,114.69,102.26,121.82,51.22,-68.79,-59.04,-68.39,-49.49,-70.86,-49.12,-27.27,-62.46,-144.96,-62.73,-137.89,-33.9,-39.77,-48.31,-65.22,-48.98,-46.83,-57.97,-54.89,-77.73,-23.22,-64.35,-65.73,-9.48,92.42,-105.79,-18.29,-24.98,17.82,98.54,14.35,-87.82,-73.45,-131.92,-56.19,26.03,-102.19,5.64,39.02,-99.27,-128.15,-124.0,-125.05,-150.18,-67.04,-76.81,-43.2,-37.95,-23.18,-8.04,111.51,132.85,133.45,142.14,92.76,-90.86,-107.7,-142.98,-27.59,128.19,-11.32,-14.5,-52.49,-44.29,-33.2,-15.5,13.74,108.32,-80.53,30.66,51.23,42.07,42.39,3.06,6.94,-10.56,-56.9,126.77,76.31,-115.19,-173.49,-3.24,-103.11,-92.85,-144.11,157.78,91.25,138.77,176.86,121.84,139.55,-121.27,-121.58,-36.1,-76.15,-65.11,-58.38,-47.68,-138.76,-4.01,-123.6,-24.99,-9.05,-36.43,-43.22,-80.0,-44.95,13.47,-31.84,-57.18,-93.96,-53.61,-14.89,27.43,15.09,64.59,13.11,154.18,-119.79,-117.84,-21.08,-45.17,-42.55,-22.58,-30.6,-16.16,-106.76,-91.65,-56.61,-87.5,39.11,43.34,12.25,-14.1,-16.36,-33.26,10.34,-49.98,-63.87,-48.4,-43.1,-64.84,-104.04,-179.12,-151.83,-103.19,-61.25,-98.36,-133.85,-122.95,133.05,74.56,54.56,-157.9,-65.99,-79.67,-84.6,-130.95,161.77,-4.91,13.15,-67.71,-76.69,-74.0,-137.66,-19.29,16.74,1.04,-6.82,-7.81,-72.33,-92.72,-83.78,-48.24,-91.55,-9.91,-20.92,-33.49,-30.81,78.31,-34.4,-7.47,51.94,132.98,132.11,-67.65,143.45,-4.86,4.24,-115.81,-31.64,-36.0,-13.45,-1.88,-75.96,155.94,-21.79,33.63,-70.71,-15.98,-145.93,-126.87,-71.52,-56.0,-76.73,-46.0,-76.08,-40.97,2.69,2.69,-19.49,-22.29,107.97,-29.79,-51.49,-62.0,-120.24,-135.98,-127.88,-176.65,-97.34,-101.63,-102.07,-70.18,-35.88,-48.33,-5.55,37.9,40.18,74.21,1.94,-12.22,-25.3,-23.9,-1.95,154.58,-122.61,-32.33,103.24,-137.49,157.29,-146.36,-92.23,-105.11,-2.48,-165.87,-57.14,-82.61,-124.5],"m0.9":[22.04,23.08,50.46,42.96,31.46,45.43,121.53,155.47,158.74,113.3,99.58,103.2,83.67,91.21,93.83,107.37,100.81,90.95,96.5,81.65,92.68,78.39,73.31,66.24,58.92,52.06,54.38,63.1,61.71,66.76,64.38,45.11,40.96,40.88,23.07,29.59,22.22,9.97,20.01,34.79,30.56,24.74,38.39,44.59,58.6,65.41,64.88,65.36,60.81,65.31,63.37,57.46,36.38,50.18,82.87,88.0,84.76,65.93,51.66,51.75,50.56,40.61,35.39,50.85,46.04,65.54,66.46,69.43,60.13,81.95,77.54,73.42,68.06,83.78,89.44,89.31,94.99,92.02,82.11,111.78,66.74,80.48,26.41,-3.88,14.54,14.53,17.81,16.61,34.34,50.04,38.67,30.21,43.47,61.64,52.41,72.23,45.61,64.58,78.54,83.81,89.95,109.1,90.93,77.37,86.33,83.57,89.09,88.19,84.93,90.91,88.86,92.25,93.26,81.87,82.57,86.41,71.43,80.93,109.07,156.49,140.28,107.6,39.7,70.09,64.71,58.72,33.49,37.78,45.69,68.08,71.69,81.22,79.67,83.71,100.58,61.45,60.21,73.4,63.24,89.08,76.33,73.63,122.8,141.72,132.44,156.34,129.41,128.66,122.86,124.96,104.77,-99.71,-57.22,-69.62,-56.31,-66.68,-54.23,-41.45,-52.11,-56.84,-55.72,-67.89,-52.51,-50.44,-51.57,-57.82,-53.18,-51.94,-54.66,-54.31,-58.87,-48.42,-55.59,-56.21,-43.78,-39.73,-49.3,-39.79,-40.79,-28.66,-13.94,-18.26,-36.08,-42.06,-41.04,-42.19,-21.87,-40.1,-24.33,-9.76,-41.11,-50.77,-67.02,-82.93,-95.53,-77.01,-78.4,-67.85,-55.93,-49.53,-47.9,-38.51,-49.12,140.73,169.58,86.0,-89.1,-99.93,-106.82,-66.29,-120.11,-50.2,-27.87,-43.32,-42.76,-37.12,-29.17,-21.98,-14.27,-25.12,-10.36,11.03,17.47,16.14,10.38,10.45,4.72,-7.14,3.33,9.74,-30.74,-19.8,-10.25,-23.27,-37.55,-100.8,-106.73,41.05,-78.5,-176.5,151.34,157.77,-164.97,-154.45,-115.28,-126.97,-101.23,-76.22,-73.43,-91.91,-60.02,-90.42,-63.62,-57.59,-53.18,-54.42,-61.22,-52.71,-23.72,-37.56,-42.88,-51.8,-48.4,-34.13,-22.85,-18.65,-1.68,-6.63,-7.89,-45.12,-45.09,-29.64,-37.78,-37.46,-31.97,-32.83,-28.85,-35.25,-52.42,-47.44,-55.25,-43.38,-40.67,-27.12,-27.75,-26.27,-30.27,-24.97,-30.15,-36.12,-38.2,-37.2,-43.05,-45.78,-49.1,-68.39,-70.98,-62.96,-75.86,-88.11,-95.38,-96.78,-88.2,-77.07,-98.57,-87.5,-86.41,-86.65,-108.58,-103.49,-70.08,-48.06,-68.2,-72.33,-71.48,-84.97,-65.97,-52.12,-35.71,-30.3,-31.49,-41.51,-60.64,-63.78,-57.05,-63.3,-47.97,-43.68,-43.6,-44.0,-42.59,-40.02,-36.99,-28.7,-32.97,-33.75,-44.08,-39.71,-36.02,-32.73,-59.82,-41.73,-40.76,-30.12,-24.43,-44.6,-39.14,-33.84,-26.21,-41.76,-30.11,-54.46,-47.27,-51.23,-49.24,-54.85,-49.34,-62.0,-53.07,-42.79,-37.55,-37.36,-34.29,-36.51,-34.4,-39.96,-42.1,-52.69,-68.33,-81.17,-97.71,-87.36,-90.3,-93.11,-84.79,-78.04,-69.95,-53.27,-35.06,-27.96,-21.16,-27.62,-22.67,-25.67,-25.59,-20.72,-22.05,-45.52,-32.84,8.65,-60.13,-82.85,-80.48,-77.74,-90.29,-59.02,-84.35,-66.22,-76.67,-92.46],"m0.99":[22.04,23.05,47.75,42.33,33.13,43.04,91.95,124.34,130.41,100.16,94.06,97.56,84.19,88.7,90.49,98.09,95.58,90.54,93.46,85.37,91.52,82.96,80.07,74.45,68.66,65.06,65.54,69.76,68.61,71.02,70.43,63.17,61.21,58.45,52.37,53.4,49.5,42.52,45.98,49.67,48.05,46.69,50.6,51.48,55.53,58.04,57.74,58.31,57.03,57.72,57.74,56.41,52.57,54.78,59.9,61.05,61.16,58.37,56.16,55.85,55.3,53.21,52.28,55.09,54.61,56.85,57.6,58.63,57.21,62.4,61.94,61.41,60.3,63.26,65.33,65.62,66.43,64.89,63.93,63.63,61.98,62.51,58.63,56.45,54.42,52.54,51.42,50.2,53.64,56.4,55.36,53.91,55.13,57.33,56.05,57.75,55.59,57.73,59.12,60.34,60.67,64.07,61.85,59.96,61.99,63.58,65.14,65.63,64.92,68.27,66.72,67.99,69.39,67.37,67.16,66.99,65.85,66.79,68.88,73.66,70.47,68.09,64.66,67.03,66.38,65.7,62.82,61.97,62.96,65.88,66.41,67.64,67.87,68.45,70.01,65.81,65.83,67.16,66.26,69.15,67.81,67.51,72.43,73.46,74.65,75.74,74.44,76.12,76.37,78.64,75.99,72.05,70.65,69.6,68.91,68.15,63.34,60.29,60.63,62.46,59.87,61.73,58.17,55.48,53.65,48.94,45.73,42.92,38.42,30.52,31.54,28.63,23.65,22.52,21.12,27.35,24.13,21.01,20.83,21.48,27.19,23.86,21.0,17.86,19.77,17.07,19.1,17.26,17.32,19.16,14.84,14.73,12.61,9.95,10.61,7.18,4.02,3.08,-1.56,-1.1,-0.26,5.64,8.12,11.6,11.12,13.7,1.57,1.13,3.0,1.05,5.5,2.75,0.24,-1.35,-5.24,-8.07,-6.95,-4.8,-2.02,-4.48,-2.14,2.52,4.84,4.38,3.39,3.59,2.45,-0.3,1.86,3.05,-2.76,-0.53,-0.44,-1.64,-3.42,-7.39,-3.63,-0.2,-1.94,-1.8,3.72,2.95,-2.82,-5.57,-6.09,-6.92,-10.31,-16.64,-15.4,-16.2,-14.25,-19.06,-17.42,-16.71,-18.81,-19.27,-20.83,-22.62,-16.4,-18.78,-21.0,-22.88,-23.81,-21.72,-18.84,-17.96,-14.35,-14.87,-15.55,-21.28,-21.32,-19.93,-22.44,-22.59,-21.97,-22.7,-21.93,-23.0,-27.46,-27.48,-29.31,-26.58,-26.12,-24.15,-24.45,-24.23,-25.39,-24.12,-25.19,-26.57,-27.74,-27.55,-29.11,-29.42,-29.53,-32.14,-34.27,-33.77,-37.29,-39.12,-42.58,-39.59,-38.15,-36.75,-39.24,-39.02,-40.39,-41.94,-47.05,-44.11,-41.51,-39.09,-42.51,-44.87,-44.49,-46.35,-44.2,-42.32,-40.07,-38.85,-39.1,-40.63,-44.31,-45.68,-44.09,-45.37,-43.13,-42.49,-42.53,-42.58,-42.35,-41.83,-41.35,-40.17,-40.87,-40.91,-42.08,-41.59,-41.18,-40.83,-43.39,-41.79,-41.64,-39.89,-38.83,-41.84,-41.09,-40.23,-39.36,-41.12,-39.38,-42.32,-41.64,-42.26,-42.07,-42.81,-42.61,-45.13,-43.73,-42.23,-41.46,-41.34,-40.65,-41.14,-40.5,-41.35,-41.68,-43.16,-45.18,-47.43,-48.06,-49.31,-50.53,-52.49,-51.93,-50.91,-50.95,-48.11,-45.38,-44.4,-44.0,-44.3,-42.64,-42.85,-43.04,-42.04,-43.25,-44.83,-43.69,-42.13,-45.23,-44.95,-45.54,-46.23,-47.63,-45.77,-46.67,-46.91,-48.47,-49.78]};
+</script>
+<script>
+/* multitask-training-loop.html tools (builder newpage). Data for tool 2 is baked from
+   training-loop-toys/tool2-turn-paths.npz by build.py; no external fetches. */
+(function () {
+  /* ---------------- Tool 1: one training step, six stages ---------------- */
+  var root = document.getElementById('t1Demo');
+  if (root) {
+    var STEPS = [
+      { parts: ['fwd', 'lw'], html: 'In the forward pass, the amber band marks where loss-weighting methods act, so every gradient further down the loop already carries their task weights.' },
+      { parts: ['bwd', 'gn', 'a0'], html: 'In the backward pass, the dashed amber path is GradNorm\'s extra read of each task\'s gradient size at W, which it uses to update its loss weights in the forward box.' },
+      { parts: ['bal', 'gm', 'a1'], html: 'Only gradient methods, the purple band, do any work in the Balance box; for loss-weighting methods the weighted gradients simply add up here.' },
+      { parts: ['clip', 'a2'], html: 'The form of clipping decides whether the balanced direction survives, as compared under <a href="#clipping">\u201cOnly global clipping keeps the balanced direction\u201d</a>.' },
+      { parts: ['opt', 'wd', 'a3'], html: 'At the optimizer step, the two green bands are the two forms of weight decay: coupled L2 adds to the gradient, and decoupled decay shrinks the weights directly. Both act after the balancer, so neither passes through it.' },
+      { parts: ['log', 'a4'], html: 'The Log stage changes nothing; it records what the other five did, as listed under <a href="#logging">\u201cWhat to log to see each interaction\u201d</a>.' }
+    ];
+    var svg1 = root.querySelector('svg');
+    var parts = svg1.querySelectorAll('.t1-part');
+    var dots = root.querySelectorAll('.t1-dot');
+    var prev = root.querySelector('[data-act="prev"]');
+    var next = root.querySelector('[data-act="next"]');
+    var read = root.querySelector('.t1-read');
+    var cur = 0;
+    function show(i) {
+      cur = Math.max(0, Math.min(STEPS.length - 1, i));
+      var on = STEPS[cur].parts;
+      for (var j = 0; j < parts.length; j++) {
+        var p = parts[j].getAttribute('data-part');
+        var lit = on.indexOf(p) >= 0;
+        parts[j].classList.toggle('eq-dim', !lit);
+        parts[j].classList.toggle('on', lit);
+      }
+      for (var d = 0; d < dots.length; d++) {
+        dots[d].classList.toggle('active', d === cur);
+        dots[d].setAttribute('aria-pressed', d === cur ? 'true' : 'false');
+      }
+      prev.disabled = cur === 0;
+      next.disabled = cur === STEPS.length - 1;
+      read.innerHTML = STEPS[cur].html;
+    }
+    prev.addEventListener('click', function () { show(cur - 1); });
+    next.addEventListener('click', function () { show(cur + 1); });
+    for (var d = 0; d < dots.length; d++) {
+      dots[d].addEventListener('click', function () { show(parseInt(this.getAttribute('data-i'), 10)); });
+    }
+    show(0);
+  }
+
+  /* ---------------- Tool 3: scale one task's loss ---------------- */
+  var slider = document.getElementById('t3Slider');
+  if (slider) {
+    var NS = 'http://www.w3.org/2000/svg';
+    var OX = 160, OY = 215;
+    var G1 = [3, 1], G2 = [-1, 2];
+    function dot(a, b) { return a[0] * b[0] + a[1] * b[1]; }
+    function nrm(a) { return Math.sqrt(dot(a, a)); }
+    function add(a, b) { return [a[0] + b[0], a[1] + b[1]]; }
+    function mul(a, k) { return [a[0] * k, a[1] * k]; }
+    function pcgrad(a, b) {
+      var c = dot(a, b), ea = a, eb = b;
+      if (c < 0) { ea = add(a, mul(b, -c / dot(b, b))); eb = add(b, mul(a, -c / dot(a, a))); }
+      return add(ea, eb);
+    }
+    function mgda(a, b) {
+      var df = [a[0] - b[0], a[1] - b[1]], n = dot(df, df);
+      var w = n < 1e-20 ? 0.5 : Math.max(0, Math.min(1, dot(b, [b[0] - a[0], b[1] - a[1]]) / n));
+      return add(mul(a, w), mul(b, 1 - w));
+    }
+    function ang(v) { return Math.atan2(v[1], v[0]); }
+    function setLine(el, a, L) {
+      el.setAttribute('x1', OX); el.setAttribute('y1', OY);
+      el.setAttribute('x2', (OX + L * Math.cos(a)).toFixed(1)); el.setAttribute('y2', (OY - L * Math.sin(a)).toFixed(1));
+    }
+    var a1 = ang(G1), a2 = ang(G2);
+    setLine(document.getElementById('t3G1'), a1, 160);  /* 160 keeps the line inside the 320-wide viewBox */
+    setLine(document.getElementById('t3G2'), a2, 170);
+    var t1 = document.getElementById('t3G1t'), t2 = document.getElementById('t3G2t');
+    t1.setAttribute('x', (OX + 170 * Math.cos(a1) - 8).toFixed(1)); t1.setAttribute('y', (OY - 170 * Math.sin(a1) + 34).toFixed(1)); t1.setAttribute('text-anchor', 'end');
+    t2.setAttribute('x', (OX + 170 * Math.cos(a2) - 6).toFixed(1)); t2.setAttribute('y', (OY - 170 * Math.sin(a2) + 4).toFixed(1)); t2.setAttribute('text-anchor', 'end');
+    var grp = document.getElementById('t3Arrows');
+    function mk(cls, w, L) {
+      var l = document.createElementNS(NS, 'line'); l.setAttribute('class', cls); l.style.strokeWidth = w + 'px';
+      var h = document.createElementNS(NS, 'polygon'); h.setAttribute('class', cls + '-h');
+      grp.appendChild(l); grp.appendChild(h); return { l: l, h: h, w: w, L: L };
+    }
+    /* Round 15: three drawn lengths, so each head sits in its own band
+       (GradNorm 119 to 140, PCGrad 94 to 112, MGDA 73 to 88) and no head
+       can touch another at any angle. The tool shows directions only. */
+    var AR = { gn: mk('t3-gn', 8, 140), pc: mk('t3-pc', 5.5, 112), mg: mk('t3-mg', 3.5, 88) };
+    function place(o, a) {
+      var hl = 10 + o.w * 1.4, hw = 4.5 + o.w * 0.75;
+      var tx = OX + o.L * Math.cos(a), ty = OY - o.L * Math.sin(a);
+      var bx = OX + (o.L - hl) * Math.cos(a), by = OY - (o.L - hl) * Math.sin(a);
+      var px = Math.sin(a) * hw, py = Math.cos(a) * hw;
+      o.l.setAttribute('x1', OX); o.l.setAttribute('y1', OY); o.l.setAttribute('x2', bx.toFixed(1)); o.l.setAttribute('y2', by.toFixed(1));
+      o.h.setAttribute('points', tx.toFixed(1) + ',' + ty.toFixed(1) + ' ' + (bx + px).toFixed(1) + ',' + (by + py).toFixed(1) + ' ' + (bx - px).toFixed(1) + ',' + (by - py).toFixed(1));
+    }
+    var val = document.getElementById('t3Val'), bar = document.getElementById('t3Bar');
+    function fmt(s) { return s < 1 ? s.toFixed(2) : (s < 10 ? s.toFixed(1) : Math.round(s).toString()); }
+    function upd() {
+      var lg = parseFloat(slider.value), s = Math.pow(10, lg);
+      var a = mul(G1, s);
+      var gn = add(mul(a, 1 / nrm(a)), mul(G2, 1 / nrm(G2)));
+      place(AR.gn, ang(gn)); place(AR.pc, ang(pcgrad(a, G2))); place(AR.mg, ang(mgda(a, G2)));
+      val.textContent = fmt(s) + '\u00d7';
+      bar.style.width = ((lg + 2) / 4 * 100).toFixed(1) + '%';  /* log bar floor at 0.01x, so 0.1x still shows one decade */
+    }
+    slider.addEventListener('input', upd);
+    upd();
+  }
+
+  /* ---------------- Tool 2: Adam momentum self-running loop ---------------- */
+  var cv = document.getElementById('t2Canvas');
+  if (cv && window.T2DATA) {
+    var D = window.T2DATA, N = D.g.length, TURN = D.turn;
+    var ctx = cv.getContext('2d');
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var beta = '0.9', xf = null;  /* xf: {from, t} momentum and trail crossfade */
+    var mode = reduce ? 'still' : 'opening', k = reduce ? 169 : 129, acc = 0, holdT = 0, fT = 0, fade = 1;
+    var onScreen = false, halfSeen = false, last = null, W = 0, dpr = 1;
+    var SPS = 6, BG = [255, 255, 255], TINT = [44, 62, 80];
+    var BAL = '125,60,152', ADAM = '41,128,185';
+    function resize() {
+      var r = cv.getBoundingClientRect(); dpr = window.devicePixelRatio || 1;
+      W = Math.max(10, r.width); cv.width = Math.round(W * dpr); cv.height = Math.round(W * dpr);
+    }
+    function rad(d) { return d * Math.PI / 180; }
+    function sdiff(a0, a1) { var d = ((a1 - a0) % 360 + 540) % 360 - 180; if (d === -180) d = 180; return d; }
+    function guideAt(i) { return i < TURN ? 45 : -45; }
+    function arrowC(a, L, w, rgb, alpha) {
+      if (alpha <= 0.002) return;
+      var cx = W / 2, cy = W / 2, hl = Math.max(9, w * 2.4), hw = Math.max(4.5, w * 1.35);
+      var c = Math.cos(rad(a)), s = Math.sin(rad(a));
+      var tx = cx + L * c, ty = cy - L * s, bx = cx + (L - hl) * c, by = cy - (L - hl) * s;
+      ctx.globalAlpha = alpha; ctx.strokeStyle = 'rgb(' + rgb + ')'; ctx.fillStyle = 'rgb(' + rgb + ')';
+      ctx.lineWidth = w; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(bx, by); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(bx - s * hw, by - c * hw); ctx.lineTo(bx + s * hw, by + c * hw); ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    function interp(a0, a1, p, L, w, rgb, alpha) {
+      var d = sdiff(a0, a1);
+      if (Math.abs(d) <= 90) arrowC(a0 + d * p, L, w, rgb, alpha);
+      else { arrowC(a0, L, w, rgb, alpha * (1 - p)); arrowC(a1, L, w, rgb, alpha * p); }
+    }
+    function trail(i, b, mult, L) {
+      /* past balanced arrows, weight b^age, drawn if weight >= 5%, opacity 0.3 x weight,
+         max blend: each arrow is an opaque pre-mixed color under 'darken' compositing */
+      var bb = parseFloat(b); if (bb <= 0 || mult <= 0.002) return;
+      ctx.globalCompositeOperation = 'darken';
+      var w = 1, cx = W / 2, cy = W / 2;
+      for (var age = 1; age <= i; age++) {
+        w *= bb; if (w < 0.05) break;
+        var a = 0.3 * w * mult;
+        var col = 'rgb(' + Math.round(BG[0] * (1 - a) + TINT[0] * a) + ',' + Math.round(BG[1] * (1 - a) + TINT[1] * a) + ',' + Math.round(BG[2] * (1 - a) + TINT[2] * a) + ')';
+        var ang = rad(D.g[i - age]), c = Math.cos(ang), s = Math.sin(ang);
+        var hl = 9, hw = 4.5, bx = cx + (L - hl) * c, by = cy - (L - hl) * s;
+        ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 3; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(bx, by); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx + L * c, cy - L * s); ctx.lineTo(bx - s * hw, by - c * hw); ctx.lineTo(bx + s * hw, by + c * hw); ctx.closePath(); ctx.fill();
+      }
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    function draw() {
+      if (!W) resize();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+      ctx.fillStyle = 'rgb(255,255,255)'; ctx.fillRect(0, 0, W, W);
+      var L = W * 0.4, p = (mode === 'play') ? acc : 0, k1 = Math.min(N - 1, k + 1);
+      var q = xf ? Math.min(1, xf.t / 250) : 1;
+      /* trail layer (never above 0.3) */
+      if (xf) { trail(k, xf.from, fade * (1 - q) * (1 - p), L); trail(k1, xf.from, fade * (1 - q) * p, L); }
+      trail(k, beta, fade * q * (1 - p), L); trail(k1, beta, fade * q * p, L);
+      /* faint guide: the noise-free balanced direction */
+      ctx.save(); ctx.setLineDash([6, 6]);
+      var ga = guideAt(k), gb = guideAt(k1), gd = sdiff(ga, gb), gang = rad(ga + gd * p);
+      ctx.globalAlpha = 0.9 * fade; ctx.strokeStyle = 'rgb(139,151,155)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(W / 2, W / 2); ctx.lineTo(W / 2 + L * 1.15 * Math.cos(gang), W / 2 - L * 1.15 * Math.sin(gang)); ctx.stroke();
+      ctx.restore();
+      /* this step's balanced gradient first, about twice the width; momentum on top */
+      interp(D.g[k], D.g[k1], p, L, 9, BAL, fade);
+      if (xf) interp(D['m' + xf.from][k], D['m' + xf.from][k1], p, L, 4.5, ADAM, fade * (1 - q));
+      interp(D['m' + beta][k], D['m' + beta][k1], p, L, 4.5, ADAM, fade * q);
+      ctx.beginPath(); ctx.fillStyle = 'rgb(44,62,80)'; ctx.arc(W / 2, W / 2, 4, 0, Math.PI * 2); ctx.fill();
+    }
+    function tick(ts) {
+      var dt = last === null ? 16 : Math.min(100, ts - last); last = ts;
+      if (onScreen || mode === 'still') {
+        if (xf) { xf.t += dt; if (xf.t >= 250) xf = null; }
+        if (mode === 'opening') { if (halfSeen) { mode = 'hold'; holdT = 0; } }
+        else if (mode === 'hold') { holdT += dt; if (holdT >= 1000) { mode = 'play'; acc = 0; } }
+        else if (mode === 'play') {
+          acc += dt * SPS / 1000;
+          while (acc >= 1) { k++; acc -= 1; }
+          if (k >= N - 1) { k = N - 1; acc = 0; mode = 'endhold'; holdT = 0; }
+        } else if (mode === 'endhold') { holdT += dt; if (holdT >= 1000 / SPS) { mode = 'fadeout'; fT = 0; } }
+        else if (mode === 'fadeout') { fT += dt; fade = Math.max(0, 1 - fT / 250); if (fT >= 250) { k = 0; acc = 0; mode = 'fadein'; fT = 0; fade = 0; } }
+        else if (mode === 'fadein') { fT += dt; fade = Math.min(1, fT / 250); if (fT >= 250) { fade = 1; mode = 'play'; } }
+        if (onScreen) draw();
+      }
+      if (mode !== 'still' || xf) requestAnimationFrame(tick); else { last = null; }
+    }
+    var bs = document.querySelectorAll('#t2Demo .t2-b');
+    function setBeta(b, animate) {
+      if (b === beta) return;
+      if (animate && !reduce) xf = { from: beta, t: 0 }; else xf = null;
+      beta = b;
+      for (var i = 0; i < bs.length; i++) {
+        var on = bs[i].getAttribute('data-b') === beta;
+        bs[i].classList.toggle('active', on); bs[i].setAttribute('aria-checked', on ? 'true' : 'false');
+        bs[i].tabIndex = on ? 0 : -1;
+      }
+      if (reduce) draw();
+    }
+    for (var i = 0; i < bs.length; i++) {
+      var on0 = bs[i].getAttribute('data-b') === beta;
+      bs[i].classList.toggle('active', on0); bs[i].setAttribute('aria-checked', on0 ? 'true' : 'false');
+      bs[i].tabIndex = on0 ? 0 : -1;
+      bs[i].addEventListener('click', function () { setBeta(this.getAttribute('data-b'), true); });
+    }
+    /* Radio group keys: Left/Up and Right/Down move the choice (wrapping), Home and End jump
+       to the ends; focus follows, and the choice goes through the same handler as a click. */
+    bs[0].parentNode.addEventListener('keydown', function (e) {
+      var cur = Array.prototype.indexOf.call(bs, document.activeElement);
+      if (cur < 0) return;
+      var n = bs.length, to = -1;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') to = (cur + 1) % n;
+      else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') to = (cur + n - 1) % n;
+      else if (e.key === 'Home') to = 0;
+      else if (e.key === 'End') to = n - 1;
+      if (to < 0) return;
+      e.preventDefault();
+      bs[to].focus();
+      setBeta(bs[to].getAttribute('data-b'), true);
+    });
+    resize(); draw();
+    window.addEventListener('resize', function () { resize(); draw(); });
+    if ('IntersectionObserver' in window) {
+      new IntersectionObserver(function (es) {
+        es.forEach(function (e) {
+          onScreen = e.isIntersecting && e.intersectionRatio > 0;
+          if (e.intersectionRatio >= 0.5) halfSeen = true;
+        });
+      }, { threshold: [0, 0.5, 1] }).observe(cv);
+    } else { onScreen = true; halfSeen = true; }
+    if (!reduce) requestAnimationFrame(tick);
+    window.__t2 = { state: function () { return { mode: mode, frame: k + 1, beta: beta, fade: fade, onScreen: onScreen }; } };
+  }
+})();
+</script>
+<script>
+        (function () {
+            var nav = document.querySelector('.topnav');
+            function onNavScroll() {
+                nav.classList.toggle('scrolled', window.scrollY > 4);
+            }
+            window.addEventListener('scroll', onNavScroll, { passive: true });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            window.addEventListener('resize', function () {
+                if (window.innerWidth > 768) {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            onNavScroll();
+            var toggle = document.getElementById('navToggle');
+            var panel = document.getElementById('navPanel');
+            if (toggle && panel) {
+                toggle.addEventListener('click', function () {
+                    var open = panel.classList.toggle('open');
+                    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                });
+                panel.addEventListener('click', function (e) {
+                    if (e.target && e.target.classList && e.target.classList.contains('panel-link')) {
+                        panel.classList.remove('open');
+                        toggle.setAttribute('aria-expanded', 'false');
+                    }
+                });
+            }
+            var links = Array.prototype.slice.call(document.querySelectorAll('.tab-strip a.tab-link[href^="#"]'));
+            if (!links.length) return;
+            var tabEls = {};
+            links.forEach(function (a) { tabEls[a.getAttribute('href').slice(1)] = a; });
+            var current = null;
+            function centerTab(tab) {
+                var strip = tab.parentElement;
+                if (!strip || !strip.classList.contains('tab-strip')) return;
+                var sr = strip.getBoundingClientRect();
+                var pr = tab.getBoundingClientRect();
+                strip.scrollLeft += (pr.width >= sr.width) ? (pr.left - sr.left) : (pr.left - sr.left) - (sr.width - pr.width) / 2;
+            }
+            function setActive(id) {
+                if (!tabEls[id] || id === current) return;
+                current = id;
+                links.forEach(function (a) {
+                    a.classList.toggle('active', a.getAttribute('href') === '#' + id);
+                });
+                centerTab(tabEls[id]);
+            }
+            links.forEach(function (a) {
+                a.addEventListener('click', function () {
+                    setActive(a.getAttribute('href').slice(1));
+                });
+            });
+            setActive(links[0].getAttribute('href').slice(1));
+            if ('IntersectionObserver' in window) {
+                var obs = new IntersectionObserver(function (entries) {
+                    entries.forEach(function (en) {
+                        if (en.isIntersecting) setActive(en.target.id);
+                    });
+                }, { rootMargin: '-35% 0px -55% 0px' });
+                Object.keys(tabEls).forEach(function (id) {
+                    var el = document.getElementById(id);
+                    if (el) obs.observe(el);
+                });
+                window.addEventListener('scroll', function () {
+                    if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) {
+                        setActive(links[links.length - 1].getAttribute('href').slice(1));
+                    }
+                }, { passive: true });
+            }
+            window.addEventListener('load', function () {
+                var act = document.querySelector('.tab-strip a.active');
+                if (act) centerTab(act);
+            });
+        })();
+    </script>
+</body>
+</html>

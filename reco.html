@@ -576,49 +576,52 @@
 
    <p>What does "people who liked this also liked that" actually mean? It means taste has a shape. Put every movie as a point in user space: two movies are close if the same users rated them the same way. Or put every movie as a point in genre space: two movies are close if they share genres. Either way, "recommend" becomes "find the <strong>nearest neighbors</strong>." <em>That is all a recommender is: geometry plus a similarity score.</em></p>
 
-   <p>The notebook (the companion notebook behind this page's numbers, in the model-optimization repo the site links) tries three geometries on the MovieLens data (a public collection of movie ratings): similarity from ratings, similarity from genres, and learned embeddings (lists of numbers learned for each user and movie that capture taste). They do not always agree, <em>and the disagreements are the interesting part</em>.</p>
+   <p>My notebook (in the model-optimization repo) tries three geometries on MovieLens, a public collection of movie ratings: similarity from ratings, similarity from genres, and learned embeddings, short lists of numbers learned per user and movie. They do not always agree, <em>and the disagreements are the interesting part</em>.</p>
 
    <h2 id="three-ways">Three ways to say similar</h2>
 
-   <p><strong>Way one: similar raters.</strong> Take the user-movie rating matrix, one row per user, one column per movie, zeros where nobody rated. Take two movie columns and compute their <strong>cosine similarity</strong>. If the same users gave both movies high ratings, the columns point the same way and the cosine is near <code>1</code>. On the notebook's data, Toy Story's closest match this way is Toy Story 2 at <code>0.573</code>.</p>
-
-   <p>One honest footnote: the notebook calls this recommender "content-based," but look at what it actually does. No content is involved, just who rated what. <em>It is collaborative filtering, finding matches from the collective pattern of who rated what rather than from what a movie itself is, wearing a content-based costume.</em></p>
-
-   <p><strong>Way two: similar content.</strong> Forget the ratings. Turn each movie's genre list into a binary vector (<code>1</code> if the movie has the genre, <code>0</code> if not) and compute cosine similarity between those. Toy Story and Toy Story 2 share all five genres, so their similarity is exactly <code>1</code>. This one is the real content-based method.</p>
-
-   <p>Both ways above are this one score:</p>
+   <p><strong>Way one: similar raters.</strong> Compare two movie columns of the user-by-movie rating matrix R, zeros where nobody rated. <strong>Way two: similar content.</strong> Compare two binary genre vectors from the genre matrix G, 1 if the movie has the genre and 0 if not. Both use the same score, <strong>cosine similarity</strong>:</p>
 
    <div class="eq-card" id="recoEqCos">
        <div class="eq-what">Cosine similarity: how far two movie vectors point the same way.</div>
        <div class="eq-line eq-active" data-eqline="0">cos(<span class="eqt" data-k="a" style="color:#2a7fbf">a</span>, <span class="eqt" data-k="b" style="color:#8e44ad">b</span>) = <span class="frac"><span class="top"><span class="eqt" data-k="a" style="color:#2a7fbf">a</span> &#183; <span class="eqt" data-k="b" style="color:#8e44ad">b</span></span><span class="bot">&#8214;<span class="eqt" data-k="a" style="color:#2a7fbf">a</span>&#8214; &#183; &#8214;<span class="eqt" data-k="b" style="color:#8e44ad">b</span>&#8214;</span></span></div>
-       <div class="eq-why eq-active" data-eqline="0">The cosine of two movie vectors is their dot product (pair up the two vectors' numbers, multiply each pair, and add the results) divided by both lengths, each length the square root of the sum of its squared entries. Dividing by the lengths means the score reads only how far the vectors point the same way, never how big the vectors are: near 1 when the same users rated both movies highly, and exactly 1 when two movies share all their genres. <span class="eqt" style="color:#2a7fbf">a</span> and <span class="eqt" style="color:#8e44ad">b</span> are rating columns for rating-cosine or binary genre vectors for genre-cosine, and the dot product is the term <a href="#factor">Learn the taste vectors</a> uses for affinity.</div>
+       <div class="eq-why eq-active" data-eqline="0"><span class="eqt" style="color:#2a7fbf">a</span> and <span class="eqt" style="color:#8e44ad">b</span> are two movies' vectors (rating columns or genre bits). The top is their dot product: multiply matching entries and add. The bottom divides by both lengths, so the score reads only direction, never size: 1 means they point the same way.</div>
      </div>
+
+<pre><code class="language-python">import numpy as np
+
+def cosine(a, b):
+    return a @ b / (np.linalg.norm(a) * np.linalg.norm(b))
+
+# R columns and G rows are indexed differently, so each has its own index
+cosine(R[:, ts_col], R[:, ts2_col])  # way one, ratings: 0.573
+cosine(G[ts_row], G[ts2_row])        # way two, genres: 1.0 (all five shared)</code></pre>
+
+   <p>On the notebook's data, Toy Story 2 is Toy Story's closest match by way one. The notebook calls it "content-based," <em>but no content is involved, just who rated what: it is collaborative filtering in a content-based costume.</em> Way two is the real content-based method.</p>
 
    
 
-   <p><strong>Way three: learn the geometry.</strong> <em>Instead of hand-picking the vectors, learn them.</em> Give every user and every movie a <code>20</code>-number <strong>embedding</strong>, plus a <strong>bias</strong> each (one learned extra number per user and per movie, added to every prediction they take part in), and train the whole thing to predict ratings with gradient descent (the step by step method that nudges each number downhill, in the direction that reduces the prediction error). The prediction for a user and a movie is a dot product plus biases.</p>
+   <p><strong>Way three: learn the geometry.</strong> <em>Instead of hand-picking the vectors, learn them.</em> Every user and every movie gets a 20-number <strong>embedding</strong> plus one learned <strong>bias</strong> number, trained by gradient descent so that a dot product plus biases predicts the rating.</p>
    <figure class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 318" style="max-width:460px" role="img" aria-label="Three ways to turn one movie into a vector: its ratings column, one number per user with 0 where nobody rated; its genre bits, one per genre; or 20 learned numbers. Any of them is compared with another movie's vector, and vectors that point the same way mean similar movies"><text class="" x="70.0" y="24.0" text-anchor="middle" style="font-size:18px;font-weight:700">Ratings</text><rect class="mtd-box" x="46" y="38" width="48" height="32" rx="4" style="fill:#d6eaf8;stroke:#1f618d"/><text class="mtd-t1" x="70.0" y="60.0" text-anchor="middle" style="font-size:17px;font-weight:700">4</text><rect class="mtd-box" x="46" y="74" width="48" height="32" rx="4"/><text class="mtd-sub" x="70.0" y="96.0" text-anchor="middle" style="font-size:17px">0</text><rect class="mtd-box" x="46" y="110" width="48" height="32" rx="4" style="fill:#d6eaf8;stroke:#1f618d"/><text class="mtd-t1" x="70.0" y="132.0" text-anchor="middle" style="font-size:17px;font-weight:700">5</text><rect class="mtd-box" x="46" y="146" width="48" height="32" rx="4"/><text class="mtd-sub" x="70.0" y="168.0" text-anchor="middle" style="font-size:17px">0</text><text class="mtd-sub" x="70.0" y="196.0" text-anchor="middle" style="font-size:16px">one per user</text><line class="mtd-s mtd-cg" x1="70.0" y1="206.0" x2="146.2" y2="236.6" style="stroke-width:2.2px"/><polygon class="mtd-f mtd-cg" points="154.5,240.0 144.5,240.8 147.8,232.5"/><text class="" x="200.0" y="24.0" text-anchor="middle" style="font-size:18px;font-weight:700">Genres</text><rect class="mtd-box" x="176" y="38" width="48" height="32" rx="4" style="fill:#d6eaf8;stroke:#1f618d"/><text class="mtd-t1" x="200.0" y="60.0" text-anchor="middle" style="font-size:17px;font-weight:700">1</text><rect class="mtd-box" x="176" y="74" width="48" height="32" rx="4" style="fill:#d6eaf8;stroke:#1f618d"/><text class="mtd-t1" x="200.0" y="96.0" text-anchor="middle" style="font-size:17px;font-weight:700">1</text><rect class="mtd-box" x="176" y="110" width="48" height="32" rx="4"/><text class="mtd-sub" x="200.0" y="132.0" text-anchor="middle" style="font-size:17px">0</text><rect class="mtd-box" x="176" y="146" width="48" height="32" rx="4" style="fill:#d6eaf8;stroke:#1f618d"/><text class="mtd-t1" x="200.0" y="168.0" text-anchor="middle" style="font-size:17px;font-weight:700">1</text><text class="mtd-sub" x="200.0" y="196.0" text-anchor="middle" style="font-size:16px">one per genre</text><line class="mtd-s mtd-cg" x1="200.0" y1="206.0" x2="200.0" y2="231.0" style="stroke-width:2.2px"/><polygon class="mtd-f mtd-cg" points="200.0,240.0 195.5,231.0 204.5,231.0"/><text class="" x="330.0" y="24.0" text-anchor="middle" style="font-size:18px;font-weight:700">Learned</text><rect class="mtd-box" x="306" y="38" width="48" height="32" rx="4" style="fill:#1f618d;stroke:#1f618d"/><rect class="mtd-box" x="306" y="74" width="48" height="32" rx="4" style="fill:#5dade2;stroke:#1f618d"/><rect class="mtd-box" x="306" y="110" width="48" height="32" rx="4" style="fill:#aed6f1;stroke:#1f618d"/><rect class="mtd-box" x="306" y="146" width="48" height="32" rx="4" style="fill:#2e86c1;stroke:#1f618d"/><text class="mtd-sub" x="330.0" y="196.0" text-anchor="middle" style="font-size:16px">20 numbers</text><line class="mtd-s mtd-cg" x1="330.0" y1="206.0" x2="253.8" y2="236.6" style="stroke-width:2.2px"/><polygon class="mtd-f mtd-cg" points="245.5,240.0 252.2,232.5 255.5,240.8"/><rect class="mtd-box " x="90" y="240" width="220" height="44" rx="7"/><text class="mtd-pu" x="200.0" y="268.0" text-anchor="middle" style="font-size:17px;font-weight:700">compare two vectors</text><text class="mtd-sub" x="200.0" y="310.0" text-anchor="middle" style="font-size:16px">same direction = similar movies</text><line class="mtd-sep" x1="135" y1="8" x2="135" y2="200"/><line class="mtd-sep" x1="265" y1="8" x2="265" y2="200"/></svg><figcaption class="caption">Each way turns a movie into a vector. Similar movies are the ones whose vectors point the same way (high cosine). The learned vectors are trained so that their dot product with a user vector, plus the biases, predicts that user's rating.</figcaption></figure>
 
    <h2 id="empty">The rating table is mostly empty</h2>
 
-   <p>Here is the actual problem. A real ratings table has thousands of users and thousands of movies, and each user rated a handful. Almost every cell is empty. "Recommend" means guessing those empty cells: what would this user rate that movie?</p>
+   <p>A real ratings table has thousands of users and movies, and each user rated a handful, so almost every cell is empty. "Recommend" means guessing those empty cells.</p>
 
-   <p>Similarity alone struggles here. Cosine needs two movies rated by the same users, and in a mostly-empty table two movies often share no raters at all. Then the comparison says nothing. What you want is a model that learns from the ratings that exist and generalizes to the ones that do not.</p>
+   <p>Cosine struggles here: two movies often share no raters at all, and then the comparison says nothing. What you want is a model that learns from the ratings that exist and generalizes to the ones that do not.</p>
 
    <h2 id="factor">Learn the taste vectors</h2>
 
-   <p><strong>Matrix factorization</strong> gives every user a short taste vector and every movie a short vibe vector. The predicted rating is the <strong>dot product</strong>: when a user's taste lines up with a movie's vibe, the prediction is high.</p>
-
-   <p>Two corrections on top: a <strong>user bias</strong>, because some people rate everything high, and an <strong>item bias</strong>, because some movies are just widely loved.</p>
+   <p><strong>Matrix factorization</strong> gives every user a short taste vector and every movie a short vibe vector, plus a <strong>user bias</strong> and an <strong>item bias</strong>.</p>
 
 
    <div class="eq-card" id="recoEqMf">
        <div class="eq-what">The one line that runs this whole section: predict a rating.</div>
        <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="rhat" style="color:#2c3e50">r&#770;<sub>ui</sub></span> = <span class="eqt" data-k="pu" style="color:#2a7fbf">p<sub>u</sub></span> <span class="eqt" data-k="dot" style="color:#2c3e50">&#183;</span> <span class="eqt" data-k="qi" style="color:#8e44ad">q<sub>i</sub></span> + <span class="eqt" data-k="bu" style="color:#c0392b">b<sub>u</sub></span> + <span class="eqt" data-k="bi" style="color:#1e8449">b<sub>i</sub></span></div>
-       <div class="eq-why eq-active" data-eqline="0">The predicted rating <span class="eqt" style="color:#2c3e50">r&#770;<sub>ui</sub></span> for user u on movie i is the dot product of the user's taste vector <span class="eqt" style="color:#2a7fbf">p<sub>u</sub></span> with the movie's vibe vector <span class="eqt" style="color:#8e44ad">q<sub>i</sub></span>, when a user's taste lines up with a movie's vibe the prediction is high, plus the user's bias <span class="eqt" style="color:#c0392b">b<sub>u</sub></span>, because some people rate everything high, plus the movie's bias <span class="eqt" style="color:#1e8449">b<sub>i</sub></span>, because some movies are just widely loved.</div>
+       <div class="eq-why eq-active" data-eqline="0">The predicted rating <span class="eqt" style="color:#2c3e50">r&#770;<sub>ui</sub></span> of user u for movie i is the dot product of taste <span class="eqt" style="color:#2a7fbf">p<sub>u</sub></span> and vibe <span class="eqt" style="color:#8e44ad">q<sub>i</sub></span> (high when they line up), plus <span class="eqt" style="color:#c0392b">b<sub>u</sub></span>, because some people rate everything high, plus <span class="eqt" style="color:#1e8449">b<sub>i</sub></span>, because some movies are just widely loved.</div>
      </div>
 
-   <p>Nothing here is hand-picked. Gradient descent adjusts all the vectors and biases to fit the ratings you have, minimizing prediction error. This is exactly the notebook's <code>forward()</code>:</p>
+   <p>Nothing is hand-picked: gradient descent fits all the vectors and biases to the ratings you have. This is exactly the notebook's forward():</p>
 
 <pre><code class="language-python">def forward(self, user_ids, item_ids):
     user_embeds = self.user_embed(user_ids)
@@ -714,7 +717,7 @@
      <div class="cap-card">
        <strong>What this shows</strong>
        <ul>
-         <li><strong>The point:</strong> the sparse ratings table (sparse means mostly empty: only a few cells hold a rating) factors into two thin tables: one short row per user, one short row per movie. Multiplying them fills every empty cell with a prediction.</li>
+         <li><strong>The point:</strong> the sparse (mostly empty) ratings table factors into two thin tables, one short row per user and one per movie. Multiplying them fills every empty cell with a prediction.</li>
          <li>The thin tables are the whole model: a short row per user and movie (<code>4</code> here, <code>20</code> in the notebook) stands in for the full table.</li>
        </ul>
      </div>
@@ -749,6 +752,9 @@
 .frac{display:inline-flex;flex-direction:column;text-align:center;vertical-align:middle;margin:0 .18em;font-size:.8em;line-height:1.3}
 .frac .top{padding:0 .3em .1em}
 .frac .bot{border-top:2px solid currentColor;padding:.1em .3em 0}
+.rad{display:inline-flex;align-items:flex-start;vertical-align:middle;white-space:nowrap}
+.rad .rad-sym{font-size:1.12em;line-height:1}
+.rad .rad-body{border-top:.09em solid currentColor;line-height:1.18;padding:0 .12em 0 .04em}
       .eq-why{display:none;visibility:hidden;font-size:1rem;color:#475569;padding:.15rem .35rem .4rem;line-height:1.65}
       .eq-why.eq-active{display:block;visibility:visible}
       .eq-card.eq-stepped .eq-line{display:none;visibility:hidden}
@@ -967,12 +973,17 @@
 
    <h2 id="fill-blanks">Factorization fills the blanks</h2>
 
-   <p>The ratings table is mostly blank: each user rated only a handful of the movies in it. Factorization fills a blank by prediction, not by lookup. Once training has given every user a taste vector and every movie a vibe vector, the entry for a pair that never met is the one line from <a href="#factor">Learn the taste vectors</a> applied to that pair: dot the two vectors, add the two biases. Recommending is then just ranking the blanks: predict the unrated movies for one user and put the highest predictions first.</p>
+   <p>Factorization fills a blank by prediction, not lookup: the one line from <a href="#factor">Learn the taste vectors</a>, applied to a pair that never met. Recommending is ranking one user's blanks:</p>
+
+<pre><code class="language-python"># P: users x 20 taste vectors, Q: movies x 20 vibe vectors, b_u, b_i: biases
+scores = Q @ P[u] + b_u[u] + b_i         # predicted rating for every movie
+scores[R[u] &gt; 0] = -np.inf              # skip the movies u already rated
+recommend = np.argsort(-scores)[:k]      # top k blanks, highest first</code></pre>
 
 
    <h2 id="tastetoy">Two honest similarities disagree</h2>
 
-   <p>The toy holds one movie fixed and builds two <code>top-5</code> lists for it, side by side: one from <strong>rating-cosine</strong> (movies rated similarly by the same users, the notebook's mislabeled "content-based" method) and one from <strong>genre-cosine</strong> (movies with similar genres, the real content-based method). Both lists recompute live from a real <code>8</code>-movie by <code>6</code>-user slice of the notebook's MovieLens data. The slice is small enough that its cosines differ from the full-data values quoted earlier (Toy Story to Toy Story 2 reads <code>0.997</code> here); what carries over is the disagreement between the two methods. Entries in only one list get an <strong>only here</strong> marker.</p>
+   <p>The toy holds one movie fixed and builds two top-5 lists for it side by side, one from <strong>rating-cosine</strong> (way one) and one from <strong>genre-cosine</strong> (way two), live from a real 8-movie by 6-user slice of the notebook's MovieLens data. The slice is small, so its cosines differ from the full data (Toy Story to Toy Story 2 reads 0.997 here); what carries over is the disagreement. Entries in only one list get an <strong>only here</strong> marker.</p>
 
    <div class="demo" id="tasteToyDemo">
      <div class="btn-row" id="moviePicker" role="group" aria-label="Pick a movie">
@@ -1215,13 +1226,32 @@ const RECO_PAYLOAD = {"meta":{"note":"Real MovieLens small-latest (notebook's ow
 
    <h2 id="hybrid">The hybrid adds the content back</h2>
 
-   <p>The learned model and the genre similarity capture different things, so the notebook combines them: the same embeddings, plus the genre-cosine score as an extra signal. Learned taste plus stated content.</p>
+   <p>The learned model and the genre similarity capture different things, so the notebook combines them: a learned model plus the genre-cosine score as an extra signal. Learned taste plus stated content.</p>
 
-   <p>The scoreboard needs a ruler. Square each prediction error so big misses hurt more than small ones, average over all test ratings (ratings held out from training and used only to score the model), then take the square root to get back to rating units. That is <strong>RMSE</strong>. An RMSE of <code>2.54</code> means the typical prediction misses by about two and a half stars. <em>Lower is better.</em></p>
+   <p>The scoreboard is <strong>RMSE</strong>, scored on ratings from users held out of training:</p>
 
-   <p>The setup: MovieLens small-latest, <code>movies.csv</code> and <code>ratings.csv</code> merged on <code>movieId</code> (joined into one table by matching the <code>movieId</code> column in both files), pivoted (rearranged so each user becomes a row and each movie a column) to a user-by-movie matrix with missing ratings filled as <code>0</code>. Collaborative filtering: embedding dim <code>20</code>, the Adam optimizer (a standard gradient descent method that adapts each weight's step size as it trains) at learning rate <code>0.001</code> (how big each update step is), <code>50</code> epochs (one epoch is one full pass over all the ratings), MSE (mean squared error: the RMSE ruler above without the final square root) loss. Hybrid: same embeddings plus the genre cosine similarity, <code>20</code> epochs. I reran the notebook's training setup to check the two RMSE numbers.</p>
+   <div class="eq-card" id="recoEqRmse">
+       <div class="eq-what">Root mean squared error: the typical miss, in stars.</div>
+       <div class="eq-line eq-active" data-eqline="0">RMSE = <span class="rad"><span class="rad-sym">&#8730;</span><span class="rad-body"><span class="frac"><span class="top">1</span><span class="bot">N</span></span> &#931;<sub>u,i</sub> (<span style="color:#2c3e50">r&#770;<sub>ui</sub></span> &#8722; r<sub>ui</sub>)&#178;</span></span></div>
+       <div class="eq-why eq-active" data-eqline="0">Each error, prediction <span style="color:#2c3e50">r&#770;<sub>ui</sub></span> minus true rating r<sub>ui</sub>, is squared so big misses hurt more, averaged over the N held-out ratings, then square-rooted back to rating units. Lower is better. Without the root it is the MSE training loss.</div>
+     </div>
 
-   <p>Collaborative filtering alone gets test RMSE <code>2.54</code>. The hybrid gets <code>2.47</code>. The content signal helps, a little.</p>
+   <p>The setup in code, on MovieLens small-latest, as in the notebook. One epoch is one pass over the rated cells in shuffled batches of 128, and Adam is a gradient descent method that adapts each weight's step size. I reran it to check the two RMSE numbers.</p>
+
+<pre><code class="language-python">df = movies.merge(ratings, on="movieId")       # movies.csv + ratings.csv
+R = df.pivot_table(index="userId", columns="title", values="rating").fillna(0).to_numpy()  # blanks = 0
+R_train, R_test = train_test_split(torch.tensor(R, dtype=torch.float32),
+                                   test_size=0.2, random_state=42)  # split by user rows
+u, i = torch.where(R_train &gt; 0)                 # train on rated cells only
+loader = DataLoader(TensorDataset(u, i, R_train[u, i]), batch_size=128, shuffle=True)
+opt = torch.optim.Adam(model.parameters(), lr=0.001)  # model: forward() above, dim 20
+loss_fn = torch.nn.MSELoss()
+for epoch in range(50):                         # the hybrid: 20 full-batch steps
+    for bu, bi, br in loader:
+        loss = loss_fn(model(bu, bi), br)
+        opt.zero_grad(); loss.backward(); opt.step()</code></pre>
+
+   <p>Collaborative filtering alone gets test RMSE 2.54, a typical miss of about two and a half stars. The notebook's hybrid run gets 2.47.</p>
 
    <h2 id="when">When it helps and when it does not</h2>
 
@@ -1229,7 +1259,7 @@ const RECO_PAYLOAD = {"meta":{"note":"Real MovieLens small-latest (notebook's ow
 
    <p><strong>Keep in mind</strong> the cold start: a new user or a new movie has no ratings, so it has no vector, and the model has nothing to say. Genre similarity still works on day one: a new movie arrives with its genres attached.</p>
 
-   <p>And the item bias is honest about a real skew: widely loved movies get recommended to everyone. If you want surprising picks instead of popular ones, the raw prediction needs re-ranking (sorting the list again by a different criterion, here to favor surprising picks instead of only the highest predicted rating).</p>
+   <p>And the item bias is honest about a real skew: widely loved movies get recommended to everyone. If you want surprising picks instead of popular ones, the raw prediction needs re-ranking: sorting the list again by a criterion that favors surprising picks.</p>
 
    <p>Taste has a shape, and the ratings are enough to learn it: two short vectors, one dot product, two biases.</p>
 

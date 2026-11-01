@@ -719,29 +719,28 @@
    </div>
 
 
-   <p>Why would you quantize a model that already works? <em>Because smaller numbers are cheaper, in every way that matters.</em> Smaller model means less memory bandwidth. Fewer bits means fewer multiplies and faster inference (inference is running the trained model on new inputs to get its predictions, as opposed to training it). Integer ops burn less power than float on most hardware. Same model, smaller bills. Two words carry the whole page, so here they are up front: a tensor is the array of numbers a layer holds or passes on, its weights or its activations, and an activation is a layer's output values, the numbers it hands to the next layer after an input runs through it.</p>
+   <p>Why would you quantize a model that already works? <em>Because smaller numbers are cheaper, in every way that matters.</em> A smaller model needs less memory bandwidth, fewer bits mean faster inference (running the trained model on new inputs), and integer ops burn less power than float on most hardware. Two words carry the whole page: a <strong>tensor</strong> is the array of numbers a layer holds or passes on, and an <strong>activation</strong> is a layer's output, the numbers it hands to the next layer.</p>
 
    <p>There are two ways to get there: <strong>Post-Training Quantization (PTQ)</strong>, where you quantize a model after training, and <strong>Quantization-Aware Training (QAT)</strong>, where the model trains with quantization in the loop. PTQ itself comes in two flavors, <strong>Dynamic</strong> and <strong>Static</strong>. I will start with the easy one.</p>
 
    <section>
      <h2 id="dynamic-quantization">Dynamic quantization: no calibration, activations quantized on the fly</h2>
-     <p>I think of dynamic quantization as the lazy version, and I mean that as a compliment. You quantize the weights after training and leave it at that. Activations stay in float32 during inference but get quantized on the fly, per batch. No calibration, no fuss.</p>
+     <p>I think of dynamic quantization as the lazy version, and I mean that as a compliment. You quantize the weights after training and leave it at that. Activations arrive in float32 and get quantized to int8 on the fly, per batch. No calibration, no fuss.</p>
      <pre><code class="language-python">
-import torch.quantization
+import torch.ao.quantization
 model = YourModel()
 model.eval()
-quantized_model = torch.quantization.quantize_dynamic(
+quantized_model = torch.ao.quantization.quantize_dynamic(
     model, {torch.nn.Linear}, dtype=torch.qint8
 )
      </code></pre>
      <p>In this setup:</p>
      <ul>
-        <li>Weights → <code>int8</code> (8-bit integers: each weight stored as one whole number in a single byte, instead of a 32-bit float)</li>
-        <li>Activations → <code>float32</code></li>
-        <li>Quantization of activations happens at runtime, per batch</li>
-        <li>Dequantization happens immediately after matmul (matrix multiplication, the multiply and add work that a Linear layer mostly does)</li>
+        <li>Weights → int8 (8-bit integers: one byte per weight instead of a 32-bit float)</li>
+        <li>Activations → int8 on the fly, with the scale computed from each batch at runtime</li>
+        <li>The matmul (the matrix multiplication a Linear layer does) runs in int8, and its output goes back to float32</li>
      </ul>
-     <p>So why use it? It's stupid easy and gives you a fast win on CPUs, especially for LSTMs (long short-term memory networks, recurrent networks that carry a memory across long sequences, reading text and signals one step at a time) and Linear-heavy models. On a small MNIST (handwritten-digit) CNN (convolutional neural network, a network built from the convolution layers described below) from the companion notebook, dynamic quantization barely moved the needle:</p>
+     <p>So why use it? It's stupid easy and gives you a fast win on CPUs, especially for LSTMs (recurrent networks that read a sequence one step at a time) and Linear-heavy models. On a small MNIST (handwritten-digit) CNN (convolutional neural network) from the companion notebook, it barely moved the needle:</p>
      <div class="stat-grid">
        <div class="stat-card">
          <div class="stat-num">92.72<span class="stat-unit">%</span></div>
@@ -754,27 +753,26 @@ quantized_model = torch.quantization.quantize_dynamic(
          <div class="stat-note">barely moved the needle</div>
        </div>
      </div>
-     <p>But why doesn't it work well for CNNs? Because Conv2d is not matmul. A convolution slides a small filter across the input and, at each stop, multiplies the filter by the patch under it and adds the products up, so one output value sums a whole little patch instead of one row. Conv layers have gnarly memory access patterns and need pre-quantized activations to be efficient. Dynamic quantization doesn't do that. You'd be quantizing every sliding window patch per inference. Not fun. Not fast.</p>
-     <p>Also, dynamic quantization doesn't touch things like BatchNorm (batch normalization, a layer that rescales each batch of activations to a steady range, then shifts them, so training stays stable) or ReLU (the activation that passes positive values through unchanged and zeroes out the negative ones, which is why its outputs span 0 upward in the tables below). It just swaps in dynamic versions of Linear and LSTM layers. So, no fusion here. No point fusing layers if you're not touching them.</p>
+     <p>But why doesn't it work well for CNNs? Because Conv2d is not matmul: a convolution slides a small filter across the input and sums a whole patch at every stop. Conv layers need pre-quantized activations to be efficient, and dynamic quantization would re-quantize every sliding patch per inference. Not fun. Not fast.</p>
+     <p>Dynamic quantization also leaves BatchNorm (a layer that rescales each batch of activations to a steady range) and ReLU (which zeroes negatives and passes positives) alone; it only swaps in dynamic Linear and LSTM layers. So no fusion here.</p>
    </section>
 
    <section>
      <h2 id="static-quantization">Static quantization: calibrate first, run everything in int8</h2>
-     <p>Static quantization is the version I actually deploy. Both weights and activations go to int8. But to quantize activations, you first need to know their range. That is where <strong>calibration</strong> comes in. You run some input data through the model (no labels needed) to collect min and max values of activations. PyTorch uses that to decide how to quantize.</p>
-     <p>This works great for CNNs and edge deployment, running the model on the device at the edge, a phone or a small board, instead of a server in a data center. You get full int8 inference.</p>
-     <p>The workflow looks like this. The listing picks a quantized kernel backend, the library that actually runs the int8 operations on the machine: fbgemm on x86 machines and qnnpack on ARM machines.</p>
+     <p>Static quantization is the version I actually deploy. Weights and activations both go to int8, so first you need the activations' range: <strong>calibration</strong> runs some inputs through the model (no labels needed) and records each activation's min and max. You get full int8 inference, which suits CNNs and edge deployment (a phone or a small board instead of a server).</p>
+     <p>The workflow, where the backend is the library that runs the int8 ops (fbgemm on x86, qnnpack on ARM):</p>
      <pre><code class="language-python">
 model = YourCNN()
 model.eval()
 
 # Fuse conv + bn + relu groups first. One op is cheaper than three.
-torch.quantization.fuse_modules(model, [['conv', 'bn', 'relu']], inplace=True)
+torch.ao.quantization.fuse_modules(model, [['conv', 'bn', 'relu']], inplace=True)
 
 # Pick how to quantize: 'fbgemm' on x86, 'qnnpack' on ARM
-model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+model.qconfig = torch.ao.quantization.get_default_qconfig('fbgemm')
 
 # Insert observers
-torch.quantization.prepare(model, inplace=True)
+torch.ao.quantization.prepare(model, inplace=True)
 
 # Calibration: run real inputs through. No labels needed.
 with torch.no_grad():
@@ -782,7 +780,7 @@ with torch.no_grad():
         model(images)
 
 # Convert to int8
-torch.quantization.convert(model, inplace=True)
+torch.ao.quantization.convert(model, inplace=True)
      </code></pre>
      <p>Same MNIST CNN, this time with static quantization. The accuracy holds and the model shrinks to a quarter of its size:</p>
      <div class="stat-grid">
@@ -797,17 +795,19 @@ torch.quantization.convert(model, inplace=True)
          <div class="stat-note">static quantization, same MNIST CNN</div>
        </div>
      </div>
-     <figure class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 204" style="max-width:480px" role="img" aria-label="Dynamic quantization: weights int8, activations float32 quantized per batch, no calibration. Static quantization: weights int8 and activations int8 with a calibrated range"><text class="" x="160.0" y="22.0" text-anchor="middle" style="font-size:17px;font-weight:700">weights</text><text class="" x="312.0" y="22.0" text-anchor="middle" style="font-size:17px;font-weight:700">activations</text><text class="" x="8.0" y="60.0" text-anchor="start" style="font-size:18px;font-weight:700">Dynamic</text><text class="mtd-sub" x="8.0" y="84.0" text-anchor="start" style="font-size:16px">no calibration</text><rect class="mtd-f mtd-cp" x="110.0" y="40.0" width="100.0" height="36.0" rx="6"/><text class="mtd-qzw" x="160.0" y="64.0" text-anchor="middle" style="font-size:17px;font-weight:700">int8</text><rect class="mtd-f mtd-c2" x="252.0" y="40.0" width="120.0" height="36.0" rx="6"/><text class="mtd-qzw" x="312.0" y="64.0" text-anchor="middle" style="font-size:17px;font-weight:700">float32</text><text class="mtd-sub" x="312.0" y="100.0" text-anchor="middle" style="font-size:16px">quantized per batch</text><line class="mtd-sep" x1="4" y1="116" x2="396" y2="116"/><text class="" x="8.0" y="150.0" text-anchor="start" style="font-size:18px;font-weight:700">Static</text><text class="mtd-sub" x="8.0" y="174.0" text-anchor="start" style="font-size:16px">calibrate first</text><rect class="mtd-f mtd-cp" x="110.0" y="130.0" width="100.0" height="36.0" rx="6"/><text class="mtd-qzw" x="160.0" y="154.0" text-anchor="middle" style="font-size:17px;font-weight:700">int8</text><rect class="mtd-f mtd-cp" x="252.0" y="130.0" width="120.0" height="36.0" rx="6"/><text class="mtd-qzw" x="312.0" y="154.0" text-anchor="middle" style="font-size:17px;font-weight:700">int8</text><text class="mtd-sub" x="312.0" y="190.0" text-anchor="middle" style="font-size:16px">calibrated range</text></svg><figcaption class="caption">Both flavors store weights as int8. Dynamic keeps activations in float32 and quantizes them per batch; static calibrates their range first, so the layers run in int8.</figcaption></figure>
+     <figure class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 204" style="max-width:480px" role="img" aria-label="Dynamic quantization: weights int8, activations int8 with the range set per batch at runtime, no calibration. Static quantization: weights int8 and activations int8 with a calibrated range"><text class="" x="160.0" y="22.0" text-anchor="middle" style="font-size:17px;font-weight:700">weights</text><text class="" x="312.0" y="22.0" text-anchor="middle" style="font-size:17px;font-weight:700">activations</text><text class="" x="8.0" y="60.0" text-anchor="start" style="font-size:18px;font-weight:700">Dynamic</text><text class="mtd-sub" x="8.0" y="84.0" text-anchor="start" style="font-size:16px">no calibration</text><rect class="mtd-f mtd-cp" x="110.0" y="40.0" width="100.0" height="36.0" rx="6"/><text class="mtd-qzw" x="160.0" y="64.0" text-anchor="middle" style="font-size:17px;font-weight:700">int8</text><rect class="mtd-f mtd-c2" x="252.0" y="40.0" width="120.0" height="36.0" rx="6"/><text class="mtd-qzw" x="312.0" y="64.0" text-anchor="middle" style="font-size:17px;font-weight:700">int8</text><text class="mtd-sub" x="312.0" y="100.0" text-anchor="middle" style="font-size:16px">range set per batch</text><line class="mtd-sep" x1="4" y1="116" x2="396" y2="116"/><text class="" x="8.0" y="150.0" text-anchor="start" style="font-size:18px;font-weight:700">Static</text><text class="mtd-sub" x="8.0" y="174.0" text-anchor="start" style="font-size:16px">calibrate first</text><rect class="mtd-f mtd-cp" x="110.0" y="130.0" width="100.0" height="36.0" rx="6"/><text class="mtd-qzw" x="160.0" y="154.0" text-anchor="middle" style="font-size:17px;font-weight:700">int8</text><rect class="mtd-f mtd-cp" x="252.0" y="130.0" width="120.0" height="36.0" rx="6"/><text class="mtd-qzw" x="312.0" y="154.0" text-anchor="middle" style="font-size:17px;font-weight:700">int8</text><text class="mtd-sub" x="312.0" y="190.0" text-anchor="middle" style="font-size:16px">calibrated range</text></svg><figcaption class="caption">Both flavors store weights as int8. Dynamic quantizes activations to int8 on the fly, with the range measured from each batch; static calibrates their range once, before inference.</figcaption></figure>
      <p>So what is actually happening under the hood?</p>
      <h3>Fuse Conv+BN+ReLU into a single op first</h3>
      <p>Before quantizing, you fuse Conv + BatchNorm + ReLU into a single op. Why? It reduces memory overhead, speeds things up, and minimizes numerical errors.</p>
      <h3>QConfig tells PyTorch how to quantize each tensor</h3>
-     <p>QConfig tells PyTorch how to quantize: symmetric vs asymmetric (symmetric keeps zero at zero, with the integer grid centered on zero; asymmetric shifts the grid so it fits a range that sits off to one side), per-tensor (one scale for the whole tensor) vs per-channel (each channel gets its own scale, a channel being one output sheet of a convolution layer, the grid of values one filter produces, so one channel with a wide range does not set the grid for the rest). Example:</p>
+     <p>QConfig tells PyTorch how to quantize each tensor: <strong>symmetric</strong> (the integer grid centered on zero) or <strong>asymmetric</strong> (the grid shifted to fit a range off to one side), and <strong>per-tensor</strong> (one scale for the whole tensor) or <strong>per-channel</strong> (one scale per channel, a channel being the output of one convolution filter):</p>
+     <figure class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 312" style="max-width:480px" role="img" aria-label="Three channels with narrow, narrow and wide weight ranges. With one scale for the whole tensor, the grid ticks are spaced for the wide channel and the two narrow channels hold only the zero tick. With one scale per channel, every channel gets seven ticks across its own range"><text x="8" y="20" style="font-size:18px;font-weight:700">One scale for the whole tensor</text><text class="mtd-sub" x="8" y="60" style="font-size:17px">channel 1</text><rect class="mtd-barbg" x="216.0" y="46" width="48" height="16" rx="4"/><line class="mtd-s mtd-c2" x1="240.0" y1="41" x2="240.0" y2="67" style="stroke-width:2.5px"/><text class="mtd-sub" x="8" y="100" style="font-size:17px">channel 2</text><rect class="mtd-barbg" x="204.0" y="86" width="72" height="16" rx="4"/><line class="mtd-s mtd-c2" x1="240.0" y1="81" x2="240.0" y2="107" style="stroke-width:2.5px"/><text class="mtd-sub" x="8" y="140" style="font-size:17px">channel 3</text><rect class="mtd-barbg" x="100.0" y="126" width="280" height="16" rx="4"/><line class="mtd-s mtd-c2" x1="100.0" y1="121" x2="100.0" y2="147" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="146.7" y1="121" x2="146.7" y2="147" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="193.3" y1="121" x2="193.3" y2="147" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="240.0" y1="121" x2="240.0" y2="147" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="286.7" y1="121" x2="286.7" y2="147" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="333.3" y1="121" x2="333.3" y2="147" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="380.0" y1="121" x2="380.0" y2="147" style="stroke-width:2.5px"/><line class="mtd-sep" x1="0" y1="152" x2="400" y2="152"/><text x="8" y="180" style="font-size:18px;font-weight:700">One scale per channel</text><text class="mtd-sub" x="8" y="220" style="font-size:17px">channel 1</text><rect class="mtd-barbg" x="216.0" y="206" width="48" height="16" rx="4"/><line class="mtd-s mtd-c2" x1="216.0" y1="201" x2="216.0" y2="227" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="224.0" y1="201" x2="224.0" y2="227" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="232.0" y1="201" x2="232.0" y2="227" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="240.0" y1="201" x2="240.0" y2="227" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="248.0" y1="201" x2="248.0" y2="227" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="256.0" y1="201" x2="256.0" y2="227" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="264.0" y1="201" x2="264.0" y2="227" style="stroke-width:2.5px"/><text class="mtd-sub" x="8" y="260" style="font-size:17px">channel 2</text><rect class="mtd-barbg" x="204.0" y="246" width="72" height="16" rx="4"/><line class="mtd-s mtd-c2" x1="204.0" y1="241" x2="204.0" y2="267" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="216.0" y1="241" x2="216.0" y2="267" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="228.0" y1="241" x2="228.0" y2="267" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="240.0" y1="241" x2="240.0" y2="267" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="252.0" y1="241" x2="252.0" y2="267" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="264.0" y1="241" x2="264.0" y2="267" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="276.0" y1="241" x2="276.0" y2="267" style="stroke-width:2.5px"/><text class="mtd-sub" x="8" y="300" style="font-size:17px">channel 3</text><rect class="mtd-barbg" x="100.0" y="286" width="280" height="16" rx="4"/><line class="mtd-s mtd-c2" x1="100.0" y1="281" x2="100.0" y2="307" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="146.7" y1="281" x2="146.7" y2="307" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="193.3" y1="281" x2="193.3" y2="307" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="240.0" y1="281" x2="240.0" y2="307" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="286.7" y1="281" x2="286.7" y2="307" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="333.3" y1="281" x2="333.3" y2="307" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="380.0" y1="281" x2="380.0" y2="307" style="stroke-width:2.5px"/></svg><figcaption class="caption">Orange ticks are the integer grid. One shared scale is set by the widest channel, so the narrow channels round to almost nothing; per-channel scales give every channel the full grid.</figcaption></figure>
+     <p>In code:</p>
      <pre><code class="language-python">
-from torch.quantization import default_per_channel_weight_observer, MinMaxObserver
+from torch.ao.quantization import default_per_channel_weight_observer, MinMaxObserver
 import torch # Ensure torch is imported for dtypes
 
-my_qconfig = torch.quantization.QConfig(
+my_qconfig = torch.ao.quantization.QConfig(
     activation=MinMaxObserver.with_args(dtype=torch.quint8),
     weight=default_per_channel_weight_observer.with_args(dtype=torch.qint8) # Specify dtype for weights
 )
@@ -828,7 +828,7 @@ class MinMaxObserverExample(ObserverBase): # Conceptual
         self.max_val = max(self.max_val, x.max().item())
         return x
      </code></pre>
-     <p>During calibration, these observers record activation stats. Then PyTorch figures out the scale (the integer grid's step size: the float range divided by <code>255</code>) and the zero-point (the integer that stands for exactly <code>0.0</code>) needed to map float values to int8; the two get their own section below.</p>
+     <p>From the recorded min and max, PyTorch computes the <strong>scale</strong> (the integer grid's step size) and the <strong>zero-point</strong> (the integer that stands for exactly 0.0); the recipe is in the cards below.</p>
      <div class="figure">
        <svg viewBox="0 0 900 140" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Calibration flow diagram">
          <defs>
@@ -867,9 +867,16 @@ class MinMaxObserverExample(ObserverBase): # Conceptual
 
    <section>
      <h2 id="histogram-observers">MinMax gets clobbered by outliers: use histogram observers</h2>
-     <p>MinMax gets clobbered by outliers. Histogram observers are smarter. They build a histogram of the activations, simulate multiple clipping thresholds, and pick the one that gives the smallest quantization error.</p>
+     <p>MinMax gets clobbered by outliers. Histogram observers are smarter: they build a histogram of the activations, try many clipping ranges, and keep the one with the smallest quantization error.</p>
+     <div class="eq-card" id="quantRoundTripEqStatic">
+<div class="eq-what">Every quantizer on this page runs the same round trip: squeeze onto the integer grid, then map back.</div>
+<div class="eq-line eq-active" data-eqline="0"><span class="eqt" style="color:#d35400">x<sub>q</sub></span> = clamp(round(<span class="frac"><span class="top"><span class="eqt" style="color:#2a7fbf">x</span></span><span class="bot"><span class="eqt" style="color:#2a7fbf">s</span></span></span>) + <span class="eqt" style="color:#8e44ad">z</span>, int<sub>min</sub>, int<sub>max</sub>)</div>
+<div class="eq-why eq-active" data-eqline="0">Divide the float <span class="eqt" style="color:#2a7fbf">x</span> by the scale <span class="eqt" style="color:#2a7fbf">s</span>, round to the nearest integer, and shift by the zero-point <span class="eqt" style="color:#8e44ad">z</span> so float zero lands exactly on an integer. clamp stops anything past the grid edges int<sub>min</sub> and int<sub>max</sub> at the edge.</div>
+<div class="eq-line eq-active" data-eqline="1"><span class="eqt" style="color:#d35400">x&#770;</span> = <span class="eqt" style="color:#2a7fbf">s</span>&#183;(<span class="eqt" style="color:#d35400">x<sub>q</sub></span> &#8722; <span class="eqt" style="color:#8e44ad">z</span>)</div>
+<div class="eq-why eq-active" data-eqline="1">To dequantize, undo the shift and multiply back up by the scale. <span class="eqt" style="color:#d35400">x&#770;</span> is the float that integer bin stands for.</div>
+</div>
      <pre><code class="language-python">
-import torch.quantization as tq 
+import torch.ao.quantization as tq 
 qconfig_hist = tq.QConfig(
     activation=tq.observer.HistogramObserver.with_args(
         dtype=torch.quint8, qscheme=torch.per_tensor_affine  # qscheme sets how the grid is laid out: per_tensor_affine means one scale and zero-point for the whole tensor, placed anywhere (affine), not pinned symmetric around zero
@@ -878,22 +885,22 @@ qconfig_hist = tq.QConfig(
 )
 model.qconfig = qconfig_hist
      </code></pre>
-     <p>They look at the L2 error (squaring each gap between an original value and its quantized then mapped back value, so big gaps count far more than small ones) between the original and the quantized-dequantized tensor and find the best range for preserving accuracy.</p>
-     <p>This is the point where quantization starts earning its keep for me. It matters most when your activations have long tails, skew, or multimodal distributions (distributions with more than one peak, where the values clump into several separate groups instead of one), the cases where MinMax quietly destroys your accuracy.</p>
+     <div class="eq-card" id="quantHistEqStatic">
+<div class="eq-what">What a histogram observer picks: the range whose round trip loses the least.</div>
+<div class="eq-line eq-active" data-eqline="0">best range = the range r that minimizes &#8214;<span class="eqt" style="color:#2a7fbf">x</span> &#8722; <span class="eqt" style="color:#d35400">x&#770;</span><sub>r</sub>&#8214;<sup>2</sup></div>
+<div class="eq-why eq-active" data-eqline="0"><span class="eqt" style="color:#2a7fbf">x</span> is the original tensor and <span class="eqt" style="color:#d35400">x&#770;</span><sub>r</sub> is the same tensor quantized with range r and mapped back to float. &#8214;&#8230;&#8214;<sup>2</sup> is the L2 error: every gap squared and summed, so big gaps count far more than small ones.</div>
+</div>
+     <p>This is where quantization starts earning its keep for me: it matters most when activations have long tails, skew, or several peaks, the cases where MinMax quietly destroys your accuracy.</p>
    </section>
    <section>
      <h2 id="a-real-histogram-from-a-real-model">A real histogram from a real MNIST model</h2>
-     <p>I keep telling you to look at the histogram. So here, look at a real one. These are actual weights from a small CNN I trained on MNIST for one epoch (one full pass through the training data), the same model as the companion notebook. The filter with the outlier shows what one loud weight does to everyone else: the scale is set by the biggest weight, so one loud weight makes all the quiet ones share a handful of bins.</p>
-     <p>Weights are from SimpleCNN trained <code>1</code> epoch on MNIST (see companion notebook).</p>
-     <p>When you quantize a float, the recipe is two steps: squeeze each value onto the integer grid, then map it back. Dividing by the scale shrinks the float range down to the integer grid, rounding snaps each value to the nearest integer, and the zero-point shifts the grid so float zero lands exactly on an integer.</p>
      
      <h3>Symmetric: zero stays at zero, for weights</h3>
      <ul>
-        <li>The zero-point is <code>0</code>, so the integer grid stays centered on zero.</li>
-        <li>The scale is the largest absolute value divided by <code>127</code> (for int8, typically range <code>[-127, 127]</code> or <code>[-128, 127]</code>)</li>
+        <li>The zero-point is 0, so the integer grid stays centered on zero.</li>
+        <li>The scale is the largest absolute value divided by 127 (for int8, typically range [-127, 127] or [-128, 127])</li>
      </ul>
-     <p>Used for weights. Assumes distribution is centered around <code>0</code> (which is usually true for weights).</p>
-     <p>For weights, with zero staying at zero, the recipe runs in four lines:</p>
+     <p>Used for weights, which are usually centered around 0. On the 4-bit grid of the toy below, the recipe runs in four lines:</p>
 <div class="eq-card" id="quantSymEqStatic">
 <div class="eq-what">The symmetric recipe in four lines: set the scale from the biggest weight, snap with a clamp, map back, and measure the error.</div>
 <div class="eq-line eq-active" data-eqline="0"><span class="eqt" style="color:#2a7fbf">s</span> = <span class="frac"><span class="top">largest |weight|</span><span class="bot"><span class="eqt" style="color:#2c3e50">7</span></span></span></div>
@@ -906,6 +913,7 @@ model.qconfig = qconfig_hist
 <div class="eq-why eq-active" data-eqline="3">MSE is the mean squared gap between each original weight and its mapped back value.</div>
 </div>
      
+     <p>The histogram tool below shows real weights: a small CNN I trained on MNIST for one epoch, the companion notebook's model. The scale is set by the biggest weight, so one loud weight makes all the quiet ones share a handful of bins.</p>
      <div class="bw-demo">
        <div class="bw-controls">
          <label for="rfhFilter">Filter <span id="rfhFilterVal"></span> of 32</label>
@@ -943,14 +951,21 @@ model.qconfig = qconfig_hist
    </section>
    <section>
      <h2 id="where-should-the-range-end">The clipping range decides the whole error tradeoff</h2>
-     <p>Here is the decision that makes or breaks low-bit quantization, and it is embarrassingly simple: <em>where do you cut the range?</em> The <code>4-bit</code> grid itself is settled; what you choose here is how much of the weight range it has to cover. <em>Cut wide and the outliers are safe but the bins get fat. Cut tight and the bins get fine but the outliers get beheaded.</em></p>
-     <p>There are two named strategies for setting the clipping range. <strong>Min-max</strong> sets the range to the tensor's actual minimum and maximum: zero clipping error by construction, but one loud outlier stretches the bins for everyone. <strong>MSE</strong> searches for the range that minimizes the <strong>Frobenius norm</strong> (the size of the whole gap between the weights and their quantized version: the square root of the summed squared gaps) between the weights and their quantized version, outliers be damned: tight bins, but the outliers get clipped. A third trick (Nagel et al., 2021): when a layer has batch norm, set the range from the batch-norm parameters so only large outliers get clipped.</p>
+     <p>Here is the decision that makes or breaks low-bit quantization, and it is embarrassingly simple: <em>where do you cut the range?</em> The 4-bit grid itself is settled; what you choose here is how much of the weight range it has to cover. <em>Cut wide and the outliers are safe but the bins get fat. Cut tight and the bins get fine but the outliers get beheaded.</em></p>
+     <div class="eq-card" id="quantRangeEqStatic">
+<div class="eq-what">Two named strategies for setting the clipping range [q<sub>min</sub>, q<sub>max</sub>].</div>
+<div class="eq-line eq-active" data-eqline="0">min-max: [q<sub>min</sub>, q<sub>max</sub>] = [min <span class="eqt" style="color:#2a7fbf">x</span>, max <span class="eqt" style="color:#2a7fbf">x</span>]</div>
+<div class="eq-why eq-active" data-eqline="0">The range is the tensor's actual minimum and maximum: zero clipping error by construction, but one loud outlier stretches the bins for everyone.</div>
+<div class="eq-line eq-active" data-eqline="1">MSE: [q<sub>min</sub>, q<sub>max</sub>] = the range that minimizes &#8214;<span class="eqt" style="color:#2a7fbf">x</span> &#8722; <span class="eqt" style="color:#d35400">x&#770;</span>&#8214;<sup>2</sup></div>
+<div class="eq-why eq-active" data-eqline="1">&#8214;&#8230;&#8214;<sup>2</sup> is the same squared error the histogram observer minimizes, the summed squared gaps between the weights <span class="eqt" style="color:#2a7fbf">x</span> and their quantized version <span class="eqt" style="color:#d35400">x&#770;</span>. Tight bins, but the outliers get clipped.</div>
+</div>
+     <p>A third trick (Nagel et al., 2021): when a layer has batch norm, set the range from the batch-norm parameters so only large outliers get clipped.</p>
      <div class="figure">
        <img src="figures/papers/quant-fig5-channel-ranges.png" alt="Figure 5 from the quantization whitepaper: boxplots of per-channel weight ranges for the first depthwise-separable layer of MobileNetV2 after BN folding. Most channels are tiny, a few span huge ranges." style="max-width:100%;height:auto;">
        <p class="caption">Rebuilt from Figure 5 of Nagel et al. (arXiv 2021). <a href="https://arxiv.org/abs/2106.08295">arXiv:2106.08295</a></p>
        <p class="caption">Figure 5, verbatim caption: \"Per (output) channel weight ranges of the first depthwise-separable layer in MobileNetV2 after BN folding. The boxplots show the min and max value, the 2nd and 3rd quartile and the median are plotted for each channel.\"</p>
      </div>
-     <p>Figure 5 is why min-max loses. These are per-channel weight ranges from MobileNetV2, a small network built for phones and tight hardware, in its first depthwise-separable layer (a layer that filters each channel separately, then mixes the channels with a cheap 1 by 1 step) after batch-norm folding (folding absorbs the batch norm scale and shift into the convolution weights before quantizing, so batch norm stops being its own layer). Most channels are tiny. A few are enormous. One global min-max range is set by the freaks, and every normal channel pays for it in rounding error.</p>
+     <p>Figure 5 is why min-max loses. These are per-channel weight ranges from MobileNetV2 (a small network built for phones), after batch-norm folding (the batch norm scale and shift absorbed into the convolution weights). Most channels are tiny, a few are enormous, and one global min-max range set by the freaks costs every normal channel rounding error.</p>
      <p>The two lines behind that choice:</p>
 <div class="eq-card" id="quantClipEqStatic">
 <div class="eq-what">Where do you cut the range? The scale follows from the cut, and the total error splits into the two ways a weight can miss.</div>
@@ -960,10 +975,10 @@ model.qconfig = qconfig_hist
 <div class="eq-why eq-active" data-eqline="1">Each weight's squared gap between itself and its quantized then mapped back value is counted as clipping if the weight falls outside the range and as rounding if it falls inside, and both terms are shares over all the weights: each term adds up its kind of squared gap, then divides by the total number of weights, so both terms share the same denominator and add up to the total, the two ways a weight can miss, added.</div>
 </div>
      
-       <p>The same scale and zero-point arithmetic runs on real layers. The observer table below shows <code>conv.0</code>'s activations spanning <code>0</code> to <code>6.478520</code>, mapped to scale <code>0.025406</code> with zero-point <code>0</code>: float <code>0</code> lands exactly on int <code>0</code>, which is why ReLU outputs quantize so cleanly.</p>
+       <p>The same scale and zero-point arithmetic runs on real layers. The observer table below shows conv.0's activations spanning 0 to 6.478520, mapped to scale 0.025406 with zero-point 0: float 0 lands exactly on int 0, which is why ReLU outputs quantize so cleanly.</p>
      <div class="crp-paperbox">
        <h4>MSE beats min-max at 4 bits</h4>
-       <p>In the table headers, W8 means weights quantized to 8 bits and W4 means weights quantized to 4 bits. ImageNet validation accuracy (ImageNet is a large labeled image dataset, and its validation split is the held out set these models are scored on), %, symmetric weight quantization with activations in FP32 (FP32 is float32, the model's original full-precision 32-bit float numbers, unquantized), averaged over <code>5</code> runs. FP32 baselines: ResNet18 (an 18-layer residual network for images) <code>69.68</code>, MobileNetV2 <code>71.72</code>.</p>
+       <p>W8 and W4 mean weights quantized to 8 and 4 bits. ImageNet validation accuracy (%, the held-out split of a large labeled image dataset), symmetric weight quantization with activations in FP32 (the original 32-bit floats), averaged over 5 runs. FP32 baselines: ResNet18 69.68, MobileNetV2 71.72.</p>
        <div class="table-scroll"><table class="datatable">
          <tr><th>Model (FP32)</th><th>W8 Min-Max</th><th>W8 MSE</th><th>W4 Min-Max</th><th>W4 MSE</th></tr>
          <tr><td>ResNet18 (69.68)</td><td>69.57</td><td>69.45</td><td>0.12</td><td>18.82</td></tr>
@@ -1687,11 +1702,10 @@ model.qconfig = qconfig_hist
 
    <section>
      <h2 id="quick-refresher-scale-and-zero-point">Scale and zero-point set the grid</h2>
-     <p>To dequantize, run it backward: undo the zero-point shift, then multiply back up by the scale.</p>
-     <h3>Asymmetric: shift the grid for skewed activations</h3>
+          <h3>Asymmetric: shift the grid for skewed activations</h3>
      <ul>
-        <li>The zero-point is usually not <code>0</code>: the grid shifts to fit the data.</li>
-        <li>The scale is the full value range divided by <code>255</code> (for quint8, typically range <code>[0, 255]</code>)</li>
+        <li>The zero-point is usually not 0: the grid shifts to fit the data.</li>
+        <li>The scale is the full value range divided by 255 (for quint8, typically range [0, 255])</li>
         <li>The zero-point is rounded to the nearest integer, not clamped inside the integer range; the snapped values are what get clamped</li>
      </ul>
      <p>Used for activations. Better when data is skewed (e.g., ReLU output).</p>
@@ -1743,10 +1757,7 @@ model.qconfig = qconfig_hist
 <div class="eq-why eq-active" data-eqline="2"><span class="eqt" style="color:#b9770e">SNR</span>, spelled out as signal-to-noise ratio, is how clean the snapped-back signal is next to the original, measured in decibels: it grows by about 6 for every bit of width, plus a fixed 1.76. Every bit you drop doubles the step size and costs about 6 dB of SNR.</div>
 </div>
      
-     <p>
-         The procedure runs in order: fix the range, choose <code>N</code>, and the bins and the step follow from the lines above. The float range gets chopped into equal steps, and everything inside one bin rounds to the same number: a value snaps to the nearest bin center, and the gap between the value and the center is its rounding error.
-     </p>
-     <p>Fixed range, plus/minus <code>1.2V</code>, like the <a href="adc.html">ADC tutorial</a>: this tool borrows that tutorial's example range and its one fixed sample value, <code>0.37V</code>, a single example voltage inside the range, so you can watch that one sample's rounding error grow as bits drop and the numbers here line up with the ones there:</p>
+          <p>The tool below borrows the <a href="adc.html">ADC tutorial</a>'s range, plus/minus 1.2V, and its one sample, 0.37V, so you can watch that sample's rounding error grow as bits drop:</p>
      <div class="bw-demo">
        <div class="bw-controls">
          <label for="bwSlider">Bit-width N: <span id="bwBits">8</span></label>
@@ -2203,20 +2214,30 @@ model.qconfig = qconfig_hist
 
    <section>
      <h2 id="calibration-matters">Your quantization is only as good as your calibration data</h2>
-     <p>Here is the gotcha that bites everyone once: your quantization is only as good as your calibration data.</p>
-     <p>If the calibration set is too small or does not look like production, the observers learn the wrong ranges. The model either clips real activations or wastes resolution on ranges that never show up. The more your calibration inputs look like the real thing, the better your scale and zero-point.</p>
-     <p>And PTQ is a one-shot deal. Once you calibrate and convert, there is no fine-tuning afterward, no retraining the converted model to win back accuracy. The numbers are baked in, so get the calibration right the first time.</p>
+     <p>The gotcha that bites everyone once: if the calibration set is too small or does not look like production, the observers learn the wrong ranges, and the model either clips real activations or wastes resolution on ranges that never show up.</p>
+     <p>And PTQ is a one-shot deal: no fine-tuning after convert. The numbers are baked in, so get the calibration right the first time.</p>
    </section>
 
    <section>
      <h2 id="be-smart-about-quant-boundaries">Float-int boundaries are expensive, so stay quantized</h2>
-     <p>Quantizing just part of a model? You'd better manage the float-int transitions carefully. These quant-dequant boundaries are expensive. You're moving data from int8 to float and back. It kills performance and breaks layer fusion.</p>
-     <p>Once you quantize, stay quantized as long as possible. You can safely quantize ReLU, pooling, and many elementwise ops.</p>
+     <p>Every quant-dequant boundary moves data from int8 to float and back, which kills performance and breaks layer fusion. So quantize once at the entry, dequantize once at the exit, and keep everything between in int8; ReLU, pooling and many elementwise ops quantize safely. In eager mode you place the stubs yourself (FX inserts these for you):</p>
+     <pre><code class="language-python">
+from torch.ao.quantization import QuantStub, DeQuantStub
+
+class Net(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.quant = QuantStub()      # float to int8, once
+        self.body = nn.Sequential(nn.Conv2d(1, 32, 3), nn.ReLU(), nn.MaxPool2d(2))
+        self.dequant = DeQuantStub()  # int8 to float, once
+    def forward(self, x):
+        return self.dequant(self.body(self.quant(x)))
+     </code></pre>
    </section>
 
    <section>
      <h2 id="visualize-with-fx">See what quantization did to your model with FX</h2>
-     <p>When I need to see what quantization actually did to my model, I reach for FX, PyTorch's graph-tracing toolkit. It traces the model into a graph you can inspect and manipulate.</p>
+     <p>To see what quantization did to my model, I reach for FX, PyTorch's graph-tracing toolkit: it traces the model into a graph you can inspect and manipulate.</p>
      <pre><code class="language-python">
 from torch.fx import symbolic_trace
 graph = symbolic_trace(quantized_model)
@@ -2230,16 +2251,16 @@ graph.print_tabular() # For a more readable table
         <li>Quantize cleanly</li>
         <li>Inspect the graph</li>
      </ul>
-     <p>It is the modern way to quantize in PyTorch. I would not start a new project on the old Eager-mode API, which quantizes the module tree directly, layer by layer, instead of working from a traced graph: FX handles the qconfig recursion (applying the quantization settings, the qconfig, down through the whole module tree, layer by layer and into the layers nested inside each one), the observer insertion, and the fusion correctly, and Eager mode will fight you on all three.</p>
+     <p>It is the modern way to quantize in PyTorch. The old Eager-mode API quantizes the module tree layer by layer; FX works from the traced graph and gets the qconfig recursion (applying the settings into every nested layer), observer insertion and fusion right, where Eager mode will fight you on all three.</p>
      <pre><code class="language-python">
-import torch # Ensure torch is imported for torch.quantization
-qconfig_dict = {"": torch.quantization.get_default_qconfig('fbgemm')}
+import torch
+qconfig_dict = {"": torch.ao.quantization.get_default_qconfig('fbgemm')}
      </code></pre>
    </section>
 
     <section>
         <h2 id="ptq-example-cnn-with-manual-observers">Post-training quantization on a CNN, with manual observers</h2>
-        <p>Let me walk through a concrete PTQ example on a CNN, since this is the part I always had to look up. We manually add <code>PerChannelMinMaxObserver</code> for weights and <code>MinMaxObserver</code> for activation.</p>
+        <p>A concrete PTQ example, the part I always had to look up: PerChannelMinMaxObserver on the weights and MinMaxObserver on the activations, added by hand.</p>
         <pre><code class="language-python">
 class ObserverCNN(nn.Module):
     def __init__(self):
@@ -2288,7 +2309,7 @@ with torch.no_grad():
     for images in calibration_loader:
         _ = model_ptq_example(images)
         </code></pre>
-        <p>Here is what the observers actually report after calibrating the MNIST CNN from the companion notebook. That MNIST CNN is a different, smaller model than the hand-built ObserverCNN in the listing above, and <code>conv.0</code> and <code>conv.2</code> are that model's layer names as the framework prints them. Each layer gets its own min, max, scale, and zero-point:</p>
+        <p>What the observers report after calibrating the companion notebook's MNIST CNN (a smaller model than ObserverCNN; conv.0 and conv.2 are its layer names), one min, max, scale and zero-point per layer:</p>
         <div class="table-scroll">
         <table class="datatable">
           <tr><th>Layer</th><th>Min</th><th>Max</th><th>Scale</th><th>Zero-point</th></tr>
@@ -2305,14 +2326,13 @@ with torch.no_grad():
           <tr><td>fc1</td><td>QuantizedLinear(9216, 128)</td><td>qscheme torch.per_channel_affine</td></tr>
         </table>
         </div>
-        <p><code>calculate_qparams()</code> is a method used by observers in PyTorch to compute scale and zero-point. That's the observer's job to begin with.</p>
-        <p>Both grids from the refresher are now running on a whole model: symmetric keeps the zero-point at <code>0</code> with its scale set by the largest absolute value, and asymmetric shifts the zero-point to fit the range. The observers above reported exactly those two choices, layer by layer.</p>
+        <p>Each observer's calculate_qparams() method computes those scales and zero-points from its recorded min and max. That is the observer's whole job.</p>
         <p>Next up: Quantization-Aware Training, where instead of quantizing after the fact, you train the model to expect the quantization noise.</p>
     </section>
 
     <section>
         <h2 id="quantization-aware-training-qat">Quantization-Aware Training (QAT)</h2>
-        <p>When PTQ costs me too much accuracy, QAT is how I buy it back. It requires retraining, so it is slower, but it learns to suppress outliers and it works well with tuning. You start with inserting observers (which are actually <code>FakeQuantize</code> modules in QAT) just like PTQ. These <code>FakeQuantize</code> modules are differentiable (a gradient can be computed through them, so training can adjust the model around the rounding they simulate). The model learns to adapt to quantization noise.</p>
+        <p>When PTQ costs me too much accuracy, QAT is how I buy it back. It needs retraining, so it is slower, but the model learns to live with quantization noise. The observers become <strong>FakeQuantize</strong> modules, which are differentiable (a gradient flows through them), so training adjusts the model around the rounding they simulate.</p>
         <pre><code class="language-python">
 from torch.ao.quantization import get_default_qat_qconfig
 from torch.ao.quantization.quantize_fx import prepare_qat_fx, convert_fx
@@ -2324,9 +2344,18 @@ model_for_qat.train() # Set model to training mode for QAT
 # Note: prepare_qat_fx typically requires the model to be in training mode.
 model_prepared_qat = prepare_qat_fx(model_for_qat, qconfig_dict_qat)
         </code></pre>
-        <p>Then you train the <code>model_prepared_qat</code> and convert it to int8 with <code>convert_fx</code>, after switching it to eval mode. Inside the <code>FakeQuantize</code> module, it takes the input tensor, computes scale and zero-point, and simulates the quantize-then-dequantize round trip from the refresher above: round onto the int grid, clamp, then map back to float.</p>
-        <p>QAT can learn activation clipping, push small weights out of dead zones (the band of small values around zero that all round to zero, so they carry no signal after quantization), and learn quantization-friendly distributions.</p>
-        <p>QAT simulates quantization in the forward pass. Rounding and clamping are, however, both non-differentiable, so you can't directly backpropagate through them. QAT uses a <strong>Straight-Through Estimator (STE)</strong>, which basically means this operation has no gradient for the non-differentiable part. It pretends the output equals the input during backpropagation for that specific part.</p>
+        <p>Then train it as usual, switch to eval mode, and convert to int8. Each FakeQuantize runs the round trip from the card above (round, clamp, map back) in every forward pass:</p>
+        <pre><code class="language-python">
+for images, labels in train_loader:
+    loss = F.cross_entropy(model_prepared_qat(images), labels)
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+model_prepared_qat.eval()
+model_int8 = convert_fx(model_prepared_qat)
+        </code></pre>
+        <p>QAT can learn activation clipping, push small weights out of dead zones (the band around zero that all rounds to zero), and learn quantization-friendly distributions.</p>
+        <p>Rounding and clamping have no useful gradient, so QAT uses a <strong>Straight-Through Estimator (STE)</strong>: in the backward pass it pretends the rounding output equals its input.</p>
         <pre><code class="language-python">
 class RoundSTE(torch.autograd.Function):
     @staticmethod
@@ -2339,31 +2368,39 @@ class RoundSTE(torch.autograd.Function):
         </code></pre>
         <p>STE is the hack that makes the whole thing trainable. The forward pass quantizes; the backward pass pretends it did not.</p>
         <figure class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 258" style="max-width:480px" role="img" aria-label="Left, the forward pass: rounding turns the input into a staircase of whole-number outputs. Right, the backward pass: the straight-through estimator treats the staircase as the straight line output equals input, so the gradient passes through unchanged"><text class="" x="100.0" y="22.0" text-anchor="middle" style="font-size:18px;font-weight:700">Forward pass</text><line class="mtd-axis" x1="16" y1="136" x2="184" y2="136"/><line class="mtd-axis" x1="100" y1="218" x2="100" y2="54"/><line class="mtd-s mtd-c2" x1="16.8" y1="214.0" x2="35.0" y2="214.0" style="stroke-width:3.5px"/><line class="mtd-s mtd-c2" x1="35.0" y1="188.0" x2="61.0" y2="188.0" style="stroke-width:3.5px"/><line class="mtd-s mtd-c2" x1="61.0" y1="162.0" x2="87.0" y2="162.0" style="stroke-width:3.5px"/><line class="mtd-s mtd-c2" x1="87.0" y1="136.0" x2="113.0" y2="136.0" style="stroke-width:3.5px"/><line class="mtd-s mtd-c2" x1="113.0" y1="110.0" x2="139.0" y2="110.0" style="stroke-width:3.5px"/><line class="mtd-s mtd-c2" x1="139.0" y1="84.0" x2="165.0" y2="84.0" style="stroke-width:3.5px"/><line class="mtd-s mtd-c2" x1="165.0" y1="58.0" x2="183.2" y2="58.0" style="stroke-width:3.5px"/><text class="mtd-t2" x="100.0" y="248.0" text-anchor="middle" style="font-size:16px;font-weight:600">round: output in steps</text><text class="mtd-sub" x="182.0" y="156.0" text-anchor="end" style="font-size:15px">in</text><text class="mtd-sub" x="106.0" y="66.0" text-anchor="start" style="font-size:15px">out</text><text class="" x="300.0" y="22.0" text-anchor="middle" style="font-size:18px;font-weight:700">Backward pass</text><line class="mtd-axis" x1="216" y1="136" x2="384" y2="136"/><line class="mtd-axis" x1="300" y1="218" x2="300" y2="54"/><line class="mtd-s mtd-cg" x1="216.8" y1="214.0" x2="235.0" y2="214.0" style="stroke-width:2.5px;opacity:.25"/><line class="mtd-s mtd-cg" x1="235.0" y1="188.0" x2="261.0" y2="188.0" style="stroke-width:2.5px;opacity:.25"/><line class="mtd-s mtd-cg" x1="261.0" y1="162.0" x2="287.0" y2="162.0" style="stroke-width:2.5px;opacity:.25"/><line class="mtd-s mtd-cg" x1="287.0" y1="136.0" x2="313.0" y2="136.0" style="stroke-width:2.5px;opacity:.25"/><line class="mtd-s mtd-cg" x1="313.0" y1="110.0" x2="339.0" y2="110.0" style="stroke-width:2.5px;opacity:.25"/><line class="mtd-s mtd-cg" x1="339.0" y1="84.0" x2="365.0" y2="84.0" style="stroke-width:2.5px;opacity:.25"/><line class="mtd-s mtd-cg" x1="365.0" y1="58.0" x2="383.2" y2="58.0" style="stroke-width:2.5px;opacity:.25"/><line class="mtd-s mtd-cp" x1="219.4" y1="216.6" x2="380.6" y2="55.4" style="stroke-width:3.5px"/><text class="mtd-pu" x="300.0" y="248.0" text-anchor="middle" style="font-size:16px;font-weight:600">as if output = input</text><text class="mtd-sub" x="382.0" y="156.0" text-anchor="end" style="font-size:15px">in</text><text class="mtd-sub" x="306.0" y="66.0" text-anchor="start" style="font-size:15px">out</text><line class="mtd-sep" x1="200" y1="8" x2="200" y2="256"/></svg><figcaption class="caption">Forward, rounding turns the input into steps. Backward, STE treats the steps as the straight line, so the gradient passes through unchanged.</figcaption></figure>
-        <p>Now let's go back to <code>MovingAverageMinMaxObserver</code> (often used within <code>FakeQuantize</code> for QAT). It uses an exponential moving average of min/max values observed during training. <code>FakeQuantize</code> modules are inserted during <code>prepare_qat_fx()</code> and are active during the training phase. After training, during <code>convert_fx()</code>, they're replaced with real quantization operations.</p>
-        <p>The update rule is a running blend: each batch's observed min and max get folded into the running value, with a momentum term controlling how much each new batch moves it.</p>
+        <p>Inside FakeQuantize the observer is usually a MovingAverageMinMaxObserver, which keeps an exponential moving average of the min and max seen in training. prepare_qat_fx() inserts the FakeQuantize modules; convert_fx() replaces them with real quantized ops.</p>
+<div class="eq-card" id="quantEmaEqStatic">
+<div class="eq-what">The moving-average observer's update, run once per training batch.</div>
+<div class="eq-line eq-active" data-eqline="0"><span class="eqt" style="color:#2a7fbf">m<sub>t</sub></span> = (1 &#8722; <span class="eqt" style="color:#8e44ad">c</span>)&#183;<span class="eqt" style="color:#2a7fbf">m<sub>t&#8722;1</sub></span> + <span class="eqt" style="color:#8e44ad">c</span>&#183;min(batch)</div>
+<div class="eq-why eq-active" data-eqline="0"><span class="eqt" style="color:#2a7fbf">m<sub>t</sub></span> is the running min after batch t, min(batch) is the smallest activation in this batch, and <span class="eqt" style="color:#8e44ad">c</span> is the averaging constant (the momentum term) that sets how far each new batch moves it. The running max updates the same way.</div>
+</div>
     </section>
 
     <section>
         <h2 id="qat-training-fakequantize-details">Warm up the observers, then freeze the quantization noise</h2>
-        <p>QAT is fussy. You need lower learning rates (the learning rate is the step size for each training update, how far the weights move at each step), more epochs, and a good starting point, so always start from your trained FP32 model. And same as static quantization, you fuse BatchNorm into the conv or linear layer before conversion. It stops being its own layer.</p>
-        <p>Here is the trick that actually works: warm up first. Let the observers watch data and learn the scale and zero-point while the model trains. Then freeze those numbers and keep training. The second phase is the model learning to live with one fixed, consistent flavor of quantization noise. If you keep moving the noise around while the model is trying to learn, it never settles.</p>
+        <p>QAT is fussy: lower learning rates (smaller steps per update), more epochs, and always start from your trained FP32 model. As with static quantization, BatchNorm gets fused into the conv or linear layer before conversion.</p>
+        <p>The trick that actually works: warm up first, letting the observers learn the scale and zero-point while the model trains, then freeze them and keep training. The model then learns one fixed flavor of quantization noise instead of a moving one it never settles on:</p>
+        <pre><code class="language-python">
+from torch.ao.quantization import disable_observer
+
+for epoch in range(num_epochs):
+    if epoch == warmup_epochs:
+        model_prepared_qat.apply(disable_observer)  # freeze scale and zero-point
+    train_one_epoch(model_prepared_qat)
+        </code></pre>
         <figure class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 224" style="max-width:480px" role="img" aria-label="Quantization-aware training in phases: during warm up the scale moves as observers update every batch; after the freeze it stays flat while the model adapts to one fixed noise; at convert it is baked into real int8 layers"><rect class="mtd-pic" x="6.0" y="6.0" width="152.0" height="212.0" rx="6"/><text class="" x="82.0" y="28.0" text-anchor="middle" style="font-size:17px;font-weight:700">Warm up</text><text class="mtd-sub" x="82.0" y="182.0" text-anchor="middle" style="font-size:16px">ranges update</text><text class="mtd-sub" x="82.0" y="204.0" text-anchor="middle" style="font-size:16px">every batch</text><rect class="mtd-box" x="162.0" y="6.0" width="136.0" height="212.0" rx="6" style="fill:#ffffff;stroke:#e1e4e8;stroke-width:1px"/><text class="" x="230.0" y="28.0" text-anchor="middle" style="font-size:17px;font-weight:700">Freeze</text><text class="mtd-sub" x="230.0" y="182.0" text-anchor="middle" style="font-size:16px">noise fixed,</text><text class="mtd-sub" x="230.0" y="204.0" text-anchor="middle" style="font-size:16px">model adapts</text><rect class="mtd-pic" x="302.0" y="6.0" width="92.0" height="212.0" rx="6"/><text class="" x="348.0" y="28.0" text-anchor="middle" style="font-size:17px;font-weight:700">Convert</text><text class="mtd-sub" x="348.0" y="182.0" text-anchor="middle" style="font-size:16px">real int8</text><text class="mtd-sub" x="348.0" y="204.0" text-anchor="middle" style="font-size:16px">layers</text><polyline class="mtd-s mtd-c2" style="stroke-width:3px;fill:none" points="10.0,100.5 13.0,114.2 16.0,129.5 19.0,126.5 22.0,132.0 25.0,121.3 28.0,120.9 31.0,108.0 34.0,100.3 37.0,87.7 40.0,84.7 43.0,82.2 46.0,84.0 49.0,91.6 52.0,96.4 55.0,105.9 58.0,114.5 61.0,117.9 64.0,118.9 67.0,121.9 70.0,115.0 73.0,108.8 76.0,104.2 79.0,98.0 82.0,94.3 85.0,92.4 88.0,95.5 91.0,95.1 94.0,98.7 97.0,103.4 100.0,108.9 103.0,109.7 106.0,111.2 109.0,114.7 112.0,109.8 115.0,108.6 118.0,106.6 121.0,105.0 124.0,99.6 127.0,96.6 130.0,98.5 133.0,98.0 136.0,99.5 139.0,102.1 142.0,104.2 145.0,106.3 148.0,107.3 151.0,109.2 154.0,109.2 157.0,107.5 160.0,105.9 160.0,104.0"/><line class="mtd-s mtd-c2" x1="160" y1="104" x2="300" y2="104" style="stroke-width:3px"/><line class="mtd-s mtd-cp" x1="300" y1="104" x2="388" y2="104" style="stroke-width:3px;stroke-dasharray:6 5"/><text class="mtd-t2" x="230.0" y="92.0" text-anchor="middle" style="font-size:16px;font-weight:600">scale</text></svg><figcaption class="caption">The model trains during warm up and freeze. The scale moves during warm up, stays frozen after it, and gets baked into real int8 layers at convert.</figcaption></figure>
         
         <h3>What FakeQuantize actually contains</h3>
-        <p>Under the hood, a <code>FakeQuantize</code> module is two things glued together: an observer that watches the range, and a quantize-then-dequantize simulator. You can poke at both. One thing that tripped me up the first time: the <code>activation_post_process</code> attribute on a layer (e.g., <code>model.conv1.activation_post_process</code>) *is* the <code>FakeQuantize</code> module itself after <code>prepare_qat_fx</code>. Same object, just wearing PyTorch's naming hat.</p>
+        <p>A FakeQuantize module is an observer that watches the range glued to a quantize-then-dequantize simulator, and you can poke at both. One thing that tripped me up: after prepare_qat_fx, the FakeQuantize modules sit at the top of the graph module as activation_post_process_0, activation_post_process_1 and so on (eager-mode prepare_qat attaches one to each layer as layer.activation_post_process instead).</p>
         <pre><code class="language-python">
-if hasattr(model_prepared_qat, 'conv1') and hasattr(model_prepared_qat.conv1, 'activation_post_process'):
-    fq_module = model_prepared_qat.conv1.activation_post_process
-    
-    current_scale, current_zero_point = fq_module.calculate_qparams()
-    print(f"Scale: {current_scale}, Zero-point: {current_zero_point}")
-
-    if hasattr(fq_module, 'min_val') and hasattr(fq_module, 'max_val'):
-         print(f"Observed min by FakeQuant: {fq_module.min_val.item()}, Observed max: {fq_module.max_val.item()}")
-else:
-    print("conv1 or activation_post_process not found in conceptual model_prepared_qat.")
+for name, fq in model_prepared_qat.named_modules():
+    if name.startswith('activation_post_process'):    # a FakeQuantize inserted by FX
+        scale, zero_point = fq.calculate_qparams()
+        obs = fq.activation_post_process               # the observer inside it
+        print(name, scale.item(), zero_point.item(), obs.min_val.item(), obs.max_val.item())
+        break
         </code></pre>
-        <p>So the full loop is warm up, then freeze, as drawn above, with STE handling the backward pass throughout. That frozen phase is where most of the accuracy recovery happens.</p>
+        <p>That frozen phase, with STE handling the backward pass, is where most of the accuracy recovery happens.</p>
     </section>
 
     <section>

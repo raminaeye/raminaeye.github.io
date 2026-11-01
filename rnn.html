@@ -781,20 +781,25 @@
 
     <h2 id="idea">Order matters</h2>
     <p>
-        We all know what <strong>feedforward networks</strong> are. They assume a fixed-size input. It takes an input, multiplies it with some weights, and applies non-linearities (functions that bend their input instead of just scaling it in a straight line, which is what lets a network learn curved and complicated patterns). The order of the input doesn't matter. This is a problem for input sequences, like words in a sentence, stock prices over days, or audio samples, where <em>order actually matters</em>. Different sentences can have different lengths, which would require padding, adding dummy steps to the short sequences so every sequence reaches the same length, or truncating. A feedforward network flattens the whole sequence into one fixed-size input, and the temporal structure, which step came when, is lost.
+        A <strong>feedforward network</strong> takes one fixed-size input, multiplies it by weights and applies non-linearities (functions that bend their input, so the network can learn curved patterns). Flatten a sentence, a price series or an audio clip into that one input and <em>which step came when</em> is lost, and sequences of different lengths need padding (dummy steps) or truncating.
     </p>
     <p>
-        With <strong>recurrence</strong>, instead of processing all input at once, you process one input at a time and carry forward <em>some memory</em>.
+        With <strong>recurrence</strong>, you process one input at a time and carry forward <em>some memory</em>, the hidden state h. In code, with learned weight matrices W and U shared by every step, and one more matrix V that turns the memory into the prediction:
     </p>
+<pre><code class="language-python">
+import numpy as np
+
+h = np.zeros(hidden_dim)          # memory starts empty
+for x_t in sequence:              # one input at a time, in order
+    h = np.tanh(W @ x_t + U @ h)  # mix today's input with yesterday's memory
+y = V @ h                         # the memory becomes the prediction
+</code></pre>
 
     <h3 id="rnn-update">The RNN update: one equation, reused every timestep</h3>
     <p>
-        The current <strong>hidden state</strong> depends on the previous hidden state. <em>That is what gives it memory:</em> at each step the cell mixes today's input with yesterday's memory, squashes the mix, and carries it forward.
+        Each step mixes today's input with yesterday's memory and squashes the mix with tanh into the range from minus one to one. That squeeze keeps the numbers sane, and it is the whole tragedy of the <strong>vanilla RNN</strong>: <em>it slowly erases the past</em>. Here is one step as dataflow:
     </p>
-    <p>
-        today's memory is a squashed mix of today's input and yesterday's memory. What today shouts and what still echoes from yesterday are added together, and a squashing function squeezes the total into the range from minus one to one. That squeeze is the whole tragedy of the <strong>vanilla RNN</strong>: it keeps the numbers sane, and <em>it slowly erases the past</em>. One more matrix turns the hidden state into the output prediction. Here is that update as dataflow:
-    </p>
-
+    
     <figure>
         <svg width="100%" height="270" viewBox="0 0 640 270" style="max-width:640px; height:auto;" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Dataflow of one vanilla RNN step">
             <defs>
@@ -897,13 +902,13 @@
     <div class="eq-card" id="rnnUpdateEq">
             <div class="eq-what">The RNN update: one equation, reused every timestep. One RNN step in one line: mix the incoming word with the last cell's memory, squash, and that is the new memory.</div>
             <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="ht" style="color:#2980b9">h<sub>t</sub></span> = tanh(W&#183;<span class="eqt" data-k="xt" style="color:#2c3e50">x<sub>t</sub></span> + U&#183;<span class="eqt" data-k="htprev" style="color:#27ae60">h<sub>t-1</sub></span>)</div>
-            <div class="eq-why eq-active" data-eqline="0">Mix the incoming word with the last step's memory, then squash: the new cell state carries both forward. <span class="eqt" style="color:#2c3e50">x<sub>t</sub></span>, the word entering, and <span class="eqt" style="color:#27ae60">h<sub>t-1</sub></span>, memory from the last cell, are the two sides of the mix, and <span class="eqt" style="color:#2980b9">h<sub>t</sub></span>, the new cell state, is what comes out. W, U, the learned weights, scale each side, tanh, the squasher, squeezes the total, and &#183; means times: scaling.</div>
+            <div class="eq-why eq-active" data-eqline="0">Mix the incoming word with the last step's memory, then squash: the new hidden state carries both forward. <span class="eqt" style="color:#2c3e50">x<sub>t</sub></span>, the word entering, and <span class="eqt" style="color:#27ae60">h<sub>t-1</sub></span>, memory from the last cell, are the two sides of the mix, and <span class="eqt" style="color:#2980b9">h<sub>t</sub></span>, the new hidden state, is what comes out. W, U, the learned weights, scale each side, tanh, the squasher, squeezes the total, and &#183; means times: scaling.</div>
         </div>
     <p>
-        The equation's <code>W</code> is the <code>W</code> in the dataflow figure's <code>× W</code> box (it multiplies <code>x<sub>t</sub></code>), and the equation's <code>U</code> is the <code>U</code> in the figure's <code>× U</code> box (it multiplies <code>h<sub>t-1</sub></code>). A small bias (a learned offset, one per neuron, added so the result can shift even when the inputs are zero) joins the mix, and one more matrix turns the hidden state into the output prediction; neither appears in this equation line.
+        A learned bias per neuron also joins the mix; it is left off this line.
     </p>
     <p>
-        Each hand-off fades the past; by the third cell the first word is barely there. The hand-off arrow carries <code>h<sub>t</sub></code> to the next cell. Fading shows repeated squashing erasing early content.
+        In the toy below, each hand-off fades the past; by the third cell the first word is barely there.
     </p>
 
     <div class="demo" id="unrollToy">
@@ -954,8 +959,8 @@
 <div class="eq-card" id="unrollToyEq">
             <div class="eq-what">One RNN step in one line: mix the incoming word with the last cell's memory, squash, and that is the new memory.</div>
             <div class="eq-line" data-eqline="0"><span class="eqt" data-k="ht" style="color:#2980b9">h<sub>t</sub></span> = tanh(W&#183;<span class="eqt" data-k="xt" style="color:#2c3e50">x<sub>t</sub></span> + U&#183;<span class="eqt" data-k="htprev" style="color:#27ae60">h<sub>t-1</sub></span>)</div>
-        <div class="eq-why" data-eqline="0">Mix the incoming word with the last step's memory, then squash: the new cell state carries both forward. The same weights are reused at every step, and that weight sharing is what makes the RNN handle sequences of any length.</div>
-            <div class="eq-legend"><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#2c3e50"></span><code>x<sub>t</sub></code> the word entering</span><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#27ae60"></span><code>h<sub>t-1</sub></code> memory from the last cell</span><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#2980b9"></span><code>h<sub>t</sub></code> the new cell state</span><span class="eq-item" data-lines="0"><code>W</code>, <code>U</code> the learned weights; <code>tanh</code> the squasher</span><span class="eq-item" data-lines="0"><code>·</code> times: scaling</span></div>
+        <div class="eq-why" data-eqline="0">Mix the incoming word with the last step's memory, then squash: the new hidden state carries both forward. The same weights are reused at every step, and that weight sharing is what makes the RNN handle sequences of any length.</div>
+            <div class="eq-legend"><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#2c3e50"></span><code>x<sub>t</sub></code> the word entering</span><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#27ae60"></span><code>h<sub>t-1</sub></code> memory from the last cell</span><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#2980b9"></span><code>h<sub>t</sub></code> the new hidden state</span><span class="eq-item" data-lines="0"><code>W</code>, <code>U</code> the learned weights; <code>tanh</code> the squasher</span><span class="eq-item" data-lines="0"><code>·</code> times: scaling</span></div>
         </div></div>
 <div class="caption-card" id="unrollCap">
             <p class="cc-head">What this shows</p>
@@ -1077,20 +1082,20 @@
 
     <h2 id="bptt">Backpropagation through time unrolls the loop</h2>
     <p>
-        Unlike backpropagation, where gradients flow backward through the network and nudge each weight by how much it contributed to the error, flowing layer by layer, in an RNN we have <em>time as well as depth</em>. This is called <strong>backpropagation through time (BPTT)</strong>.
+        In an RNN, gradients flow back through <em>time as well as depth</em>: <strong>backpropagation through time (BPTT)</strong>. Unrolled for T steps, the RNN is a depth-T network that <em>reuses the same weights</em> at every layer, with a loss L<sub>t</sub> at every step (say cross-entropy, the standard loss for picking the right class). The symbol &#8706; marks a partial derivative: how much one quantity moves when another moves.
     </p>
-    <p>
-        Say the loss is cross-entropy (the standard loss for picking the right class, which grows when the model gives the correct answer little probability), summed over all timesteps.
-    </p>
-    <p>
-        When we <strong>unroll</strong> the RNN for <code>T</code> timesteps, it looks like a deep forward network of depth <code>T</code>, where each layer <em>reuses the same weights</em> (the input, recurrent, and output weight matrices). During backprop, gradients flow through the sequence of hidden states. Since parameters are shared, their gradients accumulate across timesteps.
-    </p>
-    <p>
-        The trouble comes from the <strong>recurrent connection</strong>. Since each hidden state depends on the previous one, this expands into a <em>long chain rule across time</em>: the chain rule is the rule that a gradient through nested steps is the product of the per step derivatives, so the gradient picks up one multiplication at every timestep.
-    </p>
+    <div class="eq-card" id="bpttEq">
+            <div class="eq-what">BPTT in three lines: the loss adds up over time, the shared weights collect a gradient from every step, and the path back through time is one long product.</div>
+            <div class="eq-line eq-active" data-eqline="0">L = &#8721;<sub>t=1..T</sub> L<sub>t</sub></div>
+            <div class="eq-why eq-active" data-eqline="0">The total loss L is the per-step loss L<sub>t</sub> summed over all T timesteps.</div>
+            <div class="eq-line eq-active" data-eqline="1"><span class="frac"><span class="top">&#8706;L</span><span class="bot">&#8706;U</span></span> = &#8721;<sub>k=1..T</sub> <span class="frac"><span class="top">&#8706;L</span><span class="bot">&#8706;U<sub>(k)</sub></span></span></div>
+            <div class="eq-why eq-active" data-eqline="1">U is shared, so its gradient is the sum of the gradients through each step's copy of it, U<sub>(k)</sub> at step k. The same holds for W and V.</div>
+            <div class="eq-line eq-active" data-eqline="2"><span class="frac"><span class="top">&#8706;<span class="eqt" data-k="hT" style="color:#2980b9">h<sub>T</sub></span></span><span class="bot">&#8706;<span class="eqt" data-k="h1" style="color:#27ae60">h<sub>1</sub></span></span></span> = <span class="frac"><span class="top">&#8706;<span class="eqt" data-k="hT" style="color:#2980b9">h<sub>T</sub></span></span><span class="bot">&#8706;h<sub>T&#8722;1</sub></span></span>&#183;<span class="frac"><span class="top">&#8706;h<sub>T&#8722;1</sub></span><span class="bot">&#8706;h<sub>T&#8722;2</sub></span></span> &#8943; <span class="frac"><span class="top">&#8706;h<sub>2</sub></span><span class="bot">&#8706;<span class="eqt" data-k="h1" style="color:#27ae60">h<sub>1</sub></span></span></span></div>
+            <div class="eq-why eq-active" data-eqline="2">The chain rule: how much the last hidden state <span class="eqt" data-k="hT" style="color:#2980b9">h<sub>T</sub></span> moves when the first one <span class="eqt" data-k="h1" style="color:#27ae60">h<sub>1</sub></span> moves is a product of per-step derivatives, one factor per timestep. Each factor carries a tanh derivative, which is at most 1.</div>
+        </div>
     <ul>
-        <li><strong>Vanishing gradients.</strong> The gradient from the loss has to travel back through every timestep, and each step multiplies it by a <code>tanh</code> derivative, which is at most <code>1</code>. Multiply a number below <code>1</code> by itself <code>T</code> times and it collapses: after a few dozen steps the signal arriving from step <code>T</code> back at step <code>1</code> is a whisper. I think of it as shouting down a long hallway where every door eats half the sound. The model simply never learns dependencies longer than that hallway.</li>
-        <li><strong>Exploding gradients.</strong> The same chain can run in reverse. If the recurrent weights are large, each timestep multiplies the gradient instead of shrinking it, and the updates blow up to garbage. Same mechanism, opposite disease. This one is at least loud about it: you see NaNs (not a number: the invalid value a calculation produces when the numbers blow up, and once a gradient or the loss becomes one, every update it touches turns into the same invalid value instead of a usable number), not silence.</li>
+        <li><strong>Vanishing gradients.</strong> A product of T factors below 1 collapses: after a few dozen steps almost nothing from the loss reaches step 1, and the model never learns dependencies that long.</li>
+        <li><strong>Exploding gradients.</strong> With large recurrent weights the factors sit above 1 and the product blows up. Same mechanism, opposite disease, and at least a loud one: you see NaNs (not a number, the invalid value an overflowing calculation produces, which then spreads to every update it touches).</li>
     </ul>
 
     <div class="eq-card" id="rnnGradEq">
@@ -1101,13 +1106,13 @@
 
     <figure class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 336" style="max-width:480px" role="img" aria-label="The gradient starts at the loss and flows back through steps 4, 3, 2 and 1, multiplied by w at every step. With w equal to 0.5 it shrinks to 0.125 by step 1; with w equal to 1.5 it grows to about 3.4"><rect class="mtd-box " x="2" y="8" width="62" height="44" rx="7"/><text class="" x="33.0" y="36.0" text-anchor="middle" style="font-size:17px">step 1</text><rect class="mtd-box " x="84" y="8" width="64" height="44" rx="7"/><text class="" x="116.0" y="36.0" text-anchor="middle" style="font-size:17px">step 2</text><rect class="mtd-box " x="168" y="8" width="64" height="44" rx="7"/><text class="" x="200.0" y="36.0" text-anchor="middle" style="font-size:17px">step 3</text><rect class="mtd-box " x="252" y="8" width="64" height="44" rx="7"/><text class="" x="284.0" y="36.0" text-anchor="middle" style="font-size:17px">step 4</text><rect class="mtd-box " x="336" y="8" width="62" height="44" rx="7"/><text class="" x="367.0" y="36.0" text-anchor="middle" style="font-size:17px;font-weight:700">loss</text><line class="mtd-s mtd-c1" x1="64.0" y1="30.0" x2="76.0" y2="30.0" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-c1" points="84.0,30.0 76.0,34.0 76.0,26.0"/><line class="mtd-s mtd-c1" x1="148.0" y1="30.0" x2="160.0" y2="30.0" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-c1" points="168.0,30.0 160.0,34.0 160.0,26.0"/><line class="mtd-s mtd-c1" x1="232.0" y1="30.0" x2="244.0" y2="30.0" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-c1" points="252.0,30.0 244.0,34.0 244.0,26.0"/><line class="mtd-s mtd-c1" x1="316.0" y1="30.0" x2="328.0" y2="30.0" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-c1" points="336.0,30.0 328.0,34.0 328.0,26.0"/><text class="mtd-red" x="200.0" y="80.0" text-anchor="middle" style="font-size:17px;font-weight:600">the gradient flows back, × w at every step</text><line class="mtd-s mtd-cr" x1="368.0" y1="94.0" x2="16.0" y2="94.0" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-cr" points="6.0,94.0 16.0,89.0 16.0,99.0"/><text class="mtd-t1" x="4.0" y="130.0" text-anchor="start" style="font-size:19px;font-weight:700">w = 0.5, it vanishes</text><rect class="mtd-f mtd-c1" x="14.0" y="159.8" width="36" height="2.2" rx="2"/><text class="mtd-sub" x="32.0" y="182.0" text-anchor="middle" style="font-size:18px">0.125</text><rect class="mtd-f mtd-c1" x="98.0" y="157.5" width="36" height="4.5" rx="2"/><text class="mtd-sub" x="116.0" y="182.0" text-anchor="middle" style="font-size:18px">0.25</text><rect class="mtd-f mtd-c1" x="182.0" y="153.0" width="36" height="9.0" rx="2"/><text class="mtd-sub" x="200.0" y="182.0" text-anchor="middle" style="font-size:18px">0.5</text><rect class="mtd-f mtd-c1" x="266.0" y="144.0" width="36" height="18.0" rx="2"/><text class="mtd-sub" x="284.0" y="182.0" text-anchor="middle" style="font-size:18px">1</text><line class="mtd-sep" x1="0" y1="162" x2="316" y2="162"/><text class="mtd-sub" x="368.0" y="158.0" text-anchor="middle" style="font-size:17px">gradient</text><text class="mtd-sub" x="368.0" y="176.0" text-anchor="middle" style="font-size:17px">size</text><text class="mtd-red" x="4.0" y="232.0" text-anchor="start" style="font-size:19px;font-weight:700">w = 1.5, it explodes</text><rect class="mtd-f mtd-cr" x="14.0" y="247.2" width="36" height="60.8" rx="2"/><text class="mtd-sub" x="32.0" y="328.0" text-anchor="middle" style="font-size:18px">3.4</text><rect class="mtd-f mtd-cr" x="98.0" y="267.5" width="36" height="40.5" rx="2"/><text class="mtd-sub" x="116.0" y="328.0" text-anchor="middle" style="font-size:18px">2.25</text><rect class="mtd-f mtd-cr" x="182.0" y="281.0" width="36" height="27.0" rx="2"/><text class="mtd-sub" x="200.0" y="328.0" text-anchor="middle" style="font-size:18px">1.5</text><rect class="mtd-f mtd-cr" x="266.0" y="290.0" width="36" height="18.0" rx="2"/><text class="mtd-sub" x="284.0" y="328.0" text-anchor="middle" style="font-size:18px">1</text><line class="mtd-sep" x1="0" y1="308" x2="316" y2="308"/><text class="mtd-sub" x="368.0" y="304.0" text-anchor="middle" style="font-size:17px">gradient</text><text class="mtd-sub" x="368.0" y="322.0" text-anchor="middle" style="font-size:17px">size</text></svg><figcaption class="caption">The gradient leaves the loss and is multiplied by w at every step on its way back. Below 1 it fades; above 1 it blows up.</figcaption></figure>
     <p>
-        In the tool below, a magnitude above <code>1e2</code> (100) counts as exploded, a magnitude below <code>1e-2</code> (0.01) counts as vanished, and the range between the two counts as safe.
+        In the tool below, a magnitude above 1e2 (100) counts as exploded, below 1e-2 (0.01) counts as vanished, and the range between is safe.
     </p>
     <p>
-        This is the simplified scalar picture. Real Jacobians (each a matrix of partial derivatives, where a partial derivative measures how much one output nudges when a single input nudges and the rest stay fixed) are matrices, not one number, but the exponential dependence on <code>T</code> is the whole story.
+        Here each factor is one number w. In a real RNN each factor is a Jacobian (a matrix of partial derivatives), but the exponential dependence on T is the same.
     </p>
     <p>
-        The exploded end has a standard fix, taught in full in the clipping section that follows this tool.
+        The exploded end has a standard fix, clipping, right after this tool.
     </p>
 
     <div class="demo" id="gradDemo">
@@ -1144,12 +1149,25 @@
 
     <h3 id="clipping-gradients">Clip exploding gradients: same direction, sane size</h3>
     <p>
-        You can deal with exploding gradients using <strong>gradient clipping</strong>. Measure the length of the whole gradient vector, all the parameter gradients flattened into one big vector. If that length is bigger than a threshold, scale every component down proportionally until the length lands exactly on that threshold. <em>Same direction, sane size</em>: a step that wanted to be enormous becomes a step you can actually take.
+        Exploding gradients have a cheap fix, <strong>gradient clipping</strong>: if the gradient is too long, scale it down to a threshold. <em>Same direction, sane size.</em>
     </p>
+    <div class="eq-card" id="clipEq">
+            <div class="eq-what">Clipping in one line: shrink the whole gradient to the threshold, never stretch it.</div>
+            <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="g" style="color:#c0392b">g</span> &#8592; <span class="eqt" data-k="g" style="color:#c0392b">g</span>&#183;min(1, <span class="frac"><span class="top"><span class="eqt" data-k="tau" style="color:#8e44ad">&#964;</span></span><span class="bot">&#8214;<span class="eqt" data-k="g" style="color:#c0392b">g</span>&#8214;</span></span>)</div>
+            <div class="eq-why eq-active" data-eqline="0"><span class="eqt" data-k="g" style="color:#c0392b">g</span> is every parameter gradient flattened into one vector, &#8214;<span class="eqt" data-k="g" style="color:#c0392b">g</span>&#8214; is its length, and <span class="eqt" data-k="tau" style="color:#8e44ad">&#964;</span> is the threshold. While the length is below <span class="eqt" data-k="tau" style="color:#8e44ad">&#964;</span> the factor is 1 and nothing changes; above it every component shrinks by the same factor, so the direction holds and the length lands on <span class="eqt" data-k="tau" style="color:#8e44ad">&#964;</span>.</div>
+        </div>
 
     <figure class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 232" style="max-width:480px" role="img" aria-label="Before clipping, the gradient arrow reaches far past the threshold circle. After clipping, it points the same way but ends exactly on the threshold"><text class="" x="100.0" y="24.0" text-anchor="middle" style="font-size:20px;font-weight:700">Before clipping</text><path class="mtd-guide" d="M116.0,196 A78,78 0 0 0 38.0,118.0"/><line class="mtd-s mtd-cr" x1="38.0" y1="196.0" x2="119.6" y2="98.7" style="stroke-width:4.5px"/><polygon class="mtd-f mtd-cr" points="128.0,88.8 124.6,102.9 114.7,94.5"/><circle class="mtd-dot" cx="38" cy="196" r="3.5"/><text class="mtd-sub" x="120.0" y="218.0" text-anchor="middle" style="font-size:18px">threshold</text><text class="mtd-red" x="100.0" y="58.0" text-anchor="middle" style="font-size:19px;font-weight:600">too long</text><text class="" x="300.0" y="24.0" text-anchor="middle" style="font-size:20px;font-weight:700">After clipping</text><path class="mtd-guide" d="M316.0,196 A78,78 0 0 0 238.0,118.0"/><line class="mtd-s mtd-cr" x1="238.0" y1="196.0" x2="321.6" y2="96.4" style="stroke-width:2.5px;opacity:0.25"/><polygon class="mtd-f mtd-cr" points="328.0,88.8 325.4,99.6 317.7,93.2" style="opacity:0.25"/><line class="mtd-s mtd-cp" x1="238.0" y1="196.0" x2="279.8" y2="146.2" style="stroke-width:4.5px"/><polygon class="mtd-f mtd-cp" points="288.1,136.2 284.8,150.4 274.8,142.0"/><circle class="mtd-dot" cx="238" cy="196" r="3.5"/><text class="mtd-sub" x="320.0" y="218.0" text-anchor="middle" style="font-size:18px">threshold</text><text class="mtd-pu" x="300.0" y="58.0" text-anchor="middle" style="font-size:19px;font-weight:600">same direction</text><line class="mtd-sep" x1="200" y1="8" x2="200" y2="226"/></svg><figcaption class="caption">Clipping keeps the gradient's direction and shrinks its length to the threshold.</figcaption></figure>
     <p>
-        Now, the main issue with RNNs was really <strong>vanishing gradients</strong>, which affects long-term memory. The old memory gets mixed in and there's no control over how information passes to the future; the information washes out. <em>The RNN forgets context.</em>
+        In PyTorch it is one line between backward and step; max_norm is the threshold &#964;:
+    </p>
+<pre><code class="language-python">
+loss.backward()
+torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+optimizer.step()
+</code></pre>
+    <p>
+        Clipping tames the explosions. The bigger problem is <strong>vanishing gradients</strong>: with no control over what passes forward, old information washes out and <em>the RNN forgets context</em>.
     </p>
 
     <hr>
@@ -1163,38 +1181,31 @@
         <li>A <strong>reset gate</strong> decides: <em>Do I ignore the old memory when making new memory, or should I use it?</em></li>
     </ul>
     <p>
-        For example, consider "Ramin wrote the best tutorial, <strong>he</strong> did it again!". A vanilla RNN might overwrite "Ramin" and forget who "he" was. A GRU's update gate would say <em>"don't overwrite Ramin, hold on to that memory."</em> If the update gate decides to just keep the old memory, the hidden state can flow unchanged for many steps. That means gradients can also flow back easily, solving the vanishing gradients problem.
+        Take "Ramin wrote the best tutorial, <strong>he</strong> did it again!". A vanilla RNN might overwrite "Ramin" and forget who "he" was; a GRU's update gate can say <em>"don't overwrite Ramin, hold on to that memory."</em>
     </p>
     <p>
-        Conceptually, the hidden state update is a blend of the old memory and the new candidate,
-        steered by the <strong>update gate</strong>. If the gate is closed, the memory is copied directly
-        from one step to the next. No multiplication, no <code>tanh</code>, just an <strong>identity
-        connection</strong>. During backprop, <em>the gradients flow through this same path, unchanged</em>.
-        This is a shortcut path or linear highway for memory.
+        When the update gate keeps the old memory, the hidden state is copied straight to the next step: no multiplication, no tanh, an <strong>identity connection</strong>. Gradients flow back along that same path <em>unchanged</em>, which is how the GRU beats vanishing gradients.
     </p>
 
     <h3 id="gates">Gates decide what to keep and what to forget</h3>
     <p>
-        There are <code>2</code> gates, both are little feedforward networks with a <strong>sigmoid activation</strong>, so their outputs are <em>between <code>0</code> and <code>1</code></em>.
+        There are 2 gates, both little feedforward networks with a <strong>sigmoid activation</strong>, so their outputs are <em>between 0 and 1</em>.
     </p>
     <ul>
         <li>
             <strong>Update gate</strong>: <em>keep the old hidden state or update it?</em>
-            The sigmoid squashes the result to a number between <code>0</code> and <code>1</code>, interpreted as a switch. <code>0</code> means keep old memory, <code>1</code> means overwrite with new memory.
+            0 means keep the old memory, 1 means overwrite it with new memory.
         </li>
         <li>
             <strong>Reset gate</strong>: <em>when computing new candidate memory, how much of the old memory should I ignore?</em>
         </li>
         <li>
-            <strong>Candidate hidden state</strong>: <em>a proposal for new memory.</em> The reset gate decides how much of the previous state is allowed in. If the reset gate is zero, the candidate ignores past memory and depends only on the input.
+            <strong>Candidate hidden state</strong>: <em>a proposal for new memory.</em> With the reset gate at zero, the candidate ignores past memory and depends only on the input.
         </li>
     </ul>
+    
     <p>
-        Finally, one more matrix turns the hidden state into the output prediction.
-    </p>
-
-    <p>
-        The <strong>update gate</strong> asks: of the past, how much do I throw away? The <strong>reset gate</strong> asks: when I imagine new candidate memory, how much of the past do I let into the room? The candidate is the proposal, and the blend closes the deal. It is a <em>weighted average</em>: fully closed keeps everything, fully open replaces everything, and the network learns the gate setting from data, per step, per neuron. Here is that blend as dataflow:
+        The update is a <em>weighted average</em> of the old memory and the candidate, and the network learns the gate setting from data, per step, per neuron. As dataflow:
     </p>
 
     <figure>
@@ -1238,7 +1249,7 @@
     
 
     <p>
-        The GRU in four lines: two gates decide what to keep and what to forget, a candidate memory is proposed, and the update gate blends old and new. Where the equations below use the odot symbol, ⊙, read it as element-wise multiplication, multiplying matching entries one by one rather than mixing entries together.
+        The GRU in four lines, where &#8857; means element-wise multiplication (matching entries multiplied one by one):
     </p>
     <div class="eq-card" id="gruStaticEq">
             <div class="eq-what">The GRU in four lines, first the two gates: they decide what to keep and what to forget.</div>
@@ -1255,7 +1266,7 @@
             <div class="eq-why eq-active" data-eqline="3">Blend old and new: the update gate picks the mix between keeping the old memory and taking the candidate. <span class="eqt" style="color:#2a7fbf">h<sub>t</sub></span> adds the old memory <span class="eqt" style="color:#2a7fbf">h<sub>t-1</sub></span> scaled by (1 - <span class="eqt" style="color:#c0392b">z<sub>t</sub></span>), the keep share, to the candidate <span class="eqt" style="color:#8e44ad">h&#771;<sub>t</sub></span> scaled by <span class="eqt" style="color:#c0392b">z<sub>t</sub></span>, the replace share. z<sub>t</sub> = 0 keeps everything, z<sub>t</sub> = 1 replaces everything: the update gate is the blend knob.</div>
         </div>
     <p>
-        In the <code>GRUCell</code> code in &#8220;One GRU step, in code&#8221;, each line here is one line there: the two sigmoid lines build <code>z<sub>t</sub></code> and <code>r<sub>t</sub></code> (the comments name them update gate and reset gate), the tanh line builds the candidate, and the last line is the blend.
+        Each line is one line of the GRUCell code below.
     </p>
 
     <h3 id="gru-step">One GRU step, in code</h3>
@@ -1284,15 +1295,8 @@ class GRUCell(nn.Module):
         return h_t
 </code></pre>
     <p>
-        Even though the GRU doesn't have a dedicated <strong>cell state</strong> (a separate memory stream that runs alongside the hidden state rather than being the hidden state itself), <em>it can still preserve long-term memory</em> because the update gate can create identity connections across time steps.
+        The GRU has no separate <strong>cell state</strong> (a memory stream beside the hidden state); the update gate's identity path is enough to <em>preserve long-term memory</em>.
     </p>
-
-    <ul>
-        <li><strong>Shut: the vault.</strong> The update gate is shut: the old memory flows straight through and the candidate is pinched off, so the memory survives unchanged.</li>
-        <li><strong>Open: the reflex.</strong> The update gate is wide open: the candidate floods through and overwrites the old memory.</li>
-        <li><strong>Halfway: the blend.</strong> The update gate sits halfway: both streams feed the output, part old memory and part new candidate.</li>
-        <li><strong>The reset gate's job.</strong> The reset gate pinches the old-memory branch feeding the candidate mixer: starved of the past, the candidate thins out.</li>
-    </ul>
     <p>
         This is the paper that introduced the GRU (Cho et al., EMNLP 2014). Below is its real Figure 2, the hidden-unit diagram, with its original caption.
     </p>
@@ -1304,7 +1308,7 @@ class GRUCell(nn.Module):
         <figcaption><strong>Figure 2.</strong> An illustration of the proposed hidden activation function. The update gate <code>z</code> selects whether the hidden state is to be updated with a new hidden state <code>h̃</code>. The reset gate <code>r</code> decides whether the previous hidden state is ignored. See Eqs. (5)-(8) for the detailed equations of <code>r</code>, <code>z</code>, <code>h</code> and <code>h̃</code>. Figure 2 of Cho et al. (EMNLP 2014). <a href="https://arxiv.org/abs/1406.1078">arXiv:1406.1078</a></figcaption>
     </figure>
     <p>
-        One quirk worth knowing: the paper writes the blend exactly the way this page does, with <code>(1 minus z)</code> weighting the <em>old</em> state and <code>z</code> weighting the new candidate, so fully open replaces the old memory. The flipped form, <code>z</code> weighting the old state, is the later library convention (PyTorch's GRU uses it). Same idea, mirrored knob. If a library's <code>z</code> feels backwards next to the paper, that is why.
+        Cho et al. and PyTorch put z on the old state; this page follows Chung et al. (2014), which puts z on the candidate. Same idea, mirrored knob.
     </p>
 
     <div class="demo" id="gruToy">
@@ -1654,15 +1658,15 @@ class GRUCell(nn.Module):
         <strong>LSTM (Long Short-Term Memory)</strong> separates memory into two parts and uses <em>three gates</em> to carefully control what flows into, out of, and stays within these memories.
     </p>
     <p>
-        The LSTM keeps two books instead of one. The cell state is the long ledger: it runs straight through the cell with no nonlinearity squashing it, so information (and, during backprop, gradients) can ride it across hundreds of steps almost untouched. <em>That unbroken line is the entire trick.</em> The hidden state is the note I hand you right now: the short-term read, what the network is thinking at this step, built from the ledger but filtered for immediate use.
+        The <strong>cell state</strong> C is the long ledger: it runs through the cell with no squashing nonlinearity, so information and gradients ride it across hundreds of steps. <em>That unbroken line is the entire trick.</em> The <strong>hidden state</strong> h is the short-term read, filtered from the ledger for this step.
     </p>
     <p>
         <strong>Three gates</strong> guard the ledger, and each one is <em>a question the network asks every step</em>:
     </p>
     <ol>
-        <li><strong>Forget gate</strong>: <em>Do I still need this?</em> It looks at the old ledger and erases the entries that stopped mattering. Ruthless, but somebody has to take out the trash.</li>
-        <li><strong>Input gate</strong>: <em>Is this worth writing down?</em> It decides how much of the new candidate actually gets added to the ledger. Not every thought deserves ink.</li>
-        <li><strong>Output gate</strong>: <em>What do I show right now?</em> It filters the ledger down into the hidden state, the short-term read the rest of the network gets to see.</li>
+        <li><strong>Forget gate</strong>: <em>Do I still need this?</em> It looks at the old ledger and erases the entries that stopped mattering.</li>
+        <li><strong>Input gate</strong>: <em>Is this worth writing down?</em> It decides how much of the new candidate actually gets added to the ledger.</li>
+        <li><strong>Output gate</strong>: <em>What do I show right now?</em> It filters the ledger down into the hidden state.</li>
     </ol>
 
     <figure>
@@ -1705,9 +1709,7 @@ class GRUCell(nn.Module):
     </figure>
 
     <h3 id="lstm-update">The LSTM update</h3>
-    <p>The new <strong>long-term memory</strong> is formed by keeping some of the old memory and adding some new information.</p>
-    <p>The <strong>forget gate</strong> decides what fraction of yesterday's balance survives; the <strong>input gate</strong> decides how much of today's deposit, the candidate, gets added. Notice what is missing: there is no squashing nonlinearity on this line. The <strong>cell state</strong> is only ever scaled and added, <em>never squashed</em>, which is why gradients walk straight back down the highway instead of vanishing.</p>
-    <p>The <strong>short-term working memory</strong> is a <em>filtered view</em> of the long-term memory: the <strong>output gate</strong> decides how much of the (squashed) balance to show the world right now. Each gate is a mix of the input and the previous hidden state, passed through a <strong>sigmoid</strong> function. Here is the ledger as dataflow:</p>
+    <p>The <strong>forget gate</strong> scales yesterday's balance, the <strong>input gate</strong> scales today's deposit (the candidate), and they add. The cell state is only ever scaled and added, <em>never squashed</em>, which is why gradients walk straight back down the highway. The <strong>output gate</strong> then picks how much of the squashed balance to show as h. Each gate is a sigmoid of the input and the previous hidden state. As dataflow:</p>
 
     <figure>
         <svg width="100%" height="225" viewBox="0 0 640 225" style="max-width:640px; height:auto;" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Dataflow of the LSTM cell update">
@@ -1775,15 +1777,7 @@ class GRUCell(nn.Module):
             <div class="eq-line eq-active" data-eqline="1"><span class="eqt" data-k="ht" style="color:#3498db">h<sub>t</sub></span> = <span class="eqt" data-k="ot" style="color:#c0392b">o<sub>t</sub></span> &#8857; tanh(<span class="eqt" data-k="ct" style="color:#3498db">C<sub>t</sub></span>)</div>
             <div class="eq-why eq-active" data-eqline="1">The new hidden state: the squashed cell, filtered by the output gate. <span class="eqt" style="color:#3498db">C<sub>t</sub></span> is the cell state built in the update line above, and &#8857; is element-wise mixing, the output gate scaling the squashed cell entry by entry. The cell state is squashed by tanh to between -1 and 1, then the output gate lets through only its share: it picks how much of the squashed cell state to show as the hidden state <span class="eqt" style="color:#3498db">h<sub>t</sub></span>.</div>
         </div>
-    <p>
-        These six lines are the gates' doing alone, with the weights set aside. A real LSTM learns the candidate through its own weight matrices.
-    </p>
-    <ul>
-        <li><strong>The input pours in.</strong> The input gate is open: drops pour into the tank and the level rises.</li>
-        <li><strong>Sealed: the vault.</strong> The tank is sealed like a vault: nothing drains out, so the level never drops, step after step. That flat line is the whole trick.</li>
-        <li><strong>The drain: the level falls.</strong> The gate keeps nothing, so the level falls and keeps falling. Erasure is permanent.</li>
-        <li><strong>The output reveals.</strong> The output gate opens its shutter: the hidden state flows out, as much as the shutter lets through.</li>
-    </ul>
+    
 
     <div class="demo" id="lstmToy">
 <h4>Toy: the memory tank</h4>
@@ -2149,12 +2143,9 @@ class GRUCell(nn.Module):
         The forget gate stays open (nothing leaks out), so the write gate does all the routing alone. That gate is the LSTM's input gate. A real network learns both schedules from data.
     </p>
     <p>
-        The setup: six gated pipes pouring into a memory tank; the important signal and the loud distractor streams compete, alongside quiet steps. Gating is a routing policy you choose. Open the valve on the important signal, close it on the loud distractor, and the tank remembers exactly what you let in.
+        Six gated pipes pour into a memory tank, carrying the important signal, a loud distractor and quiet steps. Gating is a routing policy: open the valve on the signal, close it on the distractor, and the tank remembers exactly what you let in.
     </p>
-    <p>
-        At rest: the tank starts empty with the verdict pending. The three presets are Remember everything, Block the distractor, and Amnesia. Remember everything opens all six valves (verdict: remembers the distractor); Block the distractor opens every valve except the distractor's (verdict flips to the important signal); Amnesia closes all six (the network remembers nothing).
-    </p>
-    <p>
+        <p>
         With all gates open the loudest input wins.
     </p>
 
@@ -2488,7 +2479,7 @@ class GRUCell(nn.Module):
     <h2 id="results">Long sequences expose the vanilla RNN</h2>
 
     <p>
-        One spike feeds a plain RNN, a GRU, and an LSTM. The RNN's echo decays to flat, the gated lanes hold it, and holding costs <code>3x</code> to <code>4x</code> the compute. The RNN trace flattens by the last step while the gated traces stay up.
+        The toy at the end of this section feeds one spike to all three: the RNN's echo decays to flat while the gated lanes hold it, at 3x to 4x the compute.
     </p>
 
     <p>
@@ -2501,7 +2492,7 @@ output, (hn, cn) = lstm(x)  # output: every step of the last layer; hn, cn: fina
 # GRU is the same minus the cell state: output, hn = gru(x)
 </code></pre>
     <p>
-        <em>So what does gating actually buy you?</em> The classic stress test is <strong>sequential MNIST</strong>: feed a <code>28</code>x<code>28</code> digit in one row at a time, so the model must remember early rows for <code>28</code> steps before it gets to classify. Here is how the three architectures compare:
+        <em>So what does gating actually buy you?</em> The classic stress test is <strong>sequential MNIST</strong>: feed a 28 x 28 digit in one row at a time, so the model must remember early rows for 28 steps before it gets to classify. Here is how the three architectures compare:
     </p>
     <div class="result-block">
         <h4>Result: sequential MNIST (28 steps, 1 hidden layer of 128, ~20 epochs, one epoch being one full pass over the training data)</h4>
@@ -2754,11 +2745,24 @@ output, (hn, cn) = lstm(x)  # output: every step of the last layer; hn, cn: fina
     <h2 id="caveats">What goes wrong when you actually train one</h2>
     <ul>
         <li><strong>Vanishing gradients are real.</strong> A vanilla RNN on long sequences is a bad default. If your sequence is longer than a few dozen steps, reach for a GRU or LSTM first.</li>
-        <li><strong>Exploding gradients need clipping.</strong> Even gated models can blow up. Gradient clipping (above) is cheap insurance; a threshold around <code>1.0</code> is a common starting point.</li>
-        <li><strong>Long sequences cost memory.</strong> BPTT stores activations, the per step values the network produced, its hidden states and outputs, for every timestep. For very long sequences, use truncated BPTT: cut the sequence into chunks, carry the hidden state forward between chunks, and only backprop within each chunk.</li>
-        <li><strong>Don't put dropout inside the recurrence.</strong> Dropout is randomly zeroing some activations during training, so the network cannot lean on any single one. Apply dropout between stacked layers, not across timesteps within a cell. PyTorch's built-in modules do this correctly with one fixed mask per layer per forward pass.</li>
-        <li><strong>When do RNNs still make sense?</strong> Transformers won the long-sequence game because attention sees everything at once. But RNNs are still the right call for streaming data where you must decide now with constant memory: real-time sensor streams, on-device keyword spotting, low-latency control. If the input arrives one step at a time and you cannot wait for the full sequence, recurrence is the natural fit.</li>
+        <li><strong>Exploding gradients need clipping.</strong> Even gated models can blow up. Gradient clipping (above) is cheap insurance; a threshold around 1.0 is a common starting point.</li>
+        <li><strong>Long sequences cost memory.</strong> BPTT stores every timestep's hidden states and outputs. For very long sequences, use truncated BPTT (code below the list): backprop within chunks and carry the hidden state between them.</li>
+        <li><strong>Don't put dropout inside the recurrence.</strong> Dropout randomly zeroes activations during training. Apply it between stacked layers, not across timesteps within a cell; PyTorch's nn.LSTM and nn.GRU do this with their dropout argument.</li>
+        <li><strong>When do RNNs still make sense?</strong> Transformers won the long-sequence game because attention sees everything at once. RNNs are still the right call for streaming data where you must decide now with constant memory: real-time sensor streams, on-device keyword spotting, low-latency control.</li>
     </ul>
+    <p>
+        Truncated BPTT in code, with gru an nn.GRU built with batch_first=True, head a linear layer, loss_fn a per-step loss such as nn.MSELoss, and k the chunk length:
+    </p>
+<pre><code class="language-python">
+h = None
+for x_c, y_c in zip(x.split(k, dim=1), y.split(k, dim=1)):  # k steps per chunk
+    out, h = gru(x_c, h)                # hidden state carried in
+    loss = loss_fn(head(out), y_c)      # loss on this chunk only
+    optimizer.zero_grad()
+    loss.backward()                     # backprop stays inside the chunk
+    optimizer.step()
+    h = h.detach()                      # keep the values, cut the graph
+</code></pre>
 
     <hr>
 

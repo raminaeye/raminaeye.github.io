@@ -795,9 +795,7 @@
 
 <h2 id="the-culprit">Conflicting gradients are the culprit</h2>
         <p>
-        Joint training can come out worse than independent training. Some multitask RL (reinforcement learning, where an agent learns what to do from the rewards it earns by acting) methods quietly
-        retreated to training tasks separately first and distilling afterward (training a second model to imitate the separately trained ones, so their skills end up in one model), which throws away the
-        efficiency gains the whole thing was for.
+        Joint training can come out worse than independent training. Some multitask reinforcement-learning methods quietly gave up: they trained each task separately and then merged the results into one model, which throws away the efficiency the whole thing was for.
     </p>
     <p>
         The culprit is <strong>conflicting gradients</strong>: gradients from different tasks that point
@@ -810,9 +808,8 @@
         moves, and the quiet task pays for it.
     </p>
     <p>
-        PCGrad's answer is to stop tuning around the gradients and operate on them directly.</p>
-    <p>
-        It works across multitask supervised learning (learning from examples that come with the right answers) and multitask RL.
+        PCGrad's answer is to stop tuning around the gradients and operate on them directly. It works across
+        multitask supervised learning (learning from examples that come with the right answers) and multitask RL.
     </p>
 
     
@@ -877,27 +874,23 @@
             possible edit that makes the two gradients harmless to each other.
         </li>
         <li>
-            <strong>Why cut both gradients?</strong> One-sided surgery only moves the problem: the gradient that was not cut
-            still carries its part that fights the cut task, so the combined step can still raise the cut task's loss. With two tasks, cutting both sides guarantees the final sum
-            contains nothing that fights either task. With three or more tasks this guarantee no longer
-            holds: a later cut can bring back some of the fight with an earlier task, and the combined step can
-            still raise one task's loss.
+            <strong>Why cut both gradients?</strong> One-sided surgery only moves the problem: the uncut gradient
+            still fights the cut task. With two tasks, cutting both sides leaves nothing in the sum that fights either
+            task. With three or more, a later cut can bring some of the fight back.
         </li>
         <li>
             <strong>Why a random order?</strong> With more than two tasks, each gradient is cut against the
             others one by one, and a later cut can undo an earlier one. So the answer depends on the
-            order: the task a gradient is cut against last is the one that gradient is sure not to fight.
-            Shuffling the order every step spreads that protection evenly over the tasks during training.
+            order, and shuffling it every step spreads the advantage evenly over the tasks.
         </li>
     </ol>
 
 <h2 id="paper-figure">Cutting each gradient's conflicting part</h2>
     <p>
         Panel (a) is the conflict;
-        (b) and (c) are the two cuts; (d) is a non-conflicting pair, left alone.
-        In (b), the dashed arrow is what is left of g<sub>i</sub> after the cut. The paper labels it
-        proj<sub>n<sub>j</sub></sub> g<sub>i</sub>, where proj means a projection, the part of an arrow that lies along a given direction,
-        and the normal vector n<sub>j</sub> is the direction at a right angle to g<sub>j</sub>. Panel (c) is the same cut with the two tasks swapped.
+        (b) and (c) are the two cuts, one per task; (d) is a non-conflicting pair, left alone.
+        In (b), the dashed arrow is what is left of g<sub>i</sub> after the cut, which the paper labels
+        proj<sub>n<sub>j</sub></sub> g<sub>i</sub>: its projection onto n<sub>j</sub>, the direction at a right angle to g<sub>j</sub>.
     </p>
 
 <div class="demo">
@@ -931,7 +924,7 @@
     <ol>
         <li>Compute each task's gradient on the shared parameters, the weights every task uses (one backward pass per task, the pass that works back from a task's loss to produce its gradient).</li>
         <li>For each task <code>i</code>, and for every other task <code>j</code> in random order, if the two gradients fight (a negative dot product, measured against task j's original, uncut gradient), cut the interfering part, which means subtracting the part of this gradient that points along the other task's line.</li>
-        <li>Combine the edited gradients (sum or average) and hand the result to any optimizer: SGD (stochastic gradient descent: plain gradient descent, with each step computed from a randomly sampled batch of examples instead of the whole dataset), Adam (an optimizer that adapts each parameter's step size as it goes, scaling steps by how that parameter's gradients have been behaving, instead of using one fixed step size for all of them), anything.</li>
+        <li>Combine the edited gradients (sum or average) and hand the result to any optimizer, such as SGD (stochastic gradient descent) or Adam (an optimizer that scales each parameter's step by its recent gradients).</li>
     </ol>
     <p>In the code, the @ sign is the dot product. The conflict test is the &#8220;when&#8221; line of the surgery equation, and the line under it makes the cut, the equation's first line.</p>
     <pre><code class="language-python">import numpy as np
@@ -1084,13 +1077,17 @@ def pcgrad_combine(grads):
     
 <h2 id="pc-training-loop">Loss scale and the optimizer bend PCGrad's direction</h2>
 
-    <p>PCGrad runs at the Balance stage of a training step: it cuts the conflicting parts of the task gradients and hands their sum to the optimizer in place of the plain sum. Two things outside PCGrad can still bend that direction. If one task's loss is multiplied by 10, its gradient is 10 times longer and the edited sum leans toward that task, because PCGrad has nothing that absorbs a loss's scale. Momentum, a running average of past gradients that each step goes against, and the Adam optimizer's own running averages then mix each step with earlier ones, so a part PCGrad cut on this step can come back.</p>
-    <figure class="t1f-wrap"><svg class="t1f-svg" focusable="false" viewBox="0 0 274 412" role="img" aria-label="One training step: forward, backward, balance, clip, optimizer step, log"><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-fwd" x="14" y="10" width="246" height="62" rx="10" ry="10"/><text class="t1f-title" x="26" y="31" text-anchor="start" style="font-size:15px;font-weight:700">1 &#183; Forward</text><text class="t1f-sub" x="26" y="47" text-anchor="start" style="font-size:13px">each task computes its loss</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-bwd" x="14" y="92" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="113" text-anchor="start" style="font-size:15px;font-weight:700">2 &#183; Backward</text><text class="t1f-sub" x="26" y="129" text-anchor="start" style="font-size:13px">per-task gradients, shared layers</text></g><g class="t1f-part t1f-on"><rect class="t1f-box t1f-box-bal" x="14" y="158" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="179" text-anchor="start" style="font-size:15px;font-weight:700">3 &#183; Balance</text><text class="t1f-sub" x="26" y="195" text-anchor="start" style="font-size:13px">combine the task gradients</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-clip" x="14" y="224" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="245" text-anchor="start" style="font-size:15px;font-weight:700">4 &#183; Clip</text><text class="t1f-sub" x="26" y="261" text-anchor="start" style="font-size:13px">cap the gradient's length</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-opt" x="14" y="290" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="311" text-anchor="start" style="font-size:15px;font-weight:700">5 &#183; Optimizer step</text><text class="t1f-sub" x="26" y="327" text-anchor="start" style="font-size:13px">update the network's parameters</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-log" x="14" y="356" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="377" text-anchor="start" style="font-size:15px;font-weight:700">6 &#183; Log</text><text class="t1f-sub" x="26" y="393" text-anchor="start" style="font-size:13px">record what this step did</text></g><g class="t1f-part t1f-dim"><rect class="t1f-chip-lw" x="22" y="52" width="230" height="17" rx="4"/><text class="t1f-chiptext" x="28" y="65" text-anchor="start" style="font-size:12px">loss-weighting methods act here</text></g><g class="t1f-part t1f-on"><rect class="t1f-chip-gm" x="112" y="166" width="140" height="16" rx="4"/><text class="t1f-chiptext-w" x="182" y="178" text-anchor="middle" textLength="130" lengthAdjust="spacingAndGlyphs" style="font-size:11px;font-weight:700">steering methods act here</text></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="72" x2="54" y2="82" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,92 48.5,82 59.5,82"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="138" x2="54" y2="148" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,158 48.5,148 59.5,148"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="204" x2="54" y2="214" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,224 48.5,214 59.5,214"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="270" x2="54" y2="280" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,290 48.5,280 59.5,280"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="336" x2="54" y2="346" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,356 48.5,346 59.5,346"/></g></svg><figcaption class="t1f-cap">Steering methods such as PCGrad act after backward: they replace the plain sum of the task gradients, then clipping and the optimizer act on the result.</figcaption></figure>
-    <p><a href="multitask-training-loop.html">Gradient Balancing Inside the Training Loop</a> works through both effects in its sections <a href="multitask-training-loop.html#loss-scale">&#8220;The loss sets the scale every balancer sees&#8221;</a> and <a href="multitask-training-loop.html#momentum-returns">&#8220;Momentum can bring back a direction PCGrad removed&#8221;</a>.</p>
+    <p>PCGrad edits the task gradients at the Balance stage, and clipping and the optimizer then act on the edited sum. Two things outside PCGrad still bend its direction:</p>
+    <ul>
+        <li>Loss scale. A loss multiplied by 10 gives a gradient 10 times longer, so the edited sum leans toward that task.</li>
+        <li>Momentum, a running average of past gradients (Adam keeps one too, its first moment). It mixes each step with earlier ones, so a part PCGrad cut on this step can come back.</li>
+    </ul>
+    <figure class="t1f-wrap"><svg class="t1f-svg" focusable="false" viewBox="0 0 274 412" role="img" aria-label="One training step: forward, backward, balance, clip, optimizer step, log"><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-fwd" x="14" y="10" width="246" height="62" rx="10" ry="10"/><text class="t1f-title" x="26" y="31" text-anchor="start" style="font-size:15px;font-weight:700">1 &#183; Forward</text><text class="t1f-sub" x="26" y="47" text-anchor="start" style="font-size:13px">each task computes its loss</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-bwd" x="14" y="92" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="113" text-anchor="start" style="font-size:15px;font-weight:700">2 &#183; Backward</text><text class="t1f-sub" x="26" y="129" text-anchor="start" style="font-size:13px">per-task gradients, shared layers</text></g><g class="t1f-part t1f-on"><rect class="t1f-box t1f-box-bal" x="14" y="158" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="179" text-anchor="start" style="font-size:15px;font-weight:700">3 &#183; Balance</text><text class="t1f-sub" x="26" y="195" text-anchor="start" style="font-size:13px">combine the task gradients</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-clip" x="14" y="224" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="245" text-anchor="start" style="font-size:15px;font-weight:700">4 &#183; Clip</text><text class="t1f-sub" x="26" y="261" text-anchor="start" style="font-size:13px">cap the gradient's length</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-opt" x="14" y="290" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="311" text-anchor="start" style="font-size:15px;font-weight:700">5 &#183; Optimizer step</text><text class="t1f-sub" x="26" y="327" text-anchor="start" style="font-size:13px">update the network's parameters</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-log" x="14" y="356" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="377" text-anchor="start" style="font-size:15px;font-weight:700">6 &#183; Log</text><text class="t1f-sub" x="26" y="393" text-anchor="start" style="font-size:13px">record what this step did</text></g><g class="t1f-part t1f-dim"><rect class="t1f-chip-lw" x="22" y="52" width="230" height="17" rx="4"/><text class="t1f-chiptext" x="28" y="65" text-anchor="start" style="font-size:12px">loss-weighting methods act here</text></g><g class="t1f-part t1f-on"><rect class="t1f-chip-gm" x="112" y="166" width="140" height="16" rx="4"/><text class="t1f-chiptext-w" x="182" y="178" text-anchor="middle" textLength="130" lengthAdjust="spacingAndGlyphs" style="font-size:11px;font-weight:700">gradient methods act here</text></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="72" x2="54" y2="82" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,92 48.5,82 59.5,82"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="138" x2="54" y2="148" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,158 48.5,148 59.5,148"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="204" x2="54" y2="214" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,224 48.5,214 59.5,214"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="270" x2="54" y2="280" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,290 48.5,280 59.5,280"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="336" x2="54" y2="346" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,356 48.5,346 59.5,346"/></g></svg><figcaption class="t1f-cap">Gradient methods such as PCGrad act after backward: they replace the plain sum of the task gradients, then clipping and the optimizer act on the result.</figcaption></figure>
+    <p><a href="multitask-training-loop.html">Gradient Balancing Inside the Training Loop</a> shows both effects in <a href="multitask-training-loop.html#loss-scale">&#8220;The loss sets the scale every balancer sees&#8221;</a> and <a href="multitask-training-loop.html#momentum-returns">&#8220;Momentum can bring back a direction PCGrad removed&#8221;</a>.</p>
 
 <h2 id="pc-compare">How PCGrad compares with the other balancing methods</h2>
 
-    <p>Two more steering methods sit in the table beside PCGrad. GradVac gives each pair its own target cosine, learned from how that pair usually cooperates, and nudges sagging pairs back up to it. CAGrad takes the average gradient and adds one bounded nudge toward the worst-off task, never straying far from that average. MGDA searches over blends of the task gradients for the shortest combined direction. The Pareto front is the curve of trade-offs where no task can improve without hurting another. The two weighting methods, the volume knobs that learn each task's loss weight (GradNorm and Uncertainty Weighting), the three steering methods (PCGrad, GradVac, and CAGrad), and MGDA, which lands on the Pareto front, side by side:</p>
+    <p>The two weighting methods, the volume knobs that learn each task's loss weight (GradNorm and Uncertainty Weighting), and the four gradient methods, PCGrad, GradVac, CAGrad, and MGDA, which stops at a Pareto-stationary point (where no small step lowers every task's loss at once), side by side:</p>
 
     <table class="cmp">
         <thead><tr><th>Method</th><th>The question it answers</th></tr></thead>
@@ -1100,7 +1097,7 @@ def pcgrad_combine(grads):
             <tr><td><strong>PCGrad</strong> (this page)</td><td>How should the directions be edited so tasks stop fighting?</td></tr>
             <tr><td><a href="gradvac.html"><strong>GradVac</strong></a></td><td>How should each pair of tasks be nudged back to the agreement level where it learns best?</td></tr>
             <tr><td><a href="cagrad.html"><strong>CAGrad</strong></a></td><td>How do we protect the worst-off task and stay near the average, with a guarantee?</td></tr>
-            <tr><td><a href="mgda.html"><strong>MGDA</strong></a></td><td>What direction helps every task at once, and where does the run land on the Pareto front?</td></tr>
+            <tr><td><a href="mgda.html"><strong>MGDA</strong></a></td><td>What direction helps every task at once, and where does the run stop?</td></tr>
         </tbody>
     </table>
 

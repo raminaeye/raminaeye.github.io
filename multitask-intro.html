@@ -1011,7 +1011,7 @@ ol.brefs { padding-left: 22px; line-height: 1.8; font-size: 0.9em; color: #555; 
 
     <p>In symbols, the trunk's parameters, the numbers training adjusts, are <code>θ<sub>sh</sub></code>, shared by everyone. Each head gets its own private parameters <code>θ<sub>i</sub></code>. With <code>K</code> tasks (three in the diagram in <a href="#trace-tool">&#8220;Where each task pulls the shared trunk&#8221;</a>), each task reports its own loss <code>L<sub>i</sub></code> on one training batch, the handful of examples the model sees in one step. The optimizer, the routine that updates the parameters, works on one number built from them: the losses added up. The equation for that sum is in <a href="#the-naive-recipe">&#8220;Add the weighted losses&#8221;</a>.</p>
 
-    <p>One number is all the optimizer sees. And that single number's gradient, the direction in which it rises fastest, pushes on every head plus the one shared trunk. That shared push is the whole idea. <em>It is also, as you are about to see, the whole problem.</em></p>
+    <p>One number is all the optimizer sees. And that single number's gradient pushes on every head plus the one shared trunk. That shared push is the whole idea. <em>It is also, as you are about to see, the whole problem.</em></p>
 
     
 <h2 id="trace-tool">Where each task pulls the shared trunk</h2>
@@ -1153,17 +1153,17 @@ ol.brefs { padding-left: 22px; line-height: 1.8; font-size: 0.9em; color: #555; 
         <div class="eq-line eq-active" data-eqline="0">L(θ) = Σ<sub>i</sub> <span class="eqt" style="color:#27ae60">w<sub>i</sub></span> L<sub>i</sub>(θ)</div>
         <div class="eq-why eq-active" data-eqline="0">The total loss L(θ) is every task's loss added up, each one scaled by its <strong>volume knob</strong> <span class="eqt" style="color:#27ae60">w<sub>i</sub></span>, the task's loss weight: setting a knob to 2 makes that task count double, and with every knob at 1 this is the plain sum from <a href="#hard-sharing">&#8220;Hard parameter sharing&#8221;</a>. Σ<sub>i</sub> is the sum over every task i, and θ is all of the model's parameters, the shared trunk θ<sub>sh</sub> plus every head θ<sub>i</sub>.</div>
         <div class="eq-line eq-active" data-eqline="1">θ ← θ − <span class="eqt" style="color:#b9770e">η</span> <span class="eqt" style="color:#2c3e50">∇L(θ)</span></div>
-        <div class="eq-why eq-active" data-eqline="1">Read ← as &#8220;gets replaced by&#8221;. Each training step replaces the model's parameters θ with themselves minus a scaled copy of the <strong>gradient</strong>. <span class="eqt" style="color:#b9770e">η</span>, the Greek letter eta, is the <strong>step size</strong> (also called the learning rate), a small positive number that sets how far each step moves, and <span class="eqt" style="color:#2c3e50">∇L(θ)</span> is the gradient, the arrow pointing straight uphill on the total loss. It points uphill however steep the slope is; the steepness only sets how long it is. Subtracting it heads the step downhill.</div>
+        <div class="eq-why eq-active" data-eqline="1">Read ← as &#8220;gets replaced by&#8221;. Each training step replaces the model's parameters θ with themselves minus a scaled copy of the <strong>gradient</strong>. <span class="eqt" style="color:#b9770e">η</span>, the Greek letter eta, is the <strong>step size</strong> (also called the learning rate), a small positive number that sets how far each step moves, and <span class="eqt" style="color:#2c3e50">∇L(θ)</span> is the gradient of the total loss. It points uphill, so subtracting it heads the step downhill.</div>
     </div>
 
-    <p>Everything on this page works on this one sum, and the step in the second line is the one piece of the recipe every later method keeps. The catch sits inside the first line. If one task's loss towers over the other's, <em>the sum listens to the loud task almost exclusively, and the quiet one is a rounding error.</em> Here a loud task is one whose loss is large.</p>
+    <p>Everything on this page works on this one sum, and the step in the second line is the one piece of the recipe every later method keeps. The catch sits inside the first line. If one task's loss towers over the other's, <em>the sum listens to the loud task almost exclusively, and the quiet one is a rounding error.</em> Here a loud task is one whose loss is large, which usually means its gradient is long too.</p>
 
     <p>That is not a bug in the arithmetic; it is the naive recipe working exactly as written. And the fix is not obvious. To give the quiet task an equal vote you have to raise its weight by however many times quieter it is, and the right number changes as training proceeds, because the losses themselves move.</p>
 
     
 <h2 id="try-it">In the naive sum, the larger loss is almost the whole total</h2>
 
-    <p>Two tasks, losses <code>600</code> and <code>0.4</code>. The weights decide which task the sum actually cares about. The stacked bar in the tool is the weighted sum itself. The whole bar stands for the total loss, and each colored segment is one task's weighted loss, so a segment's width is that task's share of the sum. The two sliders set the weights w<sub>1</sub> and w<sub>2</sub>.</p>
+    <p>Two tasks, losses <code>600</code> and <code>0.4</code>. The stacked bar is the weighted sum itself: each colored segment is one task's weighted loss, so its width is that task's share of the total. The two sliders set the weights w<sub>1</sub> and w<sub>2</sub>.</p>
 
     <div class="demo" id="conflictDemo">
       <div class="demo-controls">
@@ -1200,8 +1200,6 @@ ol.brefs { padding-left: 22px; line-height: 1.8; font-size: 0.9em; color: #555; 
 
     <p>One task may be nearly solved in the first <code>10%</code> of training while another improves until the end. The fast task's gradients shrink as it finishes, so the weighting that was fair at step <code>100</code> is unfair at step <code>10,000</code>. The balance must move with training.</p>
 
-    <p>Picture two tasks whose gradients start the same size. The fast task's gradient shrinks quickly as it learns, while the slow task's barely shrinks, so a little way into training the slow task's gradient is several times larger. Weights that gave the two tasks equal shares at the start now hand most of every update to the slow task. That is why a weighting tuned early in a run can be wrong by the end of it.</p>
-
     <h3>Direction: the arrows fight</h3>
 
     <p>Two gradients can point against each other, so the average update contains a piece that actively raises one task's loss. The angle between the two arrows measures this, through its cosine: <code>1</code> when they point the same way, <code>0</code> at right angles, <code>−1</code> when they point opposite ways. <a href="#the-math-kit">&#8220;The math kit: norms, dot products, gradients&#8221;</a> builds this score properly.</p>
@@ -1228,13 +1226,13 @@ ol.brefs { padding-left: 22px; line-height: 1.8; font-size: 0.9em; color: #555; 
 
     <p>The dot product also equals the two lengths times the cosine of the angle between the arrows, so its <strong>sign</strong> is the verdict: positive means roughly the same direction, zero means exactly perpendicular, negative means they partly oppose each other.</p>
 
-    <p>Dividing by the lengths gives the <strong>cosine similarity</strong>, a scale-free agreement score between <code>−1</code> and <code>1</code>. Scale-free because a loud arrow and a quiet arrow pointing the same way score the same. This sign check is the standard conflict test for two task gradients, written <code>g<sub>1</sub></code> and <code>g<sub>2</sub></code>. A negative result means the two pulls partly oppose each other, which is not yet the same as a step against their average hurting a task. That step hurts a task only when the opposing part outweighs the task's own pull, that is, when ⟨g<sub>1</sub>, g<sub>2</sub>⟩ falls below minus that task's squared length. <a href="#betrayal-test">&#8220;The dot-product test: does this step help or hurt each task&#8221;</a> shows why.</p>
+    <p>Dividing by the lengths gives the <strong>cosine similarity</strong>, a scale-free agreement score between <code>−1</code> and <code>1</code>. Scale-free because a loud arrow and a quiet arrow pointing the same way score the same. This sign check is the standard conflict test for two task gradients, written <code>g<sub>1</sub></code> and <code>g<sub>2</sub></code>. A negative result means the two pulls partly oppose each other; <a href="#betrayal-test">&#8220;The dot-product test: does this step help or hurt each task&#8221;</a> shows when that actually hurts a task.</p>
 
     <h3 id="mk-proj">Projection is one arrow's shadow on another</h3>
 
     <p>The <strong>projection</strong> of one arrow onto another is the shadow the first arrow casts on the second arrow's line: the part of the first arrow that lies along the second.</p>
 
-    <p>To compute it, take the dot product of the two arrows and divide it by the second arrow's squared length. That number says how many copies of the second arrow the shadow holds, so scaling the second arrow by it gives the shadow. Subtract the shadow from the first arrow and the leftover has no part along the second arrow at all. The leftover's dot product with the second arrow is zero for every pair of arrows, so the leftover always sits at right angles to it.</p>
+    <p>To compute it, take the dot product of the two arrows and divide it by the second arrow's squared length. Scaling the second arrow by that number gives the shadow. Subtract the shadow from the first arrow and the leftover always sits at right angles to the second arrow.</p>
 
     <p>This subtraction is the core move of <a href="pcgrad.html">PCGrad</a>, which has its own page. PCGrad uses it when two task gradients point against each other: it subtracts from one gradient its projection onto the other, so a step against what is left of that gradient no longer raises the other task's loss. <a href="gradvac.html">GradVac</a> makes the same kind of edit, but aims for a target cosine instead of zero.</p>
 
@@ -1248,7 +1246,7 @@ ol.brefs { padding-left: 22px; line-height: 1.8; font-size: 0.9em; color: #555; 
 
     <p>A <strong>convex combination</strong> is a blend where every weight is at least zero and the weights add to one, so each task gets a percentage of the mix.</p>
 
-    <p>Blends matter because blending is how tasks compromise, and one fact makes them useful: <strong>a step that lowers every task's loss also lowers every blend of those losses</strong>. The pull of a blended loss is the same blend of the task pulls. Turned around, if some blend of the pulls cancels to zero, then, judged by the slope alone, no small step lowers that blend, so no small step lowers every task's loss. So to answer &#8220;is there a step that lowers every task's loss?&#8221;, you do not have to try every possible step. You can search over the few blend weights instead. In <a href="mgda.html">the MGDA (Multiple Gradient Descent Algorithm) page</a> I search over these blends, with weights zero or more that add to one, for the shortest arrow.</p>
+    <p>Blends matter because blending is how tasks compromise, and one fact makes them useful: <strong>a step that lowers every task's loss also lowers every blend of those losses</strong>. Turned around, if some blend of the task pulls cancels to zero, then, judged by the slope alone, no small step lowers every task's loss. So to ask &#8220;is there a step that lowers every task's loss?&#8221;, you can search over the few blend weights instead of every possible step. In <a href="mgda.html">the MGDA (Multiple Gradient Descent Algorithm) page</a> I search over these blends, with weights zero or more that add to one, for the shortest arrow.</p>
 
     <div class="demo" id="mathKitDemo">
         <div class="mk-tabs" role="group" aria-label="Math kit panels">
@@ -1304,9 +1302,9 @@ ol.brefs { padding-left: 22px; line-height: 1.8; font-size: 0.9em; color: #555; 
 
     <p>Picture two tasks sharing one set of parameters. You pick a direction, and training takes one small step against it. You want to know, task by task, whether that step helps or hurts. The answer is one dot product.</p>
 
-    <p>Why a dot product? The step is the direction reversed and scaled by the step size, which is positive. Each task's loss falls by roughly the step size times the dot product of that task's gradient with the direction (a negative dot product means it rises): slope times move, coordinate by coordinate. Since the step size is positive, the sign of the dot product is the whole verdict. A positive dot product means the direction points along the task's uphill arrow, so the actual move goes downhill for that task. A negative dot product means the move goes uphill: the task gets worse.</p>
+    <p>Why a dot product? The step is the direction reversed and scaled by the positive step size, so each task's loss falls by roughly the step size times the dot product of that task's gradient with the direction: slope times move, coordinate by coordinate. The sign of the dot product is the whole verdict. Positive, the move goes downhill for that task; negative, it goes uphill and the task gets worse.</p>
 
-    <p>Call that dot product the task's <strong>score</strong> for the step. The whole test fits in one sentence: whenever some task's dot product with the chosen direction comes out negative, the step makes that task worse. Keep your eye on this dot product. Every method in this series is really just a different way of picking a direction so that no task's score comes out too negative.</p>
+    <p>Call that dot product the task's <strong>score</strong> for the step. Every method in this series is really just a different way of picking a direction so that no task's score comes out too negative.</p>
 
     <p>Here is why opposing pulls do not always mean a hurt task. Task 2's score for the average of the two pulls is half of ⟨g<sub>1</sub>, g<sub>2</sub>⟩ plus half of g<sub>2</sub>'s squared length. So a step against the average raises task 2's loss only when ⟨g<sub>1</sub>, g<sub>2</sub>⟩ falls below minus g<sub>2</sub>'s squared length, where the opposing part outweighs task 2's own pull. The same holds for task 1 with g<sub>1</sub>'s squared length.</p>
 
@@ -1322,7 +1320,7 @@ ol.brefs { padding-left: 22px; line-height: 1.8; font-size: 0.9em; color: #555; 
     
 <h2 id="mgda-pointer">The conflict has a principled answer</h2>
 
-    <p>When the arrows fight, the plain average just picks a side. The classical answer is <strong>MGDA</strong> (Multiple Gradient Descent Algorithm), which blends the task gradients into the shortest combination whose weights are all zero or more and add to one, and steps against it. Each of its steps either lowers every task's loss, for a small enough step, or comes out as zero, and it comes out as zero only at a <strong>Pareto-stationary</strong> point, a spot where some blend of the task pulls cancels, so, judged by the slope, no single small step lowers every task's loss at once. Every model whose losses sit on the <strong>Pareto front</strong>, the curve of trade-offs where no task can improve without hurting another, is such a spot. But which spot a run stops at is decided by where you started, not by anything you chose.</p>
+    <p>When the arrows fight, the plain average just picks a side. The classical answer is <strong>MGDA</strong> (Multiple Gradient Descent Algorithm), which blends the task gradients into the shortest combination whose weights are all zero or more and add to one, and steps against it. Each step either lowers every task's loss, for a small enough step, or is zero, which happens only at a <strong>Pareto-stationary</strong> point, where some blend of the task pulls cancels and no single small step lowers every task's loss. Every model on the <strong>Pareto front</strong>, the curve of trade-offs where no task can improve without hurting another, is such a point. But which point a run stops at is decided by where you started, not by anything you chose.</p>
 
     <p>The full treatment, the Pareto front, the blend tool, and that catch, is on <a href="mgda.html">the MGDA page</a>.</p>
 
@@ -1342,7 +1340,7 @@ ol.brefs { padding-left: 22px; line-height: 1.8; font-size: 0.9em; color: #555; 
 
     <p>Whichever method you pick, the loss scale still shapes the gradients it receives, and the optimizer and gradient clipping, which caps a gradient's length, still act on the combined gradient it produces, as <a href="multitask-training-loop.html">Gradient Balancing Inside the Training Loop</a> shows.</p>
 
-    <p><strong>The two weighting methods, the volume knobs that learn each task's loss weight (GradNorm and Uncertainty Weighting), the three steering methods (PCGrad, GradVac, and CAGrad), and MGDA, which lands on the Pareto front, side by side:</strong></p>
+    <p><strong>The two weighting methods, the volume knobs that learn each task's loss weight (GradNorm and Uncertainty Weighting), and the four gradient methods, PCGrad, GradVac, CAGrad, and MGDA, which stops at a Pareto-stationary point (where no small step lowers every task's loss at once), side by side:</strong></p>
 
     <table>
         <tr><th>Method</th><th>The question it answers</th></tr>
@@ -1351,7 +1349,7 @@ ol.brefs { padding-left: 22px; line-height: 1.8; font-size: 0.9em; color: #555; 
         <tr><td><a href="pcgrad.html">PCGrad</a></td><td>How should the directions be edited so tasks stop fighting?</td></tr>
         <tr><td><a href="gradvac.html">GradVac</a></td><td>How should each pair of tasks be nudged back to the agreement level where it learns best?</td></tr>
         <tr><td><a href="cagrad.html">CAGrad</a></td><td>How do we protect the worst-off task and stay near the average, with a guarantee?</td></tr>
-        <tr><td><a href="mgda.html">MGDA</a></td><td>What direction helps every task at once, and where does the run land on the Pareto front?</td></tr>
+        <tr><td><a href="mgda.html">MGDA</a></td><td>What direction helps every task at once, and where does the run stop?</td></tr>
     </table>
 
 

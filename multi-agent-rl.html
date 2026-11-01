@@ -642,17 +642,9 @@ figcaption { margin-top: 1rem; }
 
     <p><em>Here is a question that breaks everything single-agent RL assumes: what do you do when your opponent is learning too?</em></p>
 
-    <p>Up to now the world always sat still while the agent learned. The bananas never adapted. The reacher arm's target never fought back. You could collect experience on Monday and it was still true on Friday.</p>
+    <p>Up to now the world sat still while the agent learned. The bananas never adapted, and the reacher arm's target never fought back. Tennis ruins that: two rackets, each one learning, each one's world containing the other. <em>The ground moves under both of them the whole time.</em> That moving ground is what makes multi-agent RL its own beast, not just single-agent times two.</p>
 
-    <p>Tennis ruins that. Two rackets, each one learning, each one's world containing the other. Your racket gets better, so rallies get longer, so the other racket sees longer rallies, so it learns faster, so your world changes again. <em>The ground moves under both of them the whole time.</em> That moving ground is what makes multi-agent RL its own beast, not just single-agent times two.</p>
-
-    <p>And tennis is just the friendly version of the problem. Anywhere your world contains another learner, the ground moves: robot teammates sharing a warehouse, game AIs training against each other, traffic lights all adapting at once. <em>Single-agent RL is learning an instrument. Multi-agent RL is joining a band where everyone is sight-reading a different chart.</em></p>
-
-    <p>This one is my <a href="https://github.com/raminaeye/TennisGym">TennisGym</a> repo. A gym, in RL slang, is the environment an agent trains in: the world that receives its moves and hands back observations and rewards. This gym was built with Unity ML-Agents, the Unity toolkit for that job: tennis, two rackets, one ball, and one self-play DDPG pair driving both rackets.</p>
-
-    <p>This was the third project in Udacity's deep RL nanodegree, the collaboration-and-competition one, and it is the perfect finale for this series. <em>Tennis takes all of that and moves the world underneath it.</em></p>
-
-    <p>What does the gym actually look like, number by number? Why does the embarrassingly simple approach, one shared DDPG pair playing both sides against itself, work at all? And what exactly breaks when your opponent is learning at the same time you are?</p>
+    <p>This one is my <a href="https://github.com/raminaeye/TennisGym">TennisGym</a> repo, the collaboration-and-competition project from Udacity's deep RL nanodegree. A gym, in RL slang, is the environment an agent trains in: the world that receives its moves and hands back observations and rewards. This one was built with Unity ML-Agents, the Unity toolkit for that job: two rackets, one ball, and one self-play DDPG pair driving both rackets.</p>
 
     <p class="tabs-label">On this page</p>
     <div class="tab-strip">
@@ -669,7 +661,7 @@ figcaption { margin-top: 1rem; }
     </div>
 
     <h2 id="tennis-court">The tennis court: two rackets, eight numbers, two dials</h2>
-    <p>Picture the Unity scene. A tennis court floating in that clean simulator void, a net across the middle, two rackets hovering one per side, and a ball with a mind of its own. No crowd, no umpire, no second serve. Just physics, two rackets, and a learning problem. This is the whole gym, and it is worth seeing clearly before any algorithm talk, because every number below lives here.</p>
+    <p>The whole gym is a court, a net, two rackets and a ball. Every number below lives here.</p>
     <svg class="mdiag" viewBox="0 0 360 320" role="img" aria-label="Tennis gym setup: two rackets, one ball, 8 observations in and 2 actions out per racket">
       <text x="180" y="16" text-anchor="middle" font-size="14" fill="#7f8c8d">you never see the opponent; only the ball talks</text>
       <rect x="70" y="30" width="220" height="170" rx="4" fill="#f4f8fb" stroke="#95a5a6" stroke-width="2"></rect>
@@ -689,69 +681,55 @@ figcaption { margin-top: 1rem; }
     </svg>
     <p class="caption">The whole gym in one picture: two rackets, one ball, one net. Each racket sees <code>8</code> numbers and turns <code>2</code> dials; a clear pays <code>+0.1</code>, a drop costs <code>-0.01</code>. And the dashed line is the point: your racket never sees the opponent. Everything it knows about the other learner arrives second-hand, inside the ball's flight.</p>
 
-    <p>A rally goes like this. The ball is in play. Your racket slides along its side, tracks the ball, times the intercept, and punches it back over the net. The other racket does the same on its side. Back and forth, until somebody misses: the ball kisses the ground or sails past the lines, and the rally is over. The ball resets, and they go again. Rally after rally, hundreds of them. That loop is the entire environment.</p>
+    <p>A rally runs until somebody misses: the ball hits the ground or sails out, and it resets. Each racket sees <strong>8 numbers</strong>, the position and velocity of the ball and racket, and answers with <strong>2 continuous dials</strong>: one scoots toward or away from the net, one jumps. The gym stacks three consecutive snapshots, so the actor's real input is 24 numbers per step, which lets the network feel velocity across frames. From the Python side, one step looks like this:</p>
+    <pre><code class="language-python">info = env.reset(train_mode=True)[brain_name]
+states = info.vector_observations       # shape (2, 24): 3 stacked snapshots of 8, per racket
+actions = np.random.uniform(-1, 1, (2, 2))   # scoot and jump, per racket
+info = env.step(actions)[brain_name]
+rewards = info.rewards                  # +0.1 per clear, -0.01 per drop or out
+dones = info.local_done                 # True once somebody misses
+</code></pre>
 
-    <p>Each racket sees the world through <strong><code>8</code> numbers</strong>, and that is all it gets: the position and velocity of the ball and racket. Printed out it would be a dull little list of eight numbers, ball-this, velocity-that, nothing more. No camera image, no opponent health bar, no mini-map. Eight numbers. Those are its eyes.</p>
-    <p>One repo detail before the network talk: the gym stacks three consecutive snapshots, so the actor's real input is <code>24</code> numbers per step, not <code>8</code>. When this page says eight numbers, it means one snapshot's worth. The stacking is what lets the network feel velocity across frames instead of just reading it off a dial.</p>
+    <p>Notice what is not in the list: the other racket. The ball is the only message the opponent ever sends. That is <strong>partial observability</strong>: <em>you cannot see the thing you most need to predict.</em> And the dials have no notches, so you cannot argmax, pick the single best option from a list, over infinitely many settings. That is why this is actor-critic territory again, same as the reacher arm.</p>
 
-    <p>Notice what is not in the list. The other racket's dials. Its plans. Its brain. Your racket never sees its opponent at all; it sees the ball, and the ball is the only message the opponent ever sends. A fast incoming ball means the opponent just attacked. A soft floater means it is in trouble. Everything your racket knows about the other learner arrives second-hand, encoded in physics. That is <strong>partial observability</strong>, the five-dollar phrase for: <em>you cannot see the thing you most need to predict.</em></p>
+    <p>The rewards are lopsided on purpose: one clear pays for ten drops, and that ratio explains the training curve later. The solve rule takes the better racket:</p>
+    <div class="eq-card" id="marlSolveEqStatic">
+        <div class="eq-what">When the tennis task counts as solved.</div>
+        <div class="eq-line eq-active" data-eqline="0"><span class="frac"><span class="top">1</span><span class="bot">100</span></span>&Sigma;<sub>episodes</sub> <span style="white-space:nowrap">max(<span class="eqt" style="color:#2a7fbf">score<sub>A</sub></span>, <span class="eqt" style="color:#e67e22">score<sub>B</sub></span>)</span> &#8805; 0.5</div>
+        <div class="eq-why eq-active" data-eqline="0"><span class="eqt" style="color:#2a7fbf">score<sub>A</sub></span> and <span class="eqt" style="color:#e67e22">score<sub>B</sub></span> are the two rackets' summed rewards in one episode, one rally until somebody misses, and the sum runs over the last 100 episodes. The max keeps the better racket, because you only need one good player; the other racket is the sparring partner. An average of 0.5 means about five clears a rally.</div>
+    </div>
 
-    <p>One rally, slowed down, shows the numbers working. The ball is screaming toward your side, x-velocity <code>-2.1</code> and falling. Your <code>8</code> numbers say: ball at (<code>1.2</code>, <code>0.8</code>), dropping fast, your racket at (<code>0.5</code>, <code>-0.2</code>), too far left. The actor turns its dials: scoot right, small jump. Contact. The ball arcs over the net, and <code>+0.1</code> lands in the diary. Eight numbers in, two numbers out, one tenth of reward. That is the whole game, repeated until somebody misses.</p>
-
-    <p>And it answers with <code>2</code> numbers, both continuous. One scoots the racket toward or away from the net. The other makes it jump. Continuous means no menu of moves: the racket can creep a little or lunge a lot, and every shade in between. You cannot argmax, pick the single best option from a list, over infinite scoots, which is exactly why this is actor-critic territory again, same as the reacher arm.</p>
-
-    <p>Feel the difference from the banana gym for a second. There, the agent picked from four buttons: forward, back, left, right. Here there are no buttons, just two dials that never click. The scoot dial does not say left or right; it says how far, how fast, in one smooth number. That smoothness is the whole reason the actor exists: <em>somebody has to turn a dial that has no notches.</em></p>
-
-    <p>The rewards are delightfully lopsided. Plus <code>0.1</code> every time you clear the net. Minus <code>0.01</code> when you let the ball drop or sail it out of bounds. One clear pays for ten drops. <em>Tattoo that ratio on your brain;</em> it explains the entire training curve later.</p>
-
-    <p>The environment counts as solved when the better of the two rackets averages at least <code>0.5</code> over <code>100</code> episodes, where one episode is one rally: back and forth until somebody misses, and then the ball resets. Note the max, not the average, of the two. You only need one good player. If one racket can hold rallies at a <code>0.5</code> pace, tennis is happening, and the other racket was the sparring partner that got it there.</p>
-
-    <p>Translate <code>0.5</code> into something you can watch: solved, <code>0.5</code> averaged over <code>100</code> episodes, means the average rally is about five clears long. Not championship tennis. Just: the ball goes back and forth five times before somebody misses, reliably, a hundred episodes in a row. That is the bar, and it is lower than it sounds, which is exactly why one shared brain, reading just <code>8</code> numbers per snapshot, can clear it.</p>
-
-    <p><strong>Tennis is a kind first gym for a hard problem</strong>, and that is not an accident. Rallies end in seconds, so the agent gets attempt after attempt in quick succession.</p>
-    <p>The score is <em>dense</em>: almost every rally produces clears and drops, so the reward signal never goes quiet for long. And the physics are honest: the ball does not lie about what just happened.</p>
-    <p>Compare that to <strong>robot soccer</strong>, where one goal every ten minutes teaches you almost nothing. If you wanted to invent a gym that makes the moving-world problem visible as fast as possible, you would invent something very close to this.</p>
-
-    <p>My run crossed <code>0.5</code> around episode <code>50</code>, settled near <code>2.0</code>, and peaked around <code>2.5</code>.</p>
-    <p>In rallies: the run settled near twenty clears a rally and peaked near twenty-five.</p>
-    <p>The rackets went from pure flailing to twenty-hit rallies in about a hundred episodes. Not bad for eight numbers and two dials.</p>
+    <p>Tennis is a kind first gym for a hard problem. Rallies end in seconds and almost every rally pays clears or drops, so the reward is <em>dense</em>; compare <strong>robot soccer</strong>, where one goal every ten minutes teaches almost nothing. My run crossed 0.5 around episode 50, settled near 2.0, about twenty clears a rally, and peaked around 2.5.</p>
 
 
     <h2 id="self-play-ddpg">Self-play DDPG: one shared actor and critic play both sides</h2>
-    <p>The method is almost embarrassingly simple: one actor and one critic, shared by both rackets. Each step, both rackets read their <code>8</code> numbers through the same actor and turn their <code>2</code> dials, and both rackets' transitions, each one a record of the numbers in, the dials out, the reward, and the next numbers, land in the same replay buffer, a diary of past moments that training samples from later so it can learn from old rallies again. No special multi-agent machinery. From each racket's side of the net, the opponent is just part of the environment, which is technically a lie, since the opponent is the same brain on the other side of the net, learning. And it works anyway.</p>
+    <p>The method is almost embarrassingly simple: one actor and one critic, shared by both rackets. Both rackets' transitions, each one a record of the numbers in, the dials out, the reward and the next numbers, land in one replay buffer, a diary of past moments that training samples from later. From each racket's side the opponent is just part of the environment, which is technically a lie, since it is the same brain learning on the other side of the net. <em>The lie is load-bearing, and it holds.</em></p>
 
-    <p>Why does the lie hold? Because from each racket's point of view, the opponent is just weather. Complicated, adaptive weather, but still just part of the machinery that turns <code>8</code> numbers into the next <code>8</code> numbers. Every <code>64</code> steps the brain learns, <code>128</code> gradient updates, small nudges to the networks in the direction that lowers their errors, on <code>128</code> sampled moments. Nobody tells either racket that the weather is the same brain, on the other side of the net, getting smarter. <em>The lie is load-bearing, and it holds.</em></p>
+    <p>The two sides bootstrap each other: your side lands a few more clears, rallies get longer, the other side learns to return more, and your rallies get longer still. <em>Better play manufactures its own training data.</em> That is why one shared brain needs no hand-tuned opponent schedule: <strong>self-play is its own curriculum</strong>, flailing rackets play flailing rackets, and the challenge scales itself.</p>
 
-    <p>And here is the sneaky part: the two sides bootstrap each other. Your side lands a few more clears, so rallies get longer, so the other side sees longer rallies, so it learns to return more, so your rallies get longer still. <em>Better play manufactures its own training data.</em> The reward wanted long rallies all along, every clear worth ten drops. Two rackets, one shared incentive, and the whole thing ratchets upward.</p>
+    <p>Under the hood it is the same DDPG recipe as the reacher page. The actor is a 256-256-128 network, those being the layer widths, with tanh squeezing the 2 dials into their legal range. The critic is 256-256-1: it takes the 24 stacked observations plus the 2 actions and returns one number, how good this move looks. The actor follows the critic's grades. Both networks get batch norm, which keeps each batch of inputs on a sane scale, and gradient clipping, which caps how large any one update can be, so one batch from last week's diary cannot undo an hour of learning. Both also learn against target networks, slow moving copies of the actor and critic that price what a move should be worth:</p>
+    <div class="eq-card" id="marlSoftEqStatic">
+        <div class="eq-what">Soft target update: the target networks trail the live ones.</div>
+        <div class="eq-line eq-active" data-eqline="0"><span class="eqt" style="color:#8e44ad">&#952;&#8242;</span> &#8592; <span class="eqt" style="color:#2c3e50">&#964;</span><span class="eqt" style="color:#2a7fbf">&#952;</span> + (1 &#8722; <span class="eqt" style="color:#2c3e50">&#964;</span>)<span class="eqt" style="color:#8e44ad">&#952;&#8242;</span></div>
+        <div class="eq-why eq-active" data-eqline="0"><span class="eqt" style="color:#2a7fbf">&#952;</span> are the live network weights, <span class="eqt" style="color:#8e44ad">&#952;&#8242;</span> the target copy, and <span class="eqt" style="color:#2c3e50">&#964;</span> a small mixing share. Each update moves the target only a little toward the live network, so the targets cannot thrash around.</div>
+    </div>
 
-    <p>Under the hood it is the same DDPG recipe as the reacher page. The actor is a <code>256-256-128</code> network, those numbers are the layer widths, how many units sit in each layer, with tanh squashing the outputs, squeezing the <code>2</code> dials into their legal range.</p>
-    <p>The critic is <code>256-256-1</code>: it swallows the <code>24</code> stacked observations plus the <code>2</code> actions and spits out one number, how good this move looks.</p>
-    <p>Both networks get batch norm, which normalizes each batch of numbers so their scale stays sane, both get gradient clipping, which caps how large any one update can be, and both learn through soft target updates, where the target networks, slow moving copies of the actor and critic that price what a move should be worth, are nudged only a little toward the live networks each time, so the targets cannot thrash around.</p>
-    <p>Exploration is the same OU (Ornstein-Uhlenbeck) noise from the reacher page, the smooth drifting kind, noise that wanders in one direction for a while and keeps getting pulled back toward zero, so a push lasts across a few steps and then fades: a racket's jump is a commitment across timesteps, and random twitches would teach nothing about follow-through.</p>
-
-    <p>Think about what the critic is actually learning to say. Its single output is a prophecy: given these <code>8</code> numbers and these <code>2</code> dial settings, how much <code>+0.1</code> is coming your way? Early on the prophecies are garbage, because long rallies do not exist yet. But the first time a rally stretches to ten clears, the critic sees a full <code>1.0</code> of reward attached to the moves that built it, and the prophecy sharpens. <em>The actor follows the prophet.</em> That is the whole actor-critic deal, running once, shared by both rackets.</p>
-
-    <p>Every one of those stabilizers works overtime in tennis. Batch norm keeps the <code>8</code>-number inputs on a sane scale even as rallies stretch into regimes the early random policy never visited. A policy, here, is the racket's rule for turning its numbers into dial settings: the <code>8</code> numbers come in, the <code>2</code> dial settings go out, and early on that rule is still untrained, so its settings are effectively random. Gradient clipping matters because the world moves: a batch sampled from last week's diary can disagree violently with this week's reality, and without clipping one bad batch can undo an hour of learning.</p>
-    <p>Soft target updates are the seatbelts: when your target is computed from a critic that is itself chasing a moving opponent, you update the targets slowly or you get whiplash. Single-agent DDPG needs these. Self-play DDPG needs them twice as much.</p>
-
-    <p>Here is one heartbeat of the learning loop, walked through one stage at a time.</p>
-
-    <p>A newcomer question I love: why one shared brain instead of two separate agents, one per racket, like the paper? <strong>Self-play is its own curriculum.</strong> The opponent is the same policy on the other side of the net, so every improvement to your game is an improvement to your opponent's game. The challenge scales itself: flailing rackets play flailing rackets, and by the time the brain can rally, it is rallying against itself at rally speed. No hand-tuned opponent schedule needed.</p>
-    <p>The flip side is the heart of this page: the world keeps moving precisely because the opponent is your own improvement, served back.</p>
-
-    <p>Each learning round samples only a small slice of the million-deep diary, so the diary turns over slowly, and that is the point. Stability comes from the crowd, not from any single moment.</p>
-    <p>But in tennis the crowd is full of outdated opinions, rallies against opponents who no longer exist. Slow turnover is a stabilizer in a still world and a liability in a moving one. Same diary, opposite verdict, depending on whether the world sits still.</p>
-
-    <p>The diary is a million moments deep, sampled <code>128</code> at a time. A million sounds generous until you remember the brain is burning through episodes against an opponent that rewrites itself nightly. Which brings us to the problem with the diary.</p>
-
-    <ol>
-      <li>Both rackets read their <code>8</code> numbers. Same eyes, two sides of the net.</li>
-      <li>The shared actor turns <code>2</code> dials per racket: scoot and jump, smooth, no notches.</li>
-      <li>Both rackets' transitions land in one shared diary, a million moments deep.</li>
-      <li>Every <code>64</code> steps, the brain samples <code>128</code> moments, <code>128</code> times over. Learning never runs every step.</li>
-      <li>The critic judges the actor's choices, the actor follows the critic, and the soft targets trail behind.</li>
-      <li>The catch: the same brain sits on both sides of the net. Every heartbeat trains your opponent too.</li>
-    </ol>
+    <p>Exploration is the same OU (Ornstein-Uhlenbeck) noise as the reacher page: noise that drifts in one direction for a while and is pulled back toward zero, so a jump stays a commitment across a few steps instead of a random twitch. Here is one heartbeat of the learning loop, with the repo's numbers:</p>
+    <pre><code class="language-python">buffer = ReplayBuffer(capacity=1_000_000)       # one shared diary
+for t in range(max_steps):
+    actions = np.clip(act(states) + noise.sample(), -1, 1)   # one actor, both rackets
+    info = env.step(actions)[brain_name]
+    for i in range(2):                                        # both rackets' transitions
+        buffer.add(states[i], actions[i], info.rewards[i],
+                   info.vector_observations[i], info.local_done[i])
+    states = info.vector_observations
+    if t % 64 == 0 and len(buffer) &gt;= 128:                 # every 64 steps, once full enough
+        for _ in range(128):                                  # 128 updates
+            learn(buffer.sample(128))                         # 128 moments each
+    if np.any(info.local_done):                               # somebody missed: episode over
+        break
+</code></pre>
+    <p>Each round samples a small slice of the million, so the diary turns over slowly. That is a stabilizer in a still world and a liability in a moving one, as the next section shows.</p>
 
     <div class="demo" id="heartbeatDemo">
       <style>
@@ -920,9 +898,7 @@ figcaption { margin-top: 1rem; }
 
 
     <h2 id="opponent-learns">The opponent learns too, so old lessons expire</h2>
-    <p>In the banana and reacher gyms, the world had a fixed rulebook. Collect enough experience and the past was a fair preview of the future. That deal is what every replay buffer is built on. Tennis tears the deal up, because half the rulebook is the other racket, and the other racket rewrites itself every episode. The fancy name is <strong>non-stationarity</strong>. The plain name is: <em>the world will not sit still while you learn it.</em></p>
-
-    <p>Watch what that does to a lesson. On Monday your racket discovers that floating the ball deep beats the opponent. By Wednesday the opponent has learned to camp deep, and your brilliant discovery now loses rallies. The lesson expired. Not because it was wrong, but because the world it was true in no longer exists. <em>Every improvement you make devalues your own training data.</em> That is the tax the moving world charges, and both rackets pay it for the entire run.</p>
+    <p>In the banana and reacher gyms the world had a fixed rulebook, so the past was a fair preview of the future. Every replay buffer is built on that deal. Tennis tears it up, because half the rulebook is the other racket, and it rewrites itself every episode. The fancy name is <strong>non-stationarity</strong>: <em>the world will not sit still while you learn it.</em> A lesson like "float the ball deep" expires the day the opponent learns to camp deep. <em>Every improvement you make devalues your own training data.</em></p>
 
     <svg class="mdiag" viewBox="0 0 360 200" role="img" aria-label="The Red Queen ratchet: improvement lengthens rallies, which improves the opponent, which changes your world">
       <defs>
@@ -944,17 +920,11 @@ figcaption { margin-top: 1rem; }
       <line x1="85" y1="110" x2="85" y2="70" stroke="#e74c3c" stroke-width="2" marker-end="url(#maddAh3)"></line>
       <text x="180" y="92" text-anchor="middle" font-size="14" font-style="italic" fill="#7f8c8d">the Red Queen ratchet</text>
     </svg>
-    <p class="caption">The Red Queen ratchet, named for the Red Queen effect, where you have to run as fast as you can just to stay in place because the other side keeps improving too. The loop never stops, which is why the diary keeps lying.</p>
+    <p class="caption">This is the Red Queen effect: you run as fast as you can just to stay in place, because the other side keeps improving too.</p>
 
-    <p>Your racket improves, which makes the opponent's world harder, which forces the opponent to improve, which makes your world harder. Nobody is standing still, everybody is working furiously, and the scoreboard barely moves for stretches. Then one side finds a real edge, the curve jumps, and the other side starts running again. That stop-start rhythm is the jaggedness you are about to see in the curve below. <em>It is not noise. It is two Red Queens sprinting.</em></p>
+    <p>It shows as the stop-start rhythm in the curve below: flat stretches while both sides run, then a jump when one side finds a real edge. <em>It is not noise. It is two Red Queens sprinting.</em> Meanwhile the diary is full of rallies against last week's, dumber, opponent.</p>
 
-    <p>A replay buffer is a diary: it assumes the past predicts the future. In tennis, <em>your diary is full of rallies against last week's opponent, who was dumber.</em> Training on stale experience is like studying your rival's old match tapes: useful right up until they change their game, which they do every single episode.</p>
-
-    <p>The obvious fix is tempting: if old experience is stale, stop training on old experience. Keep only fresh moments.</p>
-    <p>The problem is that fresh-only training throws away the one thing that makes DDPG stable: the big, diverse, decorrelated diary, a diary whose sampled moments are shuffled so consecutive updates are not near duplicates of each other. A million moments sampled <code>128</code> at a time is what smooths the noise. Shrink the diary to yesterday's rallies and the updates get twitchy; keep the full million and half of it is lies about a dumber opponent.</p>
-    <p>There is no clean answer, which is why multi-agent RL has a whole literature of fancier fixes: opponent modeling, building a model that predicts the opponent's next move, <strong>centralized critics</strong>, a critic that sees both rackets' numbers and both rackets' dials during training, curricula, training on a sequence of opponents or tasks that get harder step by step. This page picks the simple end of that spectrum on purpose. The plain version is the one that shows the problem most clearly.</p>
-
-    <p>This is the thing people miss about multi-agent RL. It is not just single-agent times two. The non-stationarity breaks the core assumption every replay buffer is built on. My run's jagged curve is that struggle, drawn in blue. And once you see it, you cannot unsee it: <em>every dip in that curve is the opponent getting smarter underneath you.</em></p>
+    <p>The obvious fix, training only on fresh moments, throws away what makes DDPG stable: a big, decorrelated diary whose sampled moments are shuffled, so consecutive updates are not near duplicates. Shrink it and the updates get twitchy; keep the full million and half of it is lies about a dumber opponent. Multi-agent RL has a literature of fancier fixes: opponent modeling (predicting the opponent's next move), <strong>centralized critics</strong> (a critic that sees both rackets' numbers and dials during training), and curricula (opponents or tasks that get harder step by step). This page picks the simple end on purpose, because it shows the problem most clearly.</p>
 
     <h2 id="training-curve">Training goes from flailing to sustained rallies</h2>
     <p>This is the actual training curve from my repo: one brain playing both sides, revealed in stages.</p>
@@ -985,25 +955,17 @@ figcaption { margin-top: 1rem; }
     </figure>
     <p class="demo-note">Training curve from my <a href="https://github.com/raminaeye/TennisGym">TennisGym</a> repo: self-play DDPG on Unity ML-Agents tennis, average score (better of the two rackets) per episode.</p>
 
-    <p>The three acts, in gym terms. Act one, episodes <code>0</code> to <code>30</code>: both rackets flail, the ball barely crosses the net, and the score hugs zero because every rare <code>+0.1</code> gets eaten by <code>-0.01</code> drops. Act two, episodes <code>30</code> to <code>100</code>: somebody's timing clicks, rallies stretch, and the average crosses <code>0.5</code> around episode <code>50</code>, about five clears a rally on average. Act three: both rackets can rally, the world calms down, and the average parks near <code>2.0</code>. Three acts, one story: flail, click, sustain.</p>
-
-    <p>One thing the curve hides: it plots the better of the two rackets. The max-of-two solve criterion means you are always looking at the winner's scorecard. The other racket, the sparring partner, might be a step behind the whole run, eating drops so the winner can learn. That is not a flaw in the reporting; it is the point of the criterion. You only need one good player, and the curve shows you that player.</p>
+    <p>Act one, episodes 0 to 30: both rackets flail, and every rare +0.1 gets eaten by drops. Act two, episodes 30 to 100: timing clicks, rallies stretch, and the average crosses 0.5 around episode 50. Act three: the average parks near 2.0. The curve plots the better racket, so you are always reading the winner's scorecard.</p>
 
     <h2 id="frozen-vs-learning">Frozen vs learning opponent</h2>
-    <p>That jagged curve deserves a proper control experiment. How much of the mess is the moving world, and how much is just RL being RL? So: same gym, same learner, two courts. On the left court the opponent is frozen solid: same dumb returns, every episode, forever. On the right court the opponent learns alongside you. Same algorithm, same rewards. The only difference in the universe is whether the other racket is learning.</p>
-
-    <p>Against the frozen opponent the world sits still, so the diary tells the truth and the curve climbs like a textbook: smooth, fast, boring. Against the learning opponent it is a bar fight: every time the opponent figures something out, your score dips and you re-earn ground you already took. The gap between those two curves is the multi-agent insight, drawn instead of described.</p>
-
-    <p>How to read the two courts. Everything else is identical. Any difference you see between the two charts has exactly one possible cause.</p>
-
-    <p>An episode's score is just bookkeeping:</p>
+    <p>How much of that jaggedness is the moving world, and how much is just RL? Same gym, same learner, two courts: on the left the opponent is frozen, on the right it learns alongside you. Any difference between the two charts has exactly one cause. Frozen climbs smoothly; against a learning opponent your score dips each time it finds something. An episode's score is just bookkeeping:</p>
     <div class="eq-card" id="marlScoreEqStatic">
         <div class="eq-what">The whole reward schedule, in one line: clears pay, drops cost, ten to one.</div>
         <div class="eq-line eq-active" data-eqline="0">score = <span class="eqt" style="color:#27ae60">clears</span> × 0.1 − <span class="eqt" style="color:#c0392b">drops</span> × 0.01</div>
-        <div class="eq-why eq-active" data-eqline="0">Read it as bookkeeping: every <span class="eqt" style="color:#27ae60">clear</span> of the net pays <code>+0.1</code>, and every <span class="eqt" style="color:#c0392b">drop</span>, a ball let drop or sailed out of bounds, costs <code>0.01</code>, so one clear pays for ten drops. The lopsided rates are the point: they tell the agent that trying things is nearly free, which is why the scores later launch instead of climbing.</div>
+        <div class="eq-why eq-active" data-eqline="0">Every <span class="eqt" style="color:#27ae60">clear</span> of the net pays 0.1, and every <span class="eqt" style="color:#c0392b">drop</span>, a ball let drop or sailed out of bounds, costs 0.01, so one clear pays for ten drops.</div>
     </div>
 
-    <p>A control experiment this clean should come with a warning label. A real opponent is not a knob. You cannot set its learning speed to <code>0.6</code>, and it does not hold still while you measure it. In the real run both courts are the right-hand one: both rackets dipping each other, both paying the tax at the same time. The left court is a fiction, a useful one. It shows you what this exact algorithm does when the world sits still, so you can attribute every extra jag to the only thing that changed.</p>
+    <p>The left court is a useful fiction: a real opponent is not a knob, and in the real run both rackets learn, so both curves look like the right one.</p>
 
     <div class="demo" id="vsDemo">
       <div class="demo-controls">
@@ -1276,18 +1238,14 @@ figcaption { margin-top: 1rem; }
     <h2 id="scores-explode">Why the scores explode</h2>
     <p>Look at that curve again. Once rallies start, the scores do not creep up, they launch. The reason is the reward asymmetry, and you can feel it with this slider.</p>
 
-    <p>With that ratio, the moment rallies stretch past five or six clears, the penalty term becomes decoration and the score goes vertical. A rally ends when somebody misses, so every rally's score carries exactly one drop. That is why the curve launches instead of climbing.</p>
-
-    <p>Flip the rewards symmetric for a second: <code>+0.1</code> for a clear, <code>-0.1</code> for a drop. Now one drop wipes out one clear, and early exploration, which is mostly drops, gets punished hard. The agent would learn fear before it learned tennis, and the curve would crawl. The lopsided <code>+0.1</code>/<code>-0.01</code> is a design choice, and it is doing real work: it tells the agent that trying things is nearly free. Cheap failure plus expensive success is why the scores launch. <em>The rewards were the curriculum all along.</em></p>
-
-    <p>Now re-read the training curve with that asymmetry in mind. It crosses <code>0.5</code> around episode <code>50</code>. Crossing <code>0.5</code> means the average episode is suddenly worth five-plus clears, and the sixth clear is what tips it. That crossing is not gradual because the rewards are not gradual: the moment rallies learn their sixth clear, the <code>-0.01</code> term surrenders and the average goes vertical.</p>
+    <p>A rally ends when somebody misses, so the losing racket's rally score carries exactly one drop:</p>
 
     <div class="eq-card" id="marlRallyEqStatic">
         <div class="eq-what">The same bookkeeping at the per-rally grain.</div>
         <div class="eq-line eq-active" data-eqline="0">rally score = 0.1 × <span class="eqt" style="color:#27ae60">n</span> − 0.01</div>
-        <div class="eq-why eq-active" data-eqline="0">In that line: <span class="eqt" style="color:#27ae60">n</span> is the rally length in clears, and the single <code>0.01</code> is the one drop every rally ends with, because a rally ends when somebody misses, so every rally's score carries exactly one drop. Cheap failure plus expensive success is why the scores launch.</div>
+        <div class="eq-why eq-active" data-eqline="0"><span class="eqt" style="color:#27ae60">n</span> is the rally length in clears, and the single 0.01 is the one drop that ends it. Past about six clears the penalty is decoration and the score goes vertical.</div>
     </div>
-    <p>The <code>0.5</code> line is the solve line named in <a href="#tennis-court">The tennis court: two rackets, eight numbers, two dials</a>.</p>
+    <p>That is why the curve launches instead of climbing, and why it crosses the 0.5 solve line so suddenly around episode 50. Flip the rewards symmetric, +0.1 for a clear and &#8722;0.1 for a drop, and early exploration, which is mostly drops, gets punished hard: the agent would learn fear before it learned tennis. The lopsided rewards tell it that trying things is nearly free. <em>The rewards were the curriculum all along.</em></p>
 
     <div class="diagram">
       <svg viewBox="0 0 640 360" role="img" aria-label="Static chart of rally score against rally length: a rising line crossing the 0.5 solve line at a 6-clear rally and reaching 2.99 at a 30-clear rally">
@@ -1370,29 +1328,32 @@ figcaption { margin-top: 1rem; }
       <source src="media/rl/tennis_clip.mp4" type="video/mp4">
     </video>
     <p class="demo-note">My trained rackets rallying at test time (TennisGym repo, Unity ML-Agents). This is the ~<code>2.0</code>-average policy from the end of that curve.</p>
-    <p>Test time is a different animal from training. The diary is closed, the OU noise is typically off, the critic is unemployed. Just the actor, reading <code>8</code> numbers and turning <code>2</code> dials, no learning allowed. What you are watching is pure policy: everything those rackets know, compressed into <code>256-256-128</code> weights, executed live. <em>If it looks smooth, that smoothness was earned one gradient step at a time.</em></p>
-
-    <p>Each dial does one job. The scoot: rackets gliding along their baselines, tracking the ball sideways, never quite still. The jump: those little hops to meet a high ball, timed, not random. Every clean intercept is a +<code>0.1</code>; every whiff is a <code>-0.01</code> and a reset. That is eight numbers and two dials playing actual tennis.</p>
-
-    <p>This is the <code>2.0</code>-average policy from the end of that curve, the one that survived the bar fight. Twenty-hit rallies, from eight numbers and two dials. If you watch closely you can see the whole story in one rally: track, time, punch, recover, and an opponent doing the same thing back at you.</p>
+    <p>Test time is a different animal: the diary is closed, the OU noise is typically off, and the critic is idle. Just the actor, with no learning allowed:</p>
+    <pre><code class="language-python">actor.eval()
+with torch.no_grad():                    # no learning, no noise
+    actions = actor(torch.as_tensor(states, dtype=torch.float32)).numpy()
+info = env.step(actions)[brain_name]
+</code></pre>
+    <p>Watch the two dials at work: the scoot tracks the ball sideways along the baseline, and the jump meets high balls, timed, not random. Track, time, punch, recover, and an opponent doing the same back at you.</p>
 
     <h2 id="maddpg-paper">How MADDPG differs from the shared setup on this page</h2>
-    <p>This page picks the simple end of the spectrum on purpose: one shared actor and critic, no extra eyes. But the moving-world problem is bigger than tennis, so it is worth knowing what the fancier answers look like.</p>
-    <p>The famous paper version of this idea, MADDPG (Lowe et al.), gives each agent its own actor and its own critic. During training each critic is centralized: it sees everybody's observations and everybody's actions, so it can judge your move knowing what the opponent did. Centralized training, decentralized execution: at test time each actor only sees its own observations.</p>
+    <p>The famous paper version of this idea, MADDPG (Lowe et al.), gives each agent its own actor and its own critic. During training each critic is centralized: it sees everybody's observations and actions, so it can judge your move knowing what the opponent did. At test time each actor sees only its own observations: centralized training, decentralized execution.</p>
     <figure class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 482" style="max-width:480px" role="img" aria-label="Top: on this page both rackets share one actor and one critic, and the critic sees one racket at a time. Bottom: MADDPG gives each agent its own actor and its own critic; during training each critic sees every agent's observations and actions; at test time each actor sees only its own observations. Arrows show whose observations and actions each critic sees"><text class="" x="200.0" y="22.0" text-anchor="middle" style="font-size:17px;font-weight:700">This page: one shared brain</text><rect class="mtd-box " x="20" y="40" width="130" height="40" rx="7"/><text class="" x="85.0" y="65.6" text-anchor="middle" style="font-size:16px;font-weight:700">Racket A</text><rect class="mtd-box " x="250" y="40" width="130" height="40" rx="7"/><text class="" x="315.0" y="65.6" text-anchor="middle" style="font-size:16px;font-weight:700">Racket B</text><rect class="mtd-box " x="70" y="120" width="260" height="58" rx="7"/><text class="mtd-pu" x="200.0" y="144.6" text-anchor="middle" style="font-size:16px;font-weight:700">one actor, one critic</text><text class="mtd-sub" x="200.0" y="164.6" text-anchor="middle" style="font-size:16px">critic sees one racket at a time</text><line class="mtd-s mtd-cg" x1="85.0" y1="80.0" x2="131.9" y2="114.1" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-cg" points="140.0,120.0 129.0,118.2 134.9,110.1"/><line class="mtd-s mtd-cg" x1="315.0" y1="80.0" x2="268.1" y2="114.1" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-cg" points="260.0,120.0 265.1,110.1 271.0,118.2"/><line class="mtd-sep" x1="0" y1="200" x2="400" y2="200"/><text class="" x="200.0" y="226.0" text-anchor="middle" style="font-size:17px;font-weight:700">MADDPG: own actor, own critic</text><rect class="mtd-box " x="20" y="244" width="150" height="52" rx="7"/><text class="mtd-t1" x="95.0" y="265.8" text-anchor="middle" style="font-size:15px;font-weight:700">actor 1</text><text class="mtd-sub" x="95.0" y="284.8" text-anchor="middle" style="font-size:15px">own observations</text><rect class="mtd-box " x="230" y="244" width="150" height="52" rx="7"/><text class="mtd-t2" x="305.0" y="265.8" text-anchor="middle" style="font-size:15px;font-weight:700">actor 2</text><text class="mtd-sub" x="305.0" y="284.8" text-anchor="middle" style="font-size:15px">own observations</text><rect class="mtd-box " x="20" y="356" width="150" height="70" rx="7"/><text class="mtd-t1" x="95.0" y="377.2" text-anchor="middle" style="font-size:15px;font-weight:700">critic 1</text><text class="mtd-sub" x="95.0" y="396.2" text-anchor="middle" style="font-size:15px">sees everybody,</text><text class="mtd-sub" x="95.0" y="415.2" text-anchor="middle" style="font-size:15px">training only</text><rect class="mtd-box " x="230" y="356" width="150" height="70" rx="7"/><text class="mtd-t2" x="305.0" y="377.2" text-anchor="middle" style="font-size:15px;font-weight:700">critic 2</text><text class="mtd-sub" x="305.0" y="396.2" text-anchor="middle" style="font-size:15px">sees everybody,</text><text class="mtd-sub" x="305.0" y="415.2" text-anchor="middle" style="font-size:15px">training only</text><line class="mtd-s mtd-cg" x1="95.0" y1="296.0" x2="95.0" y2="346.0" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-cg" points="95.0,356.0 90.0,346.0 100.0,346.0"/><line class="mtd-s mtd-cg" x1="305.0" y1="296.0" x2="305.0" y2="346.0" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-cg" points="305.0,356.0 300.0,346.0 310.0,346.0"/><line class="mtd-s mtd-cg" x1="150.0" y1="296.0" x2="241.4" y2="350.9" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-cg" points="250.0,356.0 238.9,355.1 244.0,346.6"/><line class="mtd-s mtd-cg" x1="250.0" y1="296.0" x2="158.6" y2="350.9" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-cg" points="150.0,356.0 156.0,346.6 161.1,355.1"/><text class="mtd-sub" x="200.0" y="452.0" text-anchor="middle" style="font-size:15px">at test time each actor sees</text><text class="mtd-sub" x="200.0" y="472.0" text-anchor="middle" style="font-size:15px">only its own observations</text></svg><figcaption class="caption">Top: this page's setup. Bottom: MADDPG, where each agent gets its own actor and its own critic, and the critics see everybody during training; at test time each actor sees only its own observations. Arrows show whose observations and actions each critic sees.</figcaption></figure>
-    <p>What the authors were after starts with a diagnosis: Q-learning, learning a score for every move on a short menu and picking the highest scoring one, breaks in multi-agent settings because the environment is inherently non-stationary, and policy-gradient variance (policy gradient means learning the actor directly from the rewards its actions earn, and variance is how much that learning signal swings from batch to batch) grows with the number of agents. Their fix adapts actor-critic to the multi-agent case around those centralized critics.</p>
-    <p>They also train an ensemble of policies per agent, several policies for the same agent instead of one, for robustness, and showed agents discovering physical and informational coordination strategies (ways of working together through how they move and through information they pass to each other) in cooperative and competitive scenarios.</p>
-    <p>My tennis repo is MADDPG's simpler cousin, the top half of that picture: its critic sees only one racket's <code>24</code> stacked numbers and <code>2</code> actions at a time. And it still solved tennis. That tells you something: the moving world is the hard part, not the architecture.</p>
-    <p>I also tried the fancier end myself: a prioritized replay buffer, which gives each stored moment a priority based on how wrong the critic was about it and samples the moments the critic is most wrong about first instead of sampling the diary evenly, and an ensemble of agents voting on actions. Neither helped enough to justify the complexity, so the plain version is what shipped. Sometimes the boring answer wins.</p>
+    <p>Their diagnosis: Q-learning, learning a score for every move on a short menu, breaks here because the environment is non-stationary, and policy-gradient variance (how much the actor's learning signal swings from batch to batch) grows with the number of agents. They also train an ensemble of several policies per agent for robustness, and show agents discovering coordination strategies in cooperative and competitive scenarios.</p>
+    <p>My repo is MADDPG's simpler cousin, the top half of that picture: its critic sees one racket's 24 numbers and 2 actions at a time, and it still solved tennis. The moving world is the hard part, not the architecture. I also tried a prioritized replay buffer, which samples the moments the critic is most wrong about first, and an ensemble of agents voting on actions. Neither helped enough to justify the complexity. Sometimes the boring answer wins.</p>
 
     <h2 id="three-ideas">What changes from DQN to DDPG to multi-agent</h2>
-    <p>Three pages, three ideas, one breath. If someone corners you and asks what the difference is between these algorithms, this is the whole answer.</p>
-
-    <p><strong>DQN is a menu.</strong> The world offers a short list of moves, the network learns a score for every item on it, and the agent picks the max. Four directions, yellow banana good, blue banana bad. The menu is the entire trick, and it only works while the list of moves is short enough to score.</p>
-
-    <p><strong>DDPG throws the menu away.</strong> The dials are continuous, infinitely many settings, so scoring every option is impossible. Instead one network, the actor, turns the dials directly, and a second network, the critic, judges each setting. No argmax anywhere. That is the reacher arm holding its target dead still.</p>
-
-    <p>Multi-agent changes nothing about the networks and everything about the world. Same DDPG machinery, one shared brain driving both rackets. But now each side of the net lives inside the other's world, and the brain keeps rewriting the opponent it plays against. <em>The ground moves.</em> That is tennis, and that is the entire difference.</p>
+    <p>Three pages, three ideas, one breath. The networks barely change; what changes is how the move is picked and whether the world sits still.</p>
+    <div class="eq-card" id="marlThreeEqStatic">
+        <div class="eq-what">How each method picks its move.</div>
+        <div class="eq-line eq-active" data-eqline="0">DQN: <span class="eqt" style="color:#c0392b">a</span> = argmax<sub><span class="eqt" style="color:#c0392b">a</span></sub> <span class="eqt" style="color:#2a7fbf">Q</span>(<span class="eqt" style="color:#2c3e50">s</span>, <span class="eqt" style="color:#c0392b">a</span>)</div>
+        <div class="eq-why eq-active" data-eqline="0">A menu: the network <span class="eqt" style="color:#2a7fbf">Q</span> scores every move <span class="eqt" style="color:#c0392b">a</span> in state <span class="eqt" style="color:#2c3e50">s</span>, and the agent plays the max. It only works while the menu is short, like the banana agent's four directions.</div>
+        <div class="eq-line eq-active" data-eqline="1">DDPG: <span class="eqt" style="color:#c0392b">a</span> = <span class="eqt" style="color:#27ae60">&#956;</span>(<span class="eqt" style="color:#2c3e50">s</span>)</div>
+        <div class="eq-why eq-active" data-eqline="1">No menu: the actor <span class="eqt" style="color:#27ae60">&#956;</span> turns the continuous dials directly, and the critic <span class="eqt" style="color:#2a7fbf">Q</span>(<span class="eqt" style="color:#2c3e50">s</span>, <span class="eqt" style="color:#c0392b">a</span>) grades the setting. No argmax anywhere. That is the reacher arm.</div>
+        <div class="eq-line eq-active" data-eqline="2">Self-play: <span class="eqt" style="color:#c0392b">a<sub>i</sub></span> = <span class="eqt" style="color:#27ae60">&#956;</span>(<span class="eqt" style="color:#2c3e50">o<sub>i</sub></span>)</div>
+        <div class="eq-why eq-active" data-eqline="2">The same <span class="eqt" style="color:#27ae60">&#956;</span> drives both rackets from each racket i's own observations <span class="eqt" style="color:#2c3e50">o<sub>i</sub></span>, i being A or B, so each racket's world contains the other, and the brain keeps rewriting the opponent it plays against.</div>
+    </div>
+    <p>Multi-agent changes nothing about the networks and everything about the world. <em>The ground moves.</em> That is tennis, and that is the entire difference.</p>
 
     <h2 id="references">References</h2>
     <ol class="brefs">

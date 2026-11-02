@@ -1,0 +1,1588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Softmax, Temperature and Decoding</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem;
+      line-height: 1.6;
+      color: #333;
+    }
+    h1, h2, h3, h4 {
+      color: #2c3e50;
+      margin-top: 1.5em;
+      margin-bottom: 0.5em;
+    }
+    h1 { font-size: 2.5em; border-bottom: 2px solid #3498db; padding-bottom: 0.3em;}
+    h2 { font-size: 2em; border-bottom: 1px solid #bdc3c7; padding-bottom: 0.2em;}
+    h3 { font-size: 1.5em; }
+    h4 { font-size: 1.2em; color: #555;}
+
+    /* Shared site nav (matches index.html topnav) */
+    body { padding-top: calc(64px + 1.5rem); }
+    h1, h2, h3 { scroll-margin-top: 84px; }
+    .topnav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        z-index: 1000;
+        background: rgba(255, 255, 255, 0.65);
+        backdrop-filter: blur(18px) saturate(1.5);
+        -webkit-backdrop-filter: blur(18px) saturate(1.5);
+        border-bottom: 1px solid transparent;
+        transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+    .topnav.scrolled {
+        background: rgba(255, 255, 255, 0.88);
+        border-bottom-color: #dee2e6;
+        box-shadow: 0 6px 24px rgba(33, 37, 41, 0.07);
+    }
+    .nav-inner {
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 0 1.5rem;
+        height: 64px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+    .wordmark {
+        font-weight: 700;
+        color: #212529;
+        text-decoration: none;
+        font-size: 1.05rem;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+    }
+    .nav-links {
+        display: flex;
+        gap: 2px;
+        align-items: center;
+    }
+    .nav-links a {
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        font-size: 0.95rem;
+        padding: 8px 14px;
+        border-radius: 999px;
+        transition: color 0.18s ease, background-color 0.18s ease;
+    }
+    .nav-links a:hover {
+        color: #007bff;
+        background-color: #e7f1ff;
+    }
+    .nav-links a.active {
+        color: #007bff;
+        background-color: #e7f1ff;
+        font-weight: 600;
+    }
+    .nav-links a:focus-visible,
+    .wordmark:focus-visible,
+    .nav-toggle:focus-visible,
+    .panel-link:focus-visible,
+    .panel-social a:focus-visible {
+        outline: 2px solid #007bff;
+        outline-offset: 2px;
+    }
+    @media (hover: hover) {
+        .nav-toggle:hover { background-color: #e7f1ff; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .topnav,
+        .nav-links a,
+        .nav-toggle span,
+        .nav-panel,
+        .nav-panel a.panel-link {
+            transition: none;
+        }
+    }
+    @media (hover: hover) {
+        .nav-toggle:hover { background-color: #e7f1ff; }
+    }
+    .nav-toggle {
+        display: none;
+        width: 42px;
+        height: 42px;
+        padding: 0;
+        background: none;
+        border: 0;
+        border-radius: 10px;
+        cursor: pointer;
+        flex: 0 0 auto;
+    }
+    .nav-panel {
+        display: grid;
+        grid-template-rows: 0fr;
+        visibility: hidden;
+        transition: grid-template-rows 0.32s ease, visibility 0s linear 0.32s;
+    }
+    .nav-panel.open {
+        grid-template-rows: 1fr;
+        visibility: visible;
+        transition: grid-template-rows 0.32s ease, visibility 0s;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner {
+        min-height: 0;
+        overflow: hidden;
+    }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link:hover {
+        background-color: #e7f1ff;
+        color: #007bff;
+    }
+    .nav-panel a.panel-link.active {
+        color: #007bff;
+        font-weight: 600;
+        background-color: #e7f1ff;
+    }
+    .panel-social a:hover {
+        border-color: #007bff;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner {
+        min-height: 0;
+        overflow: hidden;
+    }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link:hover {
+        background-color: #e7f1ff;
+        color: #007bff;
+    }
+    .nav-panel a.panel-link.active {
+        color: #007bff;
+        font-weight: 600;
+        background-color: #e7f1ff;
+    }
+    .panel-social a:hover {
+        border-color: #007bff;
+    }
+    /* Section tab strip: one slim row, scrolls sideways when it overflows. */
+    .tabs-label {
+        float: left;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #6c757d;
+        font-weight: 700;
+        line-height: 1.2;
+        margin: 0;
+        padding: 8px 12px 0 0;
+    }
+    .tab-strip {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 2px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        margin: 0 0 1.25rem;
+        max-width: 100%;
+    }
+    .tab-strip::-webkit-scrollbar { display: none; }
+    .tab-strip a.tab-chip,
+    .tab-strip a.tab-link {
+        display: inline-block;
+        flex: 0 0 auto;
+        padding: 6px 10px;
+        border-radius: 999px;
+        color: #495057;
+        text-decoration: none;
+        font-size: 0.82rem;
+        font-weight: 500;
+        line-height: 1.35;
+        white-space: nowrap;
+    }
+    .tab-strip a.tab-chip:hover,
+    .tab-strip a.tab-link:hover { color: #007bff; }
+    .tab-strip a.tab-chip.active,
+    .tab-strip a.tab-link.active { background: #007bff; color: #ffffff; }
+    @media (max-width: 768px) {
+        .tabs-label { display: none; }
+        .tab-strip {
+            width: 100vw;
+            max-width: 100vw;
+            box-sizing: border-box;
+            margin-left: calc((100% - 100vw) / 2);
+            padding-left: calc((100vw - 100%) / 2);
+        }
+        .tab-strip a.tab-chip,
+        .tab-strip a.tab-link { font-size: 0.75rem; padding: 6px 8px; }
+    }
+        .crumb { margin: 0 0 0.8em; }
+        .crumb a {
+            display: inline-block;
+            padding: 4px 14px;
+            border: 1px solid #dee2e6;
+            border-radius: 999px;
+            background: #f8f9fa;
+            color: #0056b3;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+        .crumb a:hover { border-color: #007bff; color: #007bff; }
+    .nav-panel a.panel-link {
+        display: flex;
+        align-items: center;
+        padding: 0.8rem 0.75rem;
+        margin: 0 0.25rem;
+        border-radius: 10px;
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        min-height: 48px;
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+    .panel-social {
+        display: flex;
+        gap: 0.5rem;
+        padding: 0.9rem 1rem 0.25rem;
+        flex-wrap: wrap;
+    }
+    .panel-social a {
+        color: #007bff;
+        text-decoration: none;
+        font-weight: 500;
+        font-size: 0.9rem;
+        padding: 6px 12px;
+        border: 1px solid #dee2e6;
+        border-radius: 999px;
+        transition: border-color 0.15s ease;
+    }
+    @media (max-width: 768px) {
+        .nav-links { display: none; }
+        .nav-toggle { display: block; }
+    }
+
+    pre {
+      background: #0d1117;
+      color: #e6edf3;
+      padding: 14px 16px;
+      overflow-x: auto;
+      border-radius: 8px;
+      font-size: 0.9em;
+      margin: 1em 0;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+    }
+    /* P52 canonical inline items in prose: numbers and variables wear the body
+       font at body size and read as part of the sentence (keeps P50's quiet
+       treatment, no pill; code blocks and eq-cards keep the mono treatment). */
+    code {
+        font-family: inherit;
+        font-size: 1em;
+        color: #1a1a1a;
+        background: none;
+        padding: 0 0.08em;
+        overflow-wrap: break-word;
+    }
+    pre code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 1em; }
+    .eq-card code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 0.92em; }
+    pre code {
+      background: none;
+      padding: 0;
+      font-size: 1em;
+      color: inherit;
+    }
+    ul, ol {
+      padding-left: 20px;
+    }
+    li {
+      margin-bottom: 0.5em;
+    }
+    strong {
+      color: #2980b9;
+    }
+    hr {
+      border: 0;
+      height: 1px;
+      background: #bdc3c7;
+      margin-top: 2em;
+      margin-bottom: 2em;
+    }
+    /* Rendered output block, not a print() cell */
+    .output {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 1rem 1.2rem;
+      border-radius: 6px;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+      font-size: 0.9em;
+      margin: 1em 0;
+      overflow-x: auto;
+      border-left: 4px solid #22c55e;
+    }
+    .output .dim { color: #94a3b8; }
+    /* Readability sweep: stat cards, data tables, numbered walkthroughs */
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 1.2em 0; }
+    .stat-card { border: 1px solid #bdc3c7; border-radius: 8px; padding: 14px 16px; background: #f7f9fb; }
+    .stat-num { font-size: 1.9em; font-weight: 800; color: #2c3e50; line-height: 1.15; }
+    .stat-unit { font-size: .55em; font-weight: 600; color: #7f8c8d; } .stat-vs { font-size: max(12px, .55em); font-weight: 600; color: #7f8c8d; }
+    .stat-label { font-size: .92em; font-weight: 600; margin-top: 6px; color: #2c3e50; }
+    .stat-note { font-size: .82em; color: #7f8c8d; margin-top: 3px; }
+    .datatable { border-collapse: collapse; margin: 1.2em 0; width: 100%; max-width: 560px; font-size: .95em; }
+    .datatable th, .datatable td { border: 1px solid #bdc3c7; padding: .45em .6em; text-align: center; }
+    .datatable th { background: #2c3e50; color: #fff; font-weight: 600; }
+    .datatable tr:nth-child(even) td { background: #f7f9fb; }
+    .datatable tr td.mask { background: #d8dee3; color: #6b7a89; font-weight: 600; }
+    .datatable caption { caption-side: bottom; text-align: left; font-size: .85em; color: #555; padding: .5em 0 0; border-left: 3px solid #3498db; padding-left: .8em; }
+/* Worked-example card (Round 9 template): a calm sage card that sets
+           math walkthrough steps apart from body text. Body font throughout,
+           all math in MathJax, one computation per line, generous spacing. */
+        .worked-example {
+            background: #f1f6ed;
+            border: 1px solid #d9e4d1;
+            border-left: 3px solid #6f9a63;
+            border-radius: 10px;
+            padding: 14px 20px;
+            margin: 1.1em 0;
+            max-width: 680px;
+            color: #2c3e50;
+            line-height: 1.8;
+            overflow-x: auto;
+        }
+        ol.worked-example {
+            list-style: none;
+            counter-reset: wex-step;
+            padding-left: 20px;
+        }
+        ol.worked-example > li {
+            counter-increment: wex-step;
+            position: relative;
+            margin: 0;
+            padding: 8px 0 8px 44px;
+        }
+        ol.worked-example > li + li { border-top: 1px dashed #cbdabf; }
+        ol.worked-example > li::before {
+            content: counter(wex-step);
+            position: absolute;
+            left: 0;
+            top: 9px;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: #6f9a63;
+            color: #ffffff;
+            font-size: 13px;
+            font-weight: 700;
+            line-height: 28px;
+            text-align: center;
+        }
+        @media (max-width: 480px) {
+            .worked-example { padding: 12px; font-size: 15px; }
+            ol.worked-example { padding-left: 12px; }
+            ol.worked-example > li { padding-left: 38px; }
+        }
+    .caption {
+      font-size: 0.9em; color: #555; margin-top: 1rem;
+      border-left: 3px solid #3498db; padding-left: 0.8em;
+    }
+    .diagram {
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      padding: 1rem;
+      margin: 1.75rem 0;
+      background: #fbfcfd;
+      overflow-x: auto;
+    }
+    /* Interactive demo */
+    .demo {
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      padding: 1.25rem;
+      margin: 1.75rem 0;
+      background: #fbfcfd;
+    }
+    .demo-controls { margin: 0.8rem 0 1rem; }
+    .demo-controls label { display: block; margin: 0.6em 0 0.3em; color: #2c3e50; }
+    .demo-controls input[type="range"] { width: 100%; }
+    .demo-controls select { font-size: 1em; padding: 0.3em 0.6em; }
+    .attn-toggle { display: inline-flex; border: 1px solid #bdc3c7; border-radius: 6px; overflow: hidden; margin: 0.6rem 0.6rem 1rem 0; flex-wrap: wrap; }
+    .attn-toggle button {
+      border: none; background: #fff; padding: 0.45em 1.0em; cursor: pointer;
+      font-size: 1em; color: #2c3e50; font-family: inherit;
+    }
+    .attn-toggle button.active { background: #3498db; color: #fff; font-weight: bold; }
+    .table-scroll { overflow-x: auto; margin: 0 auto 1rem; }
+    .attn-mini { border-collapse: collapse; margin: 0 auto; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; font-size: 0.85em; }
+    .attn-mini th, .attn-mini td { border: 1px solid #bdc3c7; padding: 0.35em 0.55em; text-align: center; white-space: nowrap; }
+    .attn-mini th { background: #ecf0f1; color: #2c3e50; }
+    .attn-mini tr.hl td { background: #d6eafb; }
+    .attn-mini tr.hl th.rowhead { background: #3498db; color: #fff; }
+    .attn-mini td.blocked { background: rgba(231,76,60,0.45); color: #7b241c; font-weight: bold; }
+    #causalDemo .kchip.masked rect, #causalDemo .qchip.masked rect { fill: #f2f4f4; stroke: #d5dbdb; }
+    #causalDemo .kchip.masked text, #causalDemo .qchip.masked text { fill: #aab7b8; }
+    .attn-bars { max-width: 560px; margin: 0 auto; }
+    .attn-bar-row { display: flex; align-items: center; gap: 0.6em; margin: 0.45em 0; }
+    .attn-bar-row .lbl { width: 4.2em; text-align: right; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; color: #2c3e50; flex: none; font-size: 0.9em; }
+    .attn-bar-track { flex: 1; background: #ecf0f1; border-radius: 4px; height: 1.4em; min-width: 0; }
+    .attn-bar-fill { background: #3498db; border-radius: 4px; height: 100%; }
+    .attn-bar-fill.alt { background: #e67e22; }
+    .attn-bar-row .val { width: 2.8em; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; color: #2c3e50; flex: none; }
+    /* headRoles paired bars: both heads side by side per token */
+    .pair-tracks { display: flex; gap: 0.5em; flex: 1; min-width: 0; }
+    .pair-tracks .attn-bar-track.dim { opacity: 0.3; }
+    .attn-bar-row .val.pair { width: 6.6em; font-size: 0.85em; }
+    /* Fit-in-one-page: tighter bar rows for the 12-token headRoles viz. */
+    #headRoles .attn-bar-row { margin: 0.28em 0; }
+    #headRoles .attn-bar-track { height: 1.15em; }
+    /* One attention layer, walked through (attnLayer): 4-step stepper, HTML canvas. */
+    #attnLayer .stepper { display: flex; align-items: center; gap: 0.7rem; margin: 0.8rem 0; flex-wrap: wrap; }
+    #attnLayer .dots { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+    #attnLayer .dot { border: 1px solid #bdc3c7; background: #fff; border-radius: 999px; padding: 0.3em 0.85em; font-size: 0.9em; color: #2c3e50; cursor: pointer; }
+    #attnLayer .dot.active { background: #3498db; border-color: #3498db; color: #fff; font-weight: bold; }
+    #attnLayer .dot:focus-visible, #attnLayer .stepper .play-btn:focus-visible { outline: 2px solid #e67e22; outline-offset: 2px; }
+    #attnLayer .play-btn:disabled { opacity: 0.45; cursor: default; }
+    #attnLayer .al-canvas { margin: 1rem 0 0.4rem; }
+    #attnLayer .al-scene { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .7rem; }
+    #attnLayer .al-region { border: 1px solid #dfe6ec; border-radius: 10px; padding: .5rem .6rem; background: #fff; }
+    #attnLayer .al-region-title { font-size: .78rem; font-weight: 700; color: #2c3e50; margin: 0 0 .35rem; }
+    /* Shared walkthrough equation-card contract (verbatim, all pages) */
+    
+    .eq-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+
+      padding:1rem 1.2rem;margin:1.75rem auto;max-width:640px;overflow-x:auto}
+
+    .eq-what{font-size:.95rem;color:#334155;margin:0 0 .6rem;line-height:1.55}
+
+    .eq-line{font-size:1.38rem;line-height:2.0;letter-spacing:.015em;padding:.5rem .6rem;white-space:normal;font-weight:500;opacity:.38;border-left:3px solid transparent}
+
+    .eq-line.eq-active{opacity:1;border-left-color:#2c3e50}
+.eq-line sub,.eq-line sup{font-size:.68em}
+.frac{display:inline-flex;flex-direction:column;text-align:center;vertical-align:middle;margin:0 .18em;font-size:.8em;line-height:1.3}
+.frac .top{padding:0 .3em .1em}
+.frac .bot{border-top:2px solid currentColor;padding:.1em .3em 0}
+.rad{display:inline-flex;align-items:flex-start;vertical-align:middle;white-space:nowrap}
+.rad .rad-sym{font-size:1.12em;line-height:1}
+.rad .rad-body{border-top:.09em solid currentColor;line-height:1.18;padding:0 .12em 0 .04em}
+      .eq-why{display:none;visibility:hidden;font-size:1rem;color:#475569;padding:.15rem .35rem .4rem;line-height:1.65}
+      .eq-why.eq-active{display:block;visibility:visible}
+      .eq-card.eq-stepped .eq-line{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-line.eq-active{display:block;opacity:1;visibility:visible}
+      .eq-card.eq-stepped .eq-legend .eq-item{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-legend .eq-item.eq-active{display:block;visibility:visible}
+
+    .eqt{font-weight:600;padding:0 .1em;border-radius:3px}
+
+    .eqt.eqt-active{text-decoration:underline;text-underline-offset:2px}
+
+    .eq-legend{font-size:.85rem;color:#475569;margin-top:.6rem;line-height:1.75}
+
+    .eq-legend .eq-item{display:block}
+
+    .eq-legend .eq-item code{white-space:nowrap}
+
+    .eq-sw{display:inline-block;width:.7em;height:.7em;border-radius:2px;
+
+      margin:0 .25em 0 .6em;vertical-align:baseline}
+
+    @media (max-width:480px){.eq-card{padding:.85rem .9rem}.eq-line{font-size:1.24rem;line-height:1.95}}
+    /* diagram-side dim/highlight (SVG/DOM). Do NOT use .hl/.dim: taken. */
+    .eq-dim{opacity:.58}
+    .eq-hl{filter:drop-shadow(0 0 3px currentColor)}
+    #attnLayer .al-row { display: flex; align-items: center; gap: 0.35rem; margin: 0.5em 0; padding: 0.45em 0.55em; border: 2px solid transparent; border-radius: 10px; flex-wrap: wrap; }
+    #attnLayer .al-row.follow { border-color: #e67e22; background: #fef9f0; }
+    #attnLayer .al-token { font-weight: bold; min-width: 2.4em; text-align: center; background: #ecf0f1; border-radius: 6px; padding: 0.25em 0.4em; font-size: 0.95em; }
+    #attnLayer .al-row.follow .al-token { background: #e67e22; color: #fff; }
+    #attnLayer .al-follow { font-size: 0.85em; color: #8a4b00; font-weight: bold; }
+    #attnLayer .al-strip { display: inline-flex; align-items: flex-end; gap: 1px; height: 46px; }
+    #attnLayer .al-bar { width: 5px; background: #3498db; border-radius: 2px; }
+    #attnLayer .al-bar.pos { background: repeating-linear-gradient(45deg, #8e44ad, #8e44ad 3px, #d2b4de 3px, #d2b4de 6px); }
+    #attnLayer .al-bar.al-pre { background: #c9d2d9; }
+    #attnLayer .al-bar.mix { background: #2ecc71; }
+    #attnLayer .al-op { color: #555; font-weight: bold; font-size: 1.05em; }
+    #attnLayer .al-legend { font-size: 0.9em; color: #555; margin: 0.7em 0 0; }
+    #attnLayer .al-legend .sw { display: inline-block; width: 1.1em; height: 0.85em; border-radius: 3px; margin-right: 0.35em; vertical-align: middle; }
+    #attnLayer .al-legend .sw.word { background: #3498db; }
+    #attnLayer .al-legend .sw.pos { background: repeating-linear-gradient(45deg, #8e44ad, #8e44ad 2px, #d2b4de 2px, #d2b4de 4px); }
+    #attnLayer .al-legend .sw.mix { background: #2ecc71; }
+    #attnLayer .al-note { font-size: 0.92em; color: #555; margin: 0 0 0.5em; }
+    #attnLayer table.al-grid { border-collapse: collapse; margin: 0.4rem 0; }
+    #attnLayer table.al-grid th, #attnLayer table.al-grid td { border: 1px solid #bdc3c7; width: 62px; height: 40px; text-align: center; padding: 0; }
+    #attnLayer table.al-grid th { background: #ecf0f1; color: #2c3e50; font-size: 0.9em; width: auto; padding: 0.2em 0.7em; height: auto; }
+    #attnLayer table.al-grid tr.follow td { box-shadow: inset 0 0 0 3px #e67e22; }
+    #attnLayer table.al-grid tr.follow th.rowhead { background: #e67e22; color: #fff; }
+    #attnLayer .al-wtrack { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #f4f6f7; }
+    #attnLayer .al-wfill { height: 14px; background: #e67e22; border-radius: 3px; }
+    #attnLayer .al-flow { display: flex; align-items: center; gap: 0.55rem; flex-wrap: wrap; margin: 0.6rem 0; }
+    #attnLayer .al-fnode { text-align: center; }
+    #attnLayer .al-flabel { font-size: 0.85em; color: #555; margin-top: 0.35em; max-width: 9em; }
+    #attnLayer .al-smallnote { font-size: 0.8em; color: #777; margin: 0.55em 0 0; }
+    #attnLayer .al-arrow { font-size: 1.5em; color: #2c3e50; font-weight: bold; }
+    #attnLayer .al-arrow.thick { font-size: 2em; color: #e67e22; }
+    /* attnLayer phone scene (max-width 480px): the four regions stack in a
+       compact geometry so the stepper and the full scene share one phone
+       screen. Strips also shrink in the script (bar heights scale 0.47). */
+    @media (max-width: 480px) {
+      #attnLayer .stepper { gap: .4rem; margin: .3rem 0; }
+      #attnLayer .stepper .play-btn { padding: .35rem .8rem; }
+      #attnLayer .dot { padding: .18em .5em; font-size: .8em; }
+      #attnLayer .al-canvas { margin: .45rem 0 .25rem; }
+      #attnLayer .al-scene { gap: .4rem; }
+      #attnLayer .al-region { padding: .3rem .45rem; }
+      #attnLayer .al-region-title { font-size: .72rem; margin: 0 0 .2rem; }
+      #attnLayer .al-row { margin: .3em 0; padding: .28em .4em; gap: .3rem; }
+      #attnLayer .al-strip { height: 24px; }
+      #attnLayer .al-bar { width: 4px; }
+      #attnLayer .al-token { min-width: 2.2em; padding: .2em .3em; font-size: .9em; }
+      #attnLayer .al-legend { font-size: .8em; margin: .35em 0 0; line-height: 1.4; }
+      #attnLayer .al-note { font-size: .86em; margin: 0 0 .3em; line-height: 1.35; }
+      #attnLayer .al-smallnote { font-size: .76em; margin: .35em 0 0; line-height: 1.35; }
+      #attnLayer .al-follow { line-height: 1.2; }
+      #attnLayer table.al-grid { margin: .2rem 0; }
+      #attnLayer table.al-grid td { width: 40px; height: 22px; }
+      #attnLayer table.al-grid th { padding: .08em .3em; font-size: .82em; }
+      #attnLayer .al-wfill { height: 10px; }
+      #attnLayer .al-flow { gap: .4rem; margin: .3rem 0; }
+      #attnLayer .al-flabel { font-size: .78em; margin-top: .25em; max-width: 12em; }
+      #attnLayer .al-arrow { font-size: 1.25em; }
+      #attnLayer .al-arrow.thick { font-size: 1.6em; }
+    }
+    .head-key { display: flex; flex-wrap: wrap; gap: 1.2em; justify-content: center; margin: 0.4rem 0 0.6rem; font-size: 0.9em; color: #555; }
+    .head-key .sw { display: inline-block; width: 1.4em; height: 0.9em; border-radius: 3px; margin-right: 0.4em; vertical-align: middle; }
+    .head-key .sw.blue { background: #3498db; }
+    .head-key .sw.orange { background: #e67e22; }
+    /* maskDemo legend key: lives outside the grid, so 0/-inf text never has to fit a cell */
+    .mask-legend { display: flex; flex-wrap: wrap; gap: 1.2em; justify-content: center; margin: 0.6rem 0; font-size: 0.9em; color: #555; }
+    .mask-legend .sw { display: inline-block; width: 1.4em; height: 1em; border-radius: 3px; margin-right: 0.4em; vertical-align: middle; border: 1px solid #bdc3c7; }
+    .mask-legend .sw.allow { background: rgba(46,204,113,0.55); }
+    .mask-legend .sw.block { background: rgba(231,76,60,0.55); }
+    .demo-stats {
+      text-align: center; margin-top: 1rem; font-size: 0.95em; color: #2c3e50;
+    }
+    .demo-stats strong { color: #2980b9; }
+    .big-nums { display: flex; flex-wrap: wrap; gap: 1rem; justify-content: center; margin: 1rem 0; }
+    .big-num { text-align: center; min-width: 140px; }
+    .big-num .v { font-size: 1.5em; font-weight: bold; color: #2980b9; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; }
+    .big-num .k { font-size: 0.85em; color: #555; }
+    .chart-legend { display: flex; flex-wrap: wrap; gap: 1.2em; justify-content: center; margin: 0.4rem 0 0.6rem; font-size: 0.9em; color: #555; }
+    .chart-legend .sw { display: inline-block; width: 24px; height: 0; border-top: 3px solid #3498db; vertical-align: middle; margin-right: 0.4em; }
+    .chart-legend .sw.orange { border-top-color: #e67e22; }
+    .chart-legend .sw.gray { border-top: 3px dashed #95a5a6; }
+    canvas.flopchart { width: 100%; max-width: 600px; height: auto; display: block; margin: 0 auto; }
+    .kvbar-row { display: flex; align-items: center; gap: 0.6em; margin: 0.5em 0; }
+    .kvbar-row .lbl { width: 11em; text-align: right; color: #2c3e50; flex: none; font-size: 0.9em; }
+    .kvbar-track { flex: 1; background: #ecf0f1; border-radius: 4px; height: 1.5em; min-width: 0; position: relative; }
+    .kvbar-fill { background: #e74c3c; border-radius: 4px; height: 100%; }
+    .kvbar-fill.cache { background: #27ae60; }
+    .kvbar-row .val { width: 7em; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; color: #2c3e50; flex: none; font-size: 0.85em; }
+    .kvbar-title { font-weight: bold; color: #2c3e50; margin: 0.7em 0 0.1em; }
+    .mask-grid {
+      border-collapse: collapse;
+      table-layout: fixed;
+      margin: 0 auto;
+    }
+    .mask-grid td {
+      border: 1px solid #7f8c8d;
+      width: 26px; height: 26px;
+      padding: 0;
+    }
+    /* Fit-in-one-page: streamMask uses a slightly tighter grid. */
+    #streamMask .mask-grid td { width: 22px; height: 22px; }
+    #streamMask .ctl-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 1rem; margin: 0.8rem 0 0.2rem; }
+    #streamMask .ctl-row .play-row { margin: 0; }
+    #streamMask .ctl-row .demo-buttons { margin-bottom: 0; justify-content: flex-start; }
+    .mask-grid td.allow { background: #3498db; }
+    .mask-grid td.block { background: #f4f6f7; }
+    .demo-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      justify-content: center;
+      margin-bottom: 1rem;
+    }
+    .demo-buttons button {
+      border: 1px solid #bdc3c7;
+      background: #fff;
+      padding: 0.5em 1.1em;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.9em;
+      color: #2c3e50;
+    }
+    .demo-buttons button.active {
+      background: #3498db;
+      color: #fff;
+      font-weight: bold;
+      border-color: #3498db;
+    }
+    /* Play buttons and plain-English walkthroughs */
+    .play-row { margin: 0.8rem 0 0.2rem; display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
+    .play-btn {
+      border: 1px solid #2980b9; background: #2980b9; color: #fff;
+      padding: 0.45em 1.3em; border-radius: 6px; cursor: pointer;
+      font-size: 0.95em; font-weight: bold; font-family: inherit;
+      flex: 0 0 auto;
+    }
+    .play-btn:hover { background: #1f6fa5; }
+    .play-btn.stop { background: #e74c3c; border-color: #e74c3c; }
+    .play-btn.stop:hover { background: #c0392b; }
+    .howto {
+      background: #eef6fb; border-left: 4px solid #3498db;
+      padding: 0.7em 1em; border-radius: 0 6px 6px 0;
+      font-size: 0.95em; color: #2c3e50; margin: 0.8rem 0;
+    }
+    .howto strong { color: #2980b9; }
+    /* Caption card (refocus round, shared across widgets) */
+    .capcard {
+      background: #ffffff;
+      border: 1px solid #e3e8ee;
+      border-left: 3px solid #2c3e50;
+      border-radius: 10px;
+      padding: 18px;
+      margin-top: 14px;
+      font-size: 15px;
+      line-height: 1.65;
+      color: #2c3e50;
+    }
+    .howto.capcard strong, .caption.capcard strong { color: #2c3e50; }
+    .capcard .cap-title {
+      display: block;
+      font-size: 15px;
+      font-weight: bold;
+      color: #2c3e50;
+      margin-bottom: 8px;
+    }
+    .capcard ul { list-style: none; margin: 0; padding: 0; }
+    .capcard li { position: relative; padding-left: 16px; margin: 0 0 7px; }
+    .capcard li:last-child { margin-bottom: 0; }
+    /* Fit-in-one-page: tighter how-to cards on phones. */
+    @media (max-width: 480px) {
+      .howto.capcard { padding: 12px 13px; font-size: 14px; line-height: 1.55; }
+      .capcard li { margin: 0 0 5px; }
+      .capcard .cap-title { margin-bottom: 6px; }
+    }
+    .capcard li::before {
+      content: ""; position: absolute; left: 2px; top: 0.68em;
+      width: 6px; height: 6px; border-radius: 50%; background: #2c3e50;
+    }
+    .canvas-wrap { position: relative; }
+    
+    /* Same side-by-side treatment for the causal twin. */
+    #causalDemo .canvas-wrap { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 1.25rem; align-items: start; }
+    @media (max-width: 768px) { #causalDemo .canvas-wrap { display: block; } }
+    .attn-bar-fill { transition: width 0.4s ease; }
+    /* KV cache blocks */
+    .kv-blocks { display: flex; flex-wrap: wrap; gap: 3px; margin: 0.8rem 0; }
+    .kv-block { width: 14px; height: 14px; border-radius: 3px; background: #ecf0f1; }
+    .kv-block.on { background: #27ae60; animation: kvpop 0.4s ease; }
+    @keyframes kvpop { from { transform: scale(0.4); } to { transform: scale(1); } }
+    .kv-stage { font-size: 0.9em; color: #555; margin: 0.6rem 0 0.2rem; }
+    /* Pinned-total flash (headParams) */
+    .big-num .v.pinned-flash { animation: pinflash 0.5s ease; }
+    @keyframes pinflash { 0% { color: #27ae60; } 100% { color: #2980b9; } }
+    /* Streaming token strips */
+    .stream-strip { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 0.5rem 0; font-size: 0.9em; color: #2c3e50; }
+    .tok {
+      display: inline-block; min-width: 1.8em; padding: 0.25em 0.4em; text-align: center;
+      border-radius: 4px; background: #ecf0f1; color: #7f8c8d;
+      font-family: 'SFMono-Regular', Consolas, Menlo, monospace; font-size: 0.85em;
+    }
+    .tok.arrived { background: #d6eaf8; color: #2c3e50; }
+    .tok.emitted { background: #27ae60; color: #fff; }
+    .mask-grid td.pending { background: #e9ecef; }
+    /* Head slicing visual (headParams): the 512-dim pie being re-sliced */
+    .slice-wrap { max-width: 560px; margin: 0.8rem auto 0.2rem; }
+    .slice-bar { display: flex; height: 34px; border-radius: 6px; overflow: hidden; border: 1px solid #bdc3c7; }
+    .slice-seg {
+      height: 100%; border-right: 1px solid #fff; box-sizing: border-box;
+      transition: width 0.45s ease, background-color 0.45s ease;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; color: #fff; font-weight: bold; min-width: 0; overflow: hidden;
+      white-space: nowrap;
+    }
+    .slice-cap { text-align: center; font-size: 0.9em; color: #555; margin-top: 0.35rem; }
+    /* Param bill bar (headParams): fixed-length bar, constant total, 75/25 QKV vs output-proj */
+    .bill-bar { display: flex; height: 30px; border-radius: 6px; overflow: hidden; border: 2px solid #2c3e50; }
+    .bill-seg { height: 100%; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+      font-size: 12px; color: #fff; font-weight: bold; white-space: nowrap; overflow: hidden; }
+    .bill-bar.bill-pulse { animation: billpulse 0.5s ease; }
+    @keyframes billpulse { 0% { box-shadow: 0 0 0 4px rgba(39,174,96,.55); } 100% { box-shadow: 0 0 0 0 rgba(39,174,96,0); } }
+    .bill-cap { text-align: center; font-size: 0.9em; color: #555; margin-top: 0.35rem; }
+    /* Let wide display equations scroll instead of pushing the page wide */
+    .mjx-chtml.MJXc-display { overflow-x: auto; overflow-y: hidden; max-width: 100%; }
+    /* Source-level containment for raw $$ display math before MathJax typesets */
+    .dmath { overflow-x: auto; max-width: 100%; margin: 1.4rem 0; }
+    /* Small screens: keep heatmaps and bars usable */
+    @media (max-width: 520px) {
+      .attn-mini { font-size: 0.75em; }
+      .attn-mini th, .attn-mini td { padding: 0.3em 0.45em; }
+      .kvbar-row { flex-wrap: wrap; }
+      .kvbar-row .lbl { width: 100%; text-align: left; margin-bottom: 0.2em; }
+      .kvbar-track { flex: 1 1 55%; }
+      .kvbar-row .val { width: auto; }
+      .big-num { min-width: 110px; }
+      .big-num .v { font-size: 1.25em; }
+    }
+    /* Static paper-figure citation */
+    .fig-cite { border-left: 3px solid #bdc3c7; margin: 1em 0; padding: 0.4em 0 0.4em 1em; color: #555; font-size: 0.9em; }
+
+  
+/* canonical spacing: display math */
+.MathJax_Display, mjx-container[display="true"] { margin: 1.4rem 0 !important; }
+figcaption { margin-top: 1rem; }
+    /* Compact phone walkthrough layout (canonical block, every tutorial page):
+       two-column eq legends, tightened demo spacing, and diagrams capped so
+       controls and diagram share the first phone screen. Phone widths only;
+       desktop rendering and equation typography are unchanged. */
+    @media (max-width:480px){
+      .demo{padding:.75rem}
+      .demo>*{margin-top:.6rem;margin-bottom:.6rem}
+      .demo>*:first-child{margin-top:0}
+      .demo .eq-card{margin:1rem auto;padding:.7rem .8rem}
+      .demo .cap-card,.demo .capcard{padding:.85rem .95rem}
+      .eq-legend{display:grid;grid-template-columns:1fr 1fr;column-gap:.9rem;row-gap:.1rem;line-height:1.5}
+      .eq-legend .eq-item:has(> code ~ code){grid-column:1/-1}
+      .demo svg,.demo canvas{max-height:55vh}
+    }
+</style>
+
+  <script type="text/javascript" async
+    src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML">
+  </script>
+  <script type="text/x-mathjax-config">
+    MathJax.Hub.Config({
+      tex2jax: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        displayMath: [['$$','$$'], ['\\[','\\]']],
+        processEscapes: true
+      },
+      showProcessingMessages: false,
+      messageStyle: "none"
+    });
+  </script>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+<style>
+/* Static teaching diagrams (mtd), shared across tutorials, 2026-11-01 */
+.figure.mtd-fig { margin: 1.75rem 0; }
+.mtd-fig > svg.mtd-svg { display: block; width: 100%; height: auto; margin: 0 auto; }
+.mtd-fig .caption { margin-top: 1rem; }
+.mtd-svg text { fill: #2c3e50; font-family: sans-serif; }
+.mtd-svg .mtd-sub { fill: #555; }
+.mtd-svg .mtd-t1 { fill: #1f618d; }
+.mtd-svg .mtd-t2 { fill: #ca6f1e; }
+.mtd-svg .mtd-pu { fill: #7d3c98; }
+.mtd-svg .mtd-red { fill: #c0392b; }
+.mtd-svg .mtd-grn { fill: #148f77; }
+.mtd-svg line, .mtd-svg path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.mtd-svg .mtd-s.mtd-c1 { stroke: #1f618d; } .mtd-svg .mtd-f.mtd-c1 { fill: #1f618d; }
+.mtd-svg .mtd-s.mtd-c2 { stroke: #ca6f1e; } .mtd-svg .mtd-f.mtd-c2 { fill: #ca6f1e; }
+.mtd-svg .mtd-s.mtd-cp { stroke: #7d3c98; } .mtd-svg .mtd-f.mtd-cp { fill: #7d3c98; }
+.mtd-svg .mtd-s.mtd-cr { stroke: #c0392b; } .mtd-svg .mtd-f.mtd-cr { fill: #c0392b; }
+.mtd-svg .mtd-s.mtd-cg { stroke: #2c3e50; } .mtd-svg .mtd-f.mtd-cg { fill: #2c3e50; }
+.mtd-svg .mtd-sep { stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-pic { fill: #fbfcfd; stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-axis { stroke: #7f8c8d; stroke-width: 1.5px; }
+.mtd-svg .mtd-arc { stroke: #2c3e50; stroke-width: 2px; }
+.mtd-svg .mtd-dot { fill: #2c3e50; }
+.mtd-svg .mtd-guide { stroke: #7f8c8d; stroke-width: 1.4px; stroke-dasharray: 4 4; }
+.mtd-svg .mtd-ring { fill: #fbfcfd; stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-pt { fill: #1f618d; opacity: .55; }
+.mtd-svg .mtd-cross { stroke: #2c3e50; stroke-width: 2.2px; }
+.mtd-svg .mtd-barbg { fill: #eef1f4; }
+.mtd-svg .mtd-bar { fill: #7d3c98; }
+.mtd-svg .mtd-cart { fill: #ffffff; stroke: #2c3e50; stroke-width: 2px; }
+.mtd-svg .mtd-zero { stroke: #95a5a6; stroke-width: 1.2px; stroke-dasharray: 4 4; }
+.mtd-svg .mtd-axisl { stroke: #7f8c8d; stroke-width: 2px; }
+.mtd-svg .mtd-norm { stroke: #148f77; stroke-width: 4px; }
+.mtd-svg .mtd-read { fill: #ffffff; stroke: #2c3e50; stroke-width: 2.5px; }
+.mtd-svg .mtd-ball { fill: #7d3c98; fill-opacity: .08; stroke: #7d3c98; stroke-width: 1.6px; stroke-dasharray: 5 4; }
+.mtd-svg .mtd-box { fill: #fbfcfd; stroke: #bdc3c7; stroke-width: 1.4px; }
+.mtd-svg .mtd-crossbg { fill: #ffffff; }
+.mtd-svg .mtd-halo { stroke: #ffffff; stroke-width: 5px; stroke-linejoin: round; paint-order: stroke; }
+.mtd-svg .mtd-box.mtd-note { stroke-dasharray: 5 4; }
+</style>
+<style>
+/* decoding.html page styles: static diagrams, decBars tool, beamWalk tool */
+.dc-svg { display: block; width: 100%; max-width: 460px; margin: 0 auto; height: auto; }
+.dc-svg .dc-t { font-family: inherit; font-size: 15px; fill: #2c3e50; }
+.dc-svg .dc-s { font-size: 15px; fill: #4a5568; }
+.dc-svg .dc-b { font-weight: 700; }
+.dc-svg .dc-zc { fill: #2a7fbf; }
+.dc-svg .dc-pc { fill: #1e8449; }
+.dc-svg .dc-gc { fill: #ca6f1e; }
+.dc-svg .dc-bc { fill: #148f77; }
+.dc-svg .dc-tauc { fill: #c0392b; }
+.dc-svg .dc-cutc { fill: #7d3c98; }
+.dc-svg .dc-oddc { fill: #b03a7a; }
+.dc-svg .dc-arrow { stroke: #7f8c8d; stroke-width: 1.8px; fill: none; }
+.dc-svg .dc-arrow-head { fill: #7f8c8d; }
+.dc-svg .dc-zbox { stroke: #2a7fbf; }
+.dc-svg .dc-pbox { stroke: #1e8449; }
+.dc-svg .dc-gbox { stroke: #ca6f1e; }
+.dc-svg .dc-bbox { stroke: #148f77; }
+.dc-svg .dc-pill { fill: #ffffff; stroke-width: 1.6px; }
+.dc-svg .dc-taupill { stroke: #c0392b; }
+.dc-svg .dc-cutpill { stroke: #7d3c98; }
+.dc-svg .dc-zero { stroke: #95a5a6; stroke-width: 1.2px; stroke-dasharray: 4 3; }
+.dc-svg .dc-base { stroke: #7f8c8d; stroke-width: 1.2px; }
+.dc-svg .dc-zbar { fill: #2a7fbf; }
+.dc-svg .dc-pbar { fill: #1e8449; }
+.dc-svg .dc-oddbar { fill: #b03a7a; }
+.dc-svg .dc-before { fill: none; stroke: #7f8c8d; stroke-width: 1.4px; }
+.dc-svg .dc-brace { fill: none; stroke: #b03a7a; stroke-width: 1.6px; }
+.dc-svg .dc-curve { fill: none; stroke: #b03a7a; stroke-width: 2.6px; }
+.dc-svg .dc-dot { fill: #b03a7a; }
+.dc-svg .dc-human { stroke: #2c3e50; stroke-width: 1.4px; stroke-dasharray: 5 4; }
+.dc-svg .dc-hbar { fill: #95a5a6; }
+.dc-svg .dc-gbar { fill: #ca6f1e; }
+.dc-svg .dc-bbar { fill: #148f77; }
+.dc-svg .dc-kbar { fill: #b98dcc; }
+.dc-svg .dc-cutbar { fill: #7d3c98; }
+.dc-odd { color: #b03a7a; font-weight: 600; }
+.dc-qfig { margin: 1.75rem 0; }
+.dc-qfig .caption { margin-top: 1rem; }
+.dc-quotes { display: grid; gap: .8rem; max-width: 640px; margin: 0 auto; }
+.dc-quote { border-left: 4px solid #95a5a6; background: #f8fafc; border-radius: 6px; padding: .7rem .9rem; font-size: .95rem; line-height: 1.6; }
+.dc-quote.dc-q-beam { border-left-color: #148f77; }
+.dc-quote.dc-q-pure { border-left-color: #b03a7a; }
+.dc-quote .dc-qhead { display: block; font-weight: 700; font-size: .9rem; color: #2c3e50; margin-bottom: .2rem; }
+.dc-quote .dc-loop { background: #fdebd0; border-radius: 3px; }
+.dc-fig5 { display: flex; flex-wrap: wrap; gap: 1rem 1.5rem; justify-content: center; align-items: flex-end; }
+.dc-fig5 figure { margin: 0; text-align: center; }
+.dc-fig5 .dc-ctx { display: block; font-size: .95rem; color: #2c3e50; margin-bottom: .35rem; }
+.dc-fig5 img { display: block; margin: 0 auto; height: auto; max-width: 100%; }
+.dc-fig5 .dc-f5flat { width: 200px; }
+.dc-fig5 .dc-f5peak { width: 300px; }
+.dc-pick { list-style: none; padding: 0; margin: 1.2rem auto; max-width: 640px; display: grid; gap: .55rem; }
+.dc-pick li { border: 1px solid #e2e8f0; border-radius: 8px; padding: .55rem .8rem; line-height: 1.55; }
+.dc-pick b { color: #2c3e50; margin-right: .3em; }
+.dc-pick .dc-risk { color: #8a4b0f; }
+/* decBars (decoding.html): temperature slider and cut buttons reshape the next-word bars */
+#decBars .db-ctl { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin: .2rem 0 .5rem; }
+#decBars .db-ctl label { font-weight: 600; color: #c0392b; min-width: 6.2em; }
+#decBars input[type=range] { flex: 1 1 140px; min-height: 44px; accent-color: #c0392b; }
+#decBars .db-ends { display: flex; justify-content: space-between; font-size: .85rem; color: #4a5568; margin: -.4rem 0 .4rem; }
+#decBars .demo-buttons button { min-height: 44px; }
+#decBars .db-rows { display: grid; gap: 4px; margin: .4rem 0; }
+#decBars .db-row { display: grid; grid-template-columns: 4.6em 1fr 3.1em; align-items: center; gap: .4rem; font-size: .92rem; }
+#decBars .db-row .db-w { text-align: right; color: #2c3e50; }
+#decBars .db-row.db-oddw .db-w { color: #b03a7a; font-weight: 600; }
+#decBars .db-track { position: relative; height: 16px; background: #f1f4f7; border-radius: 3px; }
+#decBars .db-fill { position: absolute; left: 0; top: 0; bottom: 0; background: #7d3c98; border-radius: 3px; transition: width .35s ease; }
+#decBars .db-row.db-cut .db-fill { background: transparent; border: 1.5px dashed #95a5a6; }
+#decBars .db-row.db-cut .db-w, #decBars .db-row.db-cut .db-v { color: #95a5a6; text-decoration: line-through; }
+#decBars .db-v { font-size: .85rem; color: #4a5568; font-variant-numeric: tabular-nums; }
+#decBars .db-strip { position: relative; height: 40px; padding-top: 20px; box-sizing: border-box; margin: .5rem 0 .2rem; }
+#decBars .db-strip.db-off { visibility: hidden; }
+#decBars .db-sbar { display: flex; height: 16px; border-radius: 3px; overflow: hidden; }
+#decBars .db-seg { height: 100%; border-right: 1px solid #ffffff; }
+#decBars .db-seg.db-k { background: #7d3c98; }
+#decBars .db-seg.db-x { background: #cfd6dc; }
+#decBars .db-mark { position: absolute; left: 90%; top: 14px; bottom: -2px; border-left: 2px solid #2c3e50; }
+#decBars .db-marklab { position: absolute; left: 90%; top: 0; transform: translateX(-50%); font-size: .8rem; color: #2c3e50; font-weight: 600; }
+#decBars .db-striplab { position: absolute; left: 0; top: 0; font-size: .8rem; color: #4a5568; }
+@media (prefers-reduced-motion: reduce) { #decBars .db-fill { transition: none; } }
+/* beamWalk (decoding.html): five steps of greedy against beam search on a small reply tree */
+#beamWalk .bw-ctl { display: flex; align-items: center; justify-content: center; gap: .6rem; }
+#beamWalk .bw-ctl button { min-height: 44px; min-width: 44px; }
+#beamWalk .bw-count { min-width: 7em; text-align: center; font-weight: 600; color: #2c3e50; }
+#beamWalk .bw-nav { padding: .4rem .9rem; border: 1px solid #bdc3c7; border-radius: 6px; background: #ffffff; color: #2c3e50; font: inherit; cursor: pointer; }
+#beamWalk .bw-nav:disabled { opacity: .4; cursor: default; }
+#beamWalk svg { display: block; width: 100%; max-width: 460px; margin: .3rem auto; height: auto; }
+#beamWalk .bw-e { stroke: #95a5a6; fill: none; stroke-linecap: round; transition: opacity .3s, stroke .3s; }
+#beamWalk .bw-e.bw-g { stroke: #ca6f1e; }
+#beamWalk .bw-e.bw-k { stroke: #148f77; }
+#beamWalk .bw-n rect { fill: #fbfcfd; stroke: #bdc3c7; stroke-width: 1.4px; transition: stroke .3s; }
+#beamWalk .bw-n.bw-g rect { stroke: #ca6f1e; stroke-width: 2.6px; }
+#beamWalk .bw-n.bw-k rect { stroke: #148f77; stroke-width: 2.6px; }
+#beamWalk .bw-n.bw-g.bw-k rect { stroke: #148f77; stroke-dasharray: 6 3; }
+#beamWalk .bw-t { font-size: 16px; fill: #2c3e50; font-family: inherit; }
+#beamWalk .bw-s { font-size: 16px; fill: #4a5568; font-family: inherit; }
+#beamWalk .bw-tot { font-size: 16px; fill: #2c3e50; font-weight: 700; font-family: inherit; }
+#beamWalk .bw-drop { font-size: 16px; fill: #7f8c8d; font-style: italic; font-family: inherit; }
+#beamWalk .bw-dim { opacity: .3; }
+#beamWalk .bw-hide { visibility: hidden; }
+#beamWalk .demo-stats { min-height: 3.3em; }
+@media (prefers-reduced-motion: reduce) { #beamWalk .bw-e, #beamWalk .bw-n rect { transition: none; } }
+</style>
+</head>
+<body>
+      <nav class="topnav" aria-label="Site">
+    <div class="nav-inner">
+        <a class="wordmark" href="index.html">Ramin Anushiravani</a>
+        <div class="nav-links">
+            <a href="tutorial.html" class="active">Tutorials</a>
+            <a href="pubs.html">Publications</a>
+            <a href="index.html">About</a>
+            <a href="work.html">Projects</a>
+        </div>
+        <button class="nav-toggle" id="navToggle" aria-expanded="false" aria-controls="navPanel" aria-label="Menu"><span></span><span></span><span></span></button>
+    </div>
+    <div class="nav-panel" id="navPanel">
+        <div class="nav-panel-inner">
+            <div class="nav-panel-body">
+                <a class="panel-link active" href="tutorial.html">Tutorials</a>
+                <a class="panel-link" href="pubs.html">Publications</a>
+                <a class="panel-link" href="index.html">About</a>
+                <a class="panel-link" href="work.html">Projects</a>
+                <div class="panel-social">
+                    <a href="https://linkedin.com/in/raminanushiravani" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+                    <a href="https://github.com/raminaeye/" target="_blank" rel="noopener noreferrer">GitHub</a>
+                    <a href="https://scholar.google.com/citations?user=kouXx8gAAAAJ&hl=en" target="_blank" rel="noopener noreferrer">Google Scholar</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</nav>
+
+    <p class="crumb"><a href="tutorial.html">&larr; All tutorials</a></p>
+
+  <h1>Softmax, Temperature and Decoding</h1>
+
+  <p class="tabs-label">On this page</p>
+  <div class="tab-strip">
+    <a class="tab-chip" href="#softmax">Softmax turns scores into odds</a>
+    <a class="tab-chip" href="#greedy-beam">Greedy and beam search chase the likeliest reply</a>
+    <a class="tab-chip" href="#degeneration">The likeliest text is bland and loops</a>
+    <a class="tab-chip" href="#sampling">Sampling draws from the odds</a>
+    <a class="tab-chip" href="#temperature">Temperature sharpens or flattens the odds</a>
+    <a class="tab-chip" href="#top-k-top-p">Top-k and top-p cut the unreliable tail</a>
+    <a class="tab-chip" href="#choosing">Each job needs its own decoder</a>
+    <a class="tab-chip" href="#references">References</a>
+  </div>
+
+  <p>
+    Ask a language model the same question twice and the two answers can differ. The model did not change, so what did?
+    At every step a decoder like the one in <a href="transformer-block.html#decoder-only-gpt">The Transformer Block</a> scores every word, or word piece called a <strong>token</strong>, in its <strong>vocabulary</strong>.
+    <strong>Decoding</strong> is the rule that turns those scores into one written word, and that rule is where the answers part ways.
+  </p>
+
+  <figure class="figure mtd-fig">
+<svg class="mtd-svg dc-svg" viewBox="0 0 360 300" role="img" aria-label="Map of the page. Scores go through the softmax to become probabilities. Then greedy takes the top word, beam search keeps the best few replies, or sampling draws a word after temperature and a cut of the tail."><rect class="mtd-box dc-zbox" x="4" y="14" width="100" height="46" rx="8"/><text class="dc-t dc-b dc-zc" x="54" y="43" text-anchor="middle">scores</text><rect class="mtd-box" x="130" y="14" width="100" height="46" rx="8"/><text class="dc-t dc-b" x="180" y="43" text-anchor="middle">softmax</text><rect class="mtd-box dc-pbox" x="256" y="14" width="100" height="46" rx="8"/><text class="dc-t dc-b dc-pc" x="306" y="43" text-anchor="middle">probabilities</text><line class="dc-arrow" x1="104" y1="37" x2="121.0" y2="37.0"/><polygon class="dc-arrow-head" points="130,37 121.0,32.0 121.0,42.0"/><line class="dc-arrow" x1="230" y1="37" x2="247.0" y2="37.0"/><polygon class="dc-arrow-head" points="256,37 247.0,32.0 247.0,42.0"/><line class="dc-arrow" x1="306" y1="60" x2="306" y2="86"/><line class="dc-arrow" x1="60" y1="86" x2="306" y2="86"/><line class="dc-arrow" x1="60" y1="86" x2="60.0" y2="101.0"/><polygon class="dc-arrow-head" points="60,110 65.0,101.0 55.0,101.0"/><line class="dc-arrow" x1="180" y1="86" x2="180.0" y2="101.0"/><polygon class="dc-arrow-head" points="180,110 185.0,101.0 175.0,101.0"/><line class="dc-arrow" x1="300" y1="86" x2="300.0" y2="101.0"/><polygon class="dc-arrow-head" points="300,110 305.0,101.0 295.0,101.0"/><rect class="mtd-box dc-gbox" x="4" y="110" width="112" height="76" rx="8"/><text class="dc-t dc-b dc-gc" x="60" y="136" text-anchor="middle">greedy</text><text class="dc-t" x="60" y="158" text-anchor="middle">take the</text><text class="dc-t" x="60" y="176" text-anchor="middle">top word</text><rect class="mtd-box dc-bbox" x="124" y="110" width="112" height="76" rx="8"/><text class="dc-t dc-b dc-bc" x="180" y="136" text-anchor="middle">beam search</text><text class="dc-t" x="180" y="158" text-anchor="middle">keep the best</text><text class="dc-t" x="180" y="176" text-anchor="middle">few replies</text><rect class="mtd-box dc-sbox" x="244" y="110" width="112" height="186" rx="8"/><text class="dc-t dc-b" x="300" y="136" text-anchor="middle">sample</text><rect class="dc-pill dc-taupill" x="252" y="150" width="96" height="30" rx="8"/><text class="dc-t dc-tauc" x="300" y="170" text-anchor="middle">temperature</text><line class="dc-arrow" x1="300" y1="180" x2="300.0" y2="189.0"/><polygon class="dc-arrow-head" points="300,198 305.0,189.0 295.0,189.0"/><rect class="dc-pill dc-cutpill" x="252" y="198" width="96" height="30" rx="8"/><text class="dc-t dc-cutc" x="300" y="218" text-anchor="middle">cut the tail</text><line class="dc-arrow" x1="300" y1="228" x2="300.0" y2="237.0"/><polygon class="dc-arrow-head" points="300,246 305.0,237.0 295.0,237.0"/><text class="dc-t dc-b" x="300" y="266" text-anchor="middle">draw</text><text class="dc-t" x="300" y="285" text-anchor="middle">a word</text></svg>
+    <figcaption class="caption">Scores become probabilities, then one of three rules writes the word. Only sampling uses temperature and the cut.</figcaption>
+  </figure>
+
+  <p>Every example uses one toy step. After <em>the cat sat on the</em>, a model scores ten candidate words.</p>
+
+  <h2 id="softmax">Softmax turns scores into odds</h2>
+
+  <p>
+    The raw scores are <strong>logits</strong>, any real numbers, and they do not add to anything.
+    <strong>Softmax</strong> makes them a probability distribution, positive numbers that add to 1, while keeping their order.
+  </p>
+
+  <div class="eq-card" id="decSoftmaxEq">
+    <p class="eq-what">The probability of word i as the next word.</p>
+    <div class="eq-line eq-active"><span style="color:#1e8449">p<sub>i</sub></span> = <span class="frac"><span class="top">exp(<span style="color:#2a7fbf">z<sub>i</sub></span>)</span><span class="bot">&Sigma;<sub>j</sub> exp(<span style="color:#2a7fbf">z<sub>j</sub></span>)</span></span></div>
+    <div class="eq-why eq-active"><span style="color:#2a7fbf">z<sub>i</sub></span> is the logit of word i, and <span style="color:#1e8449">p<sub>i</sub></span> its probability. exp(<span style="color:#2a7fbf">z<sub>i</sub></span>), e raised to the logit, is always positive and grows fast with the logit. &Sigma;<sub>j</sub> adds the same term over every word j in the vocabulary, so the <span style="color:#1e8449">p<sub>i</sub></span> add to 1. A gap of 1 between two logits means a ratio of about 2.7 between their probabilities.</div>
+  </div>
+
+  <figure class="figure mtd-fig">
+<svg class="mtd-svg dc-svg" viewBox="0 0 360 290" role="img" aria-label="Ten candidate words. Left, each word&#39;s logit, from 2.0 for mat down to minus 2.6 for of. Right, its probability after the softmax, from 0.43 for mat down to 0.004 for of. Every probability is positive and they add to 1."><text class="dc-t dc-b dc-zc" x="66" y="20" text-anchor="middle">logit</text><text class="dc-t dc-b dc-pc" x="270" y="20" text-anchor="middle">probability</text><line class="dc-zero" x1="82" y1="30" x2="82" y2="272"/><rect class="dc-zbar" x="82.0" y="37" width="40.0" height="14" rx="2"/><text class="dc-t" x="165" y="49" text-anchor="middle">mat</text><rect class="dc-pbar" x="200" y="37" width="112.0" height="14" rx="2"/><text class="dc-t dc-s" x="317.0" y="49">0.43</text><rect class="dc-zbar" x="82.0" y="61" width="24.0" height="14" rx="2"/><text class="dc-t" x="165" y="73" text-anchor="middle">floor</text><rect class="dc-pbar" x="200" y="61" width="50.3" height="14" rx="2"/><text class="dc-t dc-s" x="255.3" y="73">0.19</text><rect class="dc-zbar" x="82.0" y="85" width="16.0" height="14" rx="2"/><text class="dc-t" x="165" y="97" text-anchor="middle">sofa</text><rect class="dc-pbar" x="200" y="85" width="33.7" height="14" rx="2"/><text class="dc-t dc-s" x="238.7" y="97">0.13</text><rect class="dc-zbar" x="82.0" y="109" width="10.0" height="14" rx="2"/><text class="dc-t" x="165" y="121" text-anchor="middle">bed</text><rect class="dc-pbar" x="200" y="109" width="25.0" height="14" rx="2"/><text class="dc-t dc-s" x="230.0" y="121">0.10</text><rect class="dc-zbar" x="82.0" y="133" width="2.0" height="14" rx="2"/><text class="dc-t" x="165" y="145" text-anchor="middle">roof</text><rect class="dc-pbar" x="200" y="133" width="16.8" height="14" rx="2"/><text class="dc-t dc-s" x="221.8" y="145">0.06</text><rect class="dc-zbar" x="76.0" y="157" width="6.0" height="14" rx="2"/><text class="dc-t" x="165" y="169" text-anchor="middle">chair</text><rect class="dc-pbar" x="200" y="157" width="11.2" height="14" rx="2"/><text class="dc-t dc-s" x="216.2" y="169">0.04</text><rect class="dc-zbar" x="62.0" y="181" width="20.0" height="14" rx="2"/><text class="dc-t" x="165" y="193" text-anchor="middle">moon</text><rect class="dc-pbar" x="200" y="181" width="5.6" height="14" rx="2"/><text class="dc-t dc-s" x="210.6" y="193">0.02</text><rect class="dc-zbar" x="46.0" y="205" width="36.0" height="14" rx="2"/><text class="dc-t" x="165" y="217" text-anchor="middle">piano</text><rect class="dc-pbar" x="200" y="205" width="2.5" height="14" rx="2"/><text class="dc-t dc-s" x="207.5" y="217">0.010</text><rect class="dc-zbar" x="38.0" y="229" width="44.0" height="14" rx="2"/><text class="dc-t" x="165" y="241" text-anchor="middle">Tuesday</text><rect class="dc-pbar" x="200" y="229" width="1.7" height="14" rx="2"/><text class="dc-t dc-s" x="206.7" y="241">0.006</text><rect class="dc-zbar" x="30.0" y="253" width="52.0" height="14" rx="2"/><text class="dc-t" x="165" y="265" text-anchor="middle">of</text><rect class="dc-pbar" x="200" y="253" width="1.2" height="14" rx="2"/><text class="dc-t dc-s" x="206.1" y="265">0.004</text><text class="dc-t dc-s" x="82" y="288" text-anchor="middle">0</text></svg>
+    <figcaption class="caption">Negative logits still get a small positive share. The order never changes.</figcaption>
+  </figure>
+
+<pre><code class="language-python">import numpy as np
+
+def softmax(z):
+    # minus max keeps exp small
+    e = np.exp(z - z.max())
+    return e / e.sum()
+
+z = np.array([2.0, 1.2, 0.8,
+  0.5, 0.1, -0.3, -1.0, -1.8,
+  -2.2, -2.6])
+softmax(z).round(2)[:3]
+# [0.43, 0.19, 0.13]</code></pre>
+
+  <p>
+    Subtracting the largest logit divides the top and bottom by the same number, so every <span style="color:#1e8449">p<sub>i</sub></span> stays the same. The largest exponent is then 0, so the biggest term is exp(0) = 1 and nothing overflows.
+    The same softmax picks the weights in <a href="transformers.html#how-it-works-the-equation">Attention</a> and feeds the loss in <a href="crossentropy-loss.html#squash-compete">Cross-Entropy Loss</a>.
+  </p>
+
+  <h2 id="greedy-beam">Greedy and beam search chase the likeliest reply</h2>
+
+  <p>
+    <strong>Greedy decoding</strong> writes the likeliest word and moves on, so a strong first word can lead it into weak words after.
+    <strong>Beam search</strong> keeps the best few partial replies at every step, its <strong>beam width</strong>, and keeps the best reply at the end.
+  </p>
+
+  <div class="eq-card" id="decBeamEq">
+    <p class="eq-what">How greedy picks a word, and how beam search scores a reply.</p>
+    <div class="eq-line eq-active"><span style="color:#ca6f1e">x<sub>t</sub></span> = argmax<sub>i</sub> <span style="color:#1e8449">p<sub>i</sub></span></div>
+    <div class="eq-why eq-active">Greedy. <span style="color:#ca6f1e">x<sub>t</sub></span> is the word written at step t, and argmax<sub>i</sub> picks the word i with the largest <span style="color:#1e8449">p<sub>i</sub></span>.</div>
+    <div class="eq-line eq-active"><span style="color:#148f77">s</span> = &Sigma;<sub>t</sub> log P(x<sub>t</sub> | x<sub>&lt;t</sub>)</div>
+    <div class="eq-why eq-active">Beam score. P(x<sub>t</sub> | x<sub>&lt;t</sub>) is the chance of word x<sub>t</sub> given the words before it, x<sub>&lt;t</sub>. Each log is a number at most 0, and a sum of logs is the log of the product, so the highest <span style="color:#148f77">s</span> marks the likeliest whole reply. Logs also keep long products from rounding to 0.</div>
+    <div class="eq-line eq-active"><span style="color:#148f77">s<sub>norm</sub></span> = <span class="frac"><span class="top"><span style="color:#148f77">s</span></span><span class="bot">L<sup>&alpha;</sup></span></span></div>
+    <div class="eq-why eq-active">Length correction. Every word adds a negative log, so plain beam search favors short replies. L is the reply length and &alpha; (alpha) sets how hard to correct. &alpha; = 0 changes nothing, &alpha; = 1 averages per word, and Google&rsquo;s translation system used 0.6 to 0.7 in a similar form.</div>
+  </div>
+
+  <p>The walkthrough runs both rules on a small tree of two-word replies after <em>the cat</em>. Thicker lines are likelier next words.</p>
+
+  <div class="demo" id="beamWalk">
+    <div class="bw-ctl">
+      <button class="bw-nav" id="bwPrev" type="button" aria-label="Previous step">Back</button>
+      <span class="bw-count" id="bwCount">step 1 of 5</span>
+      <button class="bw-nav" id="bwNext" type="button" aria-label="Next step">Next</button>
+    </div>
+    <svg id="bwSvg" viewBox="0 0 360 310" role="img" aria-label="Reply tree after the cat. First words sat 0.5, is 0.4, ran 0.1. After sat, on 0.4, down 0.3, there 0.3. After is, sleeping 0.9, here 0.05, fat 0.05. After ran, away 0.8, off 0.2."></svg>
+    <p class="demo-stats" id="bwRead" aria-live="polite"></p>
+    <div class="eq-card eq-stepped" id="beamWalkEq">
+      <p class="eq-what">The rule each step uses.</p>
+      <div class="eq-line" data-s="1"><span style="color:#ca6f1e">x<sub>t</sub></span> = argmax<sub>i</sub> <span style="color:#1e8449">p<sub>i</sub></span></div>
+      <div class="eq-why" data-s="1">Greedy keeps only the single likeliest word at each step.</div>
+      <div class="eq-line" data-s="2"><span style="color:#148f77">s</span> = &Sigma;<sub>t</sub> log P(x<sub>t</sub> | x<sub>&lt;t</sub>)</div>
+      <div class="eq-why" data-s="2">Beam search ranks partial replies by summed log probability, which ranks them by the chance of the whole reply.</div>
+    </div>
+  </div>
+
+<pre><code class="language-python">from math import log
+def beam(P, width, steps=2):
+  B = [(0.0, ())]
+  for _ in range(steps):
+    C = []
+    for s, q in B:
+      for w, p in P(q):
+        # add the word's log P
+        C.append((s + log(p),
+                  q + (w,)))
+    B = sorted(C)[-width:]
+  return max(B)</code></pre>
+
+<pre><code class="language-python">T = {
+  (): [("sat", .5),
+   ("is", .4), ("ran", .1)],
+  ("sat",): [("on", .4),
+   ("down", .3), ("there", .3)],
+  ("is",): [("sleeping", .9),
+   ("here", .05), ("fat", .05)],
+  ("ran",): [("away", .8),
+   ("off", .2)]}
+# P(q) gives (word, prob) pairs
+P = T.get</code></pre>
+
+<pre><code class="language-python">beam(P, width=1)
+# (-1.61, ('sat', 'on'))
+beam(P, width=2)
+# (-1.02, ('is', 'sleeping'))</code></pre>
+
+  <p>
+    The scores in the comments are rounded. Width 1 is greedy. Speech recognition uses the same two rules over alignments in <a href="ctc-loss.html#beam-search">CTC Loss</a>.
+    Beam search works well when the input pins down the output, as in translation, summarization and data-to-text.
+  </p>
+
+  <h2 id="degeneration">The likeliest text is bland and loops</h2>
+
+  <p>
+    For open-ended writing, the likeliest reply turns out to be bad. Holtzman et al. (2020) gave GPT-2 Large the opening of a story and let beam search and pure sampling continue it.
+  </p>
+
+  <figure class="dc-qfig">
+  <div class="dc-quotes">
+    <div class="dc-quote"><span class="dc-qhead">The opening</span>In a shocking finding, scientist discovered a herd of unicorns living in a remote, previously unexplored valley, in the Andes Mountains. Even more surprising to the researchers was the fact that the unicorns spoke perfect English.</div>
+    <div class="dc-quote dc-q-beam"><span class="dc-qhead">Beam search, width 32</span>&hellip; the Universidad Nacional Aut&oacute;noma de M&eacute;xico (UNAM) and the Universidad Nacional Aut&oacute;noma de M&eacute;xico (UNAM/<span class="dc-loop">Universidad Nacional Aut&oacute;noma de M&eacute;xico/Universidad Nacional Aut&oacute;noma de M&eacute;xico/Universidad Nacional Aut&oacute;noma de M&eacute;xico/Universidad Nacional Aut&oacute;noma de&hellip;</span></div>
+  </div>
+    <figcaption class="caption">From Holtzman et al. (2020), Figure 1. Beam search loops on one name.</figcaption>
+  </figure>
+
+  <p>
+    Repetition feeds itself, because each repeat makes the next one likelier. And human text is not the likeliest text, because people often pick a surprising word.
+  </p>
+  <p>
+    A <strong>repetition penalty</strong> (Keskar et al. 2019, CTRL) fights the loop directly by lowering the logit of every word already written.
+  </p>
+
+  <div class="eq-card" id="decRepEq">
+    <p class="eq-what">The repetition penalty, applied to a used word before the softmax.</p>
+    <div class="eq-line eq-active"><span style="color:#2a7fbf">z<sub>i</sub></span> &larr; <span class="frac"><span class="top"><span style="color:#2a7fbf">z<sub>i</sub></span></span><span class="bot"><span style="color:#a04000">&theta;</span></span></span></div>
+    <div class="eq-why eq-active">&larr; means the logit is replaced. <span style="color:#a04000">&theta;</span> (theta) is the penalty, a number above 1, and CTRL used about 1.2 with greedy decoding. Dividing a positive logit by <span style="color:#a04000">&theta;</span> lowers it. Hugging Face Transformers multiplies a negative logit by <span style="color:#a04000">&theta;</span> instead, so a used word always loses ground.</div>
+  </div>
+
+  <figure class="figure mtd-fig">
+<svg class="mtd-svg dc-svg" viewBox="0 0 360 150" role="img" aria-label="Repetition penalty theta 1.2 on mat, which is already in the text. Its probability drops from 0.43 to 0.35, and floor rises from 0.19 to 0.22."><rect class="dc-before" x="80" y="6" width="22" height="12" rx="2"/><text class="dc-t dc-s" x="108" y="17">before</text><rect class="dc-pbar" x="178" y="6" width="22" height="12" rx="2"/><text class="dc-t dc-s" x="206" y="17">after, &theta; = 1.2</text><text class="dc-t" x="70" y="56" text-anchor="end">mat</text><rect class="dc-before" x="80" y="42" width="189.6" height="12" rx="2"/><rect class="dc-pbar" x="80" y="56" width="154.8" height="12" rx="2"/><text class="dc-t dc-s" x="275.6" y="60">0.43 to 0.35</text><text class="dc-t" x="70" y="92" text-anchor="end">floor</text><rect class="dc-before" x="80" y="78" width="85.2" height="12" rx="2"/><rect class="dc-pbar" x="80" y="92" width="97.0" height="12" rx="2"/><text class="dc-t dc-s" x="183.0" y="96">0.19 to 0.22</text><text class="dc-t" x="70" y="128" text-anchor="end">sofa</text><rect class="dc-before" x="80" y="114" width="57.1" height="12" rx="2"/><rect class="dc-pbar" x="80" y="128" width="65.1" height="12" rx="2"/><text class="dc-t dc-s" x="151.1" y="132">0.13 to 0.15</text></svg>
+    <figcaption class="caption">With mat already written, its share drops and the other words gain.</figcaption>
+  </figure>
+
+  <p>The penalty is blunt. It also lowers words that should repeat, such as a name or <em>the</em>.</p>
+
+  <h2 id="sampling">Sampling draws from the odds</h2>
+
+  <p>
+    <strong>Pure sampling</strong> draws the next word at random with chance <span style="color:#1e8449">p<sub>i</sub></span>. Two runs give two replies, which answers the opening question.
+    The catch is the <strong>tail</strong>, the many words that each have a small chance. In the toy, <span class="dc-odd">moon</span>, <span class="dc-odd">piano</span>, <span class="dc-odd">Tuesday</span> and <span class="dc-odd">of</span> make no sense after <em>the cat sat on the</em>. Call them the <span class="dc-odd">odd words</span>. Together they hold about 4% (0.042).
+  </p>
+
+  <figure class="figure mtd-fig">
+<svg class="mtd-svg dc-svg" viewBox="0 0 360 236" role="img" aria-label="Chance that a sampled reply contains no odd word, against its length. It starts at 1 and falls to 0.43 at 20 words, 0.12 at 50 and 0.014 at 100."><line class="dc-base" x1="46" y1="186" x2="340" y2="186"/><line class="dc-base" x1="46" y1="186" x2="46" y2="20"/><text class="dc-t dc-s" x="40" y="25" text-anchor="end">1</text><text class="dc-t dc-s" x="40" y="191" text-anchor="end">0</text><text class="dc-t dc-s" x="46.0" y="206" text-anchor="middle">0</text><text class="dc-t dc-s" x="193.0" y="206" text-anchor="middle">50</text><text class="dc-t dc-s" x="340.0" y="206" text-anchor="middle">100</text><text class="dc-t" x="193.0" y="230" text-anchor="middle">words in the reply</text><polyline class="dc-curve" points="46.0,20.0 51.9,33.6 57.8,46.1 63.6,57.6 69.5,68.1 75.4,77.8 81.3,86.7 87.2,94.8 93.0,102.3 98.9,109.2 104.8,115.5 110.7,121.2 116.6,126.6 122.4,131.4 128.3,135.9 134.2,140.0 140.1,143.8 146.0,147.2 151.8,150.4 157.7,153.3 163.6,156.0 169.5,158.5 175.4,160.7 181.2,162.8 187.1,164.7 193.0,166.5 198.9,168.1 204.8,169.5 210.6,170.9 216.5,172.1 222.4,173.3 228.3,174.3 234.2,175.3 240.0,176.1 245.9,177.0 251.8,177.7 257.7,178.4 263.6,179.0 269.4,179.6 275.3,180.1 281.2,180.6 287.1,181.0 293.0,181.4 298.8,181.8 304.7,182.2 310.6,182.5 316.5,182.8 322.4,183.0 328.2,183.3 334.1,183.5 340.0,183.7"/><circle class="dc-dot" cx="104.8" cy="115.5" r="4.5"/><text class="dc-t dc-b" x="112.8" y="107.5" text-anchor="start">0.42</text><circle class="dc-dot" cx="193.0" cy="166.5" r="4.5"/><text class="dc-t dc-b" x="199.0" y="156.5" text-anchor="start">0.12</text><circle class="dc-dot" cx="340.0" cy="183.7" r="4.5"/><text class="dc-t dc-b" x="336.0" y="171.7" text-anchor="end">0.014</text></svg>
+    <figcaption class="caption">If every word has the same 4% chance of being odd, independently, a reply avoids all of them with chance 0.958<sup>L</sup> for L words.</figcaption>
+  </figure>
+
+  <p>
+    A small risk per word becomes a near certainty over a long reply, and one odd word derails the words after it.
+  </p>
+
+  <figure class="dc-qfig">
+  <div class="dc-quotes">
+    <div class="dc-quote dc-q-pure"><span class="dc-qhead">Pure sampling, same opening</span>They were cattle called Bolivian Cavalleros; they live in a remote desert uninterrupted by town, and they speak huge, beautiful, paradisiacal Bolivian linguistic thing.</div>
+  </div>
+    <figcaption class="caption">From Holtzman et al. (2020), Figure 1. Each phrase is fluent, and the whole drifts into nonsense.</figcaption>
+  </figure>
+
+  <h2 id="temperature">Temperature sharpens or flattens the odds</h2>
+
+  <p>
+    <strong>Temperature</strong> divides every logit by one number before the softmax, moving the odds toward the top word or toward the tail.
+  </p>
+
+  <div class="eq-card" id="decTempEq">
+    <p class="eq-what">Softmax with temperature &tau;.</p>
+    <div class="eq-line eq-active"><span style="color:#1e8449">p<sub>i</sub></span> = <span class="frac"><span class="top">exp(<span style="color:#2a7fbf">z<sub>i</sub></span>/<span style="color:#c0392b">&tau;</span>)</span><span class="bot">&Sigma;<sub>j</sub> exp(<span style="color:#2a7fbf">z<sub>j</sub></span>/<span style="color:#c0392b">&tau;</span>)</span></span></div>
+    <div class="eq-why eq-active"><span style="color:#c0392b">&tau;</span> (tau), the temperature, is a positive number. <span style="color:#c0392b">&tau;</span> = 1 is the plain softmax. Below 1 the gaps between logits grow and the odds sharpen. Above 1 the gaps shrink and the odds flatten. The order of the words never changes.</div>
+    <div class="eq-line eq-active"><span style="color:#c0392b">&tau;</span> &rarr; 0 &rArr; p<sub>max</sub> &rarr; 1</div>
+    <div class="eq-why eq-active">&rarr; means approaches and &rArr; means so. p<sub>max</sub> is the probability of the likeliest word. As <span style="color:#c0392b">&tau;</span> shrinks toward 0 that word takes all the probability, and sampling becomes greedy. As <span style="color:#c0392b">&tau;</span> grows large, every word&rsquo;s share approaches the same value.</div>
+  </div>
+
+  <figure class="figure mtd-fig">
+<svg class="mtd-svg dc-svg" viewBox="0 0 360 206" role="img" aria-label="The same ten words at three temperatures. At tau 0.5 mat holds most of the probability. At tau 1 the bars fall off smoothly. At tau 2 the bars are much flatter and the four odd words on the right have grown."><text class="dc-t dc-b dc-tauc" x="58" y="18" text-anchor="middle">&tau; = 0.5</text><rect class="dc-pbar" x="4" y="43.9" width="8" height="116.1"/><rect class="dc-pbar" x="15" y="136.6" width="8" height="23.4"/><rect class="dc-pbar" x="26" y="149.5" width="8" height="10.5"/><rect class="dc-pbar" x="37" y="154.2" width="8" height="5.8"/><rect class="dc-pbar" x="48" y="157.4" width="8" height="2.6"/><rect class="dc-pbar" x="59" y="158.8" width="8" height="1.2"/><rect class="dc-oddbar" x="70" y="159.7" width="8" height="0.8"/><rect class="dc-oddbar" x="81" y="159.9" width="8" height="0.8"/><rect class="dc-oddbar" x="92" y="160.0" width="8" height="0.8"/><rect class="dc-oddbar" x="103" y="160.0" width="8" height="0.8"/><line class="dc-base" x1="2" y1="160.5" x2="114" y2="160.5"/><text class="dc-t dc-s" x="4" y="180">mat</text><path class="dc-brace" d="M70 166 v5 h41 v-5"/><text class="dc-t dc-s dc-oddc" x="112" y="198" text-anchor="end">odd words</text><text class="dc-t dc-b dc-tauc" x="180" y="18" text-anchor="middle">&tau; = 1</text><rect class="dc-pbar" x="126" y="91.1" width="8" height="68.9"/><rect class="dc-pbar" x="137" y="129.0" width="8" height="31.0"/><rect class="dc-pbar" x="148" y="139.2" width="8" height="20.8"/><rect class="dc-pbar" x="159" y="144.6" width="8" height="15.4"/><rect class="dc-pbar" x="170" y="149.7" width="8" height="10.3"/><rect class="dc-pbar" x="181" y="153.1" width="8" height="6.9"/><rect class="dc-oddbar" x="192" y="156.6" width="8" height="3.4"/><rect class="dc-oddbar" x="203" y="158.5" width="8" height="1.5"/><rect class="dc-oddbar" x="214" y="159.0" width="8" height="1.0"/><rect class="dc-oddbar" x="225" y="159.3" width="8" height="0.8"/><line class="dc-base" x1="124" y1="160.5" x2="236" y2="160.5"/><text class="dc-t dc-s" x="126" y="180">mat</text><path class="dc-brace" d="M192 166 v5 h41 v-5"/><text class="dc-t dc-s dc-oddc" x="234" y="198" text-anchor="end">odd words</text><text class="dc-t dc-b dc-tauc" x="302" y="18" text-anchor="middle">&tau; = 2</text><rect class="dc-pbar" x="248" y="119.9" width="8" height="40.1"/><rect class="dc-pbar" x="259" y="133.1" width="8" height="26.9"/><rect class="dc-pbar" x="270" y="138.0" width="8" height="22.0"/><rect class="dc-pbar" x="281" y="141.1" width="8" height="18.9"/><rect class="dc-pbar" x="292" y="144.5" width="8" height="15.5"/><rect class="dc-pbar" x="303" y="147.3" width="8" height="12.7"/><rect class="dc-oddbar" x="314" y="151.1" width="8" height="8.9"/><rect class="dc-oddbar" x="325" y="154.0" width="8" height="6.0"/><rect class="dc-oddbar" x="336" y="155.1" width="8" height="4.9"/><rect class="dc-oddbar" x="347" y="156.0" width="8" height="4.0"/><line class="dc-base" x1="246" y1="160.5" x2="358" y2="160.5"/><text class="dc-t dc-s" x="248" y="180">mat</text><path class="dc-brace" d="M314 166 v5 h41 v-5"/><text class="dc-t dc-s dc-oddc" x="356" y="198" text-anchor="end">odd words</text></svg>
+    <figcaption class="caption">Same ten logits. The odd words hold 0.2% at &tau;&nbsp;=&nbsp;0.5 and 15% at &tau;&nbsp;=&nbsp;2.</figcaption>
+  </figure>
+
+<pre><code class="language-python">def softmax(z, tau=1.0):
+    # tau divides every logit
+    s = z / tau
+    e = np.exp(s - s.max())
+    return e / e.sum()
+
+softmax(z, 0.5).round(2)[:3]
+# [0.73, 0.15, 0.07]
+softmax(z, 2.0).round(2)[:3]
+# [0.25, 0.17, 0.14]</code></pre>
+
+  <p>
+    Neither end fixes sampling. A low <span style="color:#c0392b">&tau;</span> drifts back toward greedy, and a high one feeds the tail.
+    The same knob sets how soft a teacher&rsquo;s odds are in <a href="kd.html#how-it-works-the-distillation-loss">Knowledge Distillation</a>, which writes it T, and how sharply similarities become odds in <a href="contrastive-learning.html#infonce">InfoNCE</a> and <a href="clip.html#learned-temperature">CLIP</a>.
+    <a href="transformer-block.html#temperatureBars">The Transformer Block</a> has its own temperature slider.
+  </p>
+
+  <h2 id="top-k-top-p">Top-k and top-p cut the unreliable tail</h2>
+
+  <p>
+    The fix is to cut the tail before drawing. <strong>Top-k</strong> keeps the k likeliest words. <strong>Top-p</strong>, also called nucleus sampling, keeps the fewest top words whose probabilities reach a share p<sub>top</sub>. Both then <strong>renormalize</strong>, rescaling the kept words so they add to 1 again.
+  </p>
+
+  <div class="eq-card" id="decCutEq">
+    <p class="eq-what">Which words top-k and top-p keep, and their new probabilities.</p>
+    <div class="eq-line eq-active">keep i if rank(i) &le; <span style="color:#7d3c98">k</span></div>
+    <div class="eq-why eq-active">Top-k. rank(i) is word i&rsquo;s place when the words are sorted from likeliest down, so the top word has rank 1. <span style="color:#7d3c98">k</span> is a fixed count, such as 40.</div>
+    <div class="eq-line eq-active">&Sigma;<sub>kept</sub> <span style="color:#1e8449">p<sub>i</sub></span> &ge; <span style="color:#7d3c98">p<sub>top</sub></span></div>
+    <div class="eq-why eq-active">Top-p. Walk down the sorted words adding their probabilities and stop at the first word where the total reaches <span style="color:#7d3c98">p<sub>top</sub></span>, such as 0.9. The kept words are the <strong>nucleus</strong>.</div>
+    <div class="eq-line eq-active"><span style="color:#1e8449">p&prime;<sub>i</sub></span> = <span class="frac"><span class="top"><span style="color:#1e8449">p<sub>i</sub></span></span><span class="bot">&Sigma;<sub>kept</sub> <span style="color:#1e8449">p<sub>j</sub></span></span></span></div>
+    <div class="eq-why eq-active">Renormalize. p&prime; (p prime) is the new distribution, and &Sigma;<sub>kept</sub> adds over the kept words only. The kept words keep their ratios, and a cut word gets p&prime;<sub>i</sub> = 0.</div>
+  </div>
+
+  <p>
+    One fixed k cannot fit every step, because some steps have many good words and others have one.
+  </p>
+
+  <figure class="figure mtd-fig">
+    <div class="dc-fig5">
+      <figure>
+        <span class="dc-ctx">She said, &ldquo;I never &hellip;</span>
+        <img class="dc-f5flat" src="figures/papers/holtzman-fig5-flat.png" alt="Bar chart of the next word after She said I never. The top words thought, knew, had, saw, said and more each hold a few percent." width="134" height="186">
+      </figure>
+      <figure>
+        <span class="dc-ctx">I ate the pizza while it was still &hellip;</span>
+        <img class="dc-f5peak" src="figures/papers/holtzman-fig5-peaked.png" alt="Bar chart of the next word after I ate the pizza while it was still. Hot holds most of the probability, with cooling, warm and on far behind." width="243" height="163">
+      </figure>
+    </div>
+    <figcaption class="caption">&ldquo;Flat distributions lead to many moderately probable tokens, while peaked distributions concentrate most probability mass into just a few tokens.&rdquo; The scales differ, 0.08 on the left and 0.8 on the right. A small k cuts good words from the flat case, and a large k lets junk into the peaked one. Cropped from Holtzman et al. (2020), Figure 5.</figcaption>
+  </figure>
+
+  <p>
+    Top-p keeps many words when the odds are flat and few when they are peaked. Here temperature comes first and then the cut, as in Hugging Face Transformers and the min-p paper. Some libraries, such as the llama.cpp server by default, apply temperature after the cut, where it only reshapes the kept words.
+  </p>
+
+  <div class="demo" id="decBars">
+    <div class="db-ctl">
+      <label for="dbTau" id="dbTauLab">&tau; = 1.0</label>
+      <input type="range" id="dbTau" min="0" max="9" step="1" value="5" aria-label="Temperature">
+    </div>
+    <div class="db-ends"><span>sharper</span><span>flatter</span></div>
+    <div class="demo-buttons" role="group" aria-label="Cut">
+      <button type="button" data-cut="none" aria-pressed="false">no cut</button>
+      <button type="button" data-cut="k" aria-pressed="false">top-k, k = 3</button>
+      <button type="button" data-cut="p" aria-pressed="true" class="active">top-p, 90%</button>
+    </div>
+    <div class="db-strip" id="dbStrip" aria-hidden="true">
+      <span class="db-striplab">running total</span>
+      <span class="db-marklab">90%</span>
+      <div class="db-sbar" id="dbSbar"></div>
+      <span class="db-mark"></span>
+    </div>
+    <div class="db-rows" id="dbRows"></div>
+    <p class="demo-stats" id="dbRead" aria-live="polite"></p>
+    <p class="caption">Top-k keeps a fixed count. Top-p keeps a fixed share of the odds.</p>
+  </div>
+
+<pre><code class="language-python">def top_p(p, p_top=0.9):
+    # sort high to low, add up
+    order = np.argsort(p)[::-1]
+    c = np.cumsum(p[order])
+    # first c that reaches p_top
+    i = (c &lt; p_top).sum()
+    keep = order[:i + 1]
+    q = np.zeros_like(p)
+    q[keep] = p[keep]
+    # renormalize
+    return q / q.sum()</code></pre>
+
+<pre><code class="language-python">def top_k(p, k):
+    # keep the k largest
+    keep = np.argsort(p)[-k:]
+    q = np.zeros_like(p)
+    q[keep] = p[keep]
+    # renormalize
+    return q / q.sum()</code></pre>
+
+<pre><code class="language-python">rng = np.random.default_rng(0)
+q = top_p(softmax(z))
+# keeps 5 words, mat to roof
+i = rng.choice(len(q), p=q)
+# never moon, piano, Tuesday, of</code></pre>
+
+  <p>
+    <strong>Min-p</strong> (Nguyen et al. 2025) keeps every word with probability at least p<sub>base</sub> times p<sub>max</sub>, so its bar rises when the model is confident.
+    The captioner in <a href="qformer.html#capfilt">From BLIP to the Q-Former</a> uses top-p at 90%.
+  </p>
+
+  <h2 id="choosing">Each job needs its own decoder</h2>
+
+  <p>
+    Holtzman et al. wrote 5,000 passages of up to 200 tokens with each method, each from a short opening of held-out web text. <strong>Perplexity</strong> per token is how surprised the model is by the text, where higher means less predictable. <strong>Loops</strong> is the share of passages that end stuck repeating a phrase of two or more tokens at least three times.
+  </p>
+
+  <figure class="figure mtd-fig">
+<svg class="mtd-svg dc-svg" viewBox="0 0 360 262" role="img" aria-label="Perplexity per token and share of looping passages for six ways of writing 5,000 passages. Human text 12.38 and 0.28%. Greedy 1.50 and 73.66%. Beam width 16 1.48 and 28.94%. Pure sampling 22.73 and 0.22%. Top-k 40 6.88 and 0.78%. Top-p 95% 13.13 and 0.36%."><text class="dc-t dc-b" x="190" y="18" text-anchor="middle">perplexity</text><text class="dc-t dc-b" x="354" y="18" text-anchor="end">loops</text><line class="dc-human" x1="188.4" y1="28" x2="188.4" y2="226"/><text class="dc-t dc-s" x="188.4" y="246" text-anchor="middle">human level</text><text class="dc-t" x="118" y="51" text-anchor="end">human text</text><rect class="dc-hbar" x="124" y="38" width="64.4" height="16" rx="2"/><text class="dc-t dc-s mtd-halo" x="193.4" y="51">12.38</text><text class="dc-t dc-s" x="354" y="51" text-anchor="end">0.28%</text><text class="dc-t" x="118" y="83" text-anchor="end">greedy</text><rect class="dc-gbar" x="124" y="70" width="7.8" height="16" rx="2"/><text class="dc-t dc-s mtd-halo" x="136.8" y="83">1.50</text><text class="dc-t dc-s dc-b" x="354" y="83" text-anchor="end">73.66%</text><text class="dc-t" x="118" y="115" text-anchor="end">beam, width 16</text><rect class="dc-bbar" x="124" y="102" width="7.7" height="16" rx="2"/><text class="dc-t dc-s mtd-halo" x="136.7" y="115">1.48</text><text class="dc-t dc-s dc-b" x="354" y="115" text-anchor="end">28.94%</text><text class="dc-t" x="118" y="147" text-anchor="end">pure sampling</text><rect class="dc-oddbar" x="124" y="134" width="118.2" height="16" rx="2"/><text class="dc-t dc-s mtd-halo" x="247.2" y="147">22.73</text><text class="dc-t dc-s" x="354" y="147" text-anchor="end">0.22%</text><text class="dc-t" x="118" y="179" text-anchor="end">top-k, k = 40</text><rect class="dc-kbar" x="124" y="166" width="35.8" height="16" rx="2"/><text class="dc-t dc-s mtd-halo" x="164.8" y="179">6.88</text><text class="dc-t dc-s" x="354" y="179" text-anchor="end">0.78%</text><text class="dc-t" x="118" y="211" text-anchor="end">top-p, 95%</text><rect class="dc-cutbar" x="124" y="198" width="68.3" height="16" rx="2"/><text class="dc-t dc-s mtd-halo" x="197.3" y="211">13.13</text><text class="dc-t dc-s" x="354" y="211" text-anchor="end">0.36%</text></svg>
+    <figcaption class="caption">Greedy and beam are too predictable and loop. Pure sampling is too surprising. Only top-p is close to human on both measures. Holtzman et al. (2020), Table 1.</figcaption>
+  </figure>
+
+  <ul class="dc-pick">
+    <li><b>greedy</b> Short answers with one right reply, such as the capital of Australia. <span class="dc-risk">Loops on long text.</span></li>
+    <li><b>beam search</b> Output pinned down by the input, such as translation. <span class="dc-risk">Bland, looping open-ended text, and short replies without the length correction.</span></li>
+    <li><b>pure sampling</b> Rarely used alone. <span class="dc-risk">The tail derails long text.</span></li>
+    <li><b>top-k</b> A simple cut, such as k = 10 for stories (Fan et al. 2018). <span class="dc-risk">One k cannot fit both flat and peaked steps.</span></li>
+    <li><b>top-p</b> Open-ended writing, with p<sub>top</sub> from 0.9 to 0.95. <span class="dc-risk">A high &tau; applied first lets odd words back in.</span></li>
+    <li><b>min-p</b> Sampling at a high &tau;. <span class="dc-risk">Newer, with p<sub>base</sub> from 0.05 to 0.1 suggested.</span></li>
+    <li><b>repetition penalty</b> Added to any method against loops. <span class="dc-risk">Also lowers words that should repeat.</span></li>
+  </ul>
+
+  <p>
+    In <a href="rl-alignment.html#three-stages">Aligning Language Models with RL</a> the model samples its own replies during training, so decoding shapes which replies get rewarded.
+    Can the model&rsquo;s hidden layers tell when it is about to pick an odd word? <a href="probes.html">Activation Probes</a> reads those layers directly.
+  </p>
+
+  <h2 id="references">References</h2>
+  <ol class="brefs">
+    <li>Holtzman, A., et al. (2020). The Curious Case of Neural Text Degeneration. ICLR 2020. <a href="https://arxiv.org/abs/1904.09751">arXiv:1904.09751</a>.</li>
+    <li>Fan, A., et al. (2018). Hierarchical Neural Story Generation. ACL 2018. <a href="https://arxiv.org/abs/1805.04833">arXiv:1805.04833</a>.</li>
+    <li>Nguyen, M. N., et al. (2025). Turning Up the Heat: Min-p Sampling for Creative and Coherent LLM Outputs. ICLR 2025. <a href="https://arxiv.org/abs/2407.01082">arXiv:2407.01082</a> (first posted 2024).</li>
+    <li>Keskar, N. S., et al. (2019). CTRL: A Conditional Transformer Language Model for Controllable Generation. <a href="https://arxiv.org/abs/1909.05858">arXiv:1909.05858</a>.</li>
+    <li>Wu, Y., et al. (2016). Google&rsquo;s Neural Machine Translation System: Bridging the Gap between Human and Machine Translation. <a href="https://arxiv.org/abs/1609.08144">arXiv:1609.08144</a>.</li>
+    <li>Goodfellow, I., Bengio, Y., and Courville, A. (2016). Deep Learning, section 4.1. MIT Press. <a href="https://www.deeplearningbook.org/">deeplearningbook.org</a>.</li>
+  </ol>
+  <script>
+  /* decBars: the temperature slider sets tau, the buttons set the cut; bars show the final odds of each word. */
+  (function () {
+    var root = document.getElementById('decBars');
+    if (!root) return;
+    var W = ['mat', 'floor', 'sofa', 'bed', 'roof', 'chair', 'moon', 'piano', 'Tuesday', 'of'];
+    var Z = [2.0, 1.2, 0.8, 0.5, 0.1, -0.3, -1.0, -1.8, -2.2, -2.6];
+    var TAUS = [0.1, 0.2, 0.3, 0.5, 0.7, 1.0, 1.4, 2.0, 2.8, 4.0];
+    var slider = document.getElementById('dbTau'), lab = document.getElementById('dbTauLab');
+    var rowsEl = document.getElementById('dbRows'), read = document.getElementById('dbRead');
+    var strip = document.getElementById('dbStrip'), sbar = document.getElementById('dbSbar');
+    var btns = root.querySelectorAll('[data-cut]');
+    var cut = 'p', rows = [];
+    W.forEach(function (w, i) {
+      var r = document.createElement('div');
+      r.className = 'db-row' + (i >= 6 ? ' db-oddw' : '');
+      r.innerHTML = '<span class="db-w">' + w + '</span><span class="db-track"><span class="db-fill"></span></span><span class="db-v"></span>';
+      rowsEl.appendChild(r);
+      rows.push(r);
+    });
+    function softmax(tau) {
+      var m = Math.max.apply(null, Z), e = Z.map(function (z) { return Math.exp((z - m) / tau); });
+      var s = e.reduce(function (a, b) { return a + b; }, 0);
+      return e.map(function (x) { return x / s; });
+    }
+    function pct(x) { return x < 0.005 ? 'under 1%' : Math.round(x * 100) + '%'; }
+    function render() {
+      var tau = TAUS[+slider.value], p = softmax(tau), n = 10, keep = [];
+      lab.textContent = '\u03c4 = ' + tau.toFixed(1);
+      if (cut === 'k') n = 3;
+      if (cut === 'p') {
+        var c = 0; n = 0;
+        while (n < 10 && c < 0.9 - 1e-12) { c += p[n]; n++; }
+      }
+      var kept = 0;
+      for (var i = 0; i < 10; i++) { keep.push(i < n); if (i < n) kept += p[i]; }
+      rows.forEach(function (r, i) {
+        var q = keep[i] ? p[i] / kept : 0;
+        r.classList.toggle('db-cut', !keep[i]);
+        r.querySelector('.db-fill').style.width = (keep[i] ? q * 100 : p[i] * 100) + '%';
+        r.querySelector('.db-v').textContent = keep[i] ? q.toFixed(2) : 'cut';
+      });
+      strip.classList.toggle('db-off', cut !== 'p');
+      sbar.innerHTML = p.map(function (x, i) {
+        return '<span class="db-seg ' + (keep[i] ? 'db-k' : 'db-x') + '" style="width:' + (x * 100) + '%"></span>';
+      }).join('');
+      var odd = p[6] + p[7] + p[8] + p[9];
+      if (cut === 'none') read.textContent = 'No cut, all 10 words kept. The odd words get ' + pct(odd) + ' of the draws.';
+      else if (cut === 'k') read.textContent = 'Keeps 3 words at every \u03c4. They held ' + pct(kept) + ' of the odds before renormalizing.';
+      else read.textContent = n === 1 ? 'Keeps 1 word. Mat alone reaches 90%.' : 'Keeps ' + n + ' words, the fewest that reach 90%.';
+    }
+    slider.addEventListener('input', render);
+    Array.prototype.forEach.call(btns, function (b) {
+      b.addEventListener('click', function () {
+        cut = b.getAttribute('data-cut');
+        Array.prototype.forEach.call(btns, function (o) {
+          o.classList.toggle('active', o === b);
+          o.setAttribute('aria-pressed', o === b ? 'true' : 'false');
+        });
+        render();
+      });
+    });
+    render();
+  })();
+  </script>
+  <script>
+  /* beamWalk: five steps; greedy follows the top word, beam search keeps two replies and wins. */
+  (function () {
+    var root = document.getElementById('beamWalk');
+    if (!root) return;
+    var NS = 'http://www.w3.org/2000/svg', svg = document.getElementById('bwSvg');
+    var L1 = [{ w: 'sat', p: 0.5, y: 74 }, { w: 'is', p: 0.4, y: 176 }, { w: 'ran', p: 0.1, y: 261 }];
+    var L2 = [
+      { a: 0, w: 'on', p: 0.4, y: 40 }, { a: 0, w: 'down', p: 0.3, y: 74 }, { a: 0, w: 'there', p: 0.3, y: 108 },
+      { a: 1, w: 'sleeping', p: 0.9, y: 142 }, { a: 1, w: 'here', p: 0.05, y: 176 }, { a: 1, w: 'fat', p: 0.05, y: 210 },
+      { a: 2, w: 'away', p: 0.8, y: 244 }, { a: 2, w: 'off', p: 0.2, y: 278 }];
+    function el(tag, attrs, text) {
+      var e = document.createElementNS(NS, tag);
+      for (var k in attrs) e.setAttribute(k, attrs[k]);
+      if (text) e.textContent = text;
+      svg.appendChild(e);
+      return e;
+    }
+    var e1 = L1.map(function (n) {
+      return el('line', { 'class': 'bw-e', x1: 68, y1: 170, x2: 104, y2: n.y, 'stroke-width': 1.5 + 8 * n.p });
+    });
+    var e2 = L2.map(function (n) {
+      return el('line', { 'class': 'bw-e', x1: 160, y1: L1[n.a].y, x2: 196, y2: n.y - 4, 'stroke-width': 1.5 + 8 * n.p });
+    });
+    var rootG = document.createElementNS(NS, 'g'); svg.appendChild(rootG);
+    rootG.setAttribute('class', 'bw-n');
+    var rr = document.createElementNS(NS, 'rect');
+    [['x', 4], ['y', 155], ['width', 64], ['height', 30], ['rx', 6]].forEach(function (a) { rr.setAttribute(a[0], a[1]); });
+    rootG.appendChild(rr);
+    var rt = document.createElementNS(NS, 'text');
+    rt.setAttribute('class', 'bw-t'); rt.setAttribute('x', 36); rt.setAttribute('y', 175); rt.setAttribute('text-anchor', 'middle');
+    rt.textContent = 'the cat'; rootG.appendChild(rt);
+    function node(x, y, w, h, word, sub, subx) {
+      var g = document.createElementNS(NS, 'g'); g.setAttribute('class', 'bw-n'); svg.appendChild(g);
+      var r = document.createElementNS(NS, 'rect');
+      r.setAttribute('x', x); r.setAttribute('y', y - h / 2 - 4); r.setAttribute('width', w); r.setAttribute('height', h); r.setAttribute('rx', 6);
+      g.appendChild(r);
+      return g;
+    }
+    var n1 = L1.map(function (n) {
+      var g = node(104, n.y + 4, 56, 44);
+      var t = document.createElementNS(NS, 'text'); t.setAttribute('class', 'bw-t'); t.setAttribute('x', 132); t.setAttribute('y', n.y - 1); t.setAttribute('text-anchor', 'middle'); t.textContent = n.w; g.appendChild(t);
+      var s = document.createElementNS(NS, 'text'); s.setAttribute('class', 'bw-s'); s.setAttribute('x', 132); s.setAttribute('y', n.y + 16); s.setAttribute('text-anchor', 'middle'); s.textContent = String(n.p); g.appendChild(s);
+      return g;
+    });
+    var n2 = L2.map(function (n) {
+      var g = node(196, n.y, 72, 26);
+      var t = document.createElementNS(NS, 'text'); t.setAttribute('class', 'bw-t'); t.setAttribute('x', 202); t.setAttribute('y', n.y + 1); t.textContent = n.w; g.appendChild(t);
+      var s = document.createElementNS(NS, 'text'); s.setAttribute('class', 'bw-s'); s.setAttribute('x', 302); s.setAttribute('y', n.y + 1); s.setAttribute('text-anchor', 'end'); s.textContent = String(n.p); g.appendChild(s);
+      return g;
+    });
+    var head = el('text', { 'class': 'bw-tot', x: 356, y: 16, 'text-anchor': 'end' }, 'whole reply');
+    var tots = L2.map(function (n) {
+      var v = L1[n.a].p * n.p;
+      return el('text', { 'class': 'bw-tot', x: 356, y: n.y + 1, 'text-anchor': 'end' }, v.toFixed(2));
+    });
+    var drop = el('text', { 'class': 'bw-drop', x: 132, y: 302, 'text-anchor': 'middle' }, 'dropped');
+    var TEXT = [
+      'Each first word after the cat leads to its own next words. The small number is the chance of each word, given the words before it.',
+      'Greedy takes sat, the likeliest first word, then on, the likeliest after sat. Greedy picks \u201cthe cat sat on\u201d, chance of the whole reply 0.20.',
+      'Beam search with width 2 keeps the two likeliest first words, sat and is. Ran is dropped.',
+      'It extends both and scores all six replies. The right column is the chance of each whole reply, which the summed logs rank.',
+      'It keeps the best two. Beam picks \u201cthe cat is sleeping\u201d, chance 0.36, and greedy got 0.20.'];
+    var EQ = [0, 1, 2, 2, 2];
+    var count = document.getElementById('bwCount'), prev = document.getElementById('bwPrev'), next = document.getElementById('bwNext');
+    var read = document.getElementById('bwRead'), card = document.getElementById('beamWalkEq');
+    var step = 0;
+    function cls(g, name, on) { g.classList.toggle(name, !!on); }
+    function show(s) {
+      step = s;
+      var greedy = s >= 1, beam = s >= 2;
+      e1.forEach(function (e, i) {
+        cls(e, 'bw-g', greedy && i === 0 && s < 4);
+        cls(e, 'bw-k', (s === 2 || s === 3) && i < 2 || s === 4 && i < 2);
+        cls(e, 'bw-dim', s === 1 && i !== 0 || s >= 2 && i === 2);
+      });
+      e2.forEach(function (e, i) {
+        var a = L2[i].a;
+        cls(e, 'bw-g', greedy && i === 0);
+        cls(e, 'bw-k', s === 3 && a < 2 || s === 4 && (i === 0 || i === 3));
+        cls(e, 'bw-dim', s === 1 && i !== 0 || s === 2 && a < 2 || a === 2 && s >= 2 || s === 4 && i !== 0 && i !== 3);
+      });
+      n1.forEach(function (g, i) {
+        cls(g, 'bw-g', greedy && i === 0);
+        cls(g, 'bw-k', beam && i < 2);
+        cls(g, 'bw-dim', s === 1 && i !== 0 || s >= 2 && i === 2);
+      });
+      n2.forEach(function (g, i) {
+        var a = L2[i].a;
+        cls(g, 'bw-g', greedy && i === 0);
+        cls(g, 'bw-k', s === 4 && (i === 0 || i === 3));
+        cls(g, 'bw-dim', s === 1 && i !== 0 || s === 2 && a < 2 || a === 2 && s >= 2 || s === 4 && i !== 0 && i !== 3);
+      });
+      tots.forEach(function (t, i) { cls(t, 'bw-hide', s < 3 || L2[i].a === 2); cls(t, 'bw-dim', s === 4 && i !== 0 && i !== 3); });
+      cls(head, 'bw-hide', s < 3);
+      cls(drop, 'bw-hide', s < 2);
+      read.textContent = TEXT[s];
+      Array.prototype.forEach.call(card.querySelectorAll('[data-s]'), function (x) {
+        x.classList.toggle('eq-active', +x.getAttribute('data-s') === EQ[s]);
+      });
+      count.textContent = 'step ' + (s + 1) + ' of 5';
+      prev.disabled = s === 0; next.disabled = s === 4;
+    }
+    prev.addEventListener('click', function () { if (step > 0) show(step - 1); });
+    next.addEventListener('click', function () { if (step < 4) show(step + 1); });
+    show(0);
+  })();
+  </script>
+
+            <script>
+        (function () {
+            var nav = document.querySelector('.topnav');
+            function onNavScroll() {
+                nav.classList.toggle('scrolled', window.scrollY > 4);
+            }
+            window.addEventListener('scroll', onNavScroll, { passive: true });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            window.addEventListener('resize', function () {
+                if (window.innerWidth > 768) {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            onNavScroll();
+            var toggle = document.getElementById('navToggle');
+            var panel = document.getElementById('navPanel');
+            if (toggle && panel) {
+                toggle.addEventListener('click', function () {
+                    var open = panel.classList.toggle('open');
+                    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                });
+                panel.addEventListener('click', function (e) {
+                    if (e.target && e.target.classList && e.target.classList.contains('panel-link')) {
+                        panel.classList.remove('open');
+                        toggle.setAttribute('aria-expanded', 'false');
+                    }
+                });
+            }
+            var links = Array.prototype.slice.call(document.querySelectorAll('.tab-strip a.tab-chip[href^="#"]'));
+            if (!links.length) return;
+            var tabMap = {};
+            links.forEach(function (a) { tabMap[a.getAttribute('href').slice(1)] = a; });
+            var current = null;
+            function centerTab(tab) {
+                var strip = tab.parentElement;
+                if (!strip || !strip.classList.contains('tab-strip')) return;
+                var sr = strip.getBoundingClientRect();
+                var pr = tab.getBoundingClientRect();
+                strip.scrollLeft += (pr.width >= sr.width) ? (pr.left - sr.left) : (pr.left - sr.left) - (sr.width - pr.width) / 2;
+            }
+            function setActive(id) {
+                if (!tabMap[id] || id === current) return;
+                current = id;
+                links.forEach(function (a) {
+                    a.classList.toggle('active', a.getAttribute('href') === '#' + id);
+                });
+                centerTab(tabMap[id]);
+            }
+            links.forEach(function (a) {
+                a.addEventListener('click', function () {
+                    setActive(a.getAttribute('href').slice(1));
+                });
+            });
+            setActive(links[0].getAttribute('href').slice(1));
+            if ('IntersectionObserver' in window) {
+                var obs = new IntersectionObserver(function (entries) {
+                    entries.forEach(function (en) {
+                        if (en.isIntersecting) setActive(en.target.id);
+                    });
+                }, { rootMargin: '-35% 0px -55% 0px' });
+                Object.keys(tabMap).forEach(function (id) {
+                    var el = document.getElementById(id);
+                    if (el) obs.observe(el);
+                });
+                window.addEventListener('scroll', function () {
+                    if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) {
+                        setActive(links[links.length - 1].getAttribute('href').slice(1));
+                    }
+                }, { passive: true });
+            }
+            window.addEventListener('load', function () {
+                var act = document.querySelector('.tab-strip a.active');
+                if (act) centerTab(act);
+            });
+        })();
+    </script>
+</body>
+</html>
+

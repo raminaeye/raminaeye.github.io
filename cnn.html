@@ -551,7 +551,8 @@
     #effCanvas { width: 100%; max-width: 640px; height: 150px; display: block; }
     .eff-grid { display: grid; grid-template-columns: 1.15fr 1fr; gap: 0.4rem 1.4rem; align-items: start; margin-top: 0.6rem; }
     @media (max-width: 760px) { .eff-grid { grid-template-columns: 1fr; } }
-    .arch-dots { display: flex; gap: 4px; overflow-x: auto; padding: 6px 2px; margin: 0.4rem 0; }
+    .arch-dots { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 2px; margin: 0.4rem 0; }
+    .arch-dotkey { font-size: 0.8rem; color: #555; margin: -0.2rem 0 0.4rem; }
     .arch-dot { min-width: 26px; padding: 0.1em 0.3em; font-size: 0.78em; flex: 0 0 auto; }
     .arch-dot.arch-on, .arch-pick.arch-active, .duel-kbtn.duel-active, .duel-scale.duel-active, .bell-pick.bell-active, .see-pick.see-active { background: #2980b9; border-color: #2980b9; color: #fff; }
     .arch-dot.arch-gray { opacity: 0.55; }
@@ -574,6 +575,11 @@
     #ksToy .ks-panels { margin-top: 0.25rem; row-gap: 1rem; }
     .ks-panel { text-align: center; }
     .ks-title { font-weight: bold; color: #2c3e50; margin-bottom: 0.6rem; font-size: 0.95em; }
+    .ks-key { display: flex; justify-content: center; gap: 0.9rem; font-size: 13px; color: #2c3e50; margin: -0.3rem 0 0.45rem; }
+    .ks-key span { display: inline-flex; align-items: center; gap: 0.3rem; }
+    .ks-sw { display: inline-block; width: 12px; height: 12px; border-radius: 2px; border: 2px solid; background: #4a4f55; }
+    .ks-sw-pos { border-color: #2980b9; }
+    .ks-sw-neg { border-color: #c0392b; }
     .ks-gridwrap { position: relative; display: inline-block; line-height: 0; }
     .ks-grid { display: inline-grid; gap: 2px; line-height: 1.2; }
     .ks-cell { width: 24px; height: 24px; border-radius: 2px; }
@@ -834,7 +840,7 @@ def conv2d(input, kernel, stride=1, padding=0):
         <em>Multiply, add, move on.</em> Nothing in this loop mixes channels or looks at distant pixels, which is why conv layers are cheap and why they need stacking to see the big picture.
     </p>
     <p>
-        Pick a kernel and press Play. The bright column on the right is the kernel saying "I found my pattern" at every position along the bar; the blur kernel smears the bar instead. <em>One small pattern detector, stamped everywhere.</em>
+        The vertical edge kernel says "I found my pattern" at every position along the bar; the blur kernel smears the bar instead. Because the same weights run at every position, shifting the input shifts the output map by the same amount. That is <strong>translation equivariance</strong> (invariance would mean the output does not change at all). <em>One small pattern detector, stamped everywhere.</em>
     </p>
     <div class="demo" id="ksToy">
         <div class="demo-controls">
@@ -855,20 +861,13 @@ def conv2d(input, kernel, stride=1, padding=0):
             </div>
             <div class="ks-panel">
                 <div class="ks-title">Output: <span id="ksOutSize">10x10</span> activation map</div>
+                <div class="ks-key"><span><i class="ks-sw ks-sw-pos"></i>strong positive</span><span><i class="ks-sw ks-sw-neg"></i>strong negative</span></div>
                 <canvas id="ksOutputCv" class="ks-canvas" role="img" aria-label="Activation map with detection boxes"></canvas>
             </div>
         </div>
         </div>
         <div class="demo-stats" id="ksReadout"></div>    </div>
-<p class="caption">The same kernel fires wherever the pattern appears. That is translation equivariance: the output map shifts by the same amount the input shifted. (Invariance would mean the output does not change at all.) The photo is generated from the same 12x12 toy data, and the orange box is the 3x3 kernel window. On the right, boxes mark strong responses, blue for a positive match and red for a negative one, scaled by that kernel's strongest response over the whole map.</p>
-<div class="howto">
-            <p class="howto-head">How to play</p>
-            <ul>
-                <li><strong>The point:</strong> one <code>3x3</code> kernel passes over the photo and multiplies-and-adds at every spot, so the same kernel fires wherever its pattern appears, no matter the position. That sweep is the convolution.</li>
-                <li><strong>What you'll see:</strong> The output map marks where one kernel matches its pattern and where it does not.</li>
-                <li><strong>Kernel buttons:</strong> Vertical edge, Horizontal edge, Blur, Sharpen. Blur goes soft all over where Vertical edge showed blue edge columns.</li>
-            </ul>
-        </div>
+<p class="caption">One kernel, one pattern, found at every position.</p>
     <script>
     (function () {
         var KSIZE = 3, IMG = 12, PHOTO_CELL = 28, OUT_CELL = 30;
@@ -1079,8 +1078,9 @@ def conv2d(input, kernel, stride=1, padding=0):
                and sweeps cell by cell. */
             buildOutput(true);
             state.step = outSize() * outSize();
-            drawInput(0, 0);
-            updateReadout(0, 0);
+            /* the window and readout sit on the last cell the sweep filled */
+            drawInput(outSize() - 1, outSize() - 1);
+            updateReadout(outSize() - 1, outSize() - 1);
         }
 
         $('ksPlay').addEventListener('click', function () {
@@ -1096,11 +1096,19 @@ def conv2d(input, kernel, stride=1, padding=0):
             state.playing = true;
             $('ksPlay').textContent = 'Pause';
             playScrollEnsure(document.getElementById('ksToy'));
+            /* first cells slow enough to follow the arithmetic, the rest of
+               the first row brisker, then the map fills quickly */
+            function ksDelay() {
+                var s = state.step;
+                if (s < 3) return 1400;
+                if (s < outSize()) return 600;
+                return 140;
+            }
             function ksSchedule() {
                 state.timer = setTimeout(function () {
                     if (doStep()) ksSchedule();
                     else stopPlay(2000);
-                }, 2600);
+                }, ksDelay());
             }
             ksSchedule();
         });
@@ -1176,17 +1184,10 @@ def conv2d(input, kernel, stride=1, padding=0):
             <div class="eq-why" data-eqline="0">Stamp one kernel over one input patch, multiply and add up every overlap, add the bias, then delete any negative result. One kernel stamped everywhere is one pattern detector reused at every position, and deleting the negatives lets only positive pattern matches pass on.</div>
             <div class="eq-line" data-eqline="1"><span class="eqt" data-k="y" style="color:#3498db">28&#8594;24</span> <span class="eqt" data-k="k" style="color:#e67e22">5&#215;5 conv</span>, <span class="eqt" data-k="y" style="color:#3498db">24&#8594;12</span> <span class="eqt" data-k="pool" style="color:#2c3e50">&#247;2 pool</span>, <span class="eqt" data-k="y" style="color:#3498db">12&#8594;8</span> <span class="eqt" data-k="k" style="color:#e67e22">5&#215;5 conv</span>, <span class="eqt" data-k="y" style="color:#3498db">8&#8594;4</span> <span class="eqt" data-k="pool" style="color:#2c3e50">&#247;2 pool</span>, then <span class="eqt" data-k="y" style="color:#3498db">256</span>&#8594;<span class="eqt" data-k="y" style="color:#2c3e50">10 scores</span></div>
             <div class="eq-why" data-eqline="1">Track the shrinking: each convolution trims the sides, each pool halves them, and the flat 256 numbers at the end become ten digit scores. The shrinking is the network deciding what matters, while the map count grows richer.</div>
-            <div class="eq-legend"><span class="eq-item" data-lines="0,1"><span class="eq-sw" style="background:#3498db"></span><code>y[i,j]</code> one output cell (blue = the maps you watch grow)</span><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#5d6d7e"></span><code>x[c][i+p][j+q]</code> the input patch under the kernel</span><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#e67e22"></span><code>K[c][p][q]</code> the kernel weights; <code>b</code> the kernel's bias</span><span class="eq-item" data-lines="0,1"><code>&#931;<sub>c,p,q</sub></code> sum over every kernel position; <code>&#183;</code> multiply; <code>max(0, &#183;)</code> ReLU, deletes the negatives; <code>i, j</code> output row and column; <code>c</code> input map; <code>p, q</code> position inside the <code>5&#215;5</code> kernel</span><span class="eq-item" data-lines="1"><code>&#8594;</code> the map size change that stage performs; <code>&#247;2 pool</code> <code>2&#215;2</code> max-pool halves each side</span></div>
+            <div class="eq-legend"><span class="eq-item" data-lines="0,1"><span class="eq-sw" style="background:#3498db"></span><code>y[i,j]</code> one output cell</span><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#5d6d7e"></span><code>x[c][i+p][j+q]</code> the input patch under the kernel</span><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#e67e22"></span><code>K[c][p][q]</code> the kernel weights; <code>b</code> the kernel's bias</span><span class="eq-item" data-lines="0,1"><code>&#931;<sub>c,p,q</sub></code> sum over every kernel position; <code>&#183;</code> multiply; <code>max(0, &#183;)</code> ReLU, deletes the negatives; <code>i, j</code> output row and column; <code>c</code> input map; <code>p, q</code> position inside the <code>5&#215;5</code> kernel</span><span class="eq-item" data-lines="1"><code>&#8594;</code> the map size change that stage performs; <code>&#247;2 pool</code> <code>2&#215;2</code> max-pool halves each side</span></div>
         </div>
 </div>
-<p class="caption">A simplified toy: the kernels and the final weights are fixed illustrations, not learned. The shapes and the shrinking are real; the patterns are staged.</p>
-<div class="howto">
-            <p class="howto-head">How to play</p>
-            <ul>
-                <li><strong>The point:</strong> a CNN turns a picture into smaller, richer maps, then into ten scores.</li>
-                <li><strong>What you'll see:</strong> The network turns a picture into class scores through smaller, richer maps: size <code>28</code> to <code>4</code>, count <code>1</code> to <code>16</code>.</li>
-            </ul>
-        </div>
+<p class="caption">The shapes and the shrinking are real; the kernels and final weights are fixed illustrations, not learned.</p>
     <script>
     (function () {
         'use strict';
@@ -1570,7 +1571,7 @@ function syncEq(cardId, lines, terms){
             </g>
             <g id="rf-rows"></g>
         </svg>
-        <figcaption>Stacking <code>3x3</code> stride-<code>1</code> convolutions grows one neuron's receptive field by <code>2</code> pixels per layer: <code>3</code>, then <code>5</code>, then <code>7</code>. With small kernels the receptive field grows linearly, so deep stacks are how you reach global context.</figcaption>
+        <figcaption>Small kernels grow the receptive field only linearly, so reaching global context takes a deep stack.</figcaption>
     </figure>
     <script>
     // Static diagram data: draws the RF growth figure above (no interactivity).
@@ -1644,7 +1645,7 @@ print(receptive_field(design))   # 507
         <text x="72" y="155" font-size="23" fill="#7f8c8d" text-anchor="end">200</text>
         <text x="72" y="100" font-size="23" fill="#7f8c8d" text-anchor="end">300</text>
         <text x="72" y="45" font-size="23" fill="#7f8c8d" text-anchor="end">400</text>
-        <text x="14" y="150" font-size="23" fill="#2c3e50" transform="rotate(-90 14 150)" text-anchor="middle">RF (ms at 1kHz)</text>
+        <text x="24" y="150" font-size="23" fill="#2c3e50" transform="rotate(-90 24 150)" text-anchor="middle">RF (ms at 1kHz)</text>
         <line x1="78" y1="95" x2="612" y2="95" stroke="#e74c3c" stroke-width="1.5" stroke-dasharray="6,4"/>
         <text x="84" y="88" font-size="23" fill="#e74c3c">300ms target</text>
         <polyline points="78,256 167,254 256,245 345,228 434,192 523,122 612,52"
@@ -1659,7 +1660,7 @@ print(receptive_field(design))   # 507
             <circle cx="612" cy="52" r="4" fill="#3498db"/><text x="612" y="24">379</text><text x="612" y="290">L7</text>
         </g>
     </svg>
-<p class="caption">Seven small layers reach 379 samples, 379ms of context at 1kHz, past the 300ms target. Doubling the dilation roughly doubles each layer's new reach, so the receptive field grows exponentially while the parameter count stays flat.</p>
+<p class="caption">Doubling the dilation grows the receptive field exponentially while the parameter count stays flat.</p>
 
     <p>
         Without dilation, small kernels grow the receptive field only linearly, so you may need dozens of layers. And even a large theoretical field is mostly unused: <em>most of the signal comes from a much smaller region.</em> That region is the <strong>effective receptive field</strong>, Gaussian-shaped and centered, where the center pixels matter far more than the edges.
@@ -1667,7 +1668,7 @@ print(receptive_field(design))   # 507
 
     <h3 id="bell-curve">Effective influence is a bell curve</h3>
     <p>
-        Theoretical RF says every pixel in the window can influence the neuron. Practically, <em>the center pixels shout and the edge pixels whisper.</em> The heat bar below is ResNet-50's 427-pixel window from "How LeNet, VGG, and ResNet stack layers"; the lit part is what matters at your threshold.
+        Theoretical RF says every pixel in the window can influence the neuron. Practically, <em>the center pixels shout and the edge pixels whisper.</em> ResNet-50's theoretical window, from "How LeNet, VGG, and ResNet stack layers", is 427 pixels wide, yet only its middle does real work.
     </p>
     <div class="eq-card" id="cnnBellEq">
             <div class="eq-what">Effective influence is a bell curve: the center pixels shout and the edge pixels whisper.</div>
@@ -1676,9 +1677,6 @@ print(receptive_field(design))   # 507
             <div class="eq-line eq-active" data-eqline="1">effective width = 2<span class="eqt" data-k="sig" style="color:#e67e22">&#963;</span> &#183; <span class="rad"><span class="rad-sym">&#8730;</span><span class="rad-body">(2 &#183; ln(1/<span class="eqt" data-k="t" style="color:#3498db">t</span>))</span></span>, capped at <span class="eqt" data-k="rf" style="color:#2c3e50">RF</span></div>
             <div class="eq-why eq-active" data-eqline="1">The effective width is the part of the window where the bell stands above <span class="eqt" style="color:#3498db">t</span>, the threshold as a fraction of the peak height. The surviving middle part is the effective width. In the line, &#8730; is the square root, ln is the natural logarithm, each &#183; is times, and 1/<span class="eqt" style="color:#3498db">t</span> is one divided by t.</div>
         </div>
-    <p>
-        The tool takes a network's theoretical window, draws the bell with its width set from that window, and cuts it at your threshold.
-    </p>
     <div class="demo" id="bellToy">
         <div class="demo-controls">
             <span role="group" aria-label="Architecture picker">
@@ -1686,7 +1684,7 @@ print(receptive_field(design))   # 507
                 <button type="button" class="toy-btn bell-pick" data-rf="212">VGG-16 (212)</button>
                 <button type="button" class="toy-btn bell-pick bell-active" data-rf="427">ResNet-50 (427)</button>
             </span>
-            <label class="toy-knob">Threshold <input type="range" id="bellT" min="5" max="60" step="1" value="25" aria-label="Influence threshold percent"> <span class="toy-val" id="bellTVal">25%</span></label>
+            <label class="toy-knob">Threshold (of peak) <input type="range" id="bellT" min="5" max="60" step="1" value="25" aria-label="Influence threshold percent"> <span class="toy-val" id="bellTVal">25%</span></label>
             <button type="button" class="toy-btn" id="bellPlay">Play</button>
             <button type="button" class="toy-btn" id="bellReset">Reset</button>
         </div>
@@ -1696,16 +1694,7 @@ print(receptive_field(design))   # 507
         </div>
         <div class="demo-stats" id="bellReadout"></div>
             </div>
-<p class="caption">The theoretical window is honest but generous. At a <code>50%</code> threshold barely half of ResNet-50's <code>427</code> pixels do real work. The edges are the faint rim of a bell curve, not equally weighted vision.</p>
-<div class="howto">
-            <p class="howto-head">How to play</p>
-            <ul>
-                <li><strong>The point:</strong> a neuron's theoretical window is big, but its real influence is a bell curve, so only the center pixels do real work and the edges barely count.</li>
-                <li><strong>What you'll see:</strong> Only the center of a neuron's theoretical window does real work, because its effective influence peaks in the middle and fades at the edges.</li>
-                <li><strong>Architecture:</strong> LeNet-style (<code>16</code>), VGG-16 (<code>212</code>), or ResNet-50 (<code>427</code>) pixels, all drawn on one true pixel scale. LeNet-style shows a <code>16</code>-pixel sliver with the same bell curve squeezed inside it.</li>
-                <li><strong>Threshold:</strong> <code>5%</code> to <code>60%</code>, whole percent steps. The lit window shrinks as it rises; the readout gives the effective width in pixels and percent.</li>
-            </ul>
-        </div>
+<p class="caption">At a <code>50%</code> threshold barely half of ResNet-50's <code>427</code> pixels do real work.</p>
     <script>
     (function () {
         'use strict';
@@ -1783,8 +1772,15 @@ print(receptive_field(design))   # 507
             ctx.fillStyle = '#2c3e50';
             ctx.textAlign = 'left';
             ctx.fillText('theoretical window: ' + rf + ' px', 2, barY + barH + 22);
-            ctx.fillStyle = '#7f8c8d';
-            ctx.fillText('threshold ' + state.t + '% of peak', 2, barY + barH + 38);
+            // the threshold label carries a sample of the red dashed line it names
+            var ky = barY + barH + 34;
+            ctx.strokeStyle = '#e74c3c';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 4]);
+            ctx.beginPath(); ctx.moveTo(2, ky); ctx.lineTo(28, ky); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = '#c0392b';
+            ctx.fillText('threshold ' + state.t + '% of peak', 34, barY + barH + 38);
             var ew = effWidth(rf, t);
             $('bellReadout').innerHTML = 'effective width: <strong>' + Math.round(ew) + ' px</strong> of ' + rf +
                 ' (' + (100 * ew / rf).toFixed(1) + '%). Model: Gaussian with sigma = RF/5, illustrative.';
@@ -2012,7 +2008,7 @@ class SeparableConv2D(nn.Module):
     <p>For 32 input channels, 64 output channels and a 3x3 kernel, a standard conv needs about <strong>18,000</strong> weights and the separable version about <strong>2,300</strong>: same spatial reach, about 8x fewer parameters. The depthwise toy opens on exactly these numbers.</p>
     <h3 id="parameter-count">Parameter count: standard versus depthwise separable</h3>
     <p>
-        As the output channels grow, the standard count explodes, because every new output channel needs a full k by k kernel for every input channel. The separable count barely notices: its depthwise part does not depend on the output channel count. At kernel 1 the separable count is the larger one; <em>the trick only pays when the kernel has spatial extent.</em> The bars use a log scale, where equal steps mean multiplying by the same factor.
+        As the output channels grow, the standard count explodes, because every new output channel needs a full k by k kernel for every input channel. The separable count grows too, but only through its pointwise part: each extra output channel adds C<sub>in</sub> weights instead of C<sub>in</sub> &#215; k &#215; k. At kernel 1 the separable count is the larger one; <em>the trick only pays when the kernel has spatial extent.</em> The bars use a log scale, where equal steps mean multiplying by the same factor.
     </p>
     <svg viewBox="0 0 560 120" class="duel-schem duel-schem-h" role="img" aria-label="Standard versus separable connection schematic">
         <g font-family="sans-serif" font-size="12" fill="#2c3e50">
@@ -2076,9 +2072,9 @@ class SeparableConv2D(nn.Module):
         </div>
     <div class="demo" id="duelToy">
         <div class="demo-controls">
-            <label class="toy-knob">C_in <input type="range" id="duelCin" min="4" max="128" step="1" value="32" aria-label="Input channels"> <span class="toy-val" id="duelCinVal">32</span></label>
-            <label class="toy-knob">C_out <input type="range" id="duelCout" min="4" max="256" step="1" value="64" aria-label="Output channels"> <span class="toy-val" id="duelCoutVal">64</span></label>
-            <span role="group" aria-label="Kernel size">
+            <label class="toy-knob">Input channels <input type="range" id="duelCin" min="4" max="128" step="1" value="32" aria-label="Input channels"> <span class="toy-val" id="duelCinVal">32</span></label>
+            <label class="toy-knob">Output channels <input type="range" id="duelCout" min="4" max="256" step="1" value="64" aria-label="Output channels"> <span class="toy-val" id="duelCoutVal">64</span></label>
+            <span role="group" aria-label="Kernel size"><span class="toy-knob">Kernel</span>
                 <button type="button" class="toy-btn duel-kbtn" data-k="1">1x1</button>
                 <button type="button" class="toy-btn duel-kbtn duel-active" data-k="3">3x3</button>
                 <button type="button" class="toy-btn duel-kbtn" data-k="5">5x5</button>
@@ -2092,16 +2088,7 @@ class SeparableConv2D(nn.Module):
             <canvas id="duelBars" class="duel-canvas" role="img" aria-label="Parameter count comparison bars"></canvas>
         </div>
         <div class="demo-stats" id="duelReadout"></div>
-        <p class="caption">The asymmetry is the trick: the standard bar multiplies everything by the output channel count, the separable bar barely notices it.</p>    </div>
-<div class="howto">
-            <p class="howto-head">How to play</p>
-            <ul>
-                <li><strong>The point:</strong> a depthwise separable convolution costs far fewer parameters than a standard one because its cost barely grows when you add output channels, except at <code>1x1</code> where the trick loses.</li>
-                <li><strong>C_in:</strong> input channels, <code>4 to 128</code>. Both bars grow together, because input channels hit both methods the same way.</li>
-                <li><strong>C_out:</strong> output channels, <code>4 to 256</code>. The standard bar explodes while the separable bar barely moves.</li>
-                <li><strong>Kernel size:</strong> <code>1x1</code>, <code>3x3</code>, <code>5x5</code>, or <code>7x7</code>. At <code>1x1</code>, the separable bar loses; the readout gives the numbers.</li>
-            </ul>
-        </div>
+        <p class="caption">Both grow with output channels; the standard cost grows k squared times faster.</p>    </div>
     <script>
     (function () {
         'use strict';
@@ -2115,7 +2102,7 @@ class SeparableConv2D(nn.Module):
         }
         function fmt(n) { return n.toLocaleString('en-US'); }
         var cv = $('duelBars');
-        var SUP = { 2: '²', 3: '³', 4: '⁴', 5: '⁵' };
+        var SUP = { 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷' };
         function render() {
             var c = counts();
             var w = cv.clientWidth || 560;
@@ -2130,7 +2117,8 @@ class SeparableConv2D(nn.Module):
             // measured label gutter: widest row label sets the bar start
             var labX = Math.ceil(Math.max(ctx.measureText('standard').width, ctx.measureText('separable').width)) + 12;
             var barX = labX + 10, trackW = Math.max(40, w - barX - 8);
-            var logMin = 1, logMax = Math.max(5, Math.log10(Math.max(c.std, c.sep, 10)));
+            /* fixed 10 to 10^7 axis: the largest count (128 x 256 x 7 x 7) stays on the chart */
+            var logMin = 1, logMax = Math.max(7, Math.log10(Math.max(c.std, c.sep, 10)));
             var linMax = Math.max(c.std, c.sep, 1);
             function barW(count) {
                 if (state.mode === 'log') {
@@ -2141,7 +2129,7 @@ class SeparableConv2D(nn.Module):
             // decade ticks on the log track, marks first
             if (state.mode === 'log') {
                 ctx.fillStyle = '#bdc3c7';
-                for (var k = 2; k <= 5; k++) {
+                for (var k = 2; k <= 7; k++) {
                     if (k < logMin || k > logMax) continue;
                     var tx = barX + (k - logMin) / (logMax - logMin) * trackW;
                     ctx.fillRect(tx, 4, 1, 72);
@@ -2171,7 +2159,7 @@ class SeparableConv2D(nn.Module):
             if (state.mode === 'log') {
                 ctx.fillStyle = '#7f8c8d';
                 ctx.textAlign = 'center';
-                for (var k2 = 2; k2 <= 5; k2++) {
+                for (var k2 = 2; k2 <= 7; k2++) {
                     if (k2 < logMin || k2 > logMax) continue;
                     var tx2 = barX + (k2 - logMin) / (logMax - logMin) * trackW;
                     ctx.fillText('10' + SUP[k2], Math.min(Math.max(tx2, 14), w - 14), 92);
@@ -2286,7 +2274,7 @@ self.block = nn.Sequential(
             </svg>
             <div id="bnFallLabel" class="bn-fall-label" hidden aria-hidden="true">diverged</div>
         </div>
-        <figcaption>Figure 2: Single crop validation accuracy of Inception and its batch-normalized variants, vs. the number of training steps, on ImageNet. This is the paper's real figure. The traveling dots follow paths traced from the paper's vector figure file. Figure 2 of Ioffe and Szegedy (ICML 2015). <a href="https://arxiv.org/abs/1502.03167">arXiv:1502.03167</a></figcaption>
+        <figcaption>Figure 2: Single crop validation accuracy of Inception and its batch-normalized variants, vs. the number of training steps, on ImageNet. The paper's real figure; the moving dots trace its own curves. Figure 2 of Ioffe and Szegedy (ICML 2015). <a href="https://arxiv.org/abs/1502.03167">arXiv:1502.03167</a></figcaption>
     </figure>
     <div class="bn-finish">
         <p class="bn-finish-title"><strong>Finish line: from the paper (Figure 3).</strong></p>
@@ -2317,7 +2305,7 @@ self.block = nn.Sequential(
         <div class="bn-topcol">
         <div class="bn-runners" id="bnRunners"></div>
         <div class="bn-lr">
-            <p class="bn-lr-title"><strong>Learning-rate stress test.</strong> Same three learning rates the paper tried. Plain Inception is the fragile one.</p>
+            <p class="bn-lr-title"><strong>Learning-rate stress test</strong> at the paper's three rates.</p>
             <div class="demo-controls">
                 <label for="bnLr">Learning rate</label>
                 <input type="range" id="bnLr" min="0" max="2" step="1" value="0" style="max-width:220px;">
@@ -2327,14 +2315,6 @@ self.block = nn.Sequential(
         </div>
         </div>
         </div>    </div>
-<div class="howto">
-            <p class="howto-head">How to play</p>
-            <ul>
-                <li><strong>The point:</strong> BatchNorm reaches the same accuracy in a fraction of the training steps and survives learning rates that make a plain network blow up.</li>
-                <li><strong>What you'll see:</strong> BatchNorm reaches <code>72.2%</code> far sooner than plain Inception across the paper's <code>0 to 31.0</code>M steps, and it tolerates higher learning rates.</li>
-                <li><strong>Learning rate:</strong> three stops: <code>1x</code>, <code>5x</code>, <code>30x</code>. At <code>5x</code>, plain Inception dives off its curve, leaving a red trail, while BN-x5 (gold ring) keeps rising; at <code>30x</code> Inception dies on the first tick and only BN-x30 rises.</li>
-            </ul>
-        </div>
     <style>
     .bn-figwrap { position: relative; max-width: 600px; margin: 0 auto; }
     .bn-overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
@@ -2373,9 +2353,12 @@ self.block = nn.Sequential(
     .bn-lr-title { font-size: 0.95rem; }
     .bn-lr-val { font-size: 0.92rem; font-weight: bold; }
     .bn-lr-rows { display: flex; flex-direction: column; gap: 0.4em; margin-top: 0.5em; }
-    .bn-lr-row { display: flex; align-items: center; gap: 0.6em; font-size: 0.92rem; }
-    .bn-lr-dot { flex: 0 0 16px; width: 16px; height: 16px; border-radius: 50%; background: #2c3e50; transition: transform 0.5s ease, background 0.5s ease; }
-    .bn-lr-row.fallen .bn-lr-dot { transform: rotate(90deg) translateX(6px); background: #c0392b; border-radius: 3px; }
+    .bn-lr-row { display: flex; align-items: center; gap: 0.6em; font-size: 0.92rem; flex-wrap: wrap; }
+    .bn-lr-dot { flex: 0 0 16px; width: 16px; height: 16px; box-sizing: border-box; border-radius: 50%; border: 2px solid #666; background: #2c3e50; transition: transform 0.5s ease; }
+    .bn-lr-row.fallen .bn-lr-dot { transform: rotate(90deg) translateX(6px); border-radius: 3px; }
+    .bn-lr-note { flex: 1 1 160px; min-width: 0; }
+    .bn-target-key { align-self: flex-end; font-size: 0.8rem; color: #2c3e50; display: flex; align-items: center; gap: 0.35em; margin-bottom: -0.1em; }
+    .bn-key-tick { display: inline-block; width: 2px; height: 12px; background: #2c3e50; }
     .bn-lr-note { color: #555; font-size: 0.88rem; }
     </style>
     <script>
@@ -2428,6 +2411,10 @@ self.block = nn.Sequential(
             $('bnClock').textContent = state.t.toFixed(1) + 'M steps';
             var box = $('bnRunners');
             box.innerHTML = '';
+            var key = document.createElement('div');
+            key.className = 'bn-target-key';
+            key.innerHTML = '72.2% target <span class="bn-key-tick" aria-hidden="true"></span>';
+            box.appendChild(key);
             // Learning-rate stress test: plain Inception dives to the axis floor
             // DURING the race. The slider's dive is a transient preview; the
             // badge, the fallen dot, and the resting trail belong to the race
@@ -2460,7 +2447,7 @@ self.block = nn.Sequential(
                 acc.textContent = p.started ? (a * 100).toFixed(1) + '%' : '';
                 var badge = document.createElement('span');
                 badge.className = 'bn-badge';
-                var txt = 'racing';
+                var txt = p.started ? 'racing' : '';
                 if (r.finishM !== null && state.t >= r.finishM) { txt = '72.2% at ' + r.finishM.toFixed(1) + 'M'; badge.classList.add('done'); }
                 else if (r.finishM === null && p.ended) { txt = 'tops out at 69.8%: never reaches 72.2%'; badge.classList.add('dead'); }
                 if (isFallen) {
@@ -2470,6 +2457,7 @@ self.block = nn.Sequential(
                     acc.textContent = '';
                 }
                 badge.textContent = txt;
+                if (!txt) badge.style.display = 'none';
                 var bar = document.createElement('div');
                 bar.className = 'bn-bar';
                 bar.setAttribute('role', 'img');
@@ -2559,16 +2547,16 @@ self.block = nn.Sequential(
         });
         var LRS = [
             { label: '1x (0.0015)', rows: [
-                { name: 'Plain Inception', note: 'LR 0.0015, slow and steady: 72.2% after 31.0M steps.', fallen: false },
-                { name: 'BN-Baseline', note: 'same 0.0015 with batch norm: 72.2% in 13.3M steps, less than half.', fallen: false }
+                { name: 'Plain Inception', rid: 'inception', acc: 72.2, note: 'LR 0.0015, slow and steady: 72.2% after 31.0M steps.', fallen: false },
+                { name: 'BN-Baseline', rid: 'bnbase', acc: 72.7, note: 'same 0.0015 with batch norm: 72.2% in 13.3M steps, less than half.', fallen: false }
             ] },
             { label: '5x (0.0075)', rows: [
-                { name: 'Plain Inception', note: 'parameters "reach machine infinity" (the paper\'s words). Training dies.', fallen: true },
-                { name: 'BN-x5', note: 'trains fine at the same 0.0075. 72.2% in 2.1M steps.', fallen: false }
+                { name: 'Plain Inception', rid: 'inception', acc: 0, note: 'parameters "reach machine infinity" (the paper\'s words). Training dies.', fallen: true },
+                { name: 'BN-x5', rid: 'bnx5', acc: 73.0, note: 'trains fine at the same 0.0075. 72.2% in 2.1M steps.', fallen: false }
             ] },
             { label: '30x (0.045)', rows: [
-                { name: 'Plain Inception', note: 'would die even faster. Not attempted.', fallen: true },
-                { name: 'BN-x30', note: 'BN-only territory. Trains at 0.045 and climbs to 74.8%.', fallen: false }
+                { name: 'Plain Inception', rid: 'inception', acc: 0, note: 'would die even faster. Not attempted.', fallen: true },
+                { name: 'BN-x30', rid: 'bnx30', acc: 74.8, note: 'BN-only territory. Trains at 0.045 and climbs to 74.8%.', fallen: false }
             ] }
         ];
         function renderLr() {
@@ -2579,15 +2567,31 @@ self.block = nn.Sequential(
             LRS[v].rows.forEach(function (r) {
                 var row = document.createElement('div');
                 row.className = 'bn-lr-row' + (r.fallen ? ' fallen' : '');
+                var rr = null;
+                for (var ri = 0; ri < RUNNERS.length; ri++) if (RUNNERS[ri].id === r.rid) rr = RUNNERS[ri];
                 var dot = document.createElement('span');
                 dot.className = 'bn-lr-dot';
+                /* same swatch as the race row above */
+                dot.style.background = rr.fill === 'none' ? '#fff' : rr.fill;
+                dot.style.borderColor = rr.color;
                 var name = document.createElement('strong');
                 name.textContent = r.name;
                 name.style.flex = '0 0 110px';
                 var note = document.createElement('span');
                 note.className = 'bn-lr-note';
                 note.textContent = r.note;
-                row.appendChild(dot); row.appendChild(name); row.appendChild(note);
+                var bar = document.createElement('div');
+                bar.className = 'bn-bar';
+                bar.setAttribute('role', 'img');
+                bar.setAttribute('aria-label', r.name + (r.fallen ? ': diverged, no accuracy' : ': best accuracy ' + r.acc + '%, target 72.2%'));
+                var fill = document.createElement('div');
+                fill.className = 'bn-bar-fill';
+                fill.style.background = rr.color;
+                fill.style.width = Math.min(100, r.acc / 72.2 * 100).toFixed(1) + '%';
+                var tgt = document.createElement('span');
+                tgt.className = 'bn-bar-target';
+                bar.appendChild(fill); bar.appendChild(tgt);
+                row.appendChild(dot); row.appendChild(name); row.appendChild(note); row.appendChild(bar);
                 box.appendChild(row);
             });
         }
@@ -2813,7 +2817,7 @@ class SEBlock(nn.Module):
                 <label><input type="radio" name="effMethod" value="res"> <span class="eff-mbadge" data-m="res">(d)</span> Resolution-only</label>
             </span>
         </div>
-        <p class="eff-fixed-phi">All four at the same budget (compound scaling coefficient <code>3</code>): each method grows a different network.</p>
+        <p class="eff-fixed-phi">All four use the same dial, compound coefficient <code>3</code>, on the paper's constants: each grows a different network, and only compound spends the full budget.</p>
         
         <div class="eff-grid">
         <div class="eff-col">
@@ -2831,14 +2835,6 @@ class SEBlock(nn.Module):
             <p class="eff-payoff">B1 beats ResNet-152 at <code>7.6x</code> smaller and <code>5.7x</code> faster. Note: the paper's tables report B1 at <code>79.1%</code> (Table 2) and <code>78.8%</code> (Table 4); B7 at <code>84.3%</code> (Table 2) and <code>84.4%</code> (Table 4). B7 input is <code>600px</code> as deployed, <code>596px</code> by the paper's equation 3.</p>
         </div>
 
-        <div class="howto">
-            <p class="howto-head">How to play</p>
-            <ul>
-                <li><strong>The point:</strong> compound scaling grows depth, width, and resolution together; scaling one dimension alone starves the other two.</li>
-                <li><strong>What you'll see:</strong> Compound scaling is the only method that grows depth, width, and resolution together at the same budget.</li>
-                <li><strong>Scaling method:</strong> Compound, Width-only, Depth-only, or Resolution-only. Two dimensions freeze while the third does all the work.</li>
-            </ul>
-        </div>
     </div>
     <script>
     (function () {
@@ -2949,7 +2945,7 @@ class SEBlock(nn.Module):
             /* Readouts */
             var flopsStr = v.flops < 10 ? v.flops.toFixed(2) : v.flops.toFixed(1);
             statsEl.innerHTML = 'Depth <strong>' + v.d.toFixed(2) + 'x</strong>, width <strong>' + v.w.toFixed(2) +
-                'x</strong>, resolution <strong>' + v.r.toFixed(2) + 'x</strong>.';
+                'x</strong>, resolution <strong>' + v.r.toFixed(2) + 'x</strong>, FLOPs <strong>' + flopsStr + 'x</strong>.';
         }
 
         for (var i = 0; i < methodRadios.length; i++) {
@@ -3007,18 +3003,10 @@ class SEBlock(nn.Module):
         <canvas id="archStrip" class="arch-canvas" role="img" aria-label="Receptive field window growing on a pixel strip"></canvas>
         </div>
         <div class="arch-dots" id="archDots" role="group" aria-label="Layer scrubber"></div>
+        <div class="arch-dotkey" id="archDotKey" hidden>faded buttons: 1x1 pairs, no receptive field growth</div>
         <div class="demo-stats" id="archReadout"></div>
         <div class="demo-stats" id="archRec"></div>
-        <p class="caption">VGG-16 lands exactly on the published <code>212</code>, ResNet-50 on <code>427</code>. Same recurrence you learned above, just run over real layer lists.</p>    </div>
-<div class="howto">
-            <p class="howto-head">How to play</p>
-            <ul>
-                <li><strong>The point:</strong> that leap is where VGG's <code>212</code> and ResNet's <code>427</code> come from.</li>
-                <li><strong>What you'll see:</strong> Receptive fields grow slowly through <code>3x3</code> layers and leap at pooling or stride layers.</li>
-                <li><strong>Architecture:</strong> LeNet-style (<code>4</code> layers), VGG-16 (<code>18</code>), or ResNet-50 (<code>34</code>). VGG-16 compares what the <code>3x3s</code> add versus what the five pools add.</li>
-                <li><strong>Layer dots:</strong> the row of dots under the strip goes straight to any layer; at a pool layer the callout appears.</li>
-            </ul>
-        </div>
+        <p class="caption">The recurrence lands exactly on the published <code>212</code> for VGG-16 and <code>427</code> for ResNet-50.</p>    </div>
     <script>
     (function () {
         'use strict';
@@ -3056,6 +3044,7 @@ class SEBlock(nn.Module):
             return out;
         }
         var state = { a: 'lenet', step: 0, timer: null, seq: compute(ARCH.lenet.steps) };
+        var SY = 48, STRIP_H = 118;  // strip top and canvas height
         var cv = $('archStrip');
         function sizeCanvas(hCss) {
             var w = cv.clientWidth || 600;
@@ -3087,9 +3076,9 @@ class SEBlock(nn.Module):
         }
         function drawBase() {
             var A = ARCH[state.a], seq = state.seq, cur = seq[state.step];
-            var g = sizeCanvas(100), ctx = g.ctx, W = g.w;
+            var g = sizeCanvas(STRIP_H), ctx = g.ctx, W = g.w;
             var maxRF = seq[seq.length - 1].rf, sc = W / maxRF;
-            ctx.clearRect(0, 0, W, 100);
+            ctx.clearRect(0, 0, W, STRIP_H);
             ctx.font = '12px sans-serif';
             ctx.textAlign = 'left';
             ctx.fillStyle = '#2c3e50';
@@ -3097,12 +3086,12 @@ class SEBlock(nn.Module):
             // strip marks, clipped to the strip rect
             ctx.save();
             ctx.beginPath();
-            ctx.rect(0, 30, W, 26);
+            ctx.rect(0, SY, W, 26);
             ctx.clip();
             ctx.fillStyle = '#e5e8ec';
-            ctx.fillRect(0, 30, W, 26);
+            ctx.fillRect(0, SY, W, 26);
             ctx.fillStyle = 'rgba(52,152,219,0.85)';
-            ctx.fillRect(0, 30, Math.max(2, cur.rf * sc), 26);
+            ctx.fillRect(0, SY, Math.max(2, cur.rf * sc), 26);
             ctx.restore();
             var winEnd = cur.rf * sc;
             // pinned callout at the pool position: names the jump change
@@ -3110,9 +3099,10 @@ class SEBlock(nn.Module):
                 var txt = 'jump ' + cur.pj + ' to ' + cur.jump;
                 ctx.font = 'bold 12px sans-serif';
                 var tw = ctx.measureText(txt).width;
-                var pw = tw + 18, ph = 22, py = 32;
-                var px = Math.min(winEnd + 8, W - pw - 4);
-                if (px < 4) px = 4;
+                /* the callout sits in its own row above the strip, centred
+                   on the window's end, so it never covers the strip */
+                var pw = tw + 18, ph = 22, py = 19;
+                var px = Math.min(Math.max(winEnd - pw / 2, 4), W - pw - 4);
                 rrPath(ctx, px, py, pw, ph, 9);
                 ctx.fillStyle = 'rgba(255,255,255,0.95)';
                 ctx.fill();
@@ -3122,8 +3112,9 @@ class SEBlock(nn.Module):
                 ctx.strokeStyle = '#e67e22';
                 ctx.lineWidth = 1;
                 ctx.beginPath();
-                ctx.moveTo(Math.min(winEnd, W - 2), py + ph / 2);
-                ctx.lineTo(px + pw < winEnd ? px + pw : px, py + ph / 2);
+                var lx = Math.min(Math.max(winEnd, px + 6), px + pw - 6);
+                ctx.moveTo(lx, py + ph);
+                ctx.lineTo(Math.min(winEnd, W - 2), SY);
                 ctx.stroke();
                 ctx.fillStyle = '#a04000';
                 ctx.textAlign = 'center';
@@ -3131,19 +3122,18 @@ class SEBlock(nn.Module):
                 ctx.textAlign = 'left';
                 ctx.font = '12px sans-serif';
             }
-            // axis ticks take the current layer's color
+            // axis ticks in one neutral colour
             var ts = tickStepFor(maxRF);
-            var tc = layerColor(cur);
             ctx.textAlign = 'center';
+            ctx.fillStyle = '#7f8c8d';
             for (var v = 0; v <= maxRF; v += ts) {
                 var x = v * sc;
-                ctx.fillStyle = tc;
-                ctx.fillRect(x, 58, 1, 5);
-                ctx.fillText(String(v), Math.min(Math.max(x, 12), W - 12), 74);
+                ctx.fillRect(x, SY + 28, 1, 5);
+                ctx.fillText(String(v), Math.min(Math.max(x, 12), W - 12), SY + 44);
             }
             ctx.textAlign = 'left';
             ctx.fillStyle = '#2c3e50';
-            ctx.fillText('layer ' + (state.step + 1) + '/' + seq.length + ': ' + cur.label, 2, 92);
+            ctx.fillText('layer ' + (state.step + 1) + '/' + seq.length + ': ' + cur.label, 2, SY + 62);
             $('archReadout').innerHTML = '<strong>' + A.name + '</strong>, layer ' + (state.step + 1) + ' of ' + seq.length +
                 ' (' + cur.label + '): RF = <strong>' + cur.rf + '</strong>, jump = <strong>' + cur.jump + '</strong>. ' +
                 'Computed ' + cur.rf + ' so far, published ' + A.published + '.';
@@ -3169,7 +3159,7 @@ class SEBlock(nn.Module):
                     if (el >= 650) { pulseRAF = null; return; }
                     var pctx = cv.getContext('2d');
                     pctx.fillStyle = 'rgba(52,152,219,' + (0.45 * (1 - el / 650)).toFixed(3) + ')';
-                    pctx.fillRect(0, 30, W, 26);
+                    pctx.fillRect(0, SY, W, 26);
                     pulseRAF = requestAnimationFrame(tick);
                 };
                 tick();
@@ -3179,6 +3169,7 @@ class SEBlock(nn.Module):
         }
         function buildDots() {
             var box = $('archDots'); box.innerHTML = '';
+            $('archDotKey').hidden = !state.seq.some(function (st) { return st.gray; });
             state.seq.forEach(function (st, i) {
                 var b = document.createElement('button');
                 b.type = 'button';
@@ -3293,14 +3284,14 @@ class SEBlock(nn.Module):
             <div class="vgg-verdict" id="vggVerdict"></div>
         </div>
         <div class="vgg-3x3" id="vgg3x3" hidden>
-            <p class="vgg-3x3-title"><strong>Why <code>3x3</code>? The paper's param argument.</strong> Two stacked <code>3x3</code> layers see what a <code>5x5</code> sees. Three see what a <code>7x7</code> sees. But the <code>7x7</code> costs <code>81%</code> more weights for the same reach. Plus the stack gets a ReLU after every layer, which the paper notes makes the decision function (the rule that turns scores into a class pick) more discriminative, better at telling classes apart.</p>
+            <p class="vgg-3x3-title"><strong>Why <code>3x3</code>?</strong> Three stacked <code>3x3</code> layers see what one <code>7x7</code> sees, with a ReLU after each, which the paper notes makes the decision function (the rule that turns scores into a class pick) more discriminative.</p>
             <div class="vgg-3x3-grids">
                 <div class="vgg-3x3-side">
                     <div class="vgg-stackwrap" id="vggStackWrap">
                         <div class="vgg-grid3" aria-hidden="true"></div>
                         <div class="vgg-grid3" aria-hidden="true"></div>
                         <div class="vgg-grid3" aria-hidden="true"></div>
-                        <div class="vgg-rf-outline" id="vggRfOutline" hidden></div>
+                        <div class="vgg-rf-outline" id="vggRfOutline" hidden><span class="vgg-rf-tag">sees 7x7</span></div>
                     </div>
                     <div class="vgg-3x3-cap">three 3x3 layers</div>
                     <div class="vgg-3x3-params" id="vggParamsA">27C² weights</div>
@@ -3308,7 +3299,7 @@ class SEBlock(nn.Module):
                 <div class="vgg-3x3-vs">vs</div>
                 <div class="vgg-3x3-side">
                     <div class="vgg-grid7" aria-hidden="true"></div>
-                    <div class="vgg-3x3-cap">one 7x7 layer</div>
+                    <div class="vgg-3x3-cap">one 7x7 layer<span class="vgg-rf-same" id="vggRfSame" hidden>, sees 7x7</span></div>
                     <div class="vgg-3x3-params" id="vggParamsB">49C² weights (81% more)</div>
                 </div>
             </div>
@@ -3316,35 +3307,29 @@ class SEBlock(nn.Module):
                 <button type="button" class="toy-btn" id="vggRfToggle" aria-pressed="false">same receptive field: off</button>
             </div>
         </div>    </div>
-<div class="howto">
-            <p class="howto-head">How to play</p>
-            <ul>
-                <li><strong>The point:</strong> stacking more layers keeps cutting the top-5 error (how often the true class misses the model's five best guesses) until <code>19</code> layers, where it rises again: depth helps until it saturates.</li>
-                <li><strong>What you'll see:</strong> Adding layers cuts error from <code>10.4%</code> to <code>8.8%</code>, but past saturation at config E the error is higher, at <code>9.0%</code>.</li>
-                <li><strong>Config buttons:</strong> A (<code>11</code>), A-LRN (<code>11</code>), B (<code>13</code>), C (<code>16</code>), D (<code>16</code>), E (<code>19</code>) weight layers. At E: <code>19</code> layers, <code>144M</code> params, <code>9.0%</code> error.</li>
-                <li><strong>"Same receptive field" toggle:</strong> draws a dashed red outline around the three-<code>3x3</code> stack showing it covers exactly the <code>7x7</code>'s area, and highlights the param counts: the <code>7x7</code> needs <code>81%</code> more weights. Same reach, <code>81%</code> more weights.</li>
-            </ul>
-        </div>
     <style>
     .paper-cite { border-left: 3px solid #2c3e50; margin: 1em 0; padding: 0.6em 1em; background: #f7f8fa; font-size: 0.95rem; }
     .paper-fig { margin: 1.75rem 0; }
-    .paper-fig img { border: 1px solid #e1e4e8; border-radius: 4px; background: #fff; }
+    .paper-fig img { border: 1px solid #e1e4e8; border-radius: 4px; background: #fff; box-sizing: border-box; max-width: 100%; }
     .paper-fig figcaption { font-size: 0.85rem; color: #555; margin-top: 1rem; }
     .vgg-racelabel { font-size: 0.85rem; color: #555; font-style: italic; margin: 0.4em 0 0.8em; }
     .vgg-stage { margin-top: 0.6em; position: relative; }
     .vgg-configline { font-size: 1.05rem; margin-bottom: 0.5em; }
     .vgg-configline strong { font-size: 1.25rem; }
-    .vgg-strip { display: flex; align-items: stretch; gap: 2px; margin: 0.6em 0; min-height: 44px; overflow-x: auto; max-width: 100%; }
-    .vgg-seg { border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #fff; min-width: 18px; flex: 1 1 0; font-family: Georgia, serif; }
+    .vgg-strip { display: flex; align-items: stretch; gap: 2px; margin: 0.6em 0; min-height: 44px; max-width: 100%; }
+    .vgg-grp { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+    .vgg-grp-segs { display: flex; gap: 2px; flex: 1 1 auto; min-height: 30px; }
+    .vgg-grp-lab { font-size: 12px; line-height: 1; text-align: center; color: #2c3e50; white-space: nowrap; }
+    .vgg-seg { border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #fff; min-width: 4px; flex: 1 1 0; }
     .vgg-seg.pool { flex: 0 0 5px; min-width: 5px; background: #9aa0a6; border-radius: 2px; }
     .vgg-seg.lrn { flex: 0 0 30px; min-width: 30px; background: #e67e22; font-size: 12px; }
-    .vgg-seg.fc { flex: 2 1 0; background: #2c3e50; }
+    .vgg-seg.fc { flex: 0 0 34px; min-width: 34px; background: #2c3e50; }
     .vgg-barwrap { margin: 0.8em 0; }
     .vgg-barlabel { font-size: 0.85rem; color: #555; margin-bottom: 0.25em; }
     .vgg-bartrack { background: #eceff1; border-radius: 4px; height: 26px; position: relative; overflow: hidden; }
     .vgg-bar { height: 100%; border-radius: 4px; background: linear-gradient(90deg, #27ae60, #2ecc71); transition: width 0.45s ease; width: 0%; }
     .vgg-bar.tickup { background: linear-gradient(90deg, #e67e22, #e74c3c); }
-    .vgg-barval { font-size: 1.6rem; font-weight: bold; margin-top: 0.2em; font-family: Georgia, serif; }
+    .vgg-barval { font-size: 1.6rem; font-weight: bold; margin-top: 0.2em; }
     .vgg-verdict { font-size: 0.95rem; margin-top: 0.5em; min-height: 3.2em; }
     .vgg-verdict .tick { color: #c0392b; font-weight: bold; }
     .vgg-3x3 { margin-top: 1.2em; border-top: 1px dashed #cfd4d9; padding-top: 1em; }
@@ -3358,8 +3343,10 @@ class SEBlock(nn.Module):
     .vgg-grid7 { display: grid; grid-template-columns: repeat(7, 13px); grid-template-rows: repeat(7, 13px); gap: 2px; margin: 6px auto; width: max-content; }
     .vgg-grid7 div { background: #e74c3c; border-radius: 2px; }
     .vgg-rf-outline { position: absolute; inset: 0; border: 3px dashed #e74c3c; border-radius: 6px; pointer-events: none; }
+    .vgg-rf-tag { position: absolute; left: 50%; top: -0.75em; transform: translateX(-50%); background: #fff; color: #c0392b; font-size: 12px; font-weight: bold; padding: 0 3px; white-space: nowrap; line-height: 1.2; }
+    .vgg-rf-same { color: #c0392b; font-weight: bold; }
     .vgg-3x3-cap { font-size: 0.85rem; color: #555; }
-    .vgg-3x3-params { font-size: 1.05rem; font-weight: bold; font-family: Georgia, serif; margin-top: 0.2em; }
+    .vgg-3x3-params { font-size: 1.05rem; font-weight: bold; margin-top: 0.2em; }
     .vgg-3x3-params.hot { color: #c0392b; }
     .vgg-3x3-vs { font-size: 1.1rem; color: #777; align-self: center; font-style: italic; }
     .vgg-pick.vgg-active { background: #2c3e50; color: #fff; }
@@ -3392,18 +3379,36 @@ class SEBlock(nn.Module):
         function renderStrip(cfg) {
             var s = $('vggStrip');
             s.innerHTML = '';
+            /* consecutive convs with the same channel count form one group
+               with one channel label under it, so the strip fits at 390 px
+               and every run stays named */
+            var grp = null, grpCh = null;
             cfg.blocks.forEach(function (b) {
                 var d = document.createElement('div');
-                if (b[0] === 'p') { d.className = 'vgg-seg pool'; d.title = 'max-pool'; }
-                else if (b[0] === 'l') { d.className = 'vgg-seg lrn'; d.textContent = 'LRN'; d.title = 'local response normalization'; }
-                else if (b[0] === 'f') { d.className = 'vgg-seg fc'; d.textContent = 'FC'; d.title = 'fully connected classifier'; }
-                else {
+                if (b[0] === 'c' || b[0] === 'c1') {
+                    if (!grp || grpCh !== b[1]) {
+                        grp = document.createElement('div');
+                        grp.className = 'vgg-grp';
+                        var segs = document.createElement('div');
+                        segs.className = 'vgg-grp-segs';
+                        var lab = document.createElement('div');
+                        lab.className = 'vgg-grp-lab';
+                        lab.textContent = String(b[1]);
+                        grp.appendChild(segs); grp.appendChild(lab);
+                        s.appendChild(grp);
+                        grpCh = b[1];
+                    }
                     d.className = 'vgg-seg';
                     d.style.background = SHADES[b[1]];
-                    if (b[1] === 64 || b[1] === 128) d.style.color = '#1a3a5c';
-                    d.textContent = b[1];
                     d.title = (b[0] === 'c1' ? '1x1' : '3x3') + ' conv, ' + b[1] + ' channels';
+                    grp.firstChild.appendChild(d);
+                    grp.style.flex = grp.firstChild.children.length + ' 1 0';
+                    return;
                 }
+                grp = null; grpCh = null;
+                if (b[0] === 'p') { d.className = 'vgg-seg pool'; d.title = 'max-pool'; d.style.marginBottom = '15px'; }
+                else if (b[0] === 'l') { d.className = 'vgg-seg lrn'; d.textContent = 'LRN'; d.title = 'local response normalization'; d.style.marginBottom = '15px'; }
+                else if (b[0] === 'f') { d.className = 'vgg-seg fc'; d.textContent = 'FC'; d.title = 'fully connected classifier'; d.style.marginBottom = '15px'; }
                 s.appendChild(d);
             });
         }
@@ -3497,6 +3502,7 @@ class SEBlock(nn.Module):
         function setRf(on) {
             rfOn = on;
             $('vggRfOutline').hidden = !rfOn;
+            $('vggRfSame').hidden = !rfOn;
             $('vggParamsA').classList.toggle('hot', rfOn);
             $('vggParamsB').classList.toggle('hot', rfOn);
             $('vggRfToggle').textContent = 'same receptive field: ' + (rfOn ? 'on' : 'off');
@@ -3562,16 +3568,7 @@ def verdict(window, obj):
         </div>
         <div class="demo-stats" id="seeBadge"></div>
             </div>
-<p class="caption">Both squares share one scale, so the comparison is honest.</p>
-<div class="howto">
-            <p class="howto-head">How to play</p>
-            <ul>
-                <li><strong>The point:</strong> your network's receptive-field window has to cover your object's size. If the window is smaller, no training run will save you.</li>
-                <li><strong>What you'll see:</strong> A receptive field must cover the object: a fixed window fails once an object from <code>10 to 500</code> px outgrows it.</li>
-                <li><strong>Object size:</strong> <code>10 to 500</code> px. The badge flips at the boundary; green needs the window to cover <code>1.2x</code> the object, and exact fits get the benefit of the doubt.</li>
-                <li><strong>Network:</strong> LeNet-style (<code>16</code>), VGG-16 (<code>212</code>), or ResNet-50 (<code>427</code>) pixels. LeNet-style turns the badge red by <code>50</code> px; ResNet-50 turns the same object green.</li>
-            </ul>
-        </div>
+<p class="caption">A window smaller than the object fails no matter how long you train.</p>
     <script>
     (function () {
         'use strict';

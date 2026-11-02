@@ -653,7 +653,7 @@
     ol.brefs li { margin-bottom: 0.5em; }
     @media (max-width: 520px) {
       #doCanvas { height: 280px; }
-      #adamCanvas { height: 360px; }
+      #adamCanvas { height: 328px; }
     }
     /* Tall tools on phone (2026-11-01): compact rows so each tool fits one 390 px screen. */
     #adamSteps .eq-legend code sub { font-size: max(11px, 0.75em); line-height: 0; }
@@ -1036,7 +1036,10 @@ for t in range(steps):
         ctx.clearRect(0, 0, w, h);
         var FS = 12; /* coordinates are CSS pixels, so 12px renders 12px effective */
         ctx.font = FS + 'px sans-serif';
-        var stripH = w < 520 ? 156 : 104;
+        /* Fix wave F1: the phone strip is cut to what the stacked bars need
+           (bottom bar ends 119 px under the strip top), so stages without
+           bars leave less blank space; the plot keeps one size on every stage. */
+        var stripH = w < 520 ? 124 : 104;
         var padL = 46, padR = 14, padT = 12, padB = stripH + 30;
         var pw = w - padL - padR, ph = h - padT - padB;
         function X(x) { return padL + (x - XMIN) / (XMAX - XMIN) * pw; }
@@ -1570,6 +1573,21 @@ for t in range(steps):
         if (e < 0) return { tr: tr, exit: false };
         return { tr: tr.slice(0, e + 1), exit: true };
       }
+      /* Fix wave F1: how many drawn path points fall inside a label's box
+         (pad px around it); labels take the candidate spot with the fewest. */
+      function boxHits(bx, by, bw, bh, lines, pad) {
+        var n = 0;
+        lines.forEach(function (pts) {
+          for (var k = 0; k < pts.length; k++) {
+            var q = pts[k], q0 = k ? pts[k - 1] : q;
+            for (var t = 0; t <= 1; t += 0.25) {
+              var x = q0[0] + (q[0] - q0[0]) * t, y = q0[1] + (q[1] - q0[1]) * t;
+              if (x > bx - pad && x < bx + bw + pad && y > by - pad && y < by + bh + pad) n++;
+            }
+          }
+        });
+        return n;
+      }
       function crossMark(ctx, x, y, col, label, W, FS) {
         ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 6;
         ctx.beginPath(); ctx.moveTo(x - 7, y - 7); ctx.lineTo(x + 7, y + 7);
@@ -1680,8 +1698,20 @@ for t in range(steps):
         ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
         var tag = '3 runners start here';
         var tagW = ctx.measureText(tag).width;
-        var tagX = sx - 5, tagY = sy;
-        if (tagX + tagW > W - padR) { tagX = W - padR - tagW; }
+        /* The tag sits beside the start dots on whichever side the drawn
+           paths leave free (right first, then above, below, left). */
+        var tagLines = [];
+        activeOpts().forEach(function (w) {
+          var src = resting ? cutTrail(w, previewTrails[w]) : cutTrail(w, states[w].trail);
+          tagLines.push(src.tr.map(function (q) { return [X(q[0]), Y(q[1])]; }));
+        });
+        var tagSpots = [[sx - 5, sy], [sx - 18, sy - 26], [sx - 18, sy + 34], [sx - 5, sy - 26], [sx - 5, sy + 34], [sx - tagW - 30, sy]];
+        var tagX = sx - 5, tagY = sy, tagBest = 1e9;
+        tagSpots.forEach(function (sp) {
+          var x0 = Math.max(padL + 2, Math.min(W - padR - tagW - 2, sp[0])), y0 = Math.max(padT + 12, Math.min(padT + ph - 12, sp[1]));
+          var h = boxHits(x0 - 4, y0 - 11, tagW + 8, 22, tagLines, 2);
+          if (h < tagBest) { tagBest = h; tagX = x0; tagY = y0; }
+        });
         ctx.fillStyle = 'rgba(255,255,255,0.92)';
         ctx.fillRect(tagX - 4, tagY - 11, tagW + 8, 22);
         ctx.fillStyle = '#2c3e50';
@@ -1768,8 +1798,25 @@ for t in range(steps):
             ctx.stroke();
             ctx.setLineDash([]);
           });
-          ctx.fillStyle = '#555'; ctx.textAlign = 'right';
-          ctx.fillText('dashed = preview', W - padR - 4, padT + 14);
+          /* The key takes the corner or edge spot the curves leave free. */
+          var dk = 'dashed = preview', dkW = ctx.measureText(dk).width;
+          var dkLines = activeOpts().map(function (w) {
+            var o = [], ls = previewLosses[w];
+            for (var k = 0; k < ls.length; k++) { if (!isFinite(ls[k])) break; o.push([X(k), Yl(ls[k])]); }
+            return o;
+          });
+          var hasDiv = activeOpts().some(function (w) { return previewDiv && previewDiv[w] >= 0; });
+          var dkSpots = [[W - padR - 4 - dkW, padT + 4], [W - padR - 4 - dkW, padT + ph - 20], [padL + (pw - dkW) / 2, padT + ph - 20], [padL + (pw - dkW) / 2, padT + 4], [W - padR - 4 - dkW, padT + ph / 2 - 8], [padL + 4, padT + ph / 2 - 8]];
+          if (!hasDiv) dkSpots.push([padL + 4, padT + ph - 20]);
+          var dkX = dkSpots[0][0], dkY = dkSpots[0][1], dkBest = 1e9;
+          dkSpots.forEach(function (sp) {
+            var h = boxHits(sp[0] - 3, sp[1], dkW + 6, 16, dkLines, 2);
+            if (h < dkBest) { dkBest = h; dkX = sp[0]; dkY = sp[1]; }
+          });
+          ctx.fillStyle = 'rgba(255,255,255,0.85)';
+          ctx.fillRect(dkX - 3, dkY, dkW + 6, 16);
+          ctx.fillStyle = '#555'; ctx.textAlign = 'left';
+          ctx.fillText(dk, dkX, dkY + 12);
         }
         ctx.restore();
         /* diverging runners: an x where the loss leaves the top of the chart */

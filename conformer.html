@@ -2472,13 +2472,13 @@ class ConformerBlock(nn.Module):
 
     <p>Second, you can split the heads into multiple scales. A phoneme is about <code>50</code> ms, a word is about <code>500</code> ms: give one head a short leash and another the whole pasture, and the same layer catches both.</p>
 
-    <p>Chunked emission: audio arrives in chunks of C frames, a frame reads keys up to the end of its own chunk plus L look-ahead frames, and a token is emitted only once those L frames arrive, so the emitted cursor trails the audio cursor by exactly L frames. A frame is 10 ms on this page:</p>
+    <p>Chunked emission: audio arrives in chunks of C frames, a frame reads every earlier frame plus keys up to the end of its own chunk and L look-ahead frames beyond it, and a chunk's tokens are emitted together once its last frame and those L frames arrive. The first frame of a chunk waits longest, the last frame waits only L frames, so the wait grows with chunk size. A frame is 10 ms on this page:</p>
     
     
     <div class="eq-card" id="cfStreamEq">
         <div class="eq-what">Streaming in two relations: what the look-ahead costs, and what it buys.</div>
-        <div class="eq-line eq-active" data-eqline="0">latency = <span class="eqt" data-k="L" style="color:#e67e22">L</span> &#215; 10 ms, context per frame = <span class="eqt" data-k="C" style="color:#3498db">C</span> + <span class="eqt" data-k="L" style="color:#e67e22">L</span> frames</div>
-        <div class="eq-why eq-active" data-eqline="0">A token is emitted only after its look-ahead frames arrive, so the emitted cursor trails the audio cursor by exactly <span class="eqt" style="color:#e67e22">L</span> frames, and each look-ahead frame is 10 ms of latency. A frame reads its own chunk of <span class="eqt" style="color:#3498db">C</span> frames plus <span class="eqt" style="color:#e67e22">L</span> look-ahead frames beyond it. L and C are as defined in the steps above, and 10 ms is the page's frame duration.</div>
+        <div class="eq-line eq-active" data-eqline="0">longest wait = (<span class="eqt" data-k="C" style="color:#3498db">C</span> &#8722; 1 + <span class="eqt" data-k="L" style="color:#e67e22">L</span>) &#215; 10 ms, shortest wait = <span class="eqt" data-k="L" style="color:#e67e22">L</span> &#215; 10 ms</div>
+        <div class="eq-why eq-active" data-eqline="0">A chunk's tokens leave together once the chunk's last frame and its <span class="eqt" style="color:#e67e22">L</span> look-ahead frames arrive. The chunk's first frame waits for the other <span class="eqt" style="color:#3498db">C</span> &#8722; 1 frames of its chunk plus the <span class="eqt" style="color:#e67e22">L</span> look-ahead frames; its last frame waits for the look-ahead only. The same frames ahead are what each frame may read, so more context costs more waiting. L and C are as defined above, and 10 ms is the page's frame duration.</div>
       </div>
     <p>The mask in code, ready for the <code>mask</code> argument of the MHSA class below:</p>
 <pre><code class="language-python">def chunk_mask(T, C, L):
@@ -2488,7 +2488,7 @@ class ConformerBlock(nn.Module):
 mask = chunk_mask(8, C=4, L=2)
 </code></pre>
 
-    <p>With chunk 4 and look-ahead 2, every frame sees its block plus two future frames, which cost 20 ms. Look-ahead 0 is block-causal: each frame sees its own chunk and nothing after it. Chunk 1 with look-ahead 0 is the true causal triangle: perfectly real-time, flying blind into the future.</p>
+    <p>With chunk 4 and look-ahead 2, the first frame of a chunk sees 5 frames ahead and its token waits 50 ms; the chunk's last frame sees 2 ahead and waits 20 ms. Look-ahead 0 is block-causal: each frame sees its own chunk and nothing after it, and tokens still wait up to C &#8722; 1 frames for the chunk to finish. Chunk 1 with look-ahead 0 is the true causal triangle: zero wait, flying blind into the future.</p>
 
     <svg width="330" height="328" viewBox="0 0 330 328" xmlns="http://www.w3.org/2000/svg" style="box-sizing:border-box;max-width:100%;height:auto;background:#fff;border:1px solid #bdc3c7;border-radius:4px">
 <text x="178.0" y="16" text-anchor="middle" font-size="12" font-weight="bold" fill="#2c3e50">key frames j</text>
@@ -2642,9 +2642,9 @@ mask = chunk_mask(8, C=4, L=2)
         <div class="bar-title">Audio heard</div>
         <div class="bar-row"><div class="bar-track"><div class="bar" style="background:#e67e22;width:58.3%"></div></div><span class="bar-val">7 / 12</span></div>
         <div class="bar-title">Tokens emitted</div>
-        <div class="bar-row"><div class="bar-track"><div class="bar" style="background:#27ae60;width:41.7%"></div></div><span class="bar-val">5 / 12</span></div>
+        <div class="bar-row"><div class="bar-track"><div class="bar" style="background:#27ae60;width:33.3%"></div></div><span class="bar-val">4 / 12</span></div>
     </div>
-    <p class="caption"><em>Offline attention is a luxury.</em> In streaming you rent the future by the frame, and the rent is latency: tokens trail the audio by the look-ahead.</p>
+    <p class="caption"><em>Offline attention is a luxury.</em> In streaming you rent the future by the frame, and the rent is latency. Tokens trail the audio by the rest of their chunk plus the look-ahead: 7 frames heard, 4 tokens out.</p>
 
     <div class="demo" id="streamDemo">
       <h3 id="streaming-chunks" style="margin-top: 0;">Streaming in chunks: more context costs more waiting</h3>
@@ -2715,10 +2715,12 @@ mask = chunk_mask(8, C=4, L=2)
         }
       })();
       function chunkEnd(i) { return (Math.floor(i / C) + 1) * C - 1 + L; }
-      function visible(i, j) { return j <= Math.min(NFR - 1, chunkEnd(i)); }
+      function needed(i) { return Math.min(NFR - 1, chunkEnd(i)); }
+      function visible(i, j) { return j <= needed(i); }
+      function isEmitted(i) { return t >= needed(i); }
       function emittedCount() {
         var n = 0;
-        for (var i = 0; i < NFR; i++) if (i + L <= t) n++;
+        for (var i = 0; i < NFR; i++) if (isEmitted(i)) n++;
         return n;
       }
       function render() {
@@ -2726,21 +2728,28 @@ mask = chunk_mask(8, C=4, L=2)
           for (var j = 0; j < NFR; j++) {
             var c = cells[i][j];
             c.classList.toggle('lit', visible(i, j));
-            c.classList.toggle('emitted', i + L <= t);
-            c.classList.toggle('audio', i === Math.min(t, NFR - 1) && !(i + L <= t));
+            c.classList.toggle('emitted', isEmitted(i));
+            c.classList.toggle('audio', i === t && !isEmitted(i));
           }
           var rl = grid.querySelector('.mask-lab[data-row="' + i + '"]');
           if (rl) {
-            rl.classList.toggle('row-emitted', i + L <= t);
-            rl.classList.toggle('row-audio', i === Math.min(t, NFR - 1) && !(i + L <= t));
+            rl.classList.toggle('row-emitted', isEmitted(i));
+            rl.classList.toggle('row-audio', i === t && !isEmitted(i));
           }
         }
-        var lat = L * 10, ctx = C + L;
-        var giveup = L === 0
-          ? 'block-causal: no frame peeks past its own chunk, zero wait on the future.'
-          : 'every token waits ' + lat + ' ms for its look-ahead: that wait is the rent.';
-        statsEl.innerHTML = 'Look-ahead latency <strong>' + lat + ' ms</strong> (' + L + (L === 1 ? ' frame' : ' frames') + ' x 10 ms) &middot; ' +
-          'each frame sees up to <strong>' + ctx + (ctx === 1 ? ' frame' : ' frames') + '</strong> (chunk ' + C + ' + look-ahead ' + L + ') &middot; ' + giveup;
+        var firstWait = needed(0), lastWait = needed(C - 1) - (C - 1);
+        var clipped = (C - 1 + L) > NFR - 1;
+        var msg;
+        if (firstWait === 0) {
+          msg = 'Chunk 1, look-ahead 0: the true causal triangle. Each token leaves the moment its frame arrives, <strong>0 ms</strong> wait.';
+        } else if (C === 1) {
+          msg = 'Chunk 1: each token waits <strong>' + (firstWait * 10) + ' ms</strong> for its ' + L + ' look-ahead ' + (L === 1 ? 'frame.' : 'frames.');
+        } else {
+          msg = 'A chunk\'s tokens leave together when its last frame' + (L > 0 ? ' and ' + L + ' look-ahead ' + (L === 1 ? 'frame arrive' : 'frames arrive') : ' arrives') + '. ' +
+            'First frame of a chunk waits <strong>' + (firstWait * 10) + ' ms</strong>, last frame waits <strong>' + (lastWait * 10) + ' ms</strong>.' +
+            (clipped ? ' (The clip ends at frame 11.)' : '');
+        }
+        statsEl.innerHTML = msg;
         var heard = t < 0 ? 0 : Math.min(NFR, t + 1);
         var em = emittedCount();
         audioBar.style.width = (100 * heard / NFR).toFixed(1) + '%';
@@ -2748,7 +2757,7 @@ mask = chunk_mask(8, C=4, L=2)
         audioVal.textContent = heard + ' / 12';
         emitVal.textContent = em + ' / 12';
         lVal.textContent = L;
-        document.getElementById('streamStep').disabled = (t >= NFR - 1 + L);
+        document.getElementById('streamStep').disabled = (t >= NFR - 1);
       }
       function stopPlay(hideMs) {
         playing = false;
@@ -2757,7 +2766,7 @@ mask = chunk_mask(8, C=4, L=2)
       }
       function step() {
         t++;
-        if (t > NFR - 1 + L) { stopPlay(2000); t = NFR - 1 + L; }
+        if (t >= NFR - 1) { stopPlay(2000); t = NFR - 1; }
         render();
       }
       function streamSchedule() {

@@ -523,7 +523,6 @@
       font-size: 13px; font-weight: 700; color: #2c3e50;
     }
     .sw-dot[aria-current="true"] { background: #e74c3c; border-color: #e74c3c; color: #ffffff; }
-    .sw-dot.coda { border-radius: 3px; }
     .sw-narr { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #e5e8ec; }
     .reflist { line-height: 1.7; color: #2c3e50; }
     .reflist li { margin: 0.4rem 0; }
@@ -637,6 +636,16 @@
     }
 </style>
 
+<style>
+/* Shared SSL button look (same as probeVsTune on ssl.html and maskRatio on
+   masked-image-modeling.html): white pills, dark Play; Play and Reset share one row. */
+.demo-btnrow { display: inline-flex; flex-wrap: nowrap; gap: .4rem; }
+.demo-btn { border: 1px solid #bdc3c7; background: #fff; padding: .45em 1em; border-radius: 6px;
+  cursor: pointer; font-size: .9em; color: #2c3e50; white-space: nowrap; font-family: inherit; }
+.demo-btn-play { background: #2c3e50; color: #fff; border-color: #2c3e50; font-weight: bold; }
+.demo-btn:disabled { cursor: default; }
+@media (max-width:480px){ .demo-btn { padding: .4em .6em; font-size: .85em; } }
+</style>
   <script type="text/javascript" async
     src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML">
   </script>
@@ -743,332 +752,31 @@
   <p class="tabs-label">On this page</p>
   <div class="tab-strip">
     <a class="tab-chip" href="#positives-pull-negatives-push">Positives pull, negatives push</a>
-    <a class="tab-chip" href="#nt-xent-loss">The loss picks the true pair out of the batch</a>
     <a class="tab-chip" href="#simclr-walkthrough">One batch becomes one loss</a>
+    <a class="tab-chip" href="#nt-xent-loss">The loss picks the true pair out of the batch</a>
     <a class="tab-chip" href="#augmentations">Augmentations decide what is learned</a>
     <a class="tab-chip" href="#projection-head">A throwaway head protects the features</a>
     <a class="tab-chip" href="#moco-queue">A queue replaces the giant batch</a>
     <a class="tab-chip" href="#references">References</a>
   </div>
 
-  <p>This page follows <a href="ssl.html">Self-Supervised Learning</a>, where one image becomes two random views and one shared encoder (the network that turns an image into a vector, its embedding) learns to match them; the setup is drawn in <a href="ssl.html#pretext-tasks">Pretext tasks turn unlabeled data into questions with answers</a>. Contrastive learning adds one ingredient: other images to push away.</p>
+  <p>In <a href="ssl.html#pretext-tasks">Self-Supervised Learning</a>, one image becomes two random views and a shared encoder (the network that turns an image into a vector, its embedding) learns to match them. Contrastive learning adds other images to push away.</p>
 
   <h2 id="positives-pull-negatives-push">Positives pull, negatives push</h2>
 
-  <p>Training works on a <strong>batch</strong>, the group of images seen in one step. The two views of one image are a <strong>positive pair</strong>; every other image in the batch is a <strong>negative</strong>. Each embedding is first <strong>L2 normalized</strong> (scaled to length 1, so all points sit on a sphere), and two points are compared by <strong>cosine similarity</strong>: 1 when they point the same way, &minus;1 when opposite. The signal is simple: <em>drag the positive pair together, shove everything else apart</em>. Similar images end up clustered without a single label.</p>
-
-  <h2 id="nt-xent-loss">The loss picks the true pair out of the batch</h2>
-
-  <p><strong>SimCLR</strong> (Chen et al. 2020) is the plainest version. A batch of N images gives 2N views; each view must pick its twin out of the other 2N&minus;1. The loss is <strong>NT-Xent</strong> (normalized temperature-scaled cross entropy): cross entropy, the standard loss for picking the right answer from a set, with the twin as the right answer. For view i and its twin j:</p>
-
-  <div class="eq-card" id="sslNtxentEqStatic">
-<div class="eq-what">Each view's loss: how sure the model is that its twin beats every other view.</div>
-<div class="eq-line eq-active" data-eqline="0"><span style="white-space:nowrap"><span class="eqt" data-k="ell" style="color:#2c3e50">&#8467;<sub>i,j</sub></span> = &minus;log <span class="eqt" data-k="p" style="color:#1e8449">p<sub>i,j</sub></span></span></div>
-<div class="eq-why eq-active" data-eqline="0">The loss of view i is the negative log of <span class="eqt" style="color:#1e8449">p<sub>i,j</sub></span>, the probability the model gives its twin j: near 0 when the twin wins clearly, large when it does not.</div>
-<div class="eq-line eq-active" data-eqline="1"><span style="white-space:nowrap"><span class="eqt" data-k="p" style="color:#1e8449">p<sub>i,j</sub></span> = <span class="frac"><span class="top"><span class="eqt" data-k="num" style="color:#1e8449">exp(<span class="frac"><span class="top"><span class="eqt" data-k="sim" style="color:#2a7fbf">sim(z<sub>i</sub>,z<sub>j</sub>)</span></span><span class="bot"><span class="eqt" data-k="tau" style="color:#8e44ad">&tau;</span></span></span>)</span></span><span class="bot"><span class="eqt" data-k="den" style="color:#c0392b">&Sigma;<sub>k&#8800;i</sub> exp(<span class="frac"><span class="top"><span class="eqt" data-k="sim" style="color:#2a7fbf">sim(z<sub>i</sub>,z<sub>k</sub>)</span></span><span class="bot"><span class="eqt" data-k="tau" style="color:#8e44ad">&tau;</span></span></span>)</span></span></span></span></div>
-<div class="eq-why eq-active" data-eqline="1"><span class="eqt" style="color:#2a7fbf">z</span> is a view's embedding and sim is cosine similarity. The top scores view i against its twin; the bottom adds (&Sigma;) that score for every view k in the batch except i itself (SimCLR writes the skip as an indicator, 1<sub>[k&#8800;i]</sub>). This fraction is a <strong>softmax</strong>. The temperature <span class="eqt" style="color:#8e44ad">&tau;</span> sharpens or softens the comparison.</div>
-</div>
-
-  <p>Leaving view i out of its own sum matters: a vector's similarity with itself is always 1 and would swamp the softmax. A low &tau; puts most of the push on the <strong>hard negatives</strong>, the wrong views closest to view i; the values that work are in <a href="ssl-failure-modes.html">Self-Supervised Learning Failure Modes and Checks</a>. In code, the whole loss is a similarity matrix and one cross entropy:</p>
-
-<pre><code class="language-python">def nt_xent_loss(z1, z2, temperature=0.1):  # best of SimCLR Table 5 (ImageNet, 100 epochs)
-    # z1, z2: [N, D] projected views, already L2 normalized
-    N = z1.size(0)
-    z = torch.cat([z1, z2], dim=0)          # [2N, D]
-    sim = torch.mm(z, z.t()) / temperature  # [2N, 2N] cosine similarity
-    labels = torch.cat([torch.arange(N, 2 * N), torch.arange(N)]).to(z.device)
-    sim.fill_diagonal_(-9e15)               # skip k = i: a view never picks itself
-    return F.cross_entropy(sim, labels)     # softmax, negative log, average</code></pre>
-
-
-  <div class="demo">
-    <div class="demo-controls">
-      <label for="ppSteps">Training steps: <span id="ppStepsVal">0</span> / 200</label>
-      <input type="range" id="ppSteps" min="0" max="200" value="0" step="1">
-      <button type="button" id="ppPlay">Play</button>
-      <button type="button" id="ppReset">Reset</button>
-    </div>
-    <div class="canvas-wrap">
-      <canvas id="ppCanvas"></canvas>
-    </div>
-    <div class="demo-stats" id="ppStats"></div>  </div>
-<p class="caption" id="ppCaption">The twin becomes the nearest neighbor early; the loss keeps falling while the others spread out, then levels off.</p>
-
-  <script>
-  (function() {
-    var canvas = document.getElementById('ppCanvas');
-    var ctx = canvas.getContext('2d');
-    var dpr = window.devicePixelRatio || 1;
-
-    /* Simulation math: anchor at angle 0, twin starts 0.55 rad away and is pulled
-       in, 12 negatives start scattered and spread to even spacing. Deterministic. */
-    function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
-    var TAU = 0.5, N_NEG = 12, STEPS = 200;
-    var rng = mulberry32(7);
-    var pos0 = 0.55;
-    var negStart = [];
-    for (var i = 0; i < N_NEG; i++) negStart.push(rng() * Math.PI * 2);
-    (function(){
-      var best = 1e9;
-      for (var i = 0; i < N_NEG; i++){
-        var d = Math.abs(negStart[i]) % (Math.PI * 2);
-        d = Math.min(d, Math.PI * 2 - d);
-        if (d < best) best = d;
-      }
-      if (best > pos0) negStart[0] = 0.30;
-    })();
-    /* Final slots are handed out in the negatives' own angular order, measured
-       from the anchor (0) round to 2*pi, and every move stays inside (0, 2*pi):
-       no negative ever passes the anchor, so once the twin is the nearest
-       neighbor it stays the nearest neighbor (the readout never flips back). */
-    var order = negStart.map(function(a, i){ return i; }).sort(function(x, y){ return negStart[x] - negStart[y]; });
-    var negFinal = new Array(N_NEG);
-    order.forEach(function(idx, r){ negFinal[idx] = Math.PI/6 + (r + 0.5)/N_NEG * (Math.PI*2 - Math.PI/3); });
-    /* Ease-out: fast early moves, then the loss visibly levels off. */
-    function ease(u){ return 1 - Math.pow(1 - u, 3); }
-
-    function wrapDelta(a, b){ var d = (b - a) % (Math.PI*2); if (d > Math.PI) d -= Math.PI*2; if (d < -Math.PI) d += Math.PI*2; return d; }
-    function stateAt(t){
-      var u = ease(t / STEPS);
-      var pos = 0.03 + (pos0 - 0.03) * (1 - u);
-      var negs = [];
-      for (var i = 0; i < N_NEG; i++) negs.push(negStart[i] + (negFinal[i] - negStart[i]) * u);
-      return { pos: pos, negs: negs };
-    }
-    function simsOf(st){
-      var s = [Math.cos(st.pos)];
-      for (var i = 0; i < N_NEG; i++) s.push(Math.cos(st.negs[i]));
-      return s;
-    }
-    function lossOf(sims){
-      var m = -1e9, i, v;
-      for (i = 0; i < sims.length; i++){ v = sims[i]/TAU; if (v > m) m = v; }
-      var sum = 0;
-      for (i = 0; i < sims.length; i++) sum += Math.exp(sims[i]/TAU - m);
-      return -(sims[0]/TAU - m) + Math.log(sum);
-    }
-    /* Per-step loss so the trail draws smoothly at any slider position. */
-    var lossCurve = [];
-    for (var s = 0; s <= STEPS; s++) lossCurve.push(lossOf(simsOf(stateAt(s))));
-    /* Y-axis rescaled to the data range (loss runs about 1.17 to 1.81). */
-    var YMIN = 1.0, YMAX = 2.0;
-
-    /* Responsive layout: side-by-side on desktop, disk on top and loss below
-       when the canvas shows smaller than about 480 CSS px. */
-    function computeLayout(cssW){
-      var small = cssW < 480;
-      var L;
-      if (small){
-        L = { W: 400, H: 566, small: true,
-              cx: 200, cy: 152, R: 112,
-              px0: 66, px1: 380, py0: 348, py1: 506, titleY: 322 };
-      } else {
-        L = { W: 560, H: 360, small: false,
-              cx: 170, cy: 185, R: 140,
-              px0: 404, px1: 548, py0: 60, py1: 300, titleY: 34 };
-      }
-      /* attnDemo pattern: draw text at 12*S attribute px so it renders ~12 CSS px. */
-      var S = L.W / cssW;
-      return { L: L, S: S, FS: Math.max(1, Math.round(12 * S)) };
-    }
-    function setup(){
-      canvas.style.width = '100%';
-      canvas.style.height = 'auto';
-      /* Round 6: the first draw used FS=8 because computeLayout read
-         clientWidth before maxWidth capped the canvas (S~0.65), while every
-         redraw recomputed S=1 (FS=12). Pass one picks the layout and applies
-         maxWidth; pass two re-measures, so the FIRST draw gets the same
-         scale as every redraw. */
-      var lay = computeLayout(canvas.clientWidth || 560);
-      var aw = Math.round(lay.L.W * dpr), ah = Math.round(lay.L.H * dpr);
-      if (canvas.width !== aw || canvas.height !== ah){
-        canvas.width = aw; canvas.height = ah;
-        canvas.style.maxWidth = lay.L.W + 'px';
-      }
-      lay = computeLayout(canvas.clientWidth || lay.L.W);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      return lay;
-    }
-
-    var slider = document.getElementById('ppSteps');
-    var valLab = document.getElementById('ppStepsVal');
-    var stats = document.getElementById('ppStats');
-    var playBtn = document.getElementById('ppPlay');
-    var timer = null;
-    /* Scroll-stability (2026-10-09): the Play label widens to "Pause" mid-tour;
-       the width change reflows the wrapping flex row by 1px at 390px (99.6->98.6),
-       moving the page. Fix the button's width to the widest label variant.
-       Follows the r4scroll reserve pattern. */
-    (function () {
-      var prev = playBtn.textContent, max = 0;
-      ['Play', 'Pause'].forEach(function (t) {
-        playBtn.textContent = t;
-        max = Math.max(max, playBtn.getBoundingClientRect().width);
-      });
-      playBtn.textContent = prev;
-      /* Buttons are border-box in this UA stylesheet, so minWidth floors the
-         measured border-box width directly. */
-      playBtn.style.minWidth = Math.ceil(max) + 'px';
-    })();
-
-    function pt(cx, cy, R, a){ return [cx + R*Math.cos(a), cy - R*Math.sin(a)]; }
-
-    function draw(){
-      var lay = setup();
-      var L = lay.L, S = lay.S, FS = lay.FS;
-      var t = parseInt(slider.value, 10);
-      valLab.textContent = t;
-      var st = stateAt(t), sims = simsOf(st), loss = lossOf(sims);
-      var mx = sims[0], top1 = true, i;
-      for (i = 1; i < sims.length; i++) if (sims[i] > mx){ mx = sims[i]; top1 = false; }
-      stats.innerHTML = 'anchor\'s nearest neighbor: <strong style="color:' + (top1 ? '#1a7a3a' : '#c0392b') + '">' + (top1 ? 'the twin' : 'a negative') + '</strong>' +
-        '<br>τ = 0.5, fixed in this toy';
-
-      ctx.clearRect(0, 0, L.W, L.H);
-      var cx = L.cx, cy = L.cy, R = L.R;
-      ctx.strokeStyle = '#bdc3c7'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2); ctx.stroke();
-      /* Name the disk in-visual. (The old center dot is gone: on a unit disk
-         of L2-normalized embeddings no point can live inside the circle, so a
-         center mark only reads as a stray data point.) */
-      ctx.fillStyle = '#7f8c8d'; ctx.font = FS + 'px sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText('unit disk: every embedding lives on this circle', cx, cy + R + Math.round(20*S));
-
-      var pa = pt(cx, cy, R, 0), pp = pt(cx, cy, R, st.pos);
-      ctx.strokeStyle = 'rgba(39,174,96,0.55)'; ctx.lineWidth = 2; ctx.setLineDash([5,4]);
-      ctx.beginPath(); ctx.moveTo(pa[0], pa[1]); ctx.lineTo(pp[0], pp[1]); ctx.stroke();
-      ctx.setLineDash([]);
-      /* Name the dashed chord where it is drawn: the gap training closes. */
-      if (Math.abs(wrapDelta(0, st.pos)) > 0.35){
-        ctx.fillStyle = '#1e8449'; ctx.font = FS + 'px sans-serif'; ctx.textAlign = 'right';
-        ctx.fillText('gap', (pa[0] + pp[0]) / 2 - Math.round(10*S), (pa[1] + pp[1]) / 2 + Math.round(4*S));
-      }
-
-      ctx.fillStyle = '#e74c3c';
-      for (i = 0; i < N_NEG; i++){
-        var q = pt(cx, cy, R, st.negs[i]);
-        ctx.beginPath(); ctx.arc(q[0], q[1], Math.max(3, Math.round(5*S)), 0, Math.PI*2); ctx.fill();
-      }
-      ctx.fillStyle = '#2980b9';
-      ctx.beginPath(); ctx.arc(pa[0], pa[1], Math.max(4, Math.round(8*S)), 0, Math.PI*2); ctx.fill();
-      /* The positive is drawn last, as a green ring, so it stays visible on top of the anchor. */
-      ctx.strokeStyle = '#1e8449'; ctx.lineWidth = Math.max(2, Math.round(3*S));
-      ctx.beginPath(); ctx.arc(pp[0], pp[1], Math.max(6, Math.round(9*S)), 0, Math.PI*2); ctx.stroke();
-
-      ctx.font = FS + 'px sans-serif'; ctx.fillStyle = '#2c3e50'; ctx.textAlign = 'left';
-      var sep = Math.abs(wrapDelta(0, st.pos));
-      if (sep > 0.35){
-        ctx.fillStyle = '#2471a3';
-        ctx.fillText('anchor', pa[0] + Math.round(12*S), pa[1] + Math.round(4*S));
-        ctx.fillStyle = '#1e8449';
-        ctx.fillText('positive', pp[0] + Math.round(11*S), pp[1] - Math.round(8*S));
-      } else {
-        /* Merged: one label only, never two stacked on each other. */
-        ctx.fillStyle = '#1a7a3a';
-        ctx.fillText('anchor +', pa[0] + Math.round(12*S), pa[1] - Math.round(4*S));
-        ctx.fillText('positive', pa[0] + Math.round(12*S), pa[1] + Math.round(12*S));
-      }
-
-      ctx.textAlign = 'center'; ctx.font = FS + 'px sans-serif';
-      ctx.fillStyle = '#2471a3';
-      ctx.fillText('anchor: a cat photo', cx, cy - Math.round(40*S));
-      ctx.fillStyle = '#1e8449';
-      ctx.fillText('positive: its twin', cx, cy - Math.round(22*S));
-      ctx.fillStyle = '#c0392b';
-      ctx.fillText('red: 12 other photos', cx, cy + Math.round(30*S));
-      ctx.fillText('(negatives)', cx, cy + Math.round(48*S));
-      ctx.textAlign = 'left';
-      /* Loss plot. The trail draws only up to the current step: no future shown. */
-      var px0 = L.px0, px1 = L.px1, py0 = L.py0, py1 = L.py1;
-      function xOf(sv){ return px0 + (sv/STEPS)*(px1-px0); }
-      function yOf(lv){ return py1 - ((lv - YMIN)/(YMAX - YMIN))*(py1-py0); }
-      ctx.fillStyle = '#2c3e50'; ctx.font = 'bold ' + Math.max(1, Math.round(13*S)) + 'px sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText('NT-Xent loss', (px0+px1)/2, L.titleY);
-      ctx.strokeStyle = '#bdc3c7'; ctx.lineWidth = 1;
-      ctx.strokeRect(px0, py0, px1-px0, py1-py0);
-      ctx.font = FS + 'px sans-serif';
-      var yt;
-      for (yt = YMIN; yt <= YMAX + 1e-9; yt += 0.2){
-        var yy = yOf(yt);
-        ctx.strokeStyle = '#ecf0f1';
-        ctx.beginPath(); ctx.moveTo(px0, yy); ctx.lineTo(px1, yy); ctx.stroke();
-        ctx.fillStyle = '#7f8c8d'; ctx.textAlign = 'right';
-        ctx.fillText(yt.toFixed(1), px0 - Math.round(6*S), yy + Math.round(4*S));
-      }
-      ctx.fillStyle = '#7f8c8d'; ctx.textAlign = 'center';
-      [0, 100, 200].forEach(function(sv){
-        ctx.fillText(sv, xOf(sv), py1 + Math.round(16*S));
-      });
-      ctx.fillText('steps', (px0+px1)/2, py1 + Math.round(32*S));
-      /* Trail: steps 0..t only. The future stays blank until you get there.
-         Clipped to the plot rect so the marker can never streak into the margin. */
-      ctx.save();
-      ctx.beginPath(); ctx.rect(px0, py0, px1-px0, py1-py0); ctx.clip();
-      ctx.strokeStyle = '#2980b9'; ctx.lineWidth = 2;
-      ctx.beginPath();
-      for (var k = 0; k <= t; k++){
-        var kx = xOf(k), ky = yOf(lossCurve[k]);
-        if (k === 0) ctx.moveTo(kx, ky); else ctx.lineTo(kx, ky);
-      }
-      if (t > 0) ctx.stroke();
-      var mxp = xOf(t), myp = yOf(loss);
-      ctx.restore();
-      ctx.fillStyle = '#e74c3c';
-      ctx.beginPath(); ctx.arc(mxp, myp, Math.max(4, Math.round(5*S)), 0, Math.PI*2); ctx.fill();
-      ctx.fillStyle = '#2c3e50'; ctx.font = 'bold ' + FS + 'px sans-serif'; ctx.textAlign = 'center';
-      /* Keep the value label clear of the y-tick labels at the left edge. */
-      var labX = Math.min(px1 - Math.round(18*S), Math.max(mxp, px0 + Math.round(34*S)));
-      ctx.fillText(loss.toFixed(2), labX, myp - Math.round(10*S));
-    }
-    slider.addEventListener('input', function(){
-      if (timer){ cancelAnimationFrame(timer); timer = null; playBtn.textContent = 'Play'; }
-      draw();
-    });
-    playBtn.addEventListener('click', function(){
-      if (timer){ cancelAnimationFrame(timer); timer = null; playBtn.textContent = 'Play'; return; }
-      if (parseInt(slider.value, 10) >= STEPS){ slider.value = 0; draw(); }
-      playBtn.textContent = 'Pause';
-      var demo = playBtn.closest('.demo');
-      if (demo) playScrollEnsure(demo);
-      /* Continuous run: the remaining steps play out over about 10 s in total. */
-      var t0 = parseInt(slider.value, 10), start = null, DUR = 10000 * (STEPS - t0) / STEPS;
-      function frame(ts){
-        if (start === null) start = ts;
-        var t = Math.min(STEPS, Math.round(t0 + (ts - start) / DUR * (STEPS - t0)));
-        if (t !== parseInt(slider.value, 10)){ slider.value = t; draw(); }
-        if (t >= STEPS){ timer = null; playBtn.textContent = 'Play'; return; }
-        timer = requestAnimationFrame(frame);
-      }
-      timer = requestAnimationFrame(frame);
-    });
-    /* Reset: stop the run and put the disk back at step 0, the opening state. */
-    document.getElementById('ppReset').addEventListener('click', function(){
-      if (timer){ cancelAnimationFrame(timer); timer = null; }
-      playBtn.textContent = 'Play';
-      slider.value = 0;
-      draw();
-    });
-    var rzT = null;
-    window.addEventListener('resize', function(){
-      if (rzT) clearTimeout(rzT);
-      rzT = setTimeout(draw, 150);
-    });
-    draw();
-  })();
-
-  </script>
+  <p>Each training step sees a <strong>batch</strong> of images. The two views of one image are a <strong>positive pair</strong>; every other image is a <strong>negative</strong>. Embeddings are <strong>L2 normalized</strong> (scaled to length 1, so they sit on a sphere) and compared by <strong>cosine similarity</strong>: 1 for the same direction, &minus;1 for opposite. Pull positives together and push negatives apart, and similar images cluster without labels.</p>
 
   <h2 id="simclr-walkthrough">One batch becomes one loss</h2>
 
-  <p>The whole SimCLR pipeline on a toy batch: two views per image, one encoder f and one small <strong>projection head</strong> g shared by every view, a similarity matrix, the pull and push, and one gradient step.</p>
+  <p><strong>SimCLR</strong> (Chen et al. 2020) is the plainest version. Here is its whole pipeline on a toy batch, with one encoder f and one small <strong>projection head</strong> g shared by all views.</p>
 
   <div class="demo" id="simclrWalk">
 <div class="demo-controls sw-chrome">
-      <button type="button" id="swPrev">Prev</button>
+      <button type="button" class="demo-btn" id="swPrev">Prev</button>
       <span class="sw-dots" id="swDots"></span>
-      <button type="button" id="swNext">Next</button>
-      <button type="button" id="swPlay">Play</button>
-      <button type="button" id="swReset">Reset</button>
+      <button type="button" class="demo-btn" id="swNext">Next</button>
+      <button type="button" class="demo-btn demo-btn-play" id="swPlay">Play</button>
+      <button type="button" class="demo-btn" id="swReset">Reset</button>
     </div>
 <div class="canvas-wrap">
       <canvas id="swBench"></canvas>
@@ -1079,15 +787,8 @@
       </div>
     </div>
 </div>
-<p class="caption">SimCLR's pipeline as a toy with N = 4 images, after Chen et al. 2020, Figure 2 (the paper's default is N = 4096).</p>
+<p class="caption">SimCLR's pipeline as a toy with N = 4 images (the paper's default is N = 4096).</p>
 
-  <p>Every view takes one turn as the scored view, so the number training minimizes is the average of the per-view loss over all 2N views:</p>
-
-<div class="eq-card" id="simclrBatchEq">
-      <div class="eq-what">The batch loss: every view's loss, averaged.</div>
-      <div class="eq-line eq-active" data-eqline="0"><span style="white-space:nowrap"><span class="eqt" data-k="L" style="color:#d35400">L</span> = <span class="frac"><span class="top">1</span><span class="bot">2N</span></span> &Sigma;<sub>i=1..2N</sub> <span class="eqt" data-k="ell" style="color:#2c3e50">&#8467;</span><sub>i,t(i)</sub></span></div>
-      <div class="eq-why eq-active" data-eqline="0">t(i) is the twin of view i, and <span class="eqt" style="color:#2c3e50">&#8467;</span> is the per-view loss from the card above. The sum runs over all 2N views, so each image counts twice, once with each of its views scored; dividing by 2N averages. This is the average F.cross_entropy takes in nt_xent_loss.</div>
-    </div>
 
   <script>
   (function() {
@@ -1110,27 +811,27 @@
       { n: '1', title: 'Two views from one image',
         hole: { l: 10, t: 64, w: 83, h: 36 }, topGaps: [[21.1, 3], [84, 3]], botGaps: [],
         badge: 'the two views', bx: 12, by: 64, bench: 'batch',
-        text: 'A batch of <code>4</code> toy images. Each image gets two random augmentations, a crop here, a color jitter there, so the batch becomes <code>8</code> views. The two views of the same image are the positive pair; the other <code>6</code> are negatives.' },
+        text: 'A batch of <code>4</code> toy images. Each gets two random edits, so the batch becomes <code>8</code> views, v1 to v8. Views of one image (v1 and v5, v2 and v6, and so on) are a positive pair, the twins; the other <code>6</code> views are negatives.' },
       { n: '2', title: 'One encoder, one head, shared everywhere',
         hole: { l: 12, t: 20, w: 84, h: 46 }, topGaps: [[21.1, 3], [84, 3]], botGaps: [[21.1, 3], [84, 3]],
         badge: 'encoder f, head g', bx: 50, by: 20, bench: 'towers',
-        text: 'Both views go through the same encoder <code>f</code>, then the same projection head <code>g</code>. The twin towers share one set of weights. <code>f</code> turns a view into a representation <code>h</code>; <code>g</code> maps <code>h</code> into <code>z</code>, the space where the loss is computed.' },
+        text: 'Both views go through the same encoder <code>f</code>, then the same projection head <code>g</code>: one set of weights. <code>f</code> turns a view into a representation <code>h</code>; <code>g</code> maps <code>h</code> to <code>z</code>, where the loss is computed.' },
       { n: '3', title: 'Normalize, then compare everything to everything',
         hole: { l: 8, t: 2, w: 84, h: 19 }, topGaps: [], botGaps: [[21.1, 3], [84, 3]],
         badge: 'compare <span style="color:#85c1e9">every pair</span>', bx: 14, by: 10, bench: 'matrix',
-        text: 'Every <code>z</code> is scaled to length <code>1</code>, so similarity is just the dot product. All <code>8</code> views are compared against all <code>8</code>: an <code>8 by 8</code> similarity matrix. The diagonal is masked, because a view is perfectly similar to itself and that would swamp everything.' },
+        text: 'Every <code>z</code> is scaled to length <code>1</code>, so similarity is a dot product. All <code>8</code> views are compared with all <code>8</code>: an <code>8 by 8</code> similarity matrix. The diagonal is masked, because a view always matches itself.' },
       { n: '4', title: 'Pull the twins, push the rest',
         hole: { l: 8, t: 2, w: 84, h: 19 }, topGaps: [], botGaps: [[21.1, 3], [84, 3]],
         badge: 'pull <span style="color:#a9dfbf">twins</span>, push <span style="color:#f5b7b1">the rest</span>', bx: 14, by: 10, bench: 'pullpush',
-        text: 'The NT-Xent loss pulls the two views of the same image together and pushes every other pair apart: twins end up side by side, strangers spread out across the space.' },
+        text: 'The loss pulls each pair of twins together and pushes every other pair apart.' },
       { n: '5', title: 'One gradient step moves the embeddings',
         hole: { l: 0, t: 0, w: 100, h: 100 }, topGaps: [], botGaps: [],
         badge: 'one gradient step', bx: 50, by: 6, bench: 'step',
-        text: 'The gradient of that loss nudges every embedding a little: twins closer, strangers farther apart. Repeat over many thousands of batches (about 313 per pass over ImageNet at batch 4096) and the space organizes itself.' },
+        text: 'The gradient of that loss nudges every embedding: twins closer, strangers farther. Repeat over many thousands of batches and the space organizes itself.' },
       { n: 'coda', title: 'Throw away <code>g</code>, keep <code>f</code>',
         hole: { l: 12, t: 20, w: 84, h: 46 }, topGaps: [[21.1, 3], [84, 3]], botGaps: [[21.1, 3], [84, 3]],
         badge: 'keep f, drop g', bx: 50, by: 20, bench: 'coda',
-        text: 'Training is over. The projection head <code>g</code> was scaffolding for the loss; it gets discarded. What you keep is the encoder <code>f</code> and its representations <code>h</code>. Those are the features you actually use.' }
+        text: 'Training is over. The head <code>g</code> only served the loss, so it is discarded. You keep the encoder <code>f</code> and its representations <code>h</code>: the features you actually use.' }
     ];
 
     function setPane(el, l, t, w, h){
@@ -1320,8 +1021,10 @@
         var ax = Math.max(20, hw + 6);
         drawScene(sceneKinds[i], cx - 54, 118, 50, rng32(200 + i * 13));
         drawScene(sceneKinds[i], cx + 4, 118, 50, rng32(300 + i * 17));
-        ctx.fillStyle = '#7f8c8d';
-        ctx.fillText('2 views', cx, 184);
+        /* view numbers match the matrix rows in step 3: image i gives v(i) and v(i+4) */
+        ctx.fillStyle = '#2c3e50';
+        ctx.fillText('v' + (i + 1), cx - 29, 186);
+        ctx.fillText('v' + (i + 5), cx + 29, 186);
         arrow(cx - ax, 88, cx - Math.max(29, ax + 6), 118, '#95a5a6');
         arrow(cx + ax, 88, cx + Math.max(29, ax + 6), 118, '#95a5a6');
       }
@@ -1443,10 +1146,11 @@
     function diskAngles(moved){
       /* 8 views; v1/v5 are the twin pair. moved=true: after one gradient step. */
       var deg = Math.PI / 180;
-      var a = [-75, 10, 120, 220, -60, 60, 170, 280];
+      var a = [-120, 20, 95, 165, -40, 60, 135, 205];
       if (moved){
-        /* twins (views 1 and 5) close in; every other view moves away from them */
-        a = [-70, 22, 117, 206, -65, 72, 160, 266];
+        /* twins (views 1 and 5) close in from 80 degrees apart to 16; every
+           other view moves away from them (toward the far side of the circle) */
+        a = [-88, 34, 99, 154, -72, 74, 126, 188];
       }
       return a.map(function(d){ return d * deg; });
     }
@@ -1465,7 +1169,23 @@
           ctx.strokeStyle = '#bdc3c7'; ctx.lineWidth = 1.5;
           ctx.beginPath(); ctx.arc(x, y, 8, 0, Math.PI * 2); ctx.stroke();
           var x2 = cx + R * Math.cos(after[i]), y2 = cy + R * Math.sin(after[i]);
-          arrow(x, y, x2, y2, '#7f8c8d');
+          if (i === 0 || i === 4){
+            /* the twins' moves are the point of this step: bold blue arcs */
+            ctx.strokeStyle = '#2980b9'; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(x, y, 8, 0, Math.PI * 2); ctx.stroke();
+            ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.arc(cx, cy, R + 16, before[i], after[i], after[i] < before[i]); ctx.stroke();
+            var ea = after[i], dir = after[i] > before[i] ? 1 : -1;
+            var hx = cx + (R + 16) * Math.cos(ea), hy = cy + (R + 16) * Math.sin(ea);
+            var tx = -Math.sin(ea) * dir, ty = Math.cos(ea) * dir;
+            ctx.fillStyle = '#2980b9'; ctx.beginPath();
+            ctx.moveTo(hx + tx * 9, hy + ty * 9);
+            ctx.lineTo(hx - tx * 2 + Math.cos(ea) * 6, hy - ty * 2 + Math.sin(ea) * 6);
+            ctx.lineTo(hx - tx * 2 - Math.cos(ea) * 6, hy - ty * 2 - Math.sin(ea) * 6);
+            ctx.closePath(); ctx.fill();
+          } else {
+            arrow(x, y, x2, y2, '#7f8c8d');
+          }
         }
       }
       var angs = moved ? after : before;
@@ -1495,11 +1215,11 @@
           ? [['#27ae60', 'pull together:'], ['#27ae60', 'the twin pair'], null,
              ['#e67e22', 'push apart:'], ['#e67e22', 'every other pair'], null,
              ['#7f8c8d', 'blue dots: views'], ['#7f8c8d', '1 and 5, the twins'], null,
-             ['#7f8c8d', 'grey: other views']]
+             ['#7f8c8d', 'gray: other views']]
           : [['#27ae60', 'pull together: the twin pair'], null,
              ['#e67e22', 'push apart: every other pair'], null,
              ['#7f8c8d', 'blue dots: views 1 and 5,'], ['#7f8c8d', 'two views of the same image'],
-             ['#7f8c8d', 'grey dots: the other views']])
+             ['#7f8c8d', 'gray dots: the other views']])
         : (narrow
           ? [['#2c3e50', 'one gradient step'], null,
              ['#7f8c8d', 'hollow: where'], ['#7f8c8d', 'each view was'],
@@ -1583,7 +1303,7 @@
     stages.forEach(function(st, i){
       var d = document.createElement('button');
       d.type = 'button';
-      d.className = 'sw-dot' + (st.n === 'coda' ? ' coda' : '');
+      d.className = 'sw-dot';
       d.textContent = st.n === 'coda' ? '6' : st.n;
       d.setAttribute('aria-label', 'Step ' + (i + 1) + ': ' + st.title.replace(/<[^>]+>/g, ''));
       d.addEventListener('click', function(){ stop(); go(i); });
@@ -1690,11 +1410,315 @@
   })();
   </script>
 
+  <h2 id="nt-xent-loss">The loss picks the true pair out of the batch</h2>
+
+  <p>A batch of N images gives 2N views, and each view must pick its twin out of the other 2N&minus;1. The loss is <strong>NT-Xent</strong> (normalized temperature-scaled cross entropy): cross entropy, the standard loss for picking the right answer from a set, with the twin as the right answer.</p>
+
+  <div class="eq-card" id="sslNtxentEqStatic">
+<div class="eq-what">The loss: how sure the model is that each view's twin beats every other view.</div>
+<div class="eq-line eq-active" data-eqline="0"><span style="white-space:nowrap"><span class="eqt" data-k="ell" style="color:#2c3e50">&#8467;<sub>i,j</sub></span> = &minus;log <span class="eqt" data-k="p" style="color:#1e8449">p<sub>i,j</sub></span></span></div>
+<div class="eq-why eq-active" data-eqline="0">The loss of view i is minus the log of <span class="eqt" style="color:#1e8449">p<sub>i,j</sub></span>, the probability given to its twin j: near 0 when the twin wins clearly.</div>
+<div class="eq-line eq-active" data-eqline="1"><span style="white-space:nowrap"><span class="eqt" data-k="p" style="color:#1e8449">p<sub>i,j</sub></span> = <span class="frac"><span class="top"><span class="eqt" data-k="num" style="color:#1e8449">exp(<span class="frac"><span class="top"><span class="eqt" data-k="sim" style="color:#2a7fbf">sim(z<sub>i</sub>,z<sub>j</sub>)</span></span><span class="bot"><span class="eqt" data-k="tau" style="color:#8e44ad">&tau;</span></span></span>)</span></span><span class="bot"><span class="eqt" data-k="den" style="color:#c0392b">&Sigma;<sub>k&#8800;i</sub> exp(<span class="frac"><span class="top"><span class="eqt" data-k="sim" style="color:#2a7fbf">sim(z<sub>i</sub>,z<sub>k</sub>)</span></span><span class="bot"><span class="eqt" data-k="tau" style="color:#8e44ad">&tau;</span></span></span>)</span></span></span></span></div>
+<div class="eq-why eq-active" data-eqline="1"><span class="eqt" style="color:#2a7fbf">z</span> is a view's embedding and sim is cosine similarity. The top scores view i against its twin; the bottom adds that score for every view k except i itself. The fraction is a <strong>softmax</strong> (scores turned into probabilities that sum to 1), and the temperature <span class="eqt" style="color:#8e44ad">&tau;</span> sharpens or softens it.</div>
+<div class="eq-line eq-active" data-eqline="2"><span style="white-space:nowrap"><span class="eqt" data-k="L" style="color:#d35400">L</span> = <span class="frac"><span class="top">1</span><span class="bot">2N</span></span> &Sigma;<sub>i=1..2N</sub> <span class="eqt" data-k="ell" style="color:#2c3e50">&#8467;</span><sub>i,t(i)</sub></span></div>
+<div class="eq-why eq-active" data-eqline="2">Every view takes one turn, so training minimizes the average over all 2N views; t(i) is the twin of view i.</div>
+</div>
+
+  <p>View i is left out of its own sum because its self-similarity is always 1. A low &tau; focuses the push on <strong>hard negatives</strong>, the wrong views closest to view i (good values: <a href="ssl-failure-modes.html">Self-Supervised Learning Failure Modes and Checks</a>). In code:</p>
+
+<pre><code class="language-python">def nt_xent_loss(z1, z2, temperature=0.1):  # best of SimCLR Table 5 (ImageNet, 100 epochs)
+    # z1, z2: [N, D] projected views, already L2 normalized
+    N = z1.size(0)
+    z = torch.cat([z1, z2], dim=0)          # [2N, D]
+    sim = torch.mm(z, z.t()) / temperature  # [2N, 2N] cosine similarity
+    labels = torch.cat([torch.arange(N, 2 * N), torch.arange(N)]).to(z.device)
+    sim.fill_diagonal_(-9e15)               # skip k = i: a view never picks itself
+    return F.cross_entropy(sim, labels)     # softmax, negative log, average</code></pre>
+
+
+  <div class="demo">
+    <div class="demo-controls">
+      <label for="ppSteps">Training steps: <span id="ppStepsVal">0</span> / 200</label>
+      <input type="range" id="ppSteps" min="0" max="200" value="0" step="1">
+      <span class="demo-btnrow"><button type="button" class="demo-btn demo-btn-play" id="ppPlay">Play</button><button type="button" class="demo-btn" id="ppReset">Reset</button></span>
+    </div>
+    <div class="canvas-wrap">
+      <canvas id="ppCanvas"></canvas>
+    </div>
+    <div class="demo-stats" id="ppStats"></div>  </div>
+<p class="caption" id="ppCaption">The twin becomes the nearest neighbor early; the loss keeps falling while the others spread out, then levels off.</p>
+
+  <script>
+  (function() {
+    var canvas = document.getElementById('ppCanvas');
+    var ctx = canvas.getContext('2d');
+    var dpr = window.devicePixelRatio || 1;
+
+    /* Simulation math: anchor at angle 0, twin starts 0.55 rad away and is pulled
+       in, 12 negatives start scattered and spread to even spacing. Deterministic. */
+    function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+    var TAU = 0.5, N_NEG = 12, STEPS = 200;
+    var rng = mulberry32(7);
+    var pos0 = 0.55;
+    var negStart = [];
+    for (var i = 0; i < N_NEG; i++) negStart.push(rng() * Math.PI * 2);
+    (function(){
+      var best = 1e9;
+      for (var i = 0; i < N_NEG; i++){
+        var d = Math.abs(negStart[i]) % (Math.PI * 2);
+        d = Math.min(d, Math.PI * 2 - d);
+        if (d < best) best = d;
+      }
+      if (best > pos0) negStart[0] = 0.30;
+    })();
+    /* Final slots are handed out in the negatives' own angular order, measured
+       from the anchor (0) round to 2*pi, and every move stays inside (0, 2*pi):
+       no negative ever passes the anchor, so once the twin is the nearest
+       neighbor it stays the nearest neighbor (the readout never flips back). */
+    var order = negStart.map(function(a, i){ return i; }).sort(function(x, y){ return negStart[x] - negStart[y]; });
+    var negFinal = new Array(N_NEG);
+    order.forEach(function(idx, r){ negFinal[idx] = Math.PI/6 + (r + 0.5)/N_NEG * (Math.PI*2 - Math.PI/3); });
+    /* Ease-out: fast early moves, then the loss visibly levels off. */
+    function ease(u){ return 1 - Math.pow(1 - u, 3); }
+
+    function wrapDelta(a, b){ var d = (b - a) % (Math.PI*2); if (d > Math.PI) d -= Math.PI*2; if (d < -Math.PI) d += Math.PI*2; return d; }
+    function stateAt(t){
+      var u = ease(t / STEPS);
+      var pos = 0.03 + (pos0 - 0.03) * (1 - u);
+      var negs = [];
+      for (var i = 0; i < N_NEG; i++) negs.push(negStart[i] + (negFinal[i] - negStart[i]) * u);
+      return { pos: pos, negs: negs };
+    }
+    function simsOf(st){
+      var s = [Math.cos(st.pos)];
+      for (var i = 0; i < N_NEG; i++) s.push(Math.cos(st.negs[i]));
+      return s;
+    }
+    function lossOf(sims){
+      var m = -1e9, i, v;
+      for (i = 0; i < sims.length; i++){ v = sims[i]/TAU; if (v > m) m = v; }
+      var sum = 0;
+      for (i = 0; i < sims.length; i++) sum += Math.exp(sims[i]/TAU - m);
+      return -(sims[0]/TAU - m) + Math.log(sum);
+    }
+    /* Per-step loss so the trail draws smoothly at any slider position. */
+    var lossCurve = [];
+    for (var s = 0; s <= STEPS; s++) lossCurve.push(lossOf(simsOf(stateAt(s))));
+    /* Y-axis rescaled to the data range (loss runs about 1.17 to 1.81). */
+    var YMIN = 1.0, YMAX = 2.0;
+
+    /* Responsive layout: side-by-side on desktop, disk on top and loss below
+       when the canvas shows smaller than about 480 CSS px. */
+    function computeLayout(cssW){
+      var small = cssW < 480;
+      var L;
+      if (small){
+        L = { W: 400, H: 566, small: true,
+              cx: 200, cy: 152, R: 112,
+              px0: 66, px1: 380, py0: 348, py1: 506, titleY: 322 };
+      } else {
+        L = { W: 560, H: 360, small: false,
+              cx: 170, cy: 185, R: 140,
+              px0: 404, px1: 548, py0: 60, py1: 300, titleY: 34 };
+      }
+      /* attnDemo pattern: draw text at 12*S attribute px so it renders ~12 CSS px. */
+      var S = L.W / cssW;
+      return { L: L, S: S, FS: Math.max(1, Math.round(12 * S)) };
+    }
+    function setup(){
+      canvas.style.width = '100%';
+      canvas.style.height = 'auto';
+      /* Round 6: the first draw used FS=8 because computeLayout read
+         clientWidth before maxWidth capped the canvas (S~0.65), while every
+         redraw recomputed S=1 (FS=12). Pass one picks the layout and applies
+         maxWidth; pass two re-measures, so the FIRST draw gets the same
+         scale as every redraw. */
+      var lay = computeLayout(canvas.clientWidth || 560);
+      var aw = Math.round(lay.L.W * dpr), ah = Math.round(lay.L.H * dpr);
+      if (canvas.width !== aw || canvas.height !== ah){
+        canvas.width = aw; canvas.height = ah;
+        canvas.style.maxWidth = lay.L.W + 'px';
+      }
+      lay = computeLayout(canvas.clientWidth || lay.L.W);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      return lay;
+    }
+
+    var slider = document.getElementById('ppSteps');
+    var valLab = document.getElementById('ppStepsVal');
+    var stats = document.getElementById('ppStats');
+    var playBtn = document.getElementById('ppPlay');
+    var timer = null;
+    /* Scroll-stability (2026-10-09): the Play label widens to "Pause" mid-tour;
+       the width change reflows the wrapping flex row by 1px at 390px (99.6->98.6),
+       moving the page. Fix the button's width to the widest label variant.
+       Follows the r4scroll reserve pattern. */
+    (function () {
+      var prev = playBtn.textContent, max = 0;
+      ['Play', 'Pause'].forEach(function (t) {
+        playBtn.textContent = t;
+        max = Math.max(max, playBtn.getBoundingClientRect().width);
+      });
+      playBtn.textContent = prev;
+      /* Buttons are border-box in this UA stylesheet, so minWidth floors the
+         measured border-box width directly. */
+      playBtn.style.minWidth = Math.ceil(max) + 'px';
+    })();
+
+    function pt(cx, cy, R, a){ return [cx + R*Math.cos(a), cy - R*Math.sin(a)]; }
+
+    function draw(){
+      var lay = setup();
+      var L = lay.L, S = lay.S, FS = lay.FS;
+      var t = parseInt(slider.value, 10);
+      valLab.textContent = t;
+      var st = stateAt(t), sims = simsOf(st), loss = lossOf(sims);
+      var mx = sims[0], top1 = true, i;
+      for (i = 1; i < sims.length; i++) if (sims[i] > mx){ mx = sims[i]; top1 = false; }
+      stats.innerHTML = 'anchor\'s nearest neighbor: <strong style="color:' + (top1 ? '#1a7a3a' : '#c0392b') + '">' + (top1 ? 'the twin' : 'a negative') + '</strong>' +
+        '<br>τ = 0.5, fixed in this toy';
+
+      ctx.clearRect(0, 0, L.W, L.H);
+      var cx = L.cx, cy = L.cy, R = L.R;
+      ctx.strokeStyle = '#bdc3c7'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2); ctx.stroke();
+      /* Name the circle in-visual. (The old center dot is gone: on a unit circle
+         of L2-normalized embeddings no point can live inside the circle, so a
+         center mark only reads as a stray data point.) */
+      ctx.fillStyle = '#7f8c8d'; ctx.font = FS + 'px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('unit circle: every embedding lives on it', cx, cy + R + Math.round(20*S));
+
+      var pa = pt(cx, cy, R, 0), pp = pt(cx, cy, R, st.pos);
+      ctx.strokeStyle = 'rgba(39,174,96,0.55)'; ctx.lineWidth = 2; ctx.setLineDash([5,4]);
+      ctx.beginPath(); ctx.moveTo(pa[0], pa[1]); ctx.lineTo(pp[0], pp[1]); ctx.stroke();
+      ctx.setLineDash([]);
+      /* Name the dashed chord where it is drawn: the gap training closes. */
+      if (Math.abs(wrapDelta(0, st.pos)) > 0.35){
+        ctx.fillStyle = '#1e8449'; ctx.font = FS + 'px sans-serif'; ctx.textAlign = 'right';
+        ctx.fillText('gap', (pa[0] + pp[0]) / 2 - Math.round(10*S), (pa[1] + pp[1]) / 2 + Math.round(4*S));
+      }
+
+      ctx.fillStyle = '#e74c3c';
+      for (i = 0; i < N_NEG; i++){
+        var q = pt(cx, cy, R, st.negs[i]);
+        ctx.beginPath(); ctx.arc(q[0], q[1], Math.max(3, Math.round(5*S)), 0, Math.PI*2); ctx.fill();
+      }
+      ctx.fillStyle = '#2980b9';
+      ctx.beginPath(); ctx.arc(pa[0], pa[1], Math.max(4, Math.round(8*S)), 0, Math.PI*2); ctx.fill();
+      /* The positive is drawn last, as a green ring, so it stays visible on top of the anchor. */
+      ctx.strokeStyle = '#1e8449'; ctx.lineWidth = Math.max(2, Math.round(3*S));
+      ctx.beginPath(); ctx.arc(pp[0], pp[1], Math.max(6, Math.round(9*S)), 0, Math.PI*2); ctx.stroke();
+
+      ctx.font = FS + 'px sans-serif'; ctx.fillStyle = '#2c3e50'; ctx.textAlign = 'left';
+      var sep = Math.abs(wrapDelta(0, st.pos));
+      /* One merged label only once the green ring sits on the anchor dot
+         (ring overlaps the dot), never while a gap is visible. */
+      var cdist = Math.hypot(pa[0] - pp[0], pa[1] - pp[1]);
+      var touch = cdist <= Math.max(6, Math.round(9*S)) + 0.5 * Math.max(4, Math.round(8*S));
+      if (!touch){
+        ctx.fillStyle = '#2471a3';
+        ctx.fillText('anchor', pa[0] + Math.round(12*S), pa[1] + Math.round(4*S));
+        ctx.fillStyle = '#1e8449';
+        ctx.fillText('positive', pp[0] + Math.round(11*S), pp[1] - Math.round(8*S));
+      } else {
+        /* Merged: one label only, never two stacked on each other. */
+        ctx.fillStyle = '#1a7a3a';
+        ctx.fillText('anchor +', pa[0] + Math.round(12*S), pa[1] - Math.round(4*S));
+        ctx.fillText('positive', pa[0] + Math.round(12*S), pa[1] + Math.round(12*S));
+      }
+
+      ctx.textAlign = 'center'; ctx.font = FS + 'px sans-serif';
+      ctx.fillStyle = '#2471a3';
+      ctx.fillText('anchor: a cat photo', cx, cy - Math.round(40*S));
+      ctx.fillStyle = '#1e8449';
+      ctx.fillText('positive: its twin', cx, cy - Math.round(22*S));
+      ctx.fillStyle = '#c0392b';
+      ctx.fillText('red: 12 other photos', cx, cy + Math.round(30*S));
+      ctx.fillText('(negatives)', cx, cy + Math.round(48*S));
+      ctx.textAlign = 'left';
+      /* Loss plot. The trail draws only up to the current step: no future shown. */
+      var px0 = L.px0, px1 = L.px1, py0 = L.py0, py1 = L.py1;
+      function xOf(sv){ return px0 + (sv/STEPS)*(px1-px0); }
+      function yOf(lv){ return py1 - ((lv - YMIN)/(YMAX - YMIN))*(py1-py0); }
+      ctx.fillStyle = '#2c3e50'; ctx.font = 'bold ' + Math.max(1, Math.round(13*S)) + 'px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('NT-Xent loss', (px0+px1)/2, L.titleY);
+      ctx.strokeStyle = '#bdc3c7'; ctx.lineWidth = 1;
+      ctx.strokeRect(px0, py0, px1-px0, py1-py0);
+      ctx.font = FS + 'px sans-serif';
+      var yt;
+      for (yt = YMIN; yt <= YMAX + 1e-9; yt += 0.2){
+        var yy = yOf(yt);
+        ctx.strokeStyle = '#ecf0f1';
+        ctx.beginPath(); ctx.moveTo(px0, yy); ctx.lineTo(px1, yy); ctx.stroke();
+        ctx.fillStyle = '#7f8c8d'; ctx.textAlign = 'right';
+        ctx.fillText(yt.toFixed(1), px0 - Math.round(6*S), yy + Math.round(4*S));
+      }
+      ctx.fillStyle = '#7f8c8d'; ctx.textAlign = 'center';
+      [0, 100, 200].forEach(function(sv){
+        ctx.fillText(sv, xOf(sv), py1 + Math.round(16*S));
+      });
+      ctx.fillText('steps', (px0+px1)/2, py1 + Math.round(32*S));
+      /* Trail: steps 0..t only. The future stays blank until you get there.
+         Clipped to the plot rect so the marker can never streak into the margin. */
+      ctx.save();
+      ctx.beginPath(); ctx.rect(px0, py0, px1-px0, py1-py0); ctx.clip();
+      ctx.strokeStyle = '#2980b9'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (var k = 0; k <= t; k++){
+        var kx = xOf(k), ky = yOf(lossCurve[k]);
+        if (k === 0) ctx.moveTo(kx, ky); else ctx.lineTo(kx, ky);
+      }
+      if (t > 0) ctx.stroke();
+      var mxp = xOf(t), myp = yOf(loss);
+      ctx.restore();
+      ctx.fillStyle = '#e74c3c';
+      ctx.beginPath(); ctx.arc(mxp, myp, Math.max(4, Math.round(5*S)), 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#2c3e50'; ctx.font = 'bold ' + FS + 'px sans-serif'; ctx.textAlign = 'center';
+      /* Keep the value label clear of the y-tick labels at the left edge. */
+      var labX = Math.min(px1 - Math.round(18*S), Math.max(mxp, px0 + Math.round(34*S)));
+      ctx.fillText(loss.toFixed(2), labX, myp - Math.round(10*S));
+    }
+    slider.addEventListener('input', function(){
+      if (timer){ cancelAnimationFrame(timer); timer = null; playBtn.textContent = 'Play'; }
+      draw();
+    });
+    playBtn.addEventListener('click', function(){
+      if (timer){ cancelAnimationFrame(timer); timer = null; playBtn.textContent = 'Play'; return; }
+      if (parseInt(slider.value, 10) >= STEPS){ slider.value = 0; draw(); }
+      playBtn.textContent = 'Pause';
+      var demo = playBtn.closest('.demo');
+      if (demo) playScrollEnsure(demo);
+      /* Continuous run: the remaining steps play out over about 10 s in total. */
+      var t0 = parseInt(slider.value, 10), start = null, DUR = 10000 * (STEPS - t0) / STEPS;
+      function frame(ts){
+        if (start === null) start = ts;
+        var t = Math.min(STEPS, Math.round(t0 + (ts - start) / DUR * (STEPS - t0)));
+        if (t !== parseInt(slider.value, 10)){ slider.value = t; draw(); }
+        if (t >= STEPS){ timer = null; playBtn.textContent = 'Play'; return; }
+        timer = requestAnimationFrame(frame);
+      }
+      timer = requestAnimationFrame(frame);
+    });
+    /* Reset: stop the run and put the disk back at step 0, the opening state. */
+    document.getElementById('ppReset').addEventListener('click', function(){
+      if (timer){ cancelAnimationFrame(timer); timer = null; }
+      playBtn.textContent = 'Play';
+      slider.value = 0;
+      draw();
+    });
+    var rzT = null;
+    window.addEventListener('resize', function(){
+      if (rzT) clearTimeout(rzT);
+      rzT = setTimeout(draw, 150);
+    });
+    draw();
+  })();
+
+  </script>
+
   <h2 id="augmentations">Augmentations decide what is learned</h2>
 
-  <p>SimCLR applies three random edits to every view: a <strong>crop</strong> resized back to full size (with a random left-right flip), <strong>color distortion</strong> (brightness, contrast, saturation and hue, and sometimes dropping the color), and <strong>Gaussian blur</strong>. Tested one at a time and in pairs on <strong>ImageNet</strong> (about 1.28 million photos, labels unused) and scored with a <a href="ssl.html#linear-probe">linear probe</a> (a linear classifier on the frozen encoder), no single edit was enough; crop plus color distortion stood out.</p>
-
-  <p>The reason is a shortcut. Crops of one photo share the same mix of colors, and a <strong>color histogram</strong> (how often each color appears) already tells photos apart, so with crops alone the network matches colors and never looks at shapes. Color distortion takes that shortcut away. The same pipeline, applied twice, gives the two views:</p>
+  <p>SimCLR edits every view with a random <strong>crop</strong> resized back to full size (plus a random flip), <strong>color distortion</strong> and <strong>Gaussian blur</strong>. On <strong>ImageNet</strong> (about 1.28 million photos, labels unused), scored with a <a href="ssl.html#linear-probe">linear probe</a>, no single edit was enough; crop plus color distortion stood out. Crops of one photo share the same mix of colors, so with crops alone the network matches <strong>color histograms</strong> (how often each color appears) and ignores shapes. Color distortion removes that shortcut:</p>
 
 <pre><code class="language-python">import torchvision.transforms as T
 augment = T.Compose([
@@ -1707,14 +1731,13 @@ augment = T.Compose([
 ])
 view1, view2 = augment(img), augment(img)     # two random views of one PIL image</code></pre>
 
-  <p>The positive pair is a promise that two views are the same thing. Weak edits keep it but teach nothing, because matching pixels is enough. Strong edits make the pixels disagree, so the model must match content, <em>until the crops stop sharing any scene and the promise is a lie</em>.</p>
+  <p>Weak edits teach nothing, because matching pixels is enough. Strong edits force the model to match content, <em>until the crops share no scene and the positive pair is a lie</em>.</p>
 
   <div class="demo">
     <div class="demo-controls">
       <label for="augS">Augmentation strength: <span id="augSVal">30</span>%</label>
       <input type="range" id="augS" min="0" max="100" value="30" step="1">
-      <button type="button" id="augPlay">Play</button>
-      <button type="button" id="augReset">Reset</button>
+      <span class="demo-btnrow"><button type="button" class="demo-btn demo-btn-play" id="augPlay">Play</button><button type="button" class="demo-btn" id="augReset">Reset</button></span>
     </div>
     <div class="canvas-wrap aug-row">
       <div class="aug-cell"><canvas id="augOrig"></canvas><div class="aug-lab">image, two crops</div></div>
@@ -1866,42 +1889,33 @@ view1, view2 = augment(img), augment(img)     # two random views of one PIL imag
   </script>
   <h2 id="projection-head">A throwaway head protects the features</h2>
 
-  <p>The projection head g is a small <strong>MLP</strong> (two linear layers with a ReLU between them) on top of the encoder. The encoder's output is the representation h; g maps it to z, the vector the loss compares. After training, g is thrown away and h is kept. The loss pushes z to ignore whatever the augmentations change, such as color or orientation, and some of that is useful later; g absorbs that pressure so h keeps it. A linear probe on h scores more than 10% better than one on z.</p>
+  <p>The projection head g is a small <strong>MLP</strong> (multilayer perceptron: two linear layers with a <strong>ReLU</strong>, which zeroes negative values, between them). It maps the encoder's output h to z, the vector the loss compares, and is thrown away after training. The loss makes z ignore what augmentations change, such as color; g absorbs that, so a linear probe on h beats one on z by more than 10%.</p>
 
   <h2 id="moco-queue">A queue replaces the giant batch</h2>
 
-  <p>SimCLR's negatives come from the batch, 2(N&minus;1) per positive pair, so a batch of 256 gives only 510; its default batch is 4096. Every view's intermediate results must sit on the <strong>GPUs</strong> (graphics processors) at once, and the MoCo v2 authors estimate a batch of 4096 would need about 93 GB per GPU, intractable even on a high-end 8-GPU machine.</p>
-
-  <p><strong>MoCo</strong> (Momentum Contrast, He et al. 2020) keeps negatives in a <strong>queue</strong>: recent batches' embeddings stay in memory, the newest batch joins and the oldest leaves. The view being trained is the <strong>query</strong>, the embeddings it is compared against are <strong>keys</strong>; its twin is the positive key and the queued keys are the negatives. With a batch of 256 and a queue of 65,536 keys, every query meets tens of thousands of negatives. The loss is the same card as above, which MoCo calls <strong>InfoNCE</strong> (the name from contrastive predictive coding, van den Oord et al. 2018), with the queue in the denominator and &tau; = 0.07.</p>
+  <p>SimCLR's negatives come from the batch, 2(N&minus;1) per positive pair: only 510 at a batch of 256. Its default batch of 4096 is too big even for a high-end machine with 8 <strong>GPUs</strong> (graphics processors), by the MoCo v2 authors' estimate. <strong>MoCo</strong> (Momentum Contrast, He et al. 2020) keeps recent batches' embeddings as negatives in a <strong>queue</strong> instead. The trained view is the <strong>query</strong>, its twin is the positive <strong>key</strong>, and 65,536 queued keys are the negatives, at a batch of 256. The loss is the same card, which MoCo calls <strong>InfoNCE</strong> (after van den Oord et al. 2018), with &tau; = 0.07.</p>
 
   <figure class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 384" style="max-width:480px" role="img" aria-label="MoCo: view 1 goes through the query encoder, trained by gradient descent, view 2 through the key encoder, a slow moving-average copy. Each new key joins a queue of 65,536 keys from past batches and the oldest leaves. The query is pulled toward its own key and pushed away from every queued key"><rect class="mtd-box " x="4.0" y="22.0" width="76.0" height="52.0" rx="7"/><text class="" x="42.0" y="54.0" text-anchor="middle" style="font-size:18px;font-weight:600">view 1</text><rect class="mtd-box " x="4.0" y="142.0" width="76.0" height="52.0" rx="7"/><text class="" x="42.0" y="174.0" text-anchor="middle" style="font-size:18px;font-weight:600">view 2</text><rect class="mtd-box " x="100.0" y="14.0" width="166.0" height="68.0" rx="7" style="stroke:#ca6f1e"/><text class="mtd-t2" x="183.0" y="45.0" text-anchor="middle" style="font-size:18px;font-weight:600">query encoder</text><text class="mtd-sub" x="183.0" y="66.0" text-anchor="middle" style="font-size:16px">gradient descent</text><rect class="mtd-box " x="100.0" y="134.0" width="166.0" height="68.0" rx="7" style="stroke:#1f618d"/><text class="mtd-t1" x="183.0" y="165.0" text-anchor="middle" style="font-size:18px;font-weight:600">key encoder</text><text class="mtd-sub" x="183.0" y="186.0" text-anchor="middle" style="font-size:16px">moving average</text><line class="mtd-s mtd-cg" x1="80.0" y1="48.0" x2="91.0" y2="48.0" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-cg" points="100.0,48.0 91.0,52.5 91.0,43.5"/><line class="mtd-s mtd-cg" x1="80.0" y1="168.0" x2="91.0" y2="168.0" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-cg" points="100.0,168.0 91.0,172.5 91.0,163.5"/><line class="mtd-s mtd-cg" x1="183.0" y1="82.0" x2="183.0" y2="125.0" style="stroke-width:2.2px;stroke-dasharray:5 4"/><polygon class="mtd-f mtd-cg" points="183.0,134.0 178.5,125.0 187.5,125.0"/><text class="mtd-sub" x="191.0" y="114.0" text-anchor="start" style="font-size:17px">slow copy</text><line class="mtd-s mtd-c2" x1="266.0" y1="48.0" x2="291.0" y2="48.0" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-c2" points="300.0,48.0 291.0,52.5 291.0,43.5"/><circle class="mtd-f mtd-c2" cx="310" cy="48" r="9"/><text class="mtd-t2" x="325.0" y="54.0" text-anchor="start" style="font-size:17px;font-weight:600">query</text><line class="mtd-s mtd-c1" x1="266.0" y1="168.0" x2="291.0" y2="168.0" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-c1" points="300.0,168.0 291.0,172.5 291.0,163.5"/><circle class="mtd-f mtd-c1" cx="310" cy="168" r="9"/><text class="mtd-t1" x="325.0" y="174.0" text-anchor="start" style="font-size:17px;font-weight:600">key</text><text class="" x="200.0" y="308.0" text-anchor="middle" style="font-size:17px;font-weight:700">queue of 65,536 keys from past batches</text><rect class="mtd-box" x="38.0" y="250" width="23.3" height="34" rx="3" style="fill:#d6e4f0;stroke:#1f618d;stroke-width:1px;opacity:0.35"/><rect class="mtd-box" x="65.3" y="250" width="23.3" height="34" rx="3" style="fill:#d6e4f0;stroke:#1f618d;stroke-width:1px;opacity:0.41"/><rect class="mtd-box" x="92.7" y="250" width="23.3" height="34" rx="3" style="fill:#d6e4f0;stroke:#1f618d;stroke-width:1px;opacity:0.47"/><rect class="mtd-box" x="120.0" y="250" width="23.3" height="34" rx="3" style="fill:#d6e4f0;stroke:#1f618d;stroke-width:1px;opacity:0.53"/><rect class="mtd-box" x="147.3" y="250" width="23.3" height="34" rx="3" style="fill:#d6e4f0;stroke:#1f618d;stroke-width:1px;opacity:0.59"/><rect class="mtd-box" x="174.7" y="250" width="23.3" height="34" rx="3" style="fill:#d6e4f0;stroke:#1f618d;stroke-width:1px;opacity:0.65"/><rect class="mtd-box" x="202.0" y="250" width="23.3" height="34" rx="3" style="fill:#d6e4f0;stroke:#1f618d;stroke-width:1px;opacity:0.70"/><rect class="mtd-box" x="229.3" y="250" width="23.3" height="34" rx="3" style="fill:#d6e4f0;stroke:#1f618d;stroke-width:1px;opacity:0.76"/><rect class="mtd-box" x="256.7" y="250" width="23.3" height="34" rx="3" style="fill:#d6e4f0;stroke:#1f618d;stroke-width:1px;opacity:0.82"/><rect class="mtd-box" x="284.0" y="250" width="23.3" height="34" rx="3" style="fill:#d6e4f0;stroke:#1f618d;stroke-width:1px;opacity:0.88"/><rect class="mtd-box" x="311.3" y="250" width="23.3" height="34" rx="3" style="fill:#d6e4f0;stroke:#1f618d;stroke-width:1px;opacity:0.94"/><rect class="mtd-box" x="338.7" y="250" width="23.3" height="34" rx="3" style="fill:#d6e4f0;stroke:#1f618d;stroke-width:1px;opacity:1.00"/><line class="mtd-s mtd-c1" x1="310" y1="177" x2="310" y2="218" style="stroke-width:2.5px"/><line class="mtd-s mtd-c1" x1="310" y1="218" x2="350.3333333333333" y2="218" style="stroke-width:2.5px"/><line class="mtd-s mtd-c1" x1="350.3" y1="218.0" x2="350.3" y2="241.0" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-c1" points="350.3,250.0 345.8,241.0 354.8,241.0"/><text class="mtd-sub" x="302.0" y="238.0" text-anchor="end" style="font-size:16px">newest in</text><line class="mtd-s mtd-cg" x1="38.0" y1="267.0" x2="12.0" y2="267.0" style="stroke-width:2.2px"/><polygon class="mtd-f mtd-cg" points="4.0,267.0 12.0,263.0 12.0,271.0"/><text class="mtd-sub" x="4.0" y="238.0" text-anchor="start" style="font-size:16px">oldest out</text><line class="mtd-sep" x1="0" y1="322" x2="400" y2="322"/><text class="mtd-grn" x="200.0" y="348.0" text-anchor="middle" style="font-size:17px;font-weight:600">query and its own key: pull together</text><text class="mtd-red" x="200.0" y="374.0" text-anchor="middle" style="font-size:17px;font-weight:600">query and every queued key: push apart</text></svg><figcaption class="caption">The slow key encoder feeds a queue of negatives, so a small batch still meets tens of thousands of them.</figcaption></figure>
 
-  <p>Keys from many batches ago came from an older encoder, so they are <strong>stale</strong>. MoCo computes keys with a second encoder, the <strong>momentum encoder</strong>, which gets no gradients and trails the query encoder as an <strong>exponential moving average</strong> (EMA):</p>
+  <p>Queued keys came from older weights, so MoCo computes keys with a <strong>momentum encoder</strong> that gets no gradients and trails the query encoder as an <strong>exponential moving average</strong> (EMA):</p>
 
   <div class="eq-card" id="sslMocoEqStatic">
 <div class="eq-what">The momentum update: the key encoder trails the query encoder slowly.</div>
 <div class="eq-line eq-active" data-eqline="0"><span class="eqt" style="color:#2a7fbf">p<sub>k</sub></span> &#8592; <span class="eqt" style="color:#2c3e50">m</span>&#183;<span class="eqt" style="color:#2a7fbf">p<sub>k</sub></span> + (1&#8722;<span class="eqt" style="color:#2c3e50">m</span>)&#183;<span class="eqt" style="color:#d35400">p<sub>q</sub></span></div>
-<div class="eq-why eq-active" data-eqline="0">After every step the key encoder's weights <span class="eqt" style="color:#2a7fbf">p<sub>k</sub></span> keep the share <span class="eqt" style="color:#2c3e50">m</span> of themselves and take the rest from the query encoder's weights <span class="eqt" style="color:#d35400">p<sub>q</sub></span>. With m = 0.999 the key encoder barely moves, so the queued keys stay consistent.</div>
+<div class="eq-why eq-active" data-eqline="0">After every step the key encoder's weights <span class="eqt" style="color:#2a7fbf">p<sub>k</sub></span> keep the share <span class="eqt" style="color:#2c3e50">m</span> of themselves and take the rest from the query encoder's weights <span class="eqt" style="color:#d35400">p<sub>q</sub></span>. With m = 0.999 the key encoder barely moves, so queued keys stay consistent.</div>
 </div>
 
-<pre><code class="language-python">@torch.no_grad()
-def momentum_update(query_encoder, key_encoder, m=0.999):
-    for p_q, p_k in zip(query_encoder.parameters(), key_encoder.parameters()):
-        p_k.data = m * p_k.data + (1 - m) * p_q.data</code></pre>
+  <p>The slow copy matters: m = 0.999 beat m = 0.9, and copying every step (m = 0) did not converge. MoCo v2 (Chen et al. 2020) added SimCLR's MLP head and blur and, at a batch of 256, beat SimCLR's large-batch result (<a href="ssl.html#close-to-supervised">results table</a>). The same pull and push also matches photos to their captions in <a href="qformer.html#blip">From BLIP to the Q-Former</a>.</p>
 
-  <p>The slow copy matters. With a <strong>ResNet-50</strong> (a 50-layer image network) trained on ImageNet with a queue of 4096 keys and scored by a linear probe, copying the query encoder every step (m = 0) did not converge, m = 0.9 reached 55.2% and m = 0.999 reached 59.0% top-1 accuracy (the share of test images whose top-scoring class is right). MoCo v2 (Chen et al. 2020) added SimCLR's MLP head, blur and a cosine learning-rate schedule and, with a batch of only 256, beat SimCLR's large-batch result; the numbers are in <a href="ssl.html#close-to-supervised">the results table</a>.</p>
-
-  <p>The same pull and push also works between images and captions: the image-text contrastive loss in <a href="qformer.html#blip">From BLIP to the Q-Former</a> pulls a photo and its own caption together.</p>
-
-  <p>Next, <a href="non-contrastive-ssl.html">Non-Contrastive Self-Supervised Learning</a> drops the negatives entirely and still keeps every image from landing on the same point.</p>
+  <p>Next, <a href="non-contrastive-ssl.html">Non-Contrastive Self-Supervised Learning</a> drops the negatives entirely.</p>
 
   <h2 id="references">References</h2>
 
   <ul class="reflist">
-    <li>Chen, T., Kornblith, S., Norouzi, M., and Hinton, G. (2020). A Simple Framework for Contrastive Learning of Visual Representations. ICML 2020. <a href="https://arxiv.org/abs/2002.05709">arXiv:2002.05709</a>.</li>
-    <li>He, K., Fan, H., Wu, Y., Xie, S., and Girshick, R. (2020). Momentum Contrast for Unsupervised Visual Representation Learning. CVPR 2020. <a href="https://arxiv.org/abs/1911.05722">arXiv:1911.05722</a>.</li>
-    <li>Chen, X., Fan, H., Girshick, R., and He, K. (2020). Improved Baselines with Momentum Contrastive Learning. <a href="https://arxiv.org/abs/2003.04297">arXiv:2003.04297</a>.</li>
-    <li>van den Oord, A., Li, Y., and Vinyals, O. (2018). Representation Learning with Contrastive Predictive Coding. <a href="https://arxiv.org/abs/1807.03748">arXiv:1807.03748</a>.</li>
+    <li>Chen, T., et al. (2020). A Simple Framework for Contrastive Learning of Visual Representations. ICML 2020. <a href="https://arxiv.org/abs/2002.05709">arXiv:2002.05709</a>.</li>
+    <li>He, K., et al. (2020). Momentum Contrast for Unsupervised Visual Representation Learning. CVPR 2020. <a href="https://arxiv.org/abs/1911.05722">arXiv:1911.05722</a>.</li>
+    <li>Chen, X., et al. (2020). Improved Baselines with Momentum Contrastive Learning. <a href="https://arxiv.org/abs/2003.04297">arXiv:2003.04297</a>.</li>
+    <li>van den Oord, A., et al. (2018). Representation Learning with Contrastive Predictive Coding. <a href="https://arxiv.org/abs/1807.03748">arXiv:1807.03748</a>.</li>
   </ul>
 
             <script>

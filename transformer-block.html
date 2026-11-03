@@ -480,9 +480,9 @@
     #attnLayer .al-scene { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .7rem; }
     #attnLayer .al-region { border: 1px solid #dfe6ec; border-radius: 10px; padding: .5rem .6rem; background: #fff; }
     #attnLayer .al-region-title { font-size: .78rem; font-weight: 700; color: #2c3e50; margin: 0 0 .35rem; }
-    /* Shared walkthrough equation-card contract (verbatim, all pages) */
-    
-    .eq-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+        /* Shared walkthrough equation-card contract (verbatim, all pages) */
+        
+        .eq-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
 
           padding:1rem 1.2rem;margin:1.75rem auto;max-width:640px;overflow-x:auto}
 
@@ -946,6 +946,7 @@ figcaption { margin-top: 1rem; }
   <p>
     A Transformer is a stack of identical <strong>blocks</strong>, all trained together so the top vectors predict well.
     This page builds one block, then the models it stacks into.
+    Every block runs on every forward pass over all tokens, in training and in generation.
   </p>
   <p>
     As in <a href="transformers.html">Attention</a>, each <strong>token</strong> (a word or word piece) is a vector of <var>d<sub>model</sub></var> numbers making a <strong>query</strong>, a <strong>key</strong> and a <strong>value</strong>, stacked as rows of <var>Q</var>, <var>K</var> and <var>V</var> (key length <var>d<sub>k</sub></var>).
@@ -963,7 +964,7 @@ figcaption { margin-top: 1rem; }
 
   <h2 id="the-full-block"><span class="secnum">1</span> Attention mixes tokens, the FFN transforms each one, residuals add the results</h2>
   <p>
-    A <strong>block</strong> runs two <strong>sublayers</strong> in turn: attention mixes information between tokens, then a small <strong>feed-forward network</strong> (FFN), two linear layers with a ReLU nonlinearity between them, transforms each token on its own.
+    A <strong>block</strong> runs two <strong>sublayers</strong> in turn: attention mixes information between tokens, then a small <strong>feed-forward network</strong> (FFN), two linear layers with a ReLU nonlinearity (it zeroes negative numbers) between them, transforms each token on its own.
     Each sublayer adds its result back onto the token's vector instead of replacing it, so that running vector, the <a href="cnn.html#resnet"><strong>residual stream</strong></a>, flows straight up through every block.
   </p>
   <figure class="figure mtd-fig" id="fig-in-the-residual"><svg class="mtd-svg" viewBox="0 0 400 372" style="max-width:440px" role="img" aria-label="In the residual stream x flows straight up; one branch normalizes it, runs attention and adds the result back; a second branch normalizes it, runs the FFN and adds the result back; a final LayerNorm sits before the output">
@@ -1001,7 +1002,7 @@ figcaption { margin-top: 1rem; }
     <polygon points="290,120 284,131 296,131" style="fill:#1f618d"/>
   </svg><figcaption class="caption"><span class="fignum">Figure 1.</span> Each sublayer reads the stream and adds its result back; nothing replaces <var>x</var>, so the input still reaches the top.</figcaption></figure>
   <p>
-    <strong>LayerNorm</strong> (LN) rescales a token's vector to mean 0 and variance 1 using only that token's numbers (<a href="#layernorm-not-batchnorm">Section 2</a> has the details).
+    <strong>LayerNorm</strong> (LN; Ba et al., 2016) rescales a token's vector to mean 0 and variance 1 using only that token's numbers (<a href="#layernorm-not-batchnorm">Section 2</a> has the details).
     With LN before each sublayer, a layout called <strong>Pre-LN</strong>, one block is two lines plus one final LayerNorm:
   </p>
   <div class="eq-card" id="tbPreLnEq">
@@ -1064,7 +1065,7 @@ class Block(nn.Module):
         <div class="eq-why eq-active" data-eqline="0">LayerNorm returns the token's vector at a standard scale, then lets training pick the scale it wants. Subtracting the token's own mean <var>μ</var> centers it at 0, and dividing by its spread (<var>σ<sup>2</sup></var> is its variance, <var>ε</var> a tiny constant that stops a division by zero) sets its variance to 1, so a token whose numbers have grown 10 times bigger comes out the same. The learned <var>γ</var> and <var>β</var> then rescale and shift each feature (&#8857; multiplies feature by feature), so the network can undo the normalization where that helps.</div>
     </div>
   <p>
-    <a href="cnn.html#batch-norm"><strong>BatchNorm</strong></a>, the usual choice in image models, instead averages each feature over every token of every sequence in the batch:
+    <a href="cnn.html#batch-norm"><strong>BatchNorm</strong></a> (Ioffe and Szegedy, 2015), the usual choice in image models, instead averages each feature over every token of every sequence in the batch:
   </p>
   <figure class="figure mtd-fig" id="fig-two-sentences-each"><svg class="mtd-svg" viewBox="0 0 400 202" style="max-width:460px" role="img" aria-label="Two sentences, each a grid of tokens by features. LayerNorm averages along one token's row; BatchNorm averages one feature's column across every token of every sentence">
     <text x="100" y="20" text-anchor="middle" style="font-size:16.5px;font-weight:700">LayerNorm</text>
@@ -1260,7 +1261,7 @@ print(F.layer_norm(one_token, (3,)))  # [-1.22, 0., 1.22]</code></pre>
       <text x="44" y="232" text-anchor="start" style="font-size:18px">layer 1, input</text>
       <text x="396" y="232" text-anchor="end" style="font-size:18px">layer 6, output</text>
     </svg>
-    <p class="caption"><span class="fignum">Figure 4.</span> Heights read approximately off Xiong et al.'s Fig. 3(a), at initialization.</p>
+    <p class="caption"><span class="fignum">Figure 4.</span> Heights read approximately off the paper's Fig. 3(a), at initialization.</p>
     <p class="demo-stats" id="lnStat" aria-live="polite">In Post-LN the gradient bars grow toward the output layers at the start, so training needs a warmup.</p>
   </div>
   <script>
@@ -1347,7 +1348,7 @@ print(lrate(4000), lrate(16000))  # about 7e-4, then half</code></pre>
     <p class="caption"><span class="fignum">Figure 5.</span> The rate peaks at step 4000; by step 12000 it is down to about 0.58 of the peak.</p>
   </figure>
 
-  <p>Xiong et al. trained Pre-LN models with no warmup and, in their words, reached "comparable results with baselines while requiring significantly less training time".</p>
+  <p>The same paper trained Pre-LN models with no warmup and, in its words, reached "comparable results with baselines while requiring significantly less training time".</p>
 
   <hr>
 
@@ -1495,24 +1496,29 @@ print(lrate(4000), lrate(16000))  # about 7e-4, then half</code></pre>
   <figure class="figure mtd-fig" id="transFigStatic">
     <style>
       #transFigStatic img { height: auto; display: block; border: 1px solid #d5dbdb; border-radius: 8px; background: #fff; margin: 0 auto; box-sizing: border-box; }
-      #transFigStatic .tf1-full { width: auto; max-width: min(640px, 100%); max-height: 700px; padding: 6px; }
-      #transFigStatic .tf1-half { display: none; padding: 4px; }
+      #transFigStatic .tf1-wrap { position: relative; display: block; width: fit-content; max-width: 100%; margin: 0 auto; }
+      #transFigStatic .tf1-mk { position: absolute; transform: translate(-50%, -50%); width: 24px; height: 24px; line-height: 24px; border-radius: 50%; background: #2c3e50; color: #fff; font-size: 13px; font-weight: 700; text-align: center; }
+      #transFigStatic .tf1-full img { width: auto; max-width: min(640px, 100%); max-height: 700px; padding: 6px; }
+      #transFigStatic .tf1-half { display: none; }
+      #transFigStatic .tf1-half img { padding: 4px; }
       @media (max-width: 600px) {
         #transFigStatic .tf1-full { display: none; }
-        #transFigStatic .tf1-half { display: block; width: 100%; }
-        #transFigStatic .tf1-dec { width: auto; max-width: 100%; max-height: 720px; margin-top: 1rem; }
+        #transFigStatic .tf1-half { display: block; }
+        #transFigStatic .tf1-enc img { width: 100%; }
+        #transFigStatic .tf1-dec { margin-top: 1rem; }
+        #transFigStatic .tf1-dec img { width: auto; max-width: 100%; max-height: 720px; }
       }
     </style>
-    <img class="tf1-full" src="figures/papers/transformer-fig1.png" alt="Figure 1 of the Attention Is All You Need paper: the Transformer model architecture">
-    <img class="tf1-half tf1-enc" src="figures/papers/transformer-fig1-encoder.png" alt="Left half of Figure 1 of the Attention Is All You Need paper: the encoder stack">
-    <img class="tf1-half tf1-dec" src="figures/papers/transformer-fig1-decoder.png" alt="Right half of Figure 1 of the Attention Is All You Need paper: the decoder stack">
+    <span class="tf1-wrap tf1-full"><img src="figures/papers/transformer-fig1.png" alt="Figure 1 of the Attention Is All You Need paper: the Transformer model architecture"><span class="tf1-mk" style="left:16.8%;top:84.4%">1</span><span class="tf1-mk" style="left:5.3%;top:52.3%">2</span><span class="tf1-mk" style="left:93.4%;top:61.6%">3</span><span class="tf1-mk" style="left:52%;top:14.1%">4</span></span>
+    <span class="tf1-wrap tf1-half tf1-enc"><img src="figures/papers/transformer-fig1-encoder.png" alt="Left half of Figure 1 of the Attention Is All You Need paper: the encoder stack"><span class="tf1-mk" style="left:27.6%;top:79.8%">1</span><span class="tf1-mk" style="left:10.3%;top:29.3%">2</span></span>
+    <span class="tf1-wrap tf1-half tf1-dec"><img src="figures/papers/transformer-fig1-decoder.png" alt="Right half of Figure 1 of the Attention Is All You Need paper: the decoder stack"><span class="tf1-mk" style="left:85.4%;top:61.6%">3</span><span class="tf1-mk" style="left:73.6%;top:14.1%">4</span></span>
     <figcaption class="caption"><span class="fignum">Figure 7.</span> The Transformer paper's <a href="#fig-in-the-residual">Figure 1</a>, whose caption reads "The Transformer - model architecture." <a href="https://arxiv.org/abs/1706.03762">arXiv:1706.03762</a></figcaption>
   </figure>
   <ul>
-    <li>Data flows bottom to top. Input Embedding turns tokens into vectors, and the plus circle adds the position signal.</li>
-    <li>The left stack (shown first on a phone) is the <strong>encoder</strong>, the part that reads the input: <var>N</var> blocks (Nx) of attention and feed-forward, each wrapped in the Post-LN Add &amp; Norm.</li>
-    <li>The right stack is the <strong>decoder</strong>, the part that writes the output. Its bottom attention uses the causal mask; its middle attention takes keys and values from the encoder.</li>
-    <li>Linear and Softmax at the top turn the decoder's last vector into a probability for every word in the vocabulary.</li>
+    <li><span class="cap-mk">1</span>Input Embedding turns tokens into vectors and the plus circle adds the position signal; data flows upward.</li>
+    <li><span class="cap-mk">2</span>The <strong>encoder</strong> reads the input: <var>N</var> blocks (Nx), each sublayer wrapped in the Post-LN Add &amp; Norm.</li>
+    <li><span class="cap-mk">3</span>The <strong>decoder</strong> writes the output: causal-masked attention, then attention over the encoder's keys and values.</li>
+    <li><span class="cap-mk">4</span>Linear and Softmax turn the decoder's last vector into a probability for every vocabulary word.</li>
   </ul>
 
   <hr>
@@ -1572,11 +1578,11 @@ import torch.nn as nn
 MAX_LEN, N_HEADS = 128, 8
 
 class MiniGPT(nn.Module):
-    def __init__(self, V, d, L):  # vocab, width, blocks
+    def __init__(self, V, d, N):  # vocab, width, blocks
         super().__init__()
         self.tok = nn.Embedding(V, d)
         self.pos = nn.Embedding(MAX_LEN, d)
-        blocks = [Block(d, N_HEADS, 4*d) for _ in range(L)]
+        blocks = [Block(d, N_HEADS, 4*d) for _ in range(N)]
         self.body = nn.ModuleList(blocks)
         self.ln = nn.LayerNorm(d)  # final LayerNorm
 
@@ -1653,7 +1659,6 @@ def generate(model, ids, n_new, tau=1.0, max_len=128):
     <p class="caption"><span class="fignum">Figure 10.</span> Temperature sharpens or flattens the same distribution; the order of the words never changes.</p>
   </div>
 
-  <p>What changes when one stream reads another, such as a translation reading its source? <a href="cross-attention.html">Cross-Attention</a>.</p>
 
   <hr>
 
@@ -1684,6 +1689,8 @@ print(sum(p.numel() for p in encoder.parameters()))
     <tr><th scope="row">Next-token loss</th><td>Every training step, all <var>T</var> positions of a sequence graded in one pass.</td></tr>
     <tr><th scope="row"><a href="#tbTempEq">Sampling, <var>&#964;</var></a></th><td>At generation, once per new token. Temperature <var>&#964;</var> divides the logits: higher flattens toward random picks, lower sharpens toward the top token; near 0 it is greedy, always the top token, and very large it is uniform. Default 1.0, the plain softmax (<code>temperature</code> in Hugging Face's generation config).</td></tr>
     <tr><th scope="row"><a href="#tbPreLnEq"><var>d<sub>model</sub></var></a></th><td>Width of the <var>x</var> every block reads and writes; weights grow as 12<var>d<sub>model</sub></var><sup>2</sup> per block, 4<var>d<sub>model</sub></var><sup>2</sup> in attention and 8<var>d<sub>model</sub></var><sup>2</sup> in the FFN. Wider holds more per token at quadratic cost; narrower is cheaper and holds less. The base Transformer uses 512, with 8 heads, FFN width 2048, 6 blocks and ReLU. PyTorch's defaults match the base model, including Post-LN (<code>norm_first=False</code>); this page's code sets <code>norm_first=True</code> for Pre-LN.</td></tr>
+    <tr><th scope="row"><a href="#tbFfnEq"><var>d<sub>ff</sub></var></a></th><td>Width of the FFN's hidden vector <var>u</var>; 2048, four times <var>d<sub>model</sub></var>, in the base model. Wider stores more per token, with FFN weights growing linearly as 2<var>d<sub>model</sub></var><var>d<sub>ff</sub></var>; narrower is cheaper and stores less; near 0 only attention is left. <code>dim_feedforward</code> in PyTorch, default 2048.</td></tr>
+    <tr><th scope="row"><a href="#tbPreLnEq">Blocks <var>N</var></a></th><td>How many blocks are stacked; 6 in the base model's encoder and decoder. More blocks give each token more rounds of mixing and transforming, at cost linear in <var>N</var>; fewer is cheaper and shallower; at 0 only the embeddings and output layer remain. <code>num_layers</code> in <code>nn.TransformerEncoder</code>, no default.</td></tr>
     <tr><th scope="row">Dropout</th><td>Zeroes that fraction of each sublayer's output in training, before it joins <var>x</var>; off at inference. More fights overfitting and slows learning, less fits faster; 0 is none, near 1 passes nothing. The base Transformer uses 0.1, also PyTorch's default.</td></tr>
     <tr><th scope="row">Cost</th><td>3.15M weights per block at 512.</td></tr>
     <tr><th scope="row">Code</th><td><a href="https://docs.pytorch.org/docs/2.15/generated/torch.nn.TransformerEncoderLayer.html"><code>nn.TransformerEncoderLayer</code></a>, <a href="https://docs.pytorch.org/docs/2.15/generated/torch.nn.TransformerEncoder.html"><code>nn.TransformerEncoder</code></a> (PyTorch docs).</td></tr>
@@ -1694,13 +1701,16 @@ print(sum(p.numel() for p in encoder.parameters()))
     <li>All blocks start with the same weights; PyTorch's docs say to re-initialize them.</li>
     <li>A decoder-only model needs a causal <code>mask</code> passed in.</li>
   </ul>
+  <p>What changes when one stream reads another, such as a translation reading its source? <a href="cross-attention.html">Cross-Attention</a>.</p>
 
   <hr>
 
   <h2 id="references"><span class="secnum">9</span> References</h2>
   <ol class="brefs">
     <li>Vaswani, A., et al. (2017). Attention Is All You Need. NeurIPS 2017. <a href="https://arxiv.org/abs/1706.03762">arXiv:1706.03762</a>.</li>
-    <li>He, K., Zhang, X., Ren, S., and Sun, J. (2016). Identity Mappings in Deep Residual Networks. ECCV 2016. <a href="https://arxiv.org/abs/1603.05027">arXiv:1603.05027</a>.</li>
+    <li>He, K., et al. (2016). Identity Mappings in Deep Residual Networks. ECCV 2016. <a href="https://arxiv.org/abs/1603.05027">arXiv:1603.05027</a>.</li>
+    <li>Ba, J. L., et al. (2016). Layer Normalization. <a href="https://arxiv.org/abs/1607.06450">arXiv:1607.06450</a>.</li>
+    <li>Ioffe, S., and Szegedy, C. (2015). Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift. ICML 2015. <a href="https://arxiv.org/abs/1502.03167">arXiv:1502.03167</a>.</li>
     <li>Xiong, R., et al. (2020). On Layer Normalization in the Transformer Architecture. ICML 2020. <a href="https://arxiv.org/abs/2002.04745">arXiv:2002.04745</a>.</li>
     <li>Devlin, J., et al. (2019). BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding. NAACL 2019. <a href="https://arxiv.org/abs/1810.04805">arXiv:1810.04805</a>.</li>
   </ol>

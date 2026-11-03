@@ -1016,63 +1016,29 @@ ol.cs-notes li:nth-child(6n+6) .cs-n{background:#76e3ea}
 </nav>
     <p class="crumb"><a href="tutorial.html">&larr; All tutorials</a></p>
     <h1>GradVac (Gradient Vaccine)</h1>
-    <p class="dek">GradVac edits each pair of task gradients so their cosine similarity returns to that pair&#8217;s usual level.</p>
+    <p class="dek">GradVac keeps each pair of task gradients about as aligned as that pair usually is.</p>
 
-<p>GradVac (Gradient Vaccine; Wang and colleagues, 2021) edits the task gradients before they are added into one update. The cosine similarity of two gradients is their dot product divided by both lengths: 1 for the same direction, 0 at a right angle, &#8722;1 for opposite directions. For every pair of tasks, GradVac keeps a target cosine, a running average of the cosines that pair has shown so far. When the current cosine is below the target, GradVac adds a multiple of one gradient to the other so the cosine equals the target.</p>
-<p>GradVac runs at every training step, on that step&#8217;s minibatch. Its state is one target per task pair per parameter group; the paper&#8217;s best grouping is one group per layer. Each step costs one backward pass per task, <var>K</var> in total for <var>K</var> tasks. It edits only the gradients of the shared parameters; <a href="multitask-training-loop.html#task-gradients">the training-loop page</a> shows how those per-task gradients are computed and written back.</p>
+<p>GradVac (Gradient Vaccine; Wang, Tsvetkov, Firat and Cao, 2021) edits the task gradients before they are added into one update. When two tasks&#8217; gradients agree less than usual, it tilts one toward the other. Agreement is the cosine similarity, the dot product divided by both lengths: 1 for the same direction, 0 at a right angle, &#8722;1 for opposite. Each task pair keeps a target cosine, the running average of its past cosines. Below the target, GradVac adds the coefficient <var>a</var> times one gradient to the other, with <var>a</var> chosen so the cosine equals the target.</p>
+<p>GradVac runs every training step on that step&#8217;s minibatch and costs one backward pass per task, <var>K</var> for <var>K</var> tasks. Its state is one target per task pair per parameter group, a block of shared weights; one layer per group was best in the paper. It edits only the shared parameters&#8217; gradients, computed and written back as in <a href="multitask-training-loop.html#task-gradients">Section 3 of Gradient Balancing Inside the Training Loop</a>.</p>
     <p class="tabs-label">On this page</p>
     <div class="tab-strip">
         <a class="tab-link" href="#zero-question"><span class="secnum">1</span> PCGrad&#8217;s fixed target of zero</a>
         <a class="tab-link" href="#measured"><span class="secnum">2</span> Gradient similarity in multilingual translation</a>
         <a class="tab-link" href="#own-target"><span class="secnum">3</span> A running target per task pair</a>
-        <a class="tab-link" href="#paper-figure-gv"><span class="secnum">4</span> The paper&#8217;s comparison with PCGrad</a>
-        <a class="tab-link" href="#feel-the-nudge"><span class="secnum">5</span> The edit toward the target</a>
-        <a class="tab-link" href="#one-step"><span class="secnum">6</span> One GradVac step</a>
-        <a class="tab-link" href="#does-it-pay"><span class="secnum">7</span> Results in the paper</a>
-        <a class="tab-link" href="#practical"><span class="secnum">8</span> Implementation in PyTorch</a>
-        <a class="tab-link" href="#gv-compare"><span class="secnum">9</span> Comparison with other methods</a>
-        <a class="tab-link" href="#references"><span class="secnum">10</span> References</a>
+        <a class="tab-link" href="#feel-the-nudge"><span class="secnum">4</span> The edit toward the target</a>
+        <a class="tab-link" href="#one-step"><span class="secnum">5</span> One GradVac step</a>
+        <a class="tab-link" href="#does-it-pay"><span class="secnum">6</span> Results on translation and tagging</a>
+        <a class="tab-link" href="#practical"><span class="secnum">7</span> Implementation in PyTorch</a>
+        <a class="tab-link" href="#gv-compare"><span class="secnum">8</span> Comparison with other methods</a>
+        <a class="tab-link" href="#references"><span class="secnum">9</span> References</a>
     </div>
 <h2 id="zero-question"><span class="secnum">1</span> PCGrad&#8217;s fixed target of zero</h2>
-    <p>PCGrad (projecting conflicting gradients) edits a pair only when its cosine is negative. It then projects one gradient so the cosine becomes exactly 0. Every pair therefore has the same target, 0.</p>
-    <p>A pair whose gradients usually align strongly, at cosine 0.6 for example, can drop to 0.2. PCGrad does nothing, because 0.2 is positive. GradVac replaces the fixed 0 with a target per pair, so it also acts on this pair. With every target at 0, GradVac&#8217;s edit is exactly PCGrad&#8217;s projection. The name compares the method to a vaccine: it can act before the cosine turns negative.</p>
+    <p>PCGrad (projecting conflicting gradients) edits a pair only when its cosine is negative, projecting one gradient so the cosine becomes 0: every pair has target 0. A pair that usually sits at 0.6 can drop to 0.2, and PCGrad does nothing. GradVac gives each pair its own target, so it acts here too; with every target at 0 it is exactly PCGrad. Like a vaccine, it acts before the cosine turns negative.</p>
 <figure class="figure mtd-fig" id="gv-fig-targets">
         <svg class="mtd-svg" viewBox="0 0 400 268" style="max-width:480px" role="img" aria-label="Two task pairs on the cosine scale. A pair below its target at 0.25: PCGrad leaves it, GradVac raises it to its target. A conflicting pair at minus 0.35: PCGrad raises it only to 0, GradVac raises it to its target"><line class="mtd-zero" x1="205" y1="50" x2="205" y2="222"/><text class="" x="20.0" y="26.0" text-anchor="start" style="font-size:18px;font-weight:700">1 Positive cosine, below target</text><line class="mtd-axisl" x1="45" y1="74" x2="365" y2="74"/><line class="mtd-axisl" x1="45" y1="68" x2="45" y2="80"/><line class="mtd-axisl" x1="365" y1="68" x2="365" y2="80"/><line class="mtd-norm" x1="301.0" y1="65" x2="301.0" y2="83"/><text class="mtd-grn mtd-halo" x="301.0" y="46.0" text-anchor="middle" style="font-size:16px;font-weight:600">its target</text><line class="mtd-s mtd-cp" x1="245.0" y1="58.0" x2="288.0" y2="58.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cp" points="299.0,58.0 288.0,63.5 288.0,52.5"/><text class="mtd-pu mtd-halo" x="237.0" y="63.0" text-anchor="end" style="font-size:17px;font-weight:600">GradVac</text><text class="mtd-red mtd-halo" x="245.0" y="103.0" text-anchor="middle" style="font-size:17px;font-weight:600">PCGrad leaves it</text><circle class="mtd-read" cx="245.0" cy="74" r="5.5"/><text class="" x="20.0" y="130.0" text-anchor="start" style="font-size:18px;font-weight:700">2 Negative cosine (conflict)</text><line class="mtd-axisl" x1="45" y1="178" x2="365" y2="178"/><line class="mtd-axisl" x1="45" y1="172" x2="45" y2="184"/><line class="mtd-axisl" x1="365" y1="172" x2="365" y2="184"/><line class="mtd-norm" x1="261.0" y1="169" x2="261.0" y2="187"/><text class="mtd-grn mtd-halo" x="261.0" y="150.0" text-anchor="middle" style="font-size:16px;font-weight:600">its target</text><line class="mtd-s mtd-cp" x1="149.0" y1="162.0" x2="248.0" y2="162.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cp" points="259.0,162.0 248.0,167.5 248.0,156.5"/><text class="mtd-pu mtd-halo" x="141.0" y="167.0" text-anchor="end" style="font-size:17px;font-weight:600">GradVac</text><line class="mtd-s mtd-cr" x1="149.0" y1="195.0" x2="194.0" y2="195.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cr" points="205.0,195.0 194.0,200.5 194.0,189.5"/><text class="mtd-red" x="141.0" y="200.0" text-anchor="end" style="font-size:17px;font-weight:600">PCGrad</text><circle class="mtd-read" cx="149.0" cy="178" r="5.5"/><text class="mtd-sub" x="45.0" y="240.0" text-anchor="middle" style="font-size:17px">−1</text><text class="mtd-sub" x="205.0" y="240.0" text-anchor="middle" style="font-size:17px">0</text><text class="mtd-sub" x="365.0" y="240.0" text-anchor="middle" style="font-size:17px">+1</text><text class="mtd-sub" x="205.0" y="260.0" text-anchor="middle" style="font-size:16px">cosine between the pair's gradients</text></svg>
         <figcaption class="caption"><span class="fignum">Figure 1.</span> Pair 1 has a positive cosine below its target: PCGrad leaves it, GradVac raises it to the target. Pair 2 conflicts: PCGrad raises it to 0, GradVac to the target.</figcaption>
     </figure>
-<h2 id="measured"><span class="secnum">2</span> Gradient similarity in multilingual translation</h2>
-    <p>The authors trained translation models on many language pairs at once. Each language pair, for example English to French, is one task. One model translated into English and one out of English. At checkpoints every 1000 steps they measured the cosine between every pair of task gradients. This measurement was for analysis only; it is not part of the method.</p>
-    <table class="cmp">
-        <thead><tr><th>Observation</th><th>What the paper found</th></tr></thead>
-        <tbody>
-            <tr><td>Related languages</td><td>Languages from the same family have higher gradient cosines and form clusters.</td></tr>
-            <tr><td>Alignment and quality</td><td>In models trained on English to French plus one other pair, a higher cosine between the two went with better English to French translation.</td></tr>
-            <tr><td>Layers and training time</td><td>The cosine differs from layer to layer and changes during training.</td></tr>
-            <tr><td>Sign of the cosine</td><td>Many pairs had positive cosines, so PCGrad&#8217;s projection acted on few steps.</td></tr>
-        </tbody>
-    </table>
-    <p>Each pair therefore has its own usual cosine, and a fixed target of 0 ignores it.</p>
-<h2 id="own-target"><span class="secnum">3</span> A running target per task pair</h2>
-    <p>Write <var>g<sub>i</sub></var> and <var>g<sub>j</sub></var> for the gradients of any two tasks <var>i</var> and <var>j</var>; the subscript <var>ij</var> marks a value that belongs to that pair. GradVac tracks the pair&#8217;s usual cosine with an exponential moving average (EMA): each step, the target moves a fraction <var>&#946;</var> of the way toward the cosine just measured.</p>
-<div class="eq-card" id="gvEqS1">
-        <div class="eq-what">The running target moves a fraction <var>&#946;</var> of the way toward this batch&#8217;s cosine. With <var>&#946;</var> = 0.01 it is 99 percent old target and 1 percent new cosine.</div>
-        <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="phi" style="color:#e67e22"><span class="gv-hat">&#966;</span><sub>ij</sub></span> := (1&#8722;&#946;)&#8201;<span class="eqt" data-k="phi" style="color:#e67e22"><span class="gv-hat">&#966;</span><sub>ij</sub></span> + &#946;&#8201;<span class="eqt" data-k="cos" style="color:#7f8c8d">&#966;<sub>ij</sub></span></div>
-        <div class="eq-why eq-active" data-eqline="0">The pair's running target <span class="eqt" style="color:#e67e22"><var><span class="gv-hat">&#966;</span><sub>ij</sub></var></span> becomes a blend of its old self and this batch's cosine <span class="eqt" style="color:#7f8c8d"><var>&#966;<sub>ij</sub></var></span>, cos(<var>g<sub>i</sub></var>, <var>g<sub>j</sub></var>); the sign := means becomes. The hat marks the running estimate; no hat means one batch's measured value. The averaging speed <var>&#946;</var> splits the weight: 1&#8722;<var>&#946;</var> on the old target, <var>&#946;</var> on the new cosine. A small <var>&#946;</var> gives a long memory, about the last 1/<var>&#946;</var> batches, so one noisy batch barely moves the target; a larger <var>&#946;</var> follows recent batches faster but lets noise in. Repeated every step, this gives the pair&#8217;s usual cosine rather than today&#8217;s.</div>
-      </div>
-    <p>The averaging rate <var>&#946;</var> enters only this update. A larger <var>&#946;</var> follows recent steps faster and lets one noisy batch move the target. A smaller <var>&#946;</var> remembers about the last 1/<var>&#946;</var> steps. At <var>&#946;</var> = 0 the target stays at its start value 0, and GradVac becomes PCGrad. At <var>&#946;</var> = 1 the target is just the last batch&#8217;s cosine. The paper tried 0.1, 0.01 and 0.001; 0.01 was best.</p>
-    <p>When the current cosine is below the target, GradVac adds <var>a</var> times <var>g<sub>j</sub></var> to <var>g<sub>i</sub></var>. The multiple <var>a</var> is solved so the new cosine equals the target exactly.</p>
-<div class="eq-card" id="gvEqStatic">
-        <div class="eq-what">Compare the cosine with the target, add <var>a</var> times <var>g<sub>j</sub></var> to <var>g<sub>i</sub></var> so the cosine equals the target, then add the gradients.</div>
-        <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="cos" style="color:#7f8c8d">cos</span>(<span class="eqt" data-k="gi" style="color:#2c3e50">g<sub>i</sub></span>, <span class="eqt" data-k="gj" style="color:#2980b9">g<sub>j</sub></span>) &lt; <span class="eqt" data-k="phi" style="color:#e67e22"><span class="gv-hat">&#966;</span><sub>ij</sub></span></div>
-        <div class="eq-why eq-active" data-eqline="0">GradVac edits the pair only when this batch&#8217;s cosine is below the running target <span class="eqt" style="color:#e67e22"><var><span class="gv-hat">&#966;</span><sub>ij</sub></var></span>. A pair at or above its target is left unchanged. The target used here is the one from before this batch; GradVac compares and edits first and only then folds this batch&#8217;s cosine into the target, so a low batch cannot lower its own threshold.</div>
-        <div class="eq-line eq-active" data-eqline="1"><span class="eqt" data-k="dose" style="color:#8e44ad">a</span> = <span style="white-space:nowrap"><span class="frac"><span class="top"><span class="eqt" data-k="gi" style="color:#2c3e50">&#8214;g<sub>i</sub>&#8214;</span></span><span class="bot"><span class="eqt" data-k="gj" style="color:#2980b9">&#8214;g<sub>j</sub>&#8214;</span></span></span> &#215;</span> <span class="frac"><span class="top" style="white-space:nowrap"><span class="eqt" data-k="phi" style="color:#e67e22"><span class="gv-hat">&#966;</span><sub>ij</sub></span>&#8201;sin&#8201;&#952; &#8722; <span class="eqt" data-k="cos" style="color:#7f8c8d">cos</span>&#8201;&#952;&#8201;sin&#8201;<span class="gv-hat">&#952;</span></span><span class="bot" style="white-space:nowrap">sin&#8201;<span class="gv-hat">&#952;</span></span></span></div>
-        <div class="eq-why eq-active" data-eqline="1">The nudge amount <var>a</var> is solved so that adding <var>a</var> copies of <var>g<sub>j</sub></var> to <var>g<sub>i</sub></var> turns <var>g<sub>i</sub></var> to exactly the target angle, not short of it and not past it. The double bars are the gradients' lengths, so the first fraction is their length ratio: a long <var>g<sub>i</sub></var> needs a larger multiple of a short <var>g<sub>j</sub></var> to turn by the same angle. In the second fraction, <var>&#952;</var> is the pair&#8217;s current angle, so cos&#8201;<var>&#952;</var> = cos(<var>g<sub>i</sub></var>, <var>g<sub>j</sub></var>), and <var><span class="gv-hat">&#952;</span></var> is the target angle, with cos&#8201;<var><span class="gv-hat">&#952;</span></var> = <span class="eqt" style="color:#e67e22"><var><span class="gv-hat">&#966;</span><sub>ij</sub></var></span>. The top is the sine of the gap between the current angle and the target angle and the bottom is the sine of the target angle. The larger the gap below the target, the larger <var>a</var>; when the cosine already sits at the target the top is zero and so is <var>a</var>. With the target at zero the formula gives exactly PCGrad's cut.</div>
-        <div class="eq-line eq-active" data-eqline="2"><span class="eqt" data-k="g1p" style="color:#c0392b">g<sub>i</sub><span class="gv-pr">&prime;</span></span> = <span class="eqt" data-k="gi" style="color:#2c3e50">g<sub>i</sub></span> + <span class="eqt" data-k="dose" style="color:#8e44ad">a</span>&#8201;<span class="eqt" data-k="gj" style="color:#2980b9">g<sub>j</sub></span></div>
-        <div class="eq-why eq-active" data-eqline="2">The edited gradient <span class="eqt" data-k="g1p" style="color:#c0392b"><var>g<sub>i</sub><span class="gv-pr">&prime;</span></var></span> is <span class="eqt" data-k="gi" style="color:#2c3e50"><var>g<sub>i</sub></var></span> plus <var>a</var> times <span class="eqt" data-k="gj" style="color:#2980b9"><var>g<sub>j</sub></var></span>. Adding a piece along <span class="eqt" data-k="gj" style="color:#2980b9"><var>g<sub>j</sub></var></span> tilts <var>g<sub>i</sub></var> toward it, which raises their cosine; it also changes <var>g<sub>i</sub></var>'s length. Everything else in <var>g<sub>i</sub></var> is kept, so task <var>i</var> still pushes toward its own goal.</div>
-        <div class="eq-line eq-active" data-eqline="3"><span style="color:#1e8449">d</span> = <span class="eqt" data-k="g1p" style="color:#c0392b">g<sub>i</sub><span class="gv-pr">&prime;</span></span> + <span class="eqt" data-k="gj" style="color:#2980b9">g<sub>j</sub></span></div>
-        <div class="eq-why eq-active" data-eqline="3">The combined gradient <var>d</var> is the edited gradient plus <span class="eqt" data-k="gj" style="color:#2980b9"><var>g<sub>j</sub></var></span>, and the step moves against it. Here only task <var>i</var> is edited, as in the paper's best setting, which edits only the low-resource languages (the ones with little training data). If task <var>j</var> is edited too, it gets its own edit toward <span class="eqt" data-k="gi" style="color:#2c3e50"><var>g<sub>i</sub></var></span> and <var>d</var> adds the two edited gradients.</div>
-      </div>
-<h2 id="paper-figure-gv"><span class="secnum">4</span> The paper&#8217;s comparison with PCGrad</h2>
+<div id="paper-figure-gv">
 <div class="demo" id="gvFigStatic">
             <div class="gv-fig-pair">
       <div class="gv-case">
@@ -1081,7 +1047,7 @@ ol.cs-notes li:nth-child(6n+6) .cs-n{background:#76e3ea}
       <div class="gv-pan gv-pan-l"><img src="figures/papers/gradvac-fig5a.png" alt="Figure 5 case a of the GradVac paper, PCGrad's panel: negative gradient cosine"></div>
       <div class="gv-pan gv-pan-r"><img src="figures/papers/gradvac-fig5a.png" alt="Figure 5 case a of the GradVac paper, GradVac's panel: negative gradient cosine"></div>
       </div>
-      <p class="caption"><span class="fignum">Figure 2.</span> Case (a), negative cosine. PCGrad <span class="gv-wide">(left)</span><span class="gv-narrow">(top)</span> projects to cosine 0; GradVac raises it to the target.</p>
+      <p class="caption">(a) Negative cosine. PCGrad <span class="gv-wide">left</span><span class="gv-narrow">top</span>, GradVac <span class="gv-wide">right</span><span class="gv-narrow">bottom</span>.</p>
       </div>
       <div class="gv-case">
       <img class="gv-full" src="figures/papers/gradvac-fig5b.png" alt="Figure 5 case b of the GradVac paper: PCGrad and GradVac on positive gradient cosine">
@@ -1089,13 +1055,44 @@ ol.cs-notes li:nth-child(6n+6) .cs-n{background:#76e3ea}
       <div class="gv-pan gv-pan-l"><img src="figures/papers/gradvac-fig5b.png" alt="Figure 5 case b of the GradVac paper, PCGrad's panel: positive gradient cosine"></div>
       <div class="gv-pan gv-pan-r"><img src="figures/papers/gradvac-fig5b.png" alt="Figure 5 case b of the GradVac paper, GradVac's panel: positive gradient cosine"></div>
       </div>
-      <p class="caption">Case (b), positive cosine below the target. PCGrad <span class="gv-wide">(left)</span><span class="gv-narrow">(top)</span> does nothing; GradVac raises it.</p>
+      <p class="caption">(b) Positive cosine below the target.</p>
       </div>
       </div>
-      <p class="caption">Rebuilt from the paper&#8217;s Figure 5 (<a href="https://arxiv.org/abs/2010.05874">arXiv:2010.05874</a>). Its <var>a<sub>2</sub></var> is this page&#8217;s <var>a</var>; <var>&theta;</var> and <var>&theta;&prime;</var> are the angle before and after the edit.</p>
-      <p class="caption">The paper&#8217;s own caption reads &#8220;Comparing PCGrad (left) with GradVac (right) in two cases. (a): For negative similarity, both methods are effective but GradVac can utilize adaptive objectives between different tasks. (b): For positive similarity, only GradVac is active while PCGrad stays &#8216;idle&#8217;.&#8221;</p>
+      <p class="caption"><span class="fignum">Figure 2.</span> The paper&#8217;s Figure 5 (<a href="https://arxiv.org/abs/2010.05874">arXiv:2010.05874</a>), where <var>a<sub>2</sub></var> is this page&#8217;s <var>a</var>: &#8220;Comparing PCGrad (left) with GradVac (right) in two cases. (a): For negative similarity, both methods are effective but GradVac can utilize adaptive objectives between different tasks. (b): For positive similarity, only GradVac is active while PCGrad stays &#8216;idle&#8217;.&#8221;</p>
     </div>
-<h2 id="feel-the-nudge"><span class="secnum">5</span> The edit toward the target</h2>
+</div>
+<h2 id="measured"><span class="secnum">2</span> Gradient similarity in multilingual translation</h2>
+    <p>The authors trained two translation models, one from every language into English and one from English into every language. Each language pair, such as English to French, is one task. Every 1000 steps they measured the cosine between every pair of task gradients, for analysis only.</p>
+    <table class="cmp">
+        <thead><tr><th>Observation</th><th>What the paper found</th></tr></thead>
+        <tbody>
+            <tr><td>Related languages</td><td>Languages of one family have higher cosines and cluster.</td></tr>
+            <tr><td>Alignment and quality</td><td>Trained on English to French plus one other pair, a higher cosine went with better English to French.</td></tr>
+            <tr><td>Layers and training time</td><td>The cosine differs by layer and over training.</td></tr>
+            <tr><td>Sign of the cosine</td><td>Mostly positive, so PCGrad&#8217;s projection acted on few steps.</td></tr>
+        </tbody>
+    </table>
+    <p>Each pair has its own usual cosine; a fixed target of 0 ignores it.</p>
+<h2 id="own-target"><span class="secnum">3</span> A running target per task pair</h2>
+    <p>For tasks <var>i</var> and <var>j</var> with gradients <var>g<sub>i</sub></var> and <var>g<sub>j</sub></var> (subscript <var>ij</var> marks the pair), GradVac tracks the pair&#8217;s usual cosine with an exponential moving average (EMA).</p>
+<div class="eq-card" id="gvEqS1">
+        <div class="eq-what">The running target moves a fraction <var>&#946;</var> of the way toward this batch&#8217;s cosine. With <var>&#946;</var> = 0.01 it is 99 percent old target and 1 percent new cosine.</div>
+        <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="phi" style="color:#e67e22"><span class="gv-hat">&#966;</span><sub>ij</sub></span> := (1&#8722;&#946;)&#8201;<span class="eqt" data-k="phi" style="color:#e67e22"><span class="gv-hat">&#966;</span><sub>ij</sub></span> + &#946;&#8201;<span class="eqt" data-k="cos" style="color:#7f8c8d">&#966;<sub>ij</sub></span></div>
+        <div class="eq-why eq-active" data-eqline="0">The pair's running target <span class="eqt" style="color:#e67e22"><var><span class="gv-hat">&#966;</span><sub>ij</sub></var></span> becomes a blend of its old self and this batch's cosine <span class="eqt" style="color:#7f8c8d"><var>&#966;<sub>ij</sub></var></span>, cos(<var>g<sub>i</sub></var>, <var>g<sub>j</sub></var>); the sign := means becomes. The hat marks the running estimate; no hat means one batch's measured value. The averaging rate <var>&#946;</var> splits the weight: 1&#8722;<var>&#946;</var> on the old target, <var>&#946;</var> on the new cosine. Repeated every step, this gives the pair&#8217;s usual cosine rather than today&#8217;s.</div>
+      </div>
+    <p>The averaging rate <var>&#946;</var> enters only this update. Raising it follows recent steps faster but lets one noisy batch move the target; lowering it averages over about the last 1/<var>&#946;</var> steps. At <var>&#946;</var> = 0 the target stays at its start, 0, and GradVac is PCGrad; at <var>&#946;</var> = 1 it is the last batch&#8217;s cosine. Of 0.1, 0.01 and 0.001, the paper found 0.01 best.</p>
+<h2 id="feel-the-nudge"><span class="secnum">4</span> The edit toward the target</h2>
+<div class="eq-card" id="gvEqStatic">
+        <div class="eq-what">Compare the cosine with the target, add <var>a</var> times <var>g<sub>j</sub></var> to <var>g<sub>i</sub></var> so the cosine equals the target, then add the gradients.</div>
+        <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="cos" style="color:#7f8c8d">cos</span>(<span class="eqt" data-k="gi" style="color:#2c3e50">g<sub>i</sub></span>, <span class="eqt" data-k="gj" style="color:#2980b9">g<sub>j</sub></span>) &lt; <span class="eqt" data-k="phi" style="color:#e67e22"><span class="gv-hat">&#966;</span><sub>ij</sub></span></div>
+        <div class="eq-why eq-active" data-eqline="0">GradVac edits the pair only when this batch&#8217;s cosine is below the running target <span class="eqt" style="color:#e67e22"><var><span class="gv-hat">&#966;</span><sub>ij</sub></var></span>. A pair at or above its target is left unchanged. The target used here is the one from before this batch; GradVac compares and edits first and only then folds this batch&#8217;s cosine into the target, so a low batch cannot lower its own threshold.</div>
+        <div class="eq-line eq-active" data-eqline="1"><span class="eqt" data-k="dose" style="color:#8e44ad">a</span> = <span style="white-space:nowrap"><span class="frac"><span class="top"><span class="eqt" data-k="gi" style="color:#2c3e50">&#8214;g<sub>i</sub>&#8214;</span></span><span class="bot"><span class="eqt" data-k="gj" style="color:#2980b9">&#8214;g<sub>j</sub>&#8214;</span></span></span> &#215;</span> <span class="frac"><span class="top" style="white-space:nowrap"><span class="eqt" data-k="phi" style="color:#e67e22"><span class="gv-hat">&#966;</span><sub>ij</sub></span>&#8201;sin&#8201;&#952; &#8722; <span class="eqt" data-k="cos" style="color:#7f8c8d">cos</span>&#8201;&#952;&#8201;sin&#8201;<span class="gv-hat">&#952;</span></span><span class="bot" style="white-space:nowrap">sin&#8201;<span class="gv-hat">&#952;</span></span></span></div>
+        <div class="eq-why eq-active" data-eqline="1">The coefficient <var>a</var> is solved so that adding <var>a</var> copies of <var>g<sub>j</sub></var> to <var>g<sub>i</sub></var> turns <var>g<sub>i</sub></var> to exactly the target angle, not short of it and not past it. The double bars are the gradients' lengths, so the first fraction is their length ratio: a long <var>g<sub>i</sub></var> needs a larger coefficient on a short <var>g<sub>j</sub></var> to turn by the same angle. In the second fraction, <var>&#952;</var> is the pair&#8217;s current angle, so cos&#8201;<var>&#952;</var> = cos(<var>g<sub>i</sub></var>, <var>g<sub>j</sub></var>), and <var><span class="gv-hat">&#952;</span></var> is the target angle, with cos&#8201;<var><span class="gv-hat">&#952;</span></var> = <span class="eqt" style="color:#e67e22"><var><span class="gv-hat">&#966;</span><sub>ij</sub></var></span>. The top is the sine of the gap between the current angle and the target angle and the bottom is the sine of the target angle. The larger the gap below the target, the larger <var>a</var>; when the cosine already sits at the target the top is zero and so is <var>a</var>. With the target at zero the formula gives exactly PCGrad's projection.</div>
+        <div class="eq-line eq-active" data-eqline="2"><span class="eqt" data-k="g1p" style="color:#c0392b">g<sub>i</sub><span class="gv-pr">&prime;</span></span> = <span class="eqt" data-k="gi" style="color:#2c3e50">g<sub>i</sub></span> + <span class="eqt" data-k="dose" style="color:#8e44ad">a</span>&#8201;<span class="eqt" data-k="gj" style="color:#2980b9">g<sub>j</sub></span></div>
+        <div class="eq-why eq-active" data-eqline="2">The edited gradient <span class="eqt" data-k="g1p" style="color:#c0392b"><var>g<sub>i</sub><span class="gv-pr">&prime;</span></var></span> is <span class="eqt" data-k="gi" style="color:#2c3e50"><var>g<sub>i</sub></var></span> plus <var>a</var> times <span class="eqt" data-k="gj" style="color:#2980b9"><var>g<sub>j</sub></var></span>. Adding a piece along <span class="eqt" data-k="gj" style="color:#2980b9"><var>g<sub>j</sub></var></span> tilts <var>g<sub>i</sub></var> toward it, which raises their cosine; it also changes <var>g<sub>i</sub></var>'s length. Everything else in <var>g<sub>i</sub></var> is kept, so task <var>i</var> still pushes toward its own goal.</div>
+        <div class="eq-line eq-active" data-eqline="3"><span style="color:#1e8449">d</span> = <span class="eqt" data-k="g1p" style="color:#c0392b">g<sub>i</sub><span class="gv-pr">&prime;</span></span> + <span class="eqt" data-k="gj" style="color:#2980b9">g<sub>j</sub></span></div>
+        <div class="eq-why eq-active" data-eqline="3">The combined gradient <var>d</var> is the edited gradient plus <span class="eqt" data-k="gj" style="color:#2980b9"><var>g<sub>j</sub></var></span>, and the step moves against it. Here only task <var>i</var> is edited, as in the paper's best setting, which edits only the low-resource languages (the ones with little training data). If task <var>j</var> is edited too, it gets its own edit toward <span class="eqt" data-k="gi" style="color:#2c3e50"><var>g<sub>i</sub></var></span> and <var>d</var> adds the two edited gradients.</div>
+      </div>
 <div class="demo" id="gvDemo">
       <div class="demo-controls">
         <button type="button" class="play-btn" id="gvPlay">Play</button>
@@ -1109,7 +1106,7 @@ ol.cs-notes li:nth-child(6n+6) .cs-n{background:#76e3ea}
       </div>
       <div class="gv-grid">
       <div class="gv-col">
-      <svg class="gv-svg" id="gvSvg" viewBox="44 8 302 318" role="img" aria-label="Interactive diagram of the GradVac nudge between two task gradients">
+      <svg class="gv-svg" id="gvSvg" viewBox="44 8 302 318" role="img" aria-label="Interactive diagram of the GradVac edit between two task gradients">
         <defs>
           <marker id="gvArrowD" markerUnits="userSpaceOnUse" markerWidth="16" markerHeight="16" refX="13" refY="8" orient="auto">
             <path d="M0,0 L16,8 L0,16 Z" fill="#2c3e50"></path>
@@ -1159,14 +1156,14 @@ ol.cs-notes li:nth-child(6n+6) .cs-n{background:#76e3ea}
       </div>
       </div>    <p class="caption"><span class="fignum">Figure 3.</span> Move the target. A target of 0 gives PCGrad&#8217;s projection; a target at or below the current cosine gives no edit.</p>
 </div>
-<h2 id="one-step"><span class="secnum">6</span> One GradVac step</h2>
+<h2 id="one-step"><span class="secnum">5</span> One GradVac step</h2>
 <div class="demo" id="wvDemo">
       <div class="demo-controls">
         <button type="button" class="step-btn nav" id="wvPrev">Prev</button>
         <div class="wv-dots" role="group" aria-label="Walkthrough steps">
           <button type="button" class="step-btn" data-wv-step="1" aria-label="Step 1, measure the pair">1</button>
           <button type="button" class="step-btn" data-wv-step="2" aria-label="Step 2, check against the target">2</button>
-          <button type="button" class="step-btn" data-wv-step="3" aria-label="Step 3, nudge g1 toward g2">3</button>
+          <button type="button" class="step-btn" data-wv-step="3" aria-label="Step 3, edit g1 toward g2">3</button>
           <button type="button" class="step-btn" data-wv-step="4" aria-label="Step 4, update the running target">4</button>
           <button type="button" class="step-btn" data-wv-step="5" aria-label="Step 5, step with the edited sum">5</button>
         </div>
@@ -1255,34 +1252,34 @@ ol.cs-notes li:nth-child(6n+6) .cs-n{background:#76e3ea}
 <div class="eq-card" id="wvDemoEq">
         <div class="eq-what">The full GradVac step: compare the cosine with the target, edit <var>g<sub>i</sub></var> so the cosine equals the target, update the target, then add the gradients.</div>
         <div class="eq-line" data-eqline="0"><span class="eqt" data-k="cos" style="color:#7f8c8d">cos</span>(<span class="eqt" data-k="gi" style="color:#2c3e50">g<sub>i</sub></span>, <span class="eqt" data-k="gj" style="color:#2980b9">g<sub>j</sub></span>) &lt; <span class="eqt" data-k="phi" style="color:#e67e22"><span class="gv-hat">&#966;</span><sub>ij</sub></span></div>
-        <div class="eq-why" data-eqline="0"><span class="wv-why1">This batch's cosine says how aligned the pair is right now; it is what gets compared with the target.</span><span class="wv-why2">Check whether this batch's cosine is less than the pair's running target <span class="eqt" data-k="phi" style="color:#e67e22"><var><span class="gv-hat">&#966;</span><sub>ij</sub></var></span>, as the target stood before this batch.</span></div>
+        <div class="eq-why" data-eqline="0"><span class="wv-why1">This batch's cosine, how aligned the pair is right now.</span><span class="wv-why2">Is this batch's cosine below the pair's running target <span class="eqt" data-k="phi" style="color:#e67e22"><var><span class="gv-hat">&#966;</span><sub>ij</sub></var></span>, as it stood before this batch?</span></div>
         <div class="eq-line" data-eqline="1"><span class="eqt" data-k="dose" style="color:#8e44ad">a</span> = <span style="white-space:nowrap"><span class="frac"><span class="top"><span class="eqt" data-k="gi" style="color:#2c3e50">&#8214;g<sub>i</sub>&#8214;</span></span><span class="bot"><span class="eqt" data-k="gj" style="color:#2980b9">&#8214;g<sub>j</sub>&#8214;</span></span></span> &#215;</span> <span class="frac"><span class="top" style="white-space:nowrap"><span class="eqt" data-k="phi" style="color:#e67e22"><span class="gv-hat">&#966;</span><sub>ij</sub></span>&#8201;sin&#8201;&#952; &#8722; <span class="eqt" data-k="cos" style="color:#7f8c8d">cos</span>&#8201;&#952;&#8201;sin&#8201;<span class="gv-hat">&#952;</span></span><span class="bot" style="white-space:nowrap">sin&#8201;<span class="gv-hat">&#952;</span></span></span></div>
-        <div class="eq-why" data-eqline="1">The nudge amount <var>a</var> is solved so the cosine lands exactly on the target. The length ratio sets the scale; the sine of the gap between <var>&#952;</var> and <var><span class="gv-hat">&#952;</span></var>, over sin&#8201;<var><span class="gv-hat">&#952;</span></var>, sets how far to turn. No gap, no edit.</div>
+        <div class="eq-why" data-eqline="1">The coefficient <var>a</var> that lands the cosine exactly on the target; no gap, no edit.</div>
         <div class="eq-line" data-eqline="2"><span class="eqt" data-k="g1p" style="color:#c0392b">g<sub>i</sub><span class="gv-pr">&prime;</span></span> = <span class="eqt" data-k="gi" style="color:#2c3e50">g<sub>i</sub></span> + <span class="eqt" data-k="dose" style="color:#8e44ad">a</span>&#8201;<span class="eqt" data-k="gj" style="color:#2980b9">g<sub>j</sub></span></div>
-        <div class="eq-why" data-eqline="2">The edited gradient <span class="eqt" data-k="g1p" style="color:#c0392b"><var>g<sub>i</sub><span class="gv-pr">&prime;</span></var></span> is task <var>i</var>&#8217;s gradient plus a multiple of <span class="eqt" data-k="gj" style="color:#2980b9"><var>g<sub>j</sub></var></span>, a times <span class="eqt" data-k="gj" style="color:#2980b9"><var>g<sub>j</sub></var></span>. The diagram draws the added part as <var>a</var>&times;<var>g<sub>2</sub></var>.</div>
+        <div class="eq-why" data-eqline="2">The edited gradient, drawn as the red arrow; the added part <var>a</var>&times;<var>g<sub>2</sub></var> is the purple arrow.</div>
         <div class="eq-line" data-eqline="3"><span class="eqt" data-k="phi" style="color:#e67e22"><span class="gv-hat">&#966;</span><sub>ij</sub></span> := (1&#8722;&#946;)&#8201;<span class="eqt" data-k="phi" style="color:#e67e22"><span class="gv-hat">&#966;</span><sub>ij</sub></span> + &#946;&#8201;<span class="eqt" data-k="cos" style="color:#7f8c8d">&#966;<sub>ij</sub></span></div>
-        <div class="eq-why" data-eqline="3">After the edit, the target moves a small fraction <var>&#946;</var> of the way toward <span class="eqt" style="color:#7f8c8d"><var>&#966;<sub>ij</sub></var></span>, this batch's cosine cos(<var>g<sub>i</sub></var>, <var>g<sub>j</sub></var>) as measured before the nudge (no hat: one batch's value).</div>
+        <div class="eq-why" data-eqline="3">After the edit, the target moves a fraction <var>&#946;</var> toward this batch's cosine, measured before the edit.</div>
         <div class="eq-line" data-eqline="4"><span style="color:#1e8449">d</span> = <span class="eqt" data-k="g1p" style="color:#c0392b">g<sub>i</sub><span class="gv-pr">&prime;</span></span> + <span class="eqt" data-k="gj" style="color:#2980b9">g<sub>j</sub></span></div>
-        <div class="eq-why" data-eqline="4">Adding the edited gradient to <span class="eqt" data-k="gj" style="color:#2980b9"><var>g<sub>j</sub></var></span> gives the combined gradient <var>d</var>, and the step moves against it. Here only task <var>i</var> is edited. When task <var>j</var> is edited too, <span class="eqt" data-k="gj" style="color:#2980b9"><var>g<sub>j</sub></var></span> gets its own edit toward <span class="eqt" data-k="gi" style="color:#2c3e50"><var>g<sub>i</sub></var></span> and <var>d</var> adds both edited gradients.</div>
-        <div class="eq-legend"><span class="eq-item" data-lines="0,1,2,3"><span class="eq-sw" style="background:#2c3e50"></span><var>g<sub>i</sub></var> task <var>i</var>'s gradient</span><span class="eq-item" data-lines="0,1,2,3,4"><span class="eq-sw" style="background:#2980b9"></span><var>g<sub>j</sub></var> task <var>j</var>'s gradient</span><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#7f8c8d"></span>cos(<var>g<sub>i</sub></var>, <var>g<sub>j</sub></var>) this batch's cosine, how aligned the two gradients are now</span><span class="eq-item" data-lines="1,2"><span class="eq-sw" style="background:#7f8c8d"></span>cos(<var>g<sub>i</sub></var>, <var>g<sub>j</sub></var>) this batch's cosine, how aligned the two gradients are now, equal to cos&#8201;<var>&#952;</var></span><span class="eq-item" data-lines="3"><span class="eq-sw" style="background:#7f8c8d"></span><var>&#966;<sub>ij</sub></var> this batch's cosine cos(<var>g<sub>i</sub></var>, <var>g<sub>j</sub></var>), the value the target moves toward</span><span class="eq-item" data-lines="0,1,2,3"><span class="eq-sw" style="background:#e67e22"></span><var><span class="gv-hat">&#966;</span><sub>ij</sub></var> the pair's running target alignment</span><span class="eq-item" data-lines="1,2"><span class="eq-sw" style="background:#8e44ad"></span><var>a</var> the nudge amount, drawn as the purple arrow <var>a</var>&times;<var>g<sub>2</sub></var></span><span class="eq-item" data-lines="3"><span class="eq-sw" style="background:transparent"></span><var>&#946;</var> the averaging speed, 0.01 here</span><span class="eq-item" data-lines="2,4"><span class="eq-sw" style="background:#c0392b"></span><var>g<sub>i</sub>&prime;</var> task <var>i</var>'s gradient after the edit, the red <var>g<sub>1</sub>′</var> arrow in the diagram</span><span class="eq-item" data-lines="4"><span class="eq-sw" style="background:#1e8449"></span><var>d</var> the combined gradient, the green arrow</span><span class="eq-item" data-lines="1,2"><span class="eq-sw" style="background:transparent"></span>‖<var>g<sub>i</sub></var>‖, ‖<var>g<sub>j</sub></var>‖ the gradient lengths</span><span class="eq-item" data-lines="1,2"><span class="eq-sw" style="background:transparent"></span><var>&#952;</var> the pair&#8217;s current angle</span><span class="eq-item" data-lines="1,2"><span class="eq-sw" style="background:transparent"></span><var><span class="gv-hat">&#952;</span></var> the target angle, with cos&#8201;<var><span class="gv-hat">&#952;</span></var> = <var><span class="gv-hat">&#966;</span><sub>ij</sub></var></span><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:transparent"></span>&lt; less than</span><span class="eq-item" data-lines="3"><span class="eq-sw" style="background:transparent"></span>:= becomes, updated to</span></div>
+        <div class="eq-why" data-eqline="4">The combined gradient <var>d</var>, the green arrow; the step moves against it.</div>
+        <div class="eq-legend"><span class="eq-item" data-lines="0,1,2,3"><span class="eq-sw" style="background:#2c3e50"></span><var>g<sub>i</sub></var> task <var>i</var>'s gradient</span><span class="eq-item" data-lines="0,1,2,3,4"><span class="eq-sw" style="background:#2980b9"></span><var>g<sub>j</sub></var> task <var>j</var>'s gradient</span><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#7f8c8d"></span>cos(<var>g<sub>i</sub></var>, <var>g<sub>j</sub></var>) this batch's cosine, how aligned the two gradients are now</span><span class="eq-item" data-lines="1,2"><span class="eq-sw" style="background:#7f8c8d"></span>cos(<var>g<sub>i</sub></var>, <var>g<sub>j</sub></var>) this batch's cosine, how aligned the two gradients are now, equal to cos&#8201;<var>&#952;</var></span><span class="eq-item" data-lines="3"><span class="eq-sw" style="background:#7f8c8d"></span><var>&#966;<sub>ij</sub></var> this batch's cosine cos(<var>g<sub>i</sub></var>, <var>g<sub>j</sub></var>), the value the target moves toward</span><span class="eq-item" data-lines="0,1,2,3"><span class="eq-sw" style="background:#e67e22"></span><var><span class="gv-hat">&#966;</span><sub>ij</sub></var> the pair's running target cosine</span><span class="eq-item" data-lines="1,2"><span class="eq-sw" style="background:#8e44ad"></span><var>a</var> the coefficient, drawn as the purple arrow <var>a</var>&times;<var>g<sub>2</sub></var></span><span class="eq-item" data-lines="3"><span class="eq-sw" style="background:transparent"></span><var>&#946;</var> the averaging rate, 0.01 here</span><span class="eq-item" data-lines="2,4"><span class="eq-sw" style="background:#c0392b"></span><var>g<sub>i</sub>&prime;</var> task <var>i</var>'s gradient after the edit, the red <var>g<sub>1</sub>′</var> arrow in the diagram</span><span class="eq-item" data-lines="4"><span class="eq-sw" style="background:#1e8449"></span><var>d</var> the combined gradient, the green arrow</span><span class="eq-item" data-lines="1,2"><span class="eq-sw" style="background:transparent"></span>‖<var>g<sub>i</sub></var>‖, ‖<var>g<sub>j</sub></var>‖ the gradient lengths</span><span class="eq-item" data-lines="1,2"><span class="eq-sw" style="background:transparent"></span><var>&#952;</var> the pair&#8217;s current angle</span><span class="eq-item" data-lines="1,2"><span class="eq-sw" style="background:transparent"></span><var><span class="gv-hat">&#952;</span></var> the target angle, with cos&#8201;<var><span class="gv-hat">&#952;</span></var> = <var><span class="gv-hat">&#966;</span><sub>ij</sub></var></span><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:transparent"></span>&lt; less than</span><span class="eq-item" data-lines="3"><span class="eq-sw" style="background:transparent"></span>:= becomes, updated to</span></div>
       </div>
     <p class="caption"><span class="fignum">Figure 4.</span> One pair in two dimensions, <var>g<sub>1</sub></var> for <var>g<sub>i</sub></var> and <var>g<sub>2</sub></var> for <var>g<sub>j</sub></var>, with only task 1 edited. Training repeats this for every edited task, every other task and every layer.</p>
 </div>
-<h2 id="does-it-pay"><span class="secnum">7</span> Results in the paper</h2>
-    <p>Each score compares GradVac with the same model trained on the plain sum of the task losses.</p>
+<h2 id="does-it-pay"><span class="secnum">6</span> Results on translation and tagging</h2>
+    <p>Translation is scored in BLEU, the overlap with reference translations; tagging in F1, which balances precision and recall.</p>
     <table class="cmp">
         <thead><tr><th>Benchmark</th><th>Compared with</th><th>Result</th></tr></thead>
         <tbody>
-            <tr><td>WMT translation, 4 languages: French and Czech with much data, Hindi and Turkish with little</td><td>Plain model, GradNorm, MGDA, PCGrad</td><td>GradVac best on average and on every language. None of the other three beat the plain model on every language.</td></tr>
-            <tr><td>In-house translation, 25 languages crawled from the web</td><td>Plain model, sampling the low-resource languages more often (the paper&#8217;s default)</td><td>Largest gains on the high-resource languages.</td></tr>
-            <tr><td>Same data</td><td>Plain model, sampling in proportion to each language&#8217;s data</td><td>Gains at every resource level.</td></tr>
-            <tr><td>Multilingual BERT, named-entity tagging, one task per language</td><td>PCGrad</td><td>Higher average score than PCGrad, not on every language.</td></tr>
+            <tr><td>WMT translation (the Workshop on Machine Translation data), 4 languages: French and Czech with much data, Hindi and Turkish with little</td><td>Plain model, GradNorm, MGDA, PCGrad</td><td>GradVac best on average and on every language; no other method beat the plain model on every language.</td></tr>
+            <tr><td>In-house translation, 25 languages crawled from the web</td><td>Plain model, oversampling low-resource languages (the paper&#8217;s default)</td><td>Largest gains on the high-resource languages.</td></tr>
+            <tr><td>Same data</td><td>Plain model, sampling by data size</td><td>Gains at every resource level.</td></tr>
+            <tr><td>Multilingual BERT, named-entity tagging (marking names of people, places and organizations) per language</td><td>PCGrad</td><td>Average F1 83.8 against 83.1, not on every language.</td></tr>
         </tbody>
     </table>
-    <p>Logging the pairwise cosines also shows how the tasks relate during training; <a href="multitask-field-guide.html#diagnose">the Field Guide</a> lists them among the values to log.</p>
-<h2 id="practical"><span class="secnum">8</span> Implementation in PyTorch</h2>
-    <p>The listing is one complete GradVac step for a shared trunk with task heads. It takes one gradient per task over the trunk&#8217;s parameters, treats each child module of the trunk as one layer, edits task <var>i</var> against every other task in random order, and writes the sum into the trunk&#8217;s <code>.grad</code>. The heads get their plain gradients. The paper&#8217;s model shares all of its parameters, so it has no heads; LibMTL, like this listing, edits only the shared encoder.</p>
-    <pre class="cs" data-cs="11-22,24-43,45-50,52-61,63-68,70-78,80-91"><code class="language-python">import math
+    <p><a href="multitask-field-guide.html#diagnose">The Field Guide</a> lists the pairwise cosines among the values to log.</p>
+<h2 id="practical"><span class="secnum">7</span> Implementation in PyTorch</h2>
+    <p>Two listings, setup then method, make one GradVac step for a shared trunk with task heads. As in LibMTL, only the trunk is edited; the paper&#8217;s model shares every parameter.</p>
+    <pre class="cs" data-cs="11-22,24-38"><code class="language-python">import math
 import random
 import torch
 from torch.autograd import grad
@@ -1305,60 +1302,61 @@ def fill_grads(params, vec):
         p.grad = part.view_as(p)
         i += n
 
-def layer_slices(layers):
-    out, i = [], 0
-    for m in layers:
-        n = 0
-        for p in m.parameters():
-            n += p.numel()
-        sl = slice(i, i + n)
-        out.append(sl)
-        i += n
-    return out
-
-layers = list(trunk.children())
-slices = layer_slices(layers)
-C = len(slices)
+kids = trunk.children()
+layers = [m for m in kids
+          if list(m.parameters())]
+slices, i = [], 0
 body = []
 for m in layers:
-    body += m.parameters()
+    ps = list(m.parameters())
+    n = sum(p.numel() for p in ps)
+    slices.append(slice(i, i + n))
+    i += n
+    body += ps
+C = len(slices)
 head_ps = list(heads.parameters())
 phi_hat = torch.zeros(K, K, C)
-EDIT = range(K)
-
-def coef(g_i, g_j, phi, tgt):
+EDIT = range(K)</code></pre>
+    <ol class="cs-notes">
+      <li><span class="cs-n">1</span>Flat per-task trunk gradients and the write-back, as in <a href="multitask-training-loop.html#task-gradients">Section 3 of Gradient Balancing Inside the Training Loop</a>.</li>
+      <li><span class="cs-n">2</span>One slice per layer (each trunk child with weights) and the targets <var><span class="gv-hat">&#966;</span><sub>ij</sub></var> per pair per layer, starting at 0.</li>
+    </ol>
+    <pre class="cs" data-cs="1-7,9-18,20-27,29-37,39-50"><code class="language-python">def coef(g_i, g_j, phi, tgt):
     s = math.sqrt(1 - phi * phi)
     t = math.sqrt(1 - tgt * tgt)
-    r = g_i.norm() / g_j.norm()
+    n_j = g_j.norm() + EPS
+    r = g_i.norm() / n_j
     num = tgt * s - phi * t
     return r * num / (t + EPS)
 
-def nudge(g_i, g_j, ijk):
+def edit(g_i, g_j, ijk):
     phi = cos(g_i, g_j, 0).item()
     tgt = phi_hat[ijk].item()
     ema = (1 - BETA) * tgt
     new = ema + BETA * phi
     phi_hat[ijk] = new
     if phi &gt;= tgt:
-        return
+        return g_i
     a = coef(g_i, g_j, phi, tgt)
-    g_i += a * g_j  # in place
+    return g_i + a * g_j
 
-def nudge_ij(out, G, i, j):
+def edit_ij(out, G, i, j):
     for k in range(C):
         sl = slices[k]
-        g_i = out[i, sl]  # a view
+        g_i = out[i, sl]
         g_j = G[j, sl]
-        nudge(g_i, g_j, (i, j, k))
+        ijk = (i, j, k)
+        new = edit(g_i, g_j, ijk)
+        out[i, sl] = new
 
-def gradvac(G, edit):
+def gradvac(G, edit_tasks):
     out = G.clone()
-    for i in edit:
+    for i in edit_tasks:
         others = list(range(K))
         others.remove(i)
         random.shuffle(others)
         for j in others:
-            nudge_ij(out, G, i, j)
+            edit_ij(out, G, i, j)
     return out.sum(0)
 
 def gradvac_step(losses):
@@ -1374,38 +1372,33 @@ def gradvac_step(losses):
     total.backward(inputs=head_ps)
     opt.step()</code></pre>
     <ol class="cs-notes">
-      <li><span class="cs-n">1</span>One gradient per task over the trunk, flattened, and the write-back into <code>.grad</code>, as on <a href="multitask-training-loop.html#task-gradients">the training-loop page</a>.</li>
-      <li><span class="cs-n">2</span>One slice of the flat vector per layer (each child module of the trunk), and the state: a table of targets <var><span class="gv-hat">&#966;</span><sub>ij</sub></var> per task pair per layer, starting at 0.</li>
-      <li><span class="cs-n">3</span>The multiple <var>a</var>, line 2 of the second eq card in <a href="#own-target">Section 3</a>.</li>
-      <li><span class="cs-n">4</span>The target update, the first eq card in <a href="#own-target">Section 3</a>, then the check (line 1) and the edit (line 3) against the old target.</li>
-      <li><span class="cs-n">5</span>Task <var>i</var> against every layer of task <var>j</var>; <var>g<sub>j</sub></var> is always the original, unedited gradient.</li>
-      <li><span class="cs-n">6</span>Every other task in random order; the sum of the edited gradients is <var>d</var>, line 4.</li>
-      <li><span class="cs-n">7</span>One step: <var>K</var> backward passes, the edit, the write-back, the heads&#8217; plain gradients, then the optimizer step.</li>
+      <li><span class="cs-n">1</span>The coefficient <var>a</var>, line 2 of the eq card in <a href="#feel-the-nudge">Section 4</a>.</li>
+      <li><span class="cs-n">2</span>Target update (<a href="#own-target">Section 3</a>), then check and edit (<a href="#feel-the-nudge">Section 4</a>, lines 1 and 3) against the old target, returning a new tensor.</li>
+      <li><span class="cs-n">3</span>Task <var>i</var> against each layer of task <var>j</var>, always the unedited <var>g<sub>j</sub></var>; the edited slice goes into <code>out</code>.</li>
+      <li><span class="cs-n">4</span>Every other task in random order; the sum of the edited gradients is <var>d</var>, line 4.</li>
+      <li><span class="cs-n">5</span><var>K</var> backward passes, edit, write-back, heads&#8217; plain gradients, optimizer step.</li>
     </ol>
     <table class="cmp">
         <thead><tr><th>Setting</th><th>Paper value</th><th>Effect</th></tr></thead>
         <tbody>
-            <tr><td>Averaging rate <var>&#946;</var></td><td>0.01, best of 0.1, 0.01 and 0.001</td><td>Memory of about 1/<var>&#946;</var> = 100 steps.</td></tr>
-            <tr><td>Parameter groups</td><td>One per layer, best of whole model, encoder and decoder, per layer, per weight matrix</td><td>The paper: groups &#8220;neither too coarse nor too fine-grained perform the best&#8221;.</td></tr>
-            <tr><td>Tasks edited</td><td>Low-resource languages only, best of all, low-resource only and high-resource only</td><td>Set by <code>EDIT</code> in the listing.</td></tr>
-            <tr><td>Rescaling the edited gradient</td><td>Not needed (&#8220;sufficient to ignore&#8221;, Appendix F)</td><td>The listing does not rescale.</td></tr>
-            <tr><td>Target start</td><td>0</td><td>Early steps behave like PCGrad.</td></tr>
+            <tr><td>Averaging rate <var>&#946;</var></td><td>0.01, best of 0.1, 0.01, 0.001</td><td>About 100 steps of memory; raising and lowering as in <a href="#own-target">Section 3</a>.</td></tr>
+            <tr><td>Parameter groups</td><td>One per layer, best of whole model, encoder and decoder, per layer, per weight matrix</td><td>Finer groups track each layer&#8217;s cosine; &#8220;neither too coarse nor too fine-grained perform the best&#8221;.</td></tr>
+            <tr><td>Tasks edited</td><td>Low-resource only, best of all, low-resource and high-resource</td><td>Leaves high-resource gradients untilted. <code>EDIT</code> in the listing.</td></tr>
+            <tr><td>Rescaling the edited gradient</td><td>None; &#8220;sufficient to ignore this step&#8221;</td><td>The listing does not rescale.</td></tr>
+            <tr><td>Target start</td><td>0</td><td>Targets need about 100 steps to catch up, so early steps act like PCGrad.</td></tr>
         </tbody>
     </table>
-    <p>The paper links no code, and no official repository was found. LibMTL (<a href="https://github.com/median-research-group/LibMTL">github.com/median-research-group/LibMTL</a>) has an implementation whose defaults differ from the paper&#8217;s best: <var>&#946;</var> = 0.5 and the whole model as one group.</p>
-    <p>Per step, the cost is <var>K</var> backward passes and <var>K</var> stored copies of the shared gradient. The targets are <var>K</var> &#215; <var>K</var> numbers per layer, small next to the gradients.</p>
+    <p>No official code was found. LibMTL (<a href="https://github.com/median-research-group/LibMTL">github.com/median-research-group/LibMTL</a>) defaults to <var>&#946;</var> = 0.5 and the whole model as one group. Each step costs <var>K</var> backward passes and <var>K</var> copies of the shared gradient; the <var>K</var> &#215; <var>K</var> targets per layer are small.</p>
     <ol>
-        <li>The targets start at 0. With <var>&#946;</var> = 0.01 their time constant is 1/<var>&#946;</var> = 100 steps, so for the first few hundred steps they are below the real cosines (this page&#8217;s estimate, not a paper figure).</li>
-        <li>Edit copies and measure against the original <var>g<sub>j</sub></var>, as the listing does: it reads the original rows of <code>G</code> and edits the copy <code>out</code>.</li>
-        <li>A target of exactly 1 or &#8722;1 makes the denominator of <var>a</var> zero; the listing adds <code>EPS</code>.</li>
-        <li>With many tasks, the <var>K</var> backward passes dominate the step. Subsampling tasks as in CAGrad-Fast on <a href="cagrad.html">the CAGrad page</a> is a possible remedy, untested for GradVac.</li>
-        <li>If logged cosines are often negative, PCGrad already acts on most steps. GradVac adds most when cosines stay positive but some pairs fall below their usual level.</li>
+                        <li>A target of 1 or &#8722;1, or an all-zero <var>g<sub>j</sub></var>, makes a denominator of <var>a</var> zero; the listing adds <code>EPS</code> to both.</li>
+        <li>With many tasks the <var>K</var> backward passes dominate the step.</li>
+        <li>If logged cosines are often negative, PCGrad already acts on most steps; GradVac adds most when cosines stay positive but drop below usual.</li>
     </ol>
-    <h3 id="training-loop"><span class="secnum">8.1</span> Where GradVac sits in the training step</h3>
-    <p>GradVac replaces <code>loss.backward()</code>. Gradient clipping and the optimizer then see only the edited sum.</p>
+    <h3 id="training-loop"><span class="secnum">7.1</span> Where GradVac sits in the training step</h3>
+    <p>GradVac replaces <code>loss.backward()</code>.</p>
 <figure class="t1f-wrap" id="gv-fig-step"><svg class="t1f-svg" focusable="false" viewBox="0 0 274 412" role="img" aria-label="One training step: forward, backward, balance, clip, optimizer step, log"><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-fwd" x="14" y="10" width="246" height="62" rx="10" ry="10"/><text class="t1f-title" x="26" y="31" text-anchor="start" style="font-size:15px;font-weight:700">1 &#183; Forward</text><text class="t1f-sub" x="26" y="47" text-anchor="start" style="font-size:13px">each task computes its loss</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-bwd" x="14" y="92" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="113" text-anchor="start" style="font-size:15px;font-weight:700">2 &#183; Backward</text><text class="t1f-sub" x="26" y="129" text-anchor="start" style="font-size:13px">per-task gradients, shared layers</text></g><g class="t1f-part t1f-on"><rect class="t1f-box t1f-box-bal" x="14" y="158" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="179" text-anchor="start" style="font-size:15px;font-weight:700">3 &#183; Balance</text><text class="t1f-sub" x="26" y="195" text-anchor="start" style="font-size:13px">combine the task gradients</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-clip" x="14" y="224" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="245" text-anchor="start" style="font-size:15px;font-weight:700">4 &#183; Clip</text><text class="t1f-sub" x="26" y="261" text-anchor="start" style="font-size:13px">cap the gradient's length</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-opt" x="14" y="290" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="311" text-anchor="start" style="font-size:15px;font-weight:700">5 &#183; Optimizer step</text><text class="t1f-sub" x="26" y="327" text-anchor="start" style="font-size:13px">update the network's parameters</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-log" x="14" y="356" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="377" text-anchor="start" style="font-size:15px;font-weight:700">6 &#183; Log</text><text class="t1f-sub" x="26" y="393" text-anchor="start" style="font-size:13px">record what this step did</text></g><g class="t1f-part t1f-dim"><rect class="t1f-chip-lw" x="22" y="52" width="230" height="17" rx="4"/><text class="t1f-chiptext" x="28" y="65" text-anchor="start" style="font-size:12px">loss-weighting methods act here</text></g><g class="t1f-part t1f-on"><rect class="t1f-chip-gm" x="112" y="166" width="140" height="16" rx="4"/><text class="t1f-chiptext-w" x="182" y="178" text-anchor="middle" textLength="130" lengthAdjust="spacingAndGlyphs" style="font-size:11px;font-weight:700">gradient methods act here</text></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="72" x2="54" y2="82" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,92 48.5,82 59.5,82"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="138" x2="54" y2="148" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,158 48.5,148 59.5,148"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="204" x2="54" y2="214" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,224 48.5,214 59.5,214"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="270" x2="54" y2="280" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,290 48.5,280 59.5,280"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="336" x2="54" y2="346" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,356 48.5,346 59.5,346"/></g></svg><figcaption class="t1f-cap"><span class="fignum">Figure 5.</span> Gradient methods act after backward: they replace the plain sum of the task gradients, then clipping and the optimizer act on the result.</figcaption></figure>
-    <p>Momentum and Adam&#8217;s per-coordinate scaling can still turn the step away from the edited direction; see <a href="multitask-training-loop.html#optimizer">the optimizer section</a> and <a href="multitask-training-loop.html#adam-tilt">the per-coordinate tilt</a> on the training-loop page.</p>
-<h2 id="gv-compare"><span class="secnum">9</span> Comparison with other methods</h2>
+    <p>Momentum and Adam&#8217;s per-coordinate scaling can still turn the step (Sections <a href="multitask-training-loop.html#optimizer">6</a> and <a href="multitask-training-loop.html#adam-tilt">7.2</a> of Gradient Balancing Inside the Training Loop).</p>
+<h2 id="gv-compare"><span class="secnum">8</span> Comparison with other methods</h2>
     <p>Two methods learn each task&#8217;s loss weight (GradNorm and Uncertainty Weighting). Four methods edit the task gradients (PCGrad, GradVac, CAGrad and MGDA). The question each one answers:</p>
     <table class="cmp">
         <thead><tr><th>Method</th><th>The question it answers</th></tr></thead>
@@ -1418,8 +1411,8 @@ def gradvac_step(losses):
             <tr><td><a href="mgda.html"><strong>MGDA</strong></a></td><td>Which blend of task gradients lowers every task's loss at once, and when does no such blend exist?</td></tr>
         </tbody>
     </table>
-    <p>GradVac makes no promise about the smallest per-task improvement. <a href="cagrad.html">CAGrad</a> raises it while staying near the average gradient.</p>
-<h2 id="references"><span class="secnum">10</span> References</h2>
+    <p>GradVac makes no promise about the smallest per-task improvement; <a href="cagrad.html">CAGrad</a> raises it.</p>
+<h2 id="references"><span class="secnum">9</span> References</h2>
 <ol class="brefs"><li>Liu, B., et al. (2021). Conflict-Averse Gradient Descent for Multi-task Learning. NeurIPS. <a href="https://arxiv.org/abs/2110.14048">arXiv:2110.14048</a>.</li><li>Wang, Z., et al. (2021). Gradient Vaccine: Investigating and Improving Multi-task Optimization in Massively Multilingual Models. ICLR. <a href="https://arxiv.org/abs/2010.05874">arXiv:2010.05874</a>.</li><li>Yu, T., et al. (2020). Gradient Surgery for Multi-Task Learning. NeurIPS. <a href="https://arxiv.org/abs/2001.06782">arXiv:2001.06782</a>.</li><li>Lin, B., and Zhang, Y. (2023). LibMTL: A Python Library for Multi-Task Learning. JMLR. Code: <a href="https://github.com/median-research-group/LibMTL">github.com/median-research-group/LibMTL</a>.</li></ol>
 
 <script>
@@ -1770,7 +1763,7 @@ def gradvac_step(losses):
             if (c.acts) {
                 if (c.cos < 0) return 'cos ' + cs + ' is below the target ' + ts + ': the gradients conflict, and GradVac raises the cosine ' +
                     (st.target > 0 ? 'past zero to its own target.' :
-                     st.target === 0 ? 'to its target of zero, the same cut PCGrad makes.' :
+                     st.target === 0 ? 'to its target of zero, the same projection PCGrad makes.' :
                      'only up to its target, which is still negative.');
                 return 'cos ' + cs + ' is below the target ' + ts +
                     ': the pair is below its target, so GradVac acts while the cosine is still positive.';
@@ -1870,7 +1863,7 @@ def gradvac_step(losses):
                 return '<span class="gv-stage-tag">Nothing happens (2 of 2).</span> GradVac edits only pairs whose cosine is below their target.';
             }
             if (i === 0) return '<span class="gv-stage-tag">Measure (1 of 3).</span> cos(<var>g<sub>1</sub></var>, <var>g<sub>2</sub></var>) against the pair\'s running target.';
-            if (i === 1) return '<span class="gv-stage-tag">Nudge (2 of 3).</span> <var>g<sub>1</sub>\u2032</var> = <var>g<sub>1</sub></var> + <var>a</var>\u00D7<var>g<sub>2</sub></var>' + (c.doseTiny
+            if (i === 1) return '<span class="gv-stage-tag">Edit (2 of 3).</span> <var>g<sub>1</sub>\u2032</var> = <var>g<sub>1</sub></var> + <var>a</var>\u00D7<var>g<sub>2</sub></var>' + (c.doseTiny
                 ? ' (the added arrow is shorter than its arrowhead here)' : '') + ', turned toward <var>g<sub>2</sub></var> just enough to reach the target.';
             return '<span class="gv-stage-tag">Land (3 of 3).</span> The new cosine sits exactly on the pair\'s own target' +
                 (st.target !== 0 ? ', not zero.' : '.');

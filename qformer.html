@@ -480,9 +480,9 @@
     #attnLayer .al-scene { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .7rem; }
     #attnLayer .al-region { border: 1px solid #dfe6ec; border-radius: 10px; padding: .5rem .6rem; background: #fff; }
     #attnLayer .al-region-title { font-size: .78rem; font-weight: 700; color: #2c3e50; margin: 0 0 .35rem; }
-    /* Shared walkthrough equation-card contract (verbatim, all pages) */
-    
-    .eq-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+        /* Shared walkthrough equation-card contract (verbatim, all pages) */
+        
+        .eq-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
 
           padding:1rem 1.2rem;margin:1.75rem auto;max-width:640px;overflow-x:auto}
 
@@ -902,6 +902,7 @@ figcaption { margin-top: 1rem; }
   #maskSwitch .ms-tok { font-size: 15px; }
   #maskSwitch .ms-lab { font-size: 18px; }
   #maskSwitch .ms-small { font-size: 14px; }
+  #maskSwitch .ms-tiny { font-size: 13px; }
 }
 @media (max-width: 520px) { #maskSwitch .ms-arrow .ms-line, #maskSwitch .ms-arrow .ms-head { opacity: .6; } #maskSwitch .ms-arrow.on .ms-line, #maskSwitch .ms-arrow.on .ms-head { opacity: 1; } }
 @media (max-width: 380px) {
@@ -1043,6 +1044,7 @@ figcaption { margin-top: 1rem; }
   <p>
     BLIP-2 lets a frozen language model describe images and answer questions on them.
     A frozen image encoder reads the picture, a small trained <strong>Q-Former</strong> compresses it into 32 vectors, and these precede the language model's text.
+    The Q-Former trains in two pretraining stages on image-caption pairs, then runs once per image at inference, before the language model writes.
   </p>
   <p>
     <strong>Cross-attention</strong> takes queries from one stream and keys and values from another; <strong>learned queries</strong> are vectors trained like weights, and a <strong>mask</strong> blocks chosen query and key pairs.
@@ -1064,7 +1066,7 @@ figcaption { margin-top: 1rem; }
     A ViT (vision transformer, which cuts an image into patch tokens) reads the image, and one text Transformer, started from BERT-base (a 12-layer text encoder), runs in three modes.
   </p>
   <p>
-    The <strong>unimodal encoder</strong> reads the caption alone and trains with the <strong>image-text contrastive</strong> loss (<strong>ITC</strong>), which pulls a matched image vector and caption vector together and pushes the batch's other captions apart, as in <a href="clip.html">Image-Text Contrastive Learning (CLIP)</a>.
+    The <strong>unimodal encoder</strong> reads the caption alone and trains with the <strong>image-text contrastive</strong> loss (<strong>ITC</strong>), which pulls a matched image vector and caption vector together and pushes the batch's other captions apart, as in <a href="clip.html">Image-Text Contrastive Learning (CLIP)</a> (Radford et al., 2021).
     The <strong>image-grounded encoder</strong> also reads the image and trains with the <strong>image-text matching</strong> loss (<strong>ITM</strong>), a head that says matched or not.
     The <strong>image-grounded decoder</strong> writes the caption under <a href="transformer-position-masking.html#causal-mask">causal</a> self-attention and trains with the <strong>language modeling</strong> loss (<strong>LM</strong>).
   </p>
@@ -1121,24 +1123,24 @@ figcaption { margin-top: 1rem; }
     <text x="332" y="344" text-anchor="middle" style="font-size:16.5px">write it</text>
     <text x="332" y="362" text-anchor="middle" style="font-size:16.5px">word by word</text>
   </svg><figcaption class="caption"><span class="fignum">Figure 2.</span> The encoder and the decoder share everything except self-attention; a special first token tells the shared text model which mode it is in.</figcaption></figure>
-  <p>BLIP's three passes over one image and caption, with one self-attention and one cross-attention layer standing in for the text Transformer; in BLIP the decoder has its own causal self-attention.</p>
-<pre class="cs" data-cs="4-9,11,12-13,14-15"><code class="language-python">import torch
+  <p>BLIP's three passes over one image and caption, with one self-attention and one cross-attention layer standing in for the text Transformer, plus the decoder's own causal self-attention.</p>
+<pre class="cs" data-cs="4-10,12,13,14-15"><code class="language-python">import torch
 import torch.nn as nn
 
 D, N_PATCH, N_TXT, H = 768, 197, 12, 12
 img = torch.randn(1, N_PATCH, D)  # ViT patch features
 txt = torch.randn(1, N_TXT, D)    # caption token vectors
 self_attn = nn.MultiheadAttention(D, H, batch_first=True)
+causal_self_attn = nn.MultiheadAttention(D, H, batch_first=True)
 cross = nn.MultiheadAttention(D, H, batch_first=True)
 causal = torch.ones(N_TXT, N_TXT, dtype=torch.bool).triu(1)
 
 itc, _ = self_attn(txt, txt, txt)  # ITC, text only
-y, _ = self_attn(txt, txt, txt)
-itm, _ = cross(y, img, img)        # ITM, reads img
-y, _ = self_attn(txt, txt, txt, attn_mask=causal)
+itm, _ = cross(itc, img, img)      # ITM, reads img
+y, _ = causal_self_attn(txt, txt, txt, attn_mask=causal)
 lm, _ = cross(y, img, img)         # LM, causal, reads img</code></pre>
 <ol class="cs-notes">
-  <li><span class="cs-n">1</span>Image features, caption tokens and the shared layers, the three columns of <a href="#fig-blip-s-three">Figure 2</a>.</li>
+  <li><span class="cs-n">1</span>Image features, caption tokens, the shared layers and the decoder's own causal self-attention, the three columns of <a href="#fig-blip-s-three">Figure 2</a>.</li>
   <li><span class="cs-n">2</span>ITC, text attends only to itself, the left column of <a href="#fig-blip-s-three">Figure 2</a>.</li>
   <li><span class="cs-n">3</span>ITM, text also reads the image, the middle column of <a href="#fig-blip-s-three">Figure 2</a>.</li>
   <li><span class="cs-n">4</span>LM, causal text reading the image, the right column of <a href="#fig-blip-s-three">Figure 2</a>.</li>
@@ -1152,7 +1154,8 @@ lm, _ = cross(y, img, img)         # LM, causal, reads img</code></pre>
     <strong>CapFilt</strong> (captioning and filtering) cleans them with two copies of the MED, each fine-tuned on COCO's human-written captions.
   </p>
   <p>
-    The <strong>captioner</strong>, the decoder fine-tuned with LM, writes one caption per web image by <a href="decoding.html#top-k-top-p"><strong>nucleus sampling</strong></a> (each word drawn from the likeliest words covering 90% of the probability); the <strong>filter</strong>, the encoder fine-tuned with ITC and ITM, drops captions its ITM head calls unmatched.
+    The <strong>captioner</strong>, the decoder fine-tuned with LM, writes one caption per web image by <a href="decoding.html#top-k-top-p"><strong>nucleus sampling</strong></a> (each word drawn from the likeliest words covering 90% of the probability; a higher share allows rarer words and more varied captions, a lower one stays with safe common words); the <strong>filter</strong>, the encoder fine-tuned with ITC and ITM, drops captions its ITM head calls unmatched.
+    The gain is measured by text recall@1, how often an image's top-ranked caption is the right one.
   </p>
   <figure class="figure mtd-fig" id="fig-in-capfilt-a"><svg class="mtd-svg" viewBox="0 0 400 388" style="max-width:460px" role="img" aria-label="In CapFilt, a web image comes with its caption; the captioner writes a synthetic caption from the image; the filter keeps only captions its matching head accepts. In BLIP Fig. 4 the web caption from bridge near my house is rejected and the synthetic caption a flock of birds flying over a lake at sunset is accepted. The kept pairs plus human-written pairs pre-train a new model; at 14M images, fine-tuned COCO text retrieval recall at 1 rises from 78.4 to 80.6">
     <rect x="10" y="8" width="380" height="40" rx="6" style="fill:#f4f6f7;stroke:#95a5a6;stroke-width:1.8px"/>
@@ -1177,7 +1180,7 @@ lm, _ = cross(y, img, img)         # LM, causal, reads img</code></pre>
     <text x="200" y="320" text-anchor="middle" style="font-size:16.5px;font-weight:700;fill:#117a65">kept captions + human-written pairs</text>
     <text x="200" y="340" text-anchor="middle" style="font-size:16.5px;fill:#117a65">pre-train a new model on this</text>
     <text x="200" y="364" text-anchor="middle" style="font-size:16.5px">14M images, fine-tuned COCO</text><text x="200" y="384" text-anchor="middle" style="font-size:16.5px">text recall@1, 78.4 &#8594; 80.6</text>
-  </svg><figcaption class="caption"><span class="fignum">Figure 3.</span> The model writes and filters its own captions; pair from BLIP Fig. 4. Text recall@1 is how often an image's top-ranked caption is the right one.</figcaption></figure>
+  </svg><figcaption class="caption"><span class="fignum">Figure 3.</span> The model writes and filters its own captions; pair from BLIP Fig. 4.</figcaption></figure>
 
   <hr>
 
@@ -1282,8 +1285,8 @@ def block(x, img, allowed):  # x (B, N_Q + T, D)
   </p>
   <div class="eq-card" id="caItcEq">
     <div class="eq-what">The contrastive similarity between an image and a caption.</div>
-    <div class="eq-line eq-active">s(I, T) = max<sub>i</sub> sim(<span class="eqt" style="color:#1f618d">z<sub>i</sub></span>, <span class="eqt" style="color:#2c3e50">t</span>)</div>
-    <div class="eq-why eq-active">An image and a caption score as high as their best-matching query. sim compares query output <var>z<sub>i</sub></var> with the caption summary <var>t</var>: both are projected and normalized to length 1, then dotted, so the score is the cosine of the angle between them. max<sub><var>i</var></sub> keeps the best of the 32 instead of an average, so one query that found the caption's subject is enough, and different queries are free to specialize in different image parts. Training raises this score for matched pairs and lowers it for the other captions in the batch, the <a href="contrastive-learning.html#infonce">InfoNCE</a> loss.</div>
+    <div class="eq-line eq-active">s(I, C) = max<sub>i</sub> sim(<span class="eqt" style="color:#1f618d">z<sub>i</sub></span>, <span class="eqt" style="color:#2c3e50">t</span>)</div>
+    <div class="eq-why eq-active">An image <var>I</var> and a caption <var>C</var> score as high as their best-matching query. sim compares query output <var>z<sub>i</sub></var> with the caption summary <var>t</var>: both are projected and normalized to length 1, then dotted, so the score is the cosine of the angle between them. max<sub><var>i</var></sub> keeps the best of the 32 instead of an average, so one query that found the caption's subject is enough, and different queries are free to specialize in different image parts. Training raises this score for matched pairs and lowers it for the other captions in the batch, the <a href="contrastive-learning.html#infonce">InfoNCE</a> loss.</div>
   </div>
   <p>The generation mask for 32 queries and 6 text tokens.</p>
 <pre class="cs" data-cs="3-6,7-8,9-10"><code class="language-python">import torch
@@ -1509,8 +1512,8 @@ from transformers import Blip2ForConditionalGeneration
 
 CKPT = "Salesforce/blip2-opt-2.7b"
 processor = Blip2Processor.from_pretrained(CKPT)
-model = Blip2ForConditionalGeneration.from_pretrained(
-    CKPT, dtype=torch.float16).to("cuda")
+model = Blip2ForConditionalGeneration.from_pretrained(CKPT, dtype=torch.float16)
+model = model.to("cuda")
 print(model.config.num_query_tokens)  # 32
 
 image = Image.open("photo.jpg").convert("RGB")
@@ -1533,7 +1536,7 @@ print(processor.batch_decode(ids, skip_special_tokens=True))</code></pre>
     <tr><th scope="row">Code</th><td><a href="https://github.com/salesforce/LAVIS/tree/main/projects/blip2">LAVIS BLIP-2</a> with both stage scripts, Hugging Face <a href="https://huggingface.co/docs/transformers/v5.3.0/en/model_doc/blip-2">BLIP-2</a>.</td></tr>
   </table>
   <ul class="gotchas">
-    <li>Flan-T5 checkpoints cannot run in float16.</li>
+    <li>LAVIS runs the FlanT5 models in bfloat16; T5 layers can overflow in float16, so prefer bfloat16 on GPUs that support it.</li>
     <li>Processors add one image token per query to the text; do not truncate them away.</li>
   </ul>
 
@@ -1541,7 +1544,8 @@ print(processor.batch_decode(ids, skip_special_tokens=True))</code></pre>
 
   <h2 id="references"><span class="secnum">10</span> References</h2>
   <ol class="brefs">
-    <li>Li, J., Li, D., Xiong, C., and Hoi, S. (2022). BLIP: Bootstrapping Language-Image Pre-training for Unified Vision-Language Understanding and Generation. ICML 2022. <a href="https://arxiv.org/abs/2201.12086">arXiv:2201.12086</a>.</li>
+    <li>Li, J., et al. (2022). BLIP: Bootstrapping Language-Image Pre-training for Unified Vision-Language Understanding and Generation. ICML 2022. <a href="https://arxiv.org/abs/2201.12086">arXiv:2201.12086</a>.</li>
+    <li>Radford, A., et al. (2021). Learning Transferable Visual Models From Natural Language Supervision. ICML 2021. <a href="https://arxiv.org/abs/2103.00020">arXiv:2103.00020</a>.</li>
     <li>Li, J., et al. (2023). BLIP-2: Bootstrapping Language-Image Pre-training with Frozen Image Encoders and Large Language Models. ICML 2023. <a href="https://arxiv.org/abs/2301.12597">arXiv:2301.12597</a>.</li>
     <li>Fang, Y., et al. (2023). EVA: Exploring the Limits of Masked Visual Representation Learning at Scale. CVPR 2023. <a href="https://arxiv.org/abs/2211.07636">arXiv:2211.07636</a>. (ViT-g width 1408, about 1B parameters.)</li>
   </ol>

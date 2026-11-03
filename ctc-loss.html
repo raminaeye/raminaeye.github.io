@@ -675,6 +675,11 @@
 .mtd-svg .mtd-ctc-al { fill: #3498db; }
 .mtd-svg .mtd-ctc-be { fill: #d35400; }
 </style>
+<style>
+    .ss{display:inline-flex;flex-direction:column;vertical-align:-0.45em;line-height:1.05;font-size:.68em;margin-left:0;text-align:left}
+    .ss>span{display:block}
+    .datatable{border-collapse:collapse;margin:1.2em 0;width:100%;max-width:560px;font-size:.95em} .datatable th,.datatable td{border:1px solid #bdc3c7;padding:.45em .6em;text-align:left} .datatable th{background:#2c3e50;color:#fff;font-weight:600} .datatable tr:nth-child(even) td{background:#f7f9fb}
+</style>
 </head>
 <body>
 <nav class="topnav" aria-label="Site">
@@ -711,8 +716,10 @@
     <div class="tab-strip">
         <a class="tab-chip" href="#alignment">The alignment problem: which frame said what</a>
         <a class="tab-chip" href="#ctc">Connectionist Temporal Classification (CTC)</a>
-        <a class="tab-chip" href="#forward-backward">Training with Forward-Backward</a>
-        <a class="tab-chip" href="#beam-search">Inference: Beam Search</a>
+        <a class="tab-chip" href="#forward-backward">Training with forward-backward</a>
+        <a class="tab-chip" href="#beam-search">Decoding with beam search</a>
+        <a class="tab-chip" href="#ctc-results">CTC beats HMM systems without frame labels</a>
+        <a class="tab-chip" href="#ctc-pitfalls">What breaks in practice</a>
 <a class="tab-chip" href="#beyond-ctc">Beyond CTC</a>
 <a class="tab-chip" href="#references">References</a>
     </div>
@@ -726,9 +733,21 @@
 
    <p>So I need a loss that needs no <strong>frame-to-label alignment</strong> and can collapse many frame predictions into a shorter token sequence. That loss is <strong>Connectionist Temporal Classification (CTC)</strong>.</p>
 
+   <table class="datatable map-table">
+       <thead><tr><th>Part</th><th>What it answers</th></tr></thead>
+       <tbody>
+           <tr><td><a href="#ctc">CTC</a></td><td>how blanks and collapsing turn frames into text</td></tr>
+           <tr><td><a href="#loss-sums-paths">The loss</a></td><td>why it adds up every path that collapses to the target</td></tr>
+           <tr><td><a href="#forward-algorithm">The forward table</a></td><td>how the sum is computed without listing paths</td></tr>
+           <tr><td><a href="#forward-backward">Forward-backward</a></td><td>where each frame's gradient comes from</td></tr>
+           <tr><td><a href="#beam-search">Beam search</a></td><td>how to read out one transcript at inference</td></tr>
+           <tr><td><a href="#ctc-results">Results</a> and <a href="#ctc-pitfalls">pitfalls</a></td><td>does it work, and what breaks in practice</td></tr>
+       </tbody>
+   </table>
+
    <h2 id="ctc">Connectionist Temporal Classification (CTC)</h2>
 
-   <p>CTC adds a <strong>blank token</strong> to the vocabulary: a frame that outputs blank outputs no symbol. Each of the T frames then gets one probability per symbol:</p>
+   <p>CTC adds a <strong>blank token</strong> to the vocabulary: a frame that outputs blank outputs no symbol. Each of the T frames, a feature vector such as the MFCCs on the audio features page<!-- link-pending: audio-features.html -->, then gets one probability per symbol:</p>
 
    <div class="eq-card" id="ctcSoftEq">
        <div class="eq-what">Each frame turns its raw scores into probabilities over the V tokens plus the blank.</div>
@@ -741,10 +760,14 @@
 <pre><code class="language-python">from itertools import groupby
 
 def collapse(path, blank="_"):
-    merged = [sym for sym, _ in groupby(path)]      # merge repeats: c c -&gt; c
-    return [sym for sym in merged if sym != blank]  # drop blanks
+    # merge repeats, drop blanks
+    merged = [s for s, _ in
+              groupby(path)]
+    return [s for s in merged
+            if s != blank]
 
-collapse(["c", "c", "_", "a", "t", "t"])  # ['c', 'a', 't']
+collapse(list("cc_att"))
+# ['c', 'a', 't']
 </code></pre>
 
    <div class="diagram">
@@ -772,12 +795,13 @@ collapse(["c", "c", "_", "a", "t", "t"])  # ['c', 'a', 't']
        <div class="eq-line eq-active" data-eqline="2"><span class="eqt" data-k="loss" style="color:#c0392b">L</span> = &minus;log <span class="eqt" data-k="P" style="color:#3498db">P(y|x)</span></div>
         <div class="eq-why eq-active" data-eqline="2"><span class="eqt" style="color:#c0392b">L</span> is the CTC loss, the negative log of that total probability: a total near 1 gives a loss near 0, and a small total gives a large loss, so the loss punishes the model most for the transcripts it rated unlikely.</div>
      </div>
-   <p>The path c c _ a t t is one term of that sum, and every path collapses by the same rule.</p>
+   <p>The path c c _ a t t is one term of that sum.</p>
 
    <div class="demo" id="ctcDemo">
      <div class="btn-row" style="justify-content:center">
        <button type="button" id="ctcPlay">Play path build</button>
        <button type="button" id="ctcReset" class="ghost">Reset</button>
+       <button type="button" id="ctcClear" class="ghost">Clear</button>
      </div>
      <div class="demo-legend post-ramp"><span>probability 0</span><span class="post-ramp-bar"></span><span>1</span></div>
      <div class="ctc-grid-wrap canvas-wrap">
@@ -1001,15 +1025,20 @@ collapse(["c", "c", "_", "a", "t", "t"])  # ['c', 'a', 't']
          ctcPlayTick();
        });
      }
+     /* at rest and on Reset the preset path c c _ a t t is picked with its
+        result; Clear empties the grid so the reader can tap a path in */
      document.getElementById('ctcReset').addEventListener('click', function () {
-       reset(); path = new Array(cfg.T).fill(-1); render();
+       reset(); path = cfg.preset.slice(); render();
      });
-     reset();
+     document.getElementById('ctcClear').addEventListener('click', function () {
+       reset();
+     });
+     reset(); path = cfg.preset.slice(); render();
    })();
    </script>
 
 
-   <h3>The loss sums over every alignment</h3>
+   <h3 id="loss-sums-paths">The loss sums over every alignment</h3>
    
    <p>The catch is the count. Each frame spreads its probability over every symbol, so the alignments explode:</p>
 
@@ -1019,7 +1048,7 @@ collapse(["c", "c", "_", "a", "t", "t"])  # ['c', 'a', 't']
         <div class="eq-why eq-active" data-eqline="0">This counts every frame sequence: T frames, each picking one of V+1 symbols. With 50 symbols per frame and 100 frames that is 50<sup>100</sup>, astronomically many, and only the ones that collapse to the ground truth count.</div>
      </div>
 
-   <p>For the toy target "cat" with 6 frames, 84 paths collapse to "cat", and their probabilities add up to the model's total belief that the audio says "cat", over every timing it can imagine. <em>No single alignment is ever chosen during training.</em></p>
+   <p>For the toy target "cat" with 6 frames, 84 paths collapse to "cat"; their probabilities add up to the model's total belief in "cat" over every timing. <em>No single alignment is ever chosen during training.</em></p>
 
    <p>Here is that count of valid paths for four words as the number of frames grows.</p>
 
@@ -1116,6 +1145,8 @@ collapse(["c", "c", "_", "a", "t", "t"])  # ['c', 'a', 't']
    })();
    </script>
 
+   <p>It is the same negative-log trick as <a href="crossentropy-loss.html#categorical-ce">categorical cross-entropy</a>, one level up:</p>
+
    <div class="eq-card" id="ctcCeEq">
        <div class="eq-what">Same negative-log trick as cross-entropy, one level up.</div>
        <div class="eq-line eq-active" data-eqline="0">CE = &minus;log p(correct class)</div>
@@ -1127,30 +1158,37 @@ collapse(["c", "c", "_", "a", "t", "t"])  # ['c', 'a', 't']
    <p>In PyTorch the whole loss is one call; the rest of this page is what that call computes:</p>
 
 <pre><code class="language-python">import torch
-import torch.nn as nn
 
-T, N, C = 6, 1, 4                                # frames, batch size, symbols incl. blank
-log_probs = torch.randn(T, N, C).log_softmax(2)  # per-frame log-probabilities
-targets = torch.tensor([[1, 2, 3]])              # c, a, t; index 0 is the blank
-ctc = nn.CTCLoss(blank=0, reduction="sum")       # -log P(y|x), summed over the batch
-loss = ctc(log_probs, targets,
-           input_lengths=torch.tensor([T]), target_lengths=torch.tensor([3]))
+# frames, batch, symbols
+T, N, C = 6, 1, 4
+# per-frame log-probabilities
+x = torch.randn(T, N, C)
+log_probs = x.log_softmax(2)
+# targets c, a, t
+y = torch.tensor([[1, 2, 3]])
+# blank is index 0
+# "sum" gives -log P(y|x)
+ctc = torch.nn.CTCLoss(
+    blank=0, reduction="sum")
+input_lengths = torch.tensor([T])
+target_lengths = torch.tensor([3])
+loss = ctc(
+    log_probs, y,
+    input_lengths, target_lengths)
 </code></pre>
 
-   <p>CTC never lists the alignments. It sums them with <strong>dynamic programming</strong>, reusing smaller sums instead of enumerating paths: the <strong>forward-backward</strong> algorithm, a forward sweep from the first frame and a backward sweep from the last, taken in turn below.</p>
+   <p>CTC never lists the alignments. It sums them with <strong>dynamic programming</strong>, reusing smaller sums: the <strong>forward-backward</strong> algorithm, one sweep from the first frame and one from the last.</p>
 
-   <h3>Dynamic Programming for CTC</h3>
+   <h3 id="dynamic-programming">Dynamic programming for CTC</h3>
 
-   <p>A <strong>valid alignment</strong> is any frame sequence that collapses to the ground truth. I count those paths first, then swap the counts for probabilities.</p>
+   <p>A <strong>valid alignment</strong> is any frame sequence that collapses to the ground truth. Count those paths first, then swap the counts for probabilities.</p>
 
-   <p>Training on one chosen alignment would need that alignment to be right: each character or phoneme (one distinct unit of speech sound) cleanly placed in time. With variable timing no single alignment is known, so CTC sums them all.</p>
-
-   <p>So I build an extended target:</p>
+   <p>So CTC builds an extended target:</p>
 
    <div class="eq-card" id="ctcExtEq">
-       <div class="eq-what">I put a blank between every two characters and one at each end.</div>
-       <div class="eq-line eq-active" data-eqline="0"><span style="white-space:nowrap">l&#8242;</span> <span style="white-space:nowrap">= (_, y<sub>1</sub>, _, y<sub>2</sub>, &#8230;, _, y<sub>U</sub>, _)</span></div>
-        <div class="eq-why eq-active" data-eqline="0">y<sub>1</sub> to y<sub>U</sub> are the U target tokens and _ is the blank. l&#8242;<sub>s</sub> is the symbol in column s, counting from 1.</div>
+       <div class="eq-what">CTC puts a blank between every two characters and one at each end.</div>
+       <div class="eq-line eq-active" data-eqline="0"><span style="white-space:nowrap">l&#8242;</span> <span style="white-space:nowrap">= (_, y<sub>1</sub>, _, y<sub>2</sub>, &#8230;, y<sub>U</sub>, _)</span></div>
+        <div class="eq-why eq-active" data-eqline="0">y<sub>1</sub> to y<sub>U</sub> are the U target tokens and _ is the blank, also between every two tokens the dots skip over. l&#8242;<sub>s</sub> is the symbol in column s, counting from 1.</div>
        <div class="eq-line eq-active" data-eqline="1">S = 2U + 1</div>
         <div class="eq-why eq-active" data-eqline="1">S is the number of columns, twice the target length plus one: "cat" has U = 3, so _ c _ a _ t _ has 7 columns. <em>Blanks are guard rails</em>: they allow variable timing and separate repeated letters.</div>
      </div>
@@ -1165,9 +1203,7 @@ loss = ctc(log_probs, targets,
      <p class="caption">Figure 3. illustration of the forward backward algorithm applied to the labelling 'CAT'. Black circles represent labels, and white circles represent blanks. Arrows signify allowed transitions. Forward variables are updated in the direction of the arrows, and backward variables are updated against them. The paper's actual figure, cropped from the published ICML 2006 version.</p>
    </div>
 
-   <p>The paper draws the same lattice for _ c _ a _ t _, black circles for the letters and white circles for the blanks, with the same stay, step, and skip moves.</p>
-
-   <h3>Stay, step, skip: the transition rules</h3>
+   <h3 id="transition-rules">Each cell is reached by staying, stepping or skipping</h3>
 
    <p>Of the three moves only the skip has a rule: it may jump over a blank only between two different letters, so a blank never skips to the next blank and a double letter keeps its blank.</p>
 
@@ -1301,60 +1337,49 @@ loss = ctc(log_probs, targets,
 
    <div class="eq-card" id="ctcFwdEq">
        <div class="eq-what">Each cell adds the paths that flow in from the row above, times this frame's probability.</div>
-       <div class="eq-line eq-active" data-eqline="0"><span style="white-space:nowrap"><span class="eqt" style="color:#3498db">&#945;<sub>t</sub>(s)</span></span> <span style="white-space:nowrap">= <span class="eqt" style="color:#7d3c98">p<sub>t</sub>(l&#8242;<sub>s</sub>)</span> &#183; (<span class="eqt" style="color:#d35400">&#945;<sub>t&#8722;1</sub>(s)</span></span> <span style="white-space:nowrap">+ <span class="eqt" style="color:#d35400">&#945;<sub>t&#8722;1</sub>(s&#8722;1)</span></span> <span style="white-space:nowrap">+ <span class="eqt" style="color:#d35400">&#945;<sub>t&#8722;1</sub>(s&#8722;2)</span>)</span></div>
-        <div class="eq-why eq-active" data-eqline="0"><span class="eqt" style="color:#3498db">&#945;<sub>t</sub>(s)</span>, alpha, is the total probability of every path that reaches column s at frame t. The three <span class="eqt" style="color:#d35400">orange</span> terms are the stay, step, and skip flows from frame t &#8722; 1, and &#183; means times this frame's probability <span class="eqt" style="color:#7d3c98">p<sub>t</sub>(l&#8242;<sub>s</sub>)</span> for the column's symbol.</div>
-       <div class="eq-line eq-active" data-eqline="1"><span style="white-space:nowrap"><span class="eqt" style="color:#d35400">&#945;<sub>t&#8722;1</sub>(s&#8722;2)</span></span> <span style="white-space:nowrap">counts only if</span> <span style="white-space:nowrap">l&#8242;<sub>s</sub> &#8800; l&#8242;<sub>s&#8722;2</sub></span></div>
-        <div class="eq-why eq-active" data-eqline="1">&#8800; means differs from. Blanks sit in every odd column, so two columns back from a blank is another blank: this one test blocks both a blank-to-blank skip and a skip between two copies of the same letter. Any column outside the grid counts as 0.</div>
-       <div class="eq-line eq-active" data-eqline="2"><span style="white-space:nowrap"><span class="eqt" style="color:#3498db">&#945;<sub>1</sub>(1)</span> = <span class="eqt" style="color:#7d3c98">p<sub>1</sub>(_)</span></span></div>
-        <div class="eq-why eq-active" data-eqline="2">A path can start on the leading blank, so frame 1 seeds column 1 with the blank's probability.</div>
-       <div class="eq-line eq-active" data-eqline="3"><span style="white-space:nowrap"><span class="eqt" style="color:#3498db">&#945;<sub>1</sub>(2)</span> = <span class="eqt" style="color:#7d3c98">p<sub>1</sub>(y<sub>1</sub>)</span></span></div>
-        <div class="eq-why eq-active" data-eqline="3">It can also start on the first letter y<sub>1</sub>, so column 2 is seeded too; every other column starts at 0.</div>
-       <div class="eq-line eq-active" data-eqline="4"><span style="white-space:nowrap">P(y|x)</span> <span style="white-space:nowrap">= <span class="eqt" style="color:#3498db">&#945;<sub>T</sub>(S)</span> + <span class="eqt" style="color:#3498db">&#945;<sub>T</sub>(S &#8722; 1)</span></span></div>
-        <div class="eq-why eq-active" data-eqline="4">A path ends on the trailing blank or on the last letter, so the total adds those two cells of the last frame T. S = 2U + 1 is the number of columns.</div>
+       <div class="eq-line eq-active" data-eqline="0"><span style="white-space:nowrap"><span class="eqt" style="color:#3498db">&#945;<sub>t</sub>(s)</span></span> <span style="white-space:nowrap">= <span class="eqt" style="color:#7d3c98">p<sub>t</sub>(l&#8242;<sub>s</sub>)</span> &#183; (<span class="eqt" style="color:#d35400">&#945;<sub>t&#8722;1</sub>(s)</span></span></div>
+        <div class="eq-why eq-active" data-eqline="0"><span class="eqt" style="color:#3498db">&#945;<sub>t</sub>(s)</span>, alpha, is the total probability of every path that reaches column s at frame t: this frame's probability <span class="eqt" style="color:#7d3c98">p<sub>t</sub>(l&#8242;<sub>s</sub>)</span> for the column's symbol, times what flows in from frame t &#8722; 1. Stay: a path already in column s stays there.</div>
+       <div class="eq-line eq-active" data-eqline="1"><span style="white-space:nowrap">+ <span class="eqt" style="color:#d35400">&#945;<sub>t&#8722;1</sub>(s&#8722;1)</span></span></div>
+        <div class="eq-why eq-active" data-eqline="1">Step: a path moves on from the column before.</div>
+       <div class="eq-line eq-active" data-eqline="2"><span style="white-space:nowrap">+ <span class="eqt" style="color:#d35400">&#945;<sub>t&#8722;1</sub>(s&#8722;2)</span>)</span></div>
+        <div class="eq-why eq-active" data-eqline="2">Skip: a path jumps two columns, counted only when l&#8242;<sub>s</sub> &#8800; l&#8242;<sub>s&#8722;2</sub> (&#8800; means differs from). Blanks sit in every odd column, so this one test blocks a blank-to-blank skip and a skip between two copies of the same letter. Columns outside the grid count as 0.</div>
+       <div class="eq-line eq-active" data-eqline="3"><span style="white-space:nowrap"><span class="eqt" style="color:#3498db">&#945;<sub>1</sub>(1)</span> = <span class="eqt" style="color:#7d3c98">p<sub>1</sub>(_)</span></span></div>
+        <div class="eq-why eq-active" data-eqline="3">A path can start on the leading blank, so frame 1 seeds column 1 with the blank's probability.</div>
+       <div class="eq-line eq-active" data-eqline="4"><span style="white-space:nowrap"><span class="eqt" style="color:#3498db">&#945;<sub>1</sub>(2)</span> = <span class="eqt" style="color:#7d3c98">p<sub>1</sub>(y<sub>1</sub>)</span></span></div>
+        <div class="eq-why eq-active" data-eqline="4">It can also start on the first letter y<sub>1</sub>, so column 2 is seeded too; every other column starts at 0.</div>
+       <div class="eq-line eq-active" data-eqline="5"><span style="white-space:nowrap">P(y|x)</span> <span style="white-space:nowrap">= <span class="eqt" style="color:#3498db">&#945;<sub>T</sub>(S)</span> + <span class="eqt" style="color:#3498db">&#945;<sub>T</sub>(S &#8722; 1)</span></span></div>
+        <div class="eq-why eq-active" data-eqline="5">A path ends on the trailing blank or on the last letter, so the total adds those two cells of the last frame T. S = 2U + 1 is the number of columns.</div>
      </div>
 
-   <p>In the listing below the three flows are stay, prev, and skip. The listings count frames and columns from 0, as Python does; the equations count from 1.</p>
+   <p>ext is the extended target from the card above, and col[s] is the column of probs that holds ext[s] (blank first, then the letters). The listings count frames and columns from 0, as Python does; the equations count from 1.</p>
 
 <pre><code class="language-python">import numpy as np
 
-def ctc_forward(probs, target):
-    """
-    probs: array (T, V) with softmax probs for each frame
-           columns: blank, then the target's letters in
-           first-appearance order (the toy's _, c, a, t)
-    target: list of symbols, e.g. ['c','a','t']
-    """
-    # 1. Build extended target
-    extended = ['_']
-    for ch in target:
-        extended += [ch, '_']
-    S = len(extended)
-
-    # Map symbol -> index in probs. First-appearance order, so the map
-    # is identical on every run; a set would order it by hash and
-    # silently scramble which column belongs to which symbol.
-    vocab = {}
-    for ch in extended:
-        if ch not in vocab:
-            vocab[ch] = len(vocab)
-
-    T = probs.shape[0]
+def ctc_forward(probs, ext, col):
+    T, S = len(probs), len(ext)
     alpha = np.zeros((T, S))
-
-    # 2. Initialize first frame
-    alpha[0][0] = probs[0, vocab[extended[0]]]   # prob of blank at t=0
-    alpha[0][1] = probs[0, vocab[extended[1]]]   # prob of 'c' at t=0
-
-    # 3. Fill DP table
+    first = probs[0]
+    alpha[0, :2] = first[col[:2]]
     for t in range(1, T):
-        for s in range(S):
-            stay = alpha[t-1][s]
-            prev = alpha[t-1][s-1] if s-1 >= 0 else 0
-            skip = alpha[t-1][s-2] if (s-2 >= 0 and extended[s] != extended[s-2]) else 0
-            alpha[t][s] = probs[t, vocab[extended[s]]] * (stay + prev + skip)
-
-    # 4. Final probability
-    return alpha[T-1][S-1] + alpha[T-1][S-2]
+        prev = alpha[t-1]
+        # stay
+        a = prev.copy()
+        # step
+        a[1:] += prev[:-1]
+        # skip
+        for s in range(2, S):
+            if ext[s] != ext[s-2]:
+                a[s] += prev[s-2]
+        a *= probs[t, col]
+        alpha[t] = a
+    total = alpha[-1, -2:].sum()
+    return alpha, total
+</code></pre>
+   <p>Build ext and col once, before the call:</p>
+<pre><code class="language-python">ext = ["_"] + [x for ch in target
+               for x in (ch, "_")]
+col = [vocab.index(ch)
+       for ch in ext]
 </code></pre>
    <style>
     #dpDemo td.cell.dp-spot { outline: 3px solid #1a252f; outline-offset: -3px; font-weight: bold; }
@@ -1389,9 +1414,9 @@ def ctc_forward(probs, target):
     }
    </style>
 
-   <h3>The forward algorithm</h3>
+   <h3 id="forward-algorithm">The forward algorithm</h3>
 
-   <p>The code looks like accounting. Run on the toy table for "cat", every cell of the forward table asks its three neighbors "how did you get here?" and adds their answers times this frame's probability, exactly the recursion card above.</p>
+   <p>Each cell of the forward table adds what flows in from its three neighbors in the row above, times this frame's probability. The same forward recursion runs a hidden Markov model; the HMM page builds it from scratch<!-- link-pending: hmm.html -->.</p>
 
 
    <div class="demo" id="dpDemo">
@@ -1403,7 +1428,7 @@ def ctc_forward(probs, target):
 <div class="ctc-grid-wrap canvas-wrap">
        <table class="ctc-grid" id="dpGrid"></table>
      </div>
-<div class="ctc-readout worked" id="dpRead">The table is empty; frame t1 fills first.</div>
+<div class="ctc-readout worked" id="dpRead"></div>
 <div class="demo-stats" id="dpTotal"></div>
 
 </div>
@@ -1458,6 +1483,10 @@ def ctc_forward(probs, target):
      })();
      var cells = [];
      var rowsFilled = 0, timer = null;
+     /* dpQuiet: the rest state (load and Reset) shows the filled table and
+        its total with no finale motion; Play and Step replay from frame 1 */
+     var dpQuiet = false;
+     function dpRest() { rowsFilled = T; dpQuiet = true; render(); dpQuiet = false; }
 
      function fmt(x) { return x.toFixed(4); }
      /* Phone widths: three decimals without the leading zero (.700) so
@@ -1544,6 +1573,11 @@ def ctc_forward(probs, target):
      function finaleMerge() {
        var token = rowsFilled;
        var c1 = cellAt(T - 1, S - 1), c2 = cellAt(T - 1, S - 2);
+       if (dpQuiet) {
+         totalEl.innerHTML = 'total probability P("cat"|x) = <strong style="color:#2471a3">' + fmt(AL[T - 1][S - 1] + AL[T - 1][S - 2]) + '</strong>';
+         totalEl.style.opacity = '1';
+         return;
+       }
        [c1, c2].forEach(function (c) { if (c) c.classList.add('dp-merge'); });
        setTimeout(function () {
          [c1, c2].forEach(function (c) { if (c) c.classList.remove('dp-merge'); });
@@ -1569,11 +1603,15 @@ def ctc_forward(probs, target):
          requestAnimationFrame(function () {
            plus.style.left = tx + 'px'; plus.style.top = ty + 'px';
          });
-         setTimeout(function () { plus.style.opacity = '0'; }, 2000);
-         setTimeout(function () { if (plus.parentNode) plus.parentNode.removeChild(plus); }, 2500);
        } catch (e) { /* the animation is garnish; the equation below is the content */ }
+       /* the plus leaves in the same tick the total appears, so the text
+          changes once, not twice 100 ms apart */
        setTimeout(function () {
+         var pl = demo.querySelectorAll('.dp-fly-plus');
+         for (var q = 0; q < pl.length; q++) pl[q].parentNode.removeChild(pl[q]);
          if (rowsFilled !== token) return;
+         /* no fade: the total appears in one step */
+         totalEl.style.transition = 'none';
          totalEl.innerHTML = eqHtml;
          totalEl.style.opacity = '1';
        }, 2600);
@@ -1616,7 +1654,6 @@ def ctc_forward(probs, target):
      }
 
      function render() {
-       document.getElementById('dpStep').disabled = rowsFilled >= T;
        /* The finale's flying "+" is garnish that removes itself on a 2.5s
           timer. A Reset (or a Play restart) before that timer fires must
           still restore the exact rest state, so clear any lingering plus
@@ -1712,8 +1749,8 @@ def ctc_forward(probs, target):
        }
        dpSchedule();
      });
-     document.getElementById('dpStep').addEventListener('click', function () { stop(600); step(); });
-     document.getElementById('dpReset').addEventListener('click', function () { stop(600); rowsFilled = 0; render(); });
+     document.getElementById('dpStep').addEventListener('click', function () { stop(600); if (rowsFilled >= T) rowsFilled = 0; step(); });
+     document.getElementById('dpReset').addEventListener('click', function () { stop(600); dpRest(); });
      window.addEventListener('resize', function () {
        for (var i = 0; i < cells.length; i++) {
          var t = parseInt(cells[i].getAttribute('data-t'), 10), s = parseInt(cells[i].getAttribute('data-s'), 10);
@@ -1721,7 +1758,7 @@ def ctc_forward(probs, target):
        }
        drawArrows();
      });
-     render();
+     dpRest();
    })();
    </script>
 
@@ -1729,121 +1766,53 @@ def ctc_forward(probs, target):
 
    
 
-   <p><em>Okay, so does this actually work?</em> I didn't run this one, so here is the literature. Graves et al. trained a bidirectional LSTM with CTC on the TIMIT speech corpus. An LSTM (long short-term memory) is a recurrent network that reads a sequence step by step and carries a gated memory of what it has seen; bidirectional means one direction reads forward and one backward, so each frame sees both sides:</p>
-
-   <figure class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 342" style="max-width:480px" role="img" aria-label="The Graves 2006 TIMIT model: frames of 26 numbers (12 MFCCs, log energy, and their first derivatives) feed a bidirectional LSTM, one forward and one backward direction with 100 blocks each, then a per-frame softmax over 61 phonemes plus blank, trained with the CTC loss"><text class="" x="200.0" y="20.0" text-anchor="middle" style="font-size:16px;font-weight:700">TIMIT frames: 26 numbers each</text><rect class="mtd-box" x="38.0" y="32.0" width="44.0" height="30.0" rx="7" style="stroke:#7f8c8d;fill:#fbfcfd"/><text class="mtd-sub" x="60.0" y="53.0" text-anchor="middle" style="font-size:16px;font-weight:600">x</text><line class="mtd-s mtd-cg" x1="60.0" y1="62.0" x2="60.0" y2="84.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cg" points="60.0,92.0 54.0,80.0 66.0,80.0"/><rect class="mtd-box" x="108.0" y="32.0" width="44.0" height="30.0" rx="7" style="stroke:#7f8c8d;fill:#fbfcfd"/><text class="mtd-sub" x="130.0" y="53.0" text-anchor="middle" style="font-size:16px;font-weight:600">x</text><line class="mtd-s mtd-cg" x1="130.0" y1="62.0" x2="130.0" y2="84.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cg" points="130.0,92.0 124.0,80.0 136.0,80.0"/><rect class="mtd-box" x="178.0" y="32.0" width="44.0" height="30.0" rx="7" style="stroke:#7f8c8d;fill:#fbfcfd"/><text class="mtd-sub" x="200.0" y="53.0" text-anchor="middle" style="font-size:16px;font-weight:600">x</text><line class="mtd-s mtd-cg" x1="200.0" y1="62.0" x2="200.0" y2="84.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cg" points="200.0,92.0 194.0,80.0 206.0,80.0"/><rect class="mtd-box" x="248.0" y="32.0" width="44.0" height="30.0" rx="7" style="stroke:#7f8c8d;fill:#fbfcfd"/><text class="mtd-sub" x="270.0" y="53.0" text-anchor="middle" style="font-size:16px;font-weight:600">x</text><line class="mtd-s mtd-cg" x1="270.0" y1="62.0" x2="270.0" y2="84.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cg" points="270.0,92.0 264.0,80.0 276.0,80.0"/><rect class="mtd-box" x="318.0" y="32.0" width="44.0" height="30.0" rx="7" style="stroke:#7f8c8d;fill:#fbfcfd"/><text class="mtd-sub" x="340.0" y="53.0" text-anchor="middle" style="font-size:16px;font-weight:600">x</text><line class="mtd-s mtd-cg" x1="340.0" y1="62.0" x2="340.0" y2="84.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cg" points="340.0,92.0 334.0,80.0 346.0,80.0"/><rect class="mtd-box" x="16.0" y="94.0" width="368.0" height="92.0" rx="7" style="stroke:#1f618d;fill:#eaf2f8"/><text class="mtd-t1" x="200.0" y="116.0" text-anchor="middle" style="font-size:16px;font-weight:700">bidirectional LSTM</text><line class="mtd-s mtd-c1" x1="40.0" y1="140.0" x2="101.0" y2="140.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-c1" points="110.0,140.0 96.5,146.8 96.5,133.2"/><text class="mtd-t1" x="120.0" y="146.0" text-anchor="start" style="font-size:15px;font-weight:600">forward, 100 blocks</text><line class="mtd-s mtd-c2" x1="110.0" y1="168.0" x2="49.0" y2="168.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-c2" points="40.0,168.0 53.5,161.2 53.5,174.8"/><text class="mtd-t2" x="120.0" y="174.0" text-anchor="start" style="font-size:15px;font-weight:600">backward, 100 blocks</text><line class="mtd-s mtd-cg" x1="200.0" y1="186.0" x2="200.0" y2="208.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cg" points="200.0,216.0 194.0,204.0 206.0,204.0"/><rect class="mtd-box" x="16.0" y="218.0" width="368.0" height="44.0" rx="7" style="stroke:#7d3c98;fill:#f5eef8"/><text class="mtd-pu" x="200.0" y="246.0" text-anchor="middle" style="font-size:15px;font-weight:600">softmax per frame: 61 phonemes + blank</text><line class="mtd-s mtd-cg" x1="200.0" y1="262.0" x2="200.0" y2="284.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cg" points="200.0,292.0 194.0,280.0 206.0,280.0"/><rect class="mtd-box" x="120.0" y="294.0" width="160.0" height="40.0" rx="7" style="stroke:#2c3e50;fill:#ffffff;stroke-width:2px"/><text class="" x="200.0" y="320.0" text-anchor="middle" style="font-size:17px;font-weight:700">CTC loss</text></svg><figcaption class="caption">Each frame holds 12 MFCCs (mel-frequency cepstral coefficients, a compact summary of the frame's spectrum) plus log energy, plus their first derivatives: 26 numbers per frame. A block is one memory unit. From Graves et al., ICML 2006, section 5 (literature, not run here).</figcaption></figure>
-
-   <p>The score is label error rate (LER): the edit distance between output and target (the insertions, substitutions, and deletions needed to turn one into the other), divided by the target length, on the TIMIT test set (1680 held-out utterances). The CTC and hybrid rows are means over 5 runs, where &plusmn; is the standard error. The baselines are HMMs (hidden Markov models, older speech models that step through hidden states, each emitting sounds at set probabilities); a hybrid lets the network score each frame against those states, and context dependent means a sound's model depends on its neighbors. Prefix search is a decoder, not a model: it grows label sequences prefix by prefix and keeps those with the highest total probability over their paths, so it beats best path decoding (greedy decoding: take the most likely symbol at each frame, then collapse) slightly.</p>
-   <div class="stat-grid">
-     <div class="stat-card">
-       <div class="stat-num">31.47 <span class="stat-unit">&plusmn; 0.21 % LER</span></div>
-       <div class="stat-label">CTC (best path)</div>
-       <div class="stat-note">mean over 5 runs, TIMIT test set (1680 utterances)</div>
-     </div>
-     <div class="stat-card">
-       <div class="stat-num">30.51 <span class="stat-unit">&plusmn; 0.19 % LER</span></div>
-       <div class="stat-label">CTC (prefix search)</div>
-       <div class="stat-note">mean over 5 runs, TIMIT test set (1680 utterances)</div>
-     </div>
-     <div class="stat-card">
-       <div class="stat-num">31.57 <span class="stat-unit">&plusmn; 0.06 % LER</span></div>
-       <div class="stat-label">Weighted error BLSTM/HMM hybrid</div>
-       <div class="stat-note">the best hybrid, its error weighting long and short phonemes equally; not significantly different from CTC best path</div>
-     </div>
-     <div class="stat-card">
-       <div class="stat-num">33.84 <span class="stat-unit">&plusmn; 0.06 % LER</span></div>
-       <div class="stat-label">BLSTM/HMM (hidden Markov model) hybrid baseline</div>
-     </div>
-     <div class="stat-card">
-       <div class="stat-num">35.21 <span class="stat-unit">% LER</span></div>
-       <div class="stat-label">Context-dependent HMM baseline</div>
-     </div>
-     <div class="stat-card">
-       <div class="stat-num">38.85 <span class="stat-unit">% LER</span></div>
-       <div class="stat-label">Context-independent HMM baseline</div>
-     </div>
-   </div>
-
-   <h2 id="forward-backward">Training with Forward-Backward</h2>
+   <h2 id="forward-backward">Training with forward-backward</h2>
    
    <p>The total is not enough for training. Training needs a gradient at every frame, the correction that compares where the credit should go with what the model predicted. That needs each frame's share of the credit for each target position, the <strong>posterior probability</strong>. The forward pass gives the <strong>prefix</strong> mass up to a cell, the backward pass the <strong>suffix</strong> mass from it to the end, and joining them gives the posterior:</p>
    <figure class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 248" style="max-width:480px" role="img" aria-label="A lattice of frames by extended target slots with one highlighted cell. Blue paths come from the start down to the cell: the forward prefix mass. Orange paths leave the cell to the end: the backward suffix mass. Every full path through the cell is one prefix joined to one suffix"><rect x="16.0" y="43.0" width="260.0" height="117.0" rx="8" style="fill:#3498db;fill-opacity:.08"/><rect x="16.0" y="160.0" width="260.0" height="83.0" rx="8" style="fill:#d35400;fill-opacity:.08"/><text class="mtd-sub" x="32.0" y="26.0" text-anchor="middle" style="font-size:17px">_</text><text class="" x="70.0" y="26.0" text-anchor="middle" style="font-size:17px;font-weight:700">c</text><text class="mtd-sub" x="108.0" y="26.0" text-anchor="middle" style="font-size:17px">_</text><text class="" x="146.0" y="26.0" text-anchor="middle" style="font-size:17px;font-weight:700">a</text><text class="mtd-sub" x="184.0" y="26.0" text-anchor="middle" style="font-size:17px">_</text><text class="" x="222.0" y="26.0" text-anchor="middle" style="font-size:17px;font-weight:700">t</text><text class="mtd-sub" x="260.0" y="26.0" text-anchor="middle" style="font-size:17px">_</text><path class="mtd-s" d="M32.0,58.0 L70.0,92.0 L108.0,126.0 L146.0,160.0" style="stroke:#3498db;stroke-width:3px;opacity:.85"/><path class="mtd-s" d="M70.0,58.0 L70.0,92.0 L70.0,126.0 L146.0,160.0" style="stroke:#3498db;stroke-width:3px;opacity:.85"/><path class="mtd-s" d="M32.0,58.0 L32.0,92.0 L70.0,126.0 L146.0,160.0" style="stroke:#3498db;stroke-width:3px;opacity:.85"/><path class="mtd-s" d="M146.0,160.0 L184.0,194.0 L222.0,228.0" style="stroke:#d35400;stroke-width:3px;opacity:.85"/><path class="mtd-s" d="M146.0,160.0 L222.0,194.0 L260.0,228.0" style="stroke:#d35400;stroke-width:3px;opacity:.85"/><path class="mtd-s" d="M146.0,160.0 L146.0,194.0 L222.0,228.0" style="stroke:#d35400;stroke-width:3px;opacity:.85"/><circle cx="32.0" cy="58.0" r="4" style="fill:#95a5a6"/><circle cx="70.0" cy="58.0" r="4" style="fill:#95a5a6"/><circle cx="108.0" cy="58.0" r="4" style="fill:#95a5a6"/><circle cx="146.0" cy="58.0" r="4" style="fill:#95a5a6"/><circle cx="184.0" cy="58.0" r="4" style="fill:#95a5a6"/><circle cx="222.0" cy="58.0" r="4" style="fill:#95a5a6"/><circle cx="260.0" cy="58.0" r="4" style="fill:#95a5a6"/><circle cx="32.0" cy="92.0" r="4" style="fill:#95a5a6"/><circle cx="70.0" cy="92.0" r="4" style="fill:#95a5a6"/><circle cx="108.0" cy="92.0" r="4" style="fill:#95a5a6"/><circle cx="146.0" cy="92.0" r="4" style="fill:#95a5a6"/><circle cx="184.0" cy="92.0" r="4" style="fill:#95a5a6"/><circle cx="222.0" cy="92.0" r="4" style="fill:#95a5a6"/><circle cx="260.0" cy="92.0" r="4" style="fill:#95a5a6"/><circle cx="32.0" cy="126.0" r="4" style="fill:#95a5a6"/><circle cx="70.0" cy="126.0" r="4" style="fill:#95a5a6"/><circle cx="108.0" cy="126.0" r="4" style="fill:#95a5a6"/><circle cx="146.0" cy="126.0" r="4" style="fill:#95a5a6"/><circle cx="184.0" cy="126.0" r="4" style="fill:#95a5a6"/><circle cx="222.0" cy="126.0" r="4" style="fill:#95a5a6"/><circle cx="260.0" cy="126.0" r="4" style="fill:#95a5a6"/><circle cx="32.0" cy="160.0" r="4" style="fill:#95a5a6"/><circle cx="70.0" cy="160.0" r="4" style="fill:#95a5a6"/><circle cx="108.0" cy="160.0" r="4" style="fill:#95a5a6"/><circle cx="146.0" cy="160.0" r="4" style="fill:#95a5a6"/><circle cx="184.0" cy="160.0" r="4" style="fill:#95a5a6"/><circle cx="222.0" cy="160.0" r="4" style="fill:#95a5a6"/><circle cx="260.0" cy="160.0" r="4" style="fill:#95a5a6"/><circle cx="32.0" cy="194.0" r="4" style="fill:#95a5a6"/><circle cx="70.0" cy="194.0" r="4" style="fill:#95a5a6"/><circle cx="108.0" cy="194.0" r="4" style="fill:#95a5a6"/><circle cx="146.0" cy="194.0" r="4" style="fill:#95a5a6"/><circle cx="184.0" cy="194.0" r="4" style="fill:#95a5a6"/><circle cx="222.0" cy="194.0" r="4" style="fill:#95a5a6"/><circle cx="260.0" cy="194.0" r="4" style="fill:#95a5a6"/><circle cx="32.0" cy="228.0" r="4" style="fill:#95a5a6"/><circle cx="70.0" cy="228.0" r="4" style="fill:#95a5a6"/><circle cx="108.0" cy="228.0" r="4" style="fill:#95a5a6"/><circle cx="146.0" cy="228.0" r="4" style="fill:#95a5a6"/><circle cx="184.0" cy="228.0" r="4" style="fill:#95a5a6"/><circle cx="222.0" cy="228.0" r="4" style="fill:#95a5a6"/><circle cx="260.0" cy="228.0" r="4" style="fill:#95a5a6"/><circle cx="146.0" cy="160.0" r="9" style="fill:#ffffff;stroke:#7d3c98;stroke-width:3px"/><text class="mtd-ctc-al" x="286.0" y="94.0" text-anchor="start" style="font-size:15px;font-weight:700">forward:</text><text class="" x="286.0" y="112.0" text-anchor="start" style="font-size:15px">prefix mass</text><text class="mtd-sub" x="286.0" y="130.0" text-anchor="start" style="font-size:15px">up to here</text><text class="mtd-ctc-be" x="286.0" y="190.0" text-anchor="start" style="font-size:15px;font-weight:700">backward:</text><text class="" x="286.0" y="208.0" text-anchor="start" style="font-size:15px">suffix mass</text><text class="mtd-sub" x="286.0" y="226.0" text-anchor="start" style="font-size:15px">to the end</text></svg><figcaption class="caption">Rows are frames, columns the extended target. Every full path through the circled cell is a forward prefix joined to a backward suffix.</figcaption></figure>
 
    <div class="eq-card" id="ctcBwdEq">
        <div class="eq-what">The backward recursion is the forward one run from the last frame back.</div>
-       <div class="eq-line eq-active" data-eqline="0"><span style="white-space:nowrap"><span class="eqt" style="color:#d35400">&#946;<sub>t</sub>(s)</span></span> <span style="white-space:nowrap">= <span class="eqt" style="color:#7d3c98">p<sub>t</sub>(l&#8242;<sub>s</sub>)</span> &#183; (&#946;<sub>t+1</sub>(s)</span> <span style="white-space:nowrap">+ &#946;<sub>t+1</sub>(s+1)</span> <span style="white-space:nowrap">+ &#946;<sub>t+1</sub>(s+2))</span></div>
-        <div class="eq-why eq-active" data-eqline="0"><span class="eqt" style="color:#d35400">&#946;<sub>t</sub>(s)</span>, beta, is the total probability of every way to finish the path from column s at frame t to the end. Like &#945;, it includes this frame's probability <span class="eqt" style="color:#7d3c98">p<sub>t</sub>(l&#8242;<sub>s</sub>)</span>. The three terms are this column, the next column, and two columns on, at frame t + 1.</div>
-       <div class="eq-line eq-active" data-eqline="1"><span style="white-space:nowrap">&#946;<sub>t+1</sub>(s+2)</span> <span style="white-space:nowrap">counts only if</span> <span style="white-space:nowrap">l&#8242;<sub>s</sub> &#8800; l&#8242;<sub>s+2</sub></span></div>
-        <div class="eq-why eq-active" data-eqline="1">The same skip rule, looking forward; any column past S counts as 0.</div>
-       <div class="eq-line eq-active" data-eqline="2"><span style="white-space:nowrap"><span class="eqt" style="color:#d35400">&#946;<sub>T</sub>(S)</span> = <span class="eqt" style="color:#7d3c98">p<sub>T</sub>(_)</span></span></div>
-        <div class="eq-why eq-active" data-eqline="2">At the last frame T a path can finish on the trailing blank, column S.</div>
-       <div class="eq-line eq-active" data-eqline="3"><span style="white-space:nowrap"><span class="eqt" style="color:#d35400">&#946;<sub>T</sub>(S&#8722;1)</span> = <span class="eqt" style="color:#7d3c98">p<sub>T</sub>(y<sub>U</sub>)</span></span></div>
-        <div class="eq-why eq-active" data-eqline="3">It can also finish on the last letter y<sub>U</sub>, column S &#8722; 1; every other &#946;<sub>T</sub>(s) is 0.</div>
+       <div class="eq-line eq-active" data-eqline="0"><span style="white-space:nowrap"><span class="eqt" style="color:#d35400">&#946;<sub>t</sub>(s)</span></span> <span style="white-space:nowrap">= <span class="eqt" style="color:#7d3c98">p<sub>t</sub>(l&#8242;<sub>s</sub>)</span> &#183; (&#946;<sub>t+1</sub>(s)</span></div>
+        <div class="eq-why eq-active" data-eqline="0"><span class="eqt" style="color:#d35400">&#946;<sub>t</sub>(s)</span>, beta, is the total probability of every way to finish the path from column s at frame t to the end. Like &#945;, it includes this frame's probability <span class="eqt" style="color:#7d3c98">p<sub>t</sub>(l&#8242;<sub>s</sub>)</span>. Stay: the path stays in column s at frame t + 1.</div>
+       <div class="eq-line eq-active" data-eqline="1"><span style="white-space:nowrap">+ &#946;<sub>t+1</sub>(s+1)</span></div>
+        <div class="eq-why eq-active" data-eqline="1">Step: the path moves on to the next column.</div>
+       <div class="eq-line eq-active" data-eqline="2"><span style="white-space:nowrap">+ &#946;<sub>t+1</sub>(s+2))</span></div>
+        <div class="eq-why eq-active" data-eqline="2">Skip: counted only when l&#8242;<sub>s</sub> &#8800; l&#8242;<sub>s+2</sub>, the same skip rule looking forward; any column past S counts as 0.</div>
+       <div class="eq-line eq-active" data-eqline="3"><span style="white-space:nowrap"><span class="eqt" style="color:#d35400">&#946;<sub>T</sub>(S)</span> = <span class="eqt" style="color:#7d3c98">p<sub>T</sub>(_)</span></span></div>
+        <div class="eq-why eq-active" data-eqline="3">At the last frame T a path can finish on the trailing blank, column S.</div>
+       <div class="eq-line eq-active" data-eqline="4"><span style="white-space:nowrap"><span class="eqt" style="color:#d35400">&#946;<sub>T</sub>(S&#8722;1)</span> = <span class="eqt" style="color:#7d3c98">p<sub>T</sub>(y<sub>U</sub>)</span></span></div>
+        <div class="eq-why eq-active" data-eqline="4">It can also finish on the last letter y<sub>U</sub>, column S &#8722; 1; every other &#946;<sub>T</sub>(s) is 0.</div>
      </div>
 
-<p>In the listing below the three terms are same, nxt, and skip.</p>
+<p>The backward listing is the forward one run from the last frame back, with the same ext and col.</p>
 
-<pre><code class="language-python">import numpy as np
-
-def ctc_forward_backward(probs, target):
-    """
-    probs: np.array of shape (T, V) with softmax probabilities
-           columns: blank, then the target's letters in
-           first-appearance order (the toy's _, c, a, t)
-    target: list of symbols, e.g. ['c','a','t']
-    """
-    # Build extended target with blanks
-    extended = ['_']
-    for ch in target:
-        extended += [ch, '_']
-    S = len(extended)   # extended length
-    T = probs.shape[0]  # number of frames
-
-    # Map symbol -> index in probs. First-appearance order, so the map
-    # is identical on every run; a set would order it by hash and
-    # silently scramble which column belongs to which symbol.
-    vocab = {}
-    for ch in extended:
-        if ch not in vocab:
-            vocab[ch] = len(vocab)
-
-    # Forward DP
-    alpha = np.zeros((T, S))
-    alpha[0][0] = probs[0, vocab[extended[0]]]
-    alpha[0][1] = probs[0, vocab[extended[1]]]
-
-    for t in range(1, T):
-        for s in range(S):
-            stay = alpha[t-1][s]
-            prev = alpha[t-1][s-1] if s-1 >= 0 else 0
-            skip = alpha[t-1][s-2] if (s-2 >= 0 and extended[s] != extended[s-2]) else 0
-            alpha[t][s] = probs[t, vocab[extended[s]]] * (stay + prev + skip)
-
-    # Backward DP
+<pre><code class="language-python">def ctc_backward(probs, ext, col):
+    T, S = len(probs), len(ext)
     beta = np.zeros((T, S))
-    # initialize last frame
-    beta[T-1][S-1] = probs[T-1, vocab[extended[S-1]]]   # last blank
-    beta[T-1][S-2] = probs[T-1, vocab[extended[S-2]]]   # last symbol
-
-    for t in reversed(range(T-1)):  # from T-2 down to 0
-        for s in range(S):
-            same = beta[t+1][s]
-            nxt = beta[t+1][s+1] if s+1 < S else 0
-            skip = beta[t+1][s+2] if (s+2 < S and extended[s] != extended[s+2]) else 0
-            beta[t][s] = probs[t, vocab[extended[s]]] * (same + nxt + skip)
-
-    # Total probability (should match forward and backward)
-    total_prob = alpha[T-1][S-1] + alpha[T-1][S-2]
-    
-    return alpha, beta, total_prob, extended
+    last = probs[-1]
+    beta[-1, -2:] = last[col[-2:]]
+    for t in range(T - 2, -1, -1):
+        nxt = beta[t+1]
+        # stay
+        b = nxt.copy()
+        # step
+        b[:-1] += nxt[1:]
+        # skip
+        for s in range(S - 2):
+            if ext[s] != ext[s+2]:
+                b[s] += nxt[s+2]
+        b *= probs[t, col]
+        beta[t] = b
+    return beta
 </code></pre>
 
-   <h3>The posterior: where the credit actually goes</h3>
+   <h3 id="posterior">The posterior shows where the credit goes</h3>
    <p>The path toy showed one alignment; training never picks one. Untrained, the posterior says "everywhere, a little". Trained, it says "right here, a lot". That sharpening <strong>is</strong> learning.</p>
    <div class="eq-card" id="ctcPostEq">
        <div class="eq-what">The posterior gives each cell its share of the credit, and the gradient follows from it.</div>
        <div class="eq-line eq-active" data-eqline="0"><span class="eqt" style="color:#148f77">&#947;<sub>t</sub>(s)</span> = <span class="frac"><span class="top"><span class="eqt" data-k="al" style="color:#3498db">&#945;<sub>t</sub>(s)</span> <span class="eqt" data-k="be" style="color:#d35400">&#946;<sub>t</sub>(s)</span></span><span class="bot"><span class="eqt" style="color:#7d3c98">p<sub>t</sub>(l&#8242;<sub>s</sub>)</span> &#183; P(y|x)</span></span></div>
-        <div class="eq-why eq-active" data-eqline="0"><span class="eqt" style="color:#148f77">&#947;<sub>t</sub>(s)</span>, gamma, is the share of all probability that passes through column s at frame t. <span class="eqt" style="color:#3498db">&#945;<sub>t</sub>(s)</span> is the prefix mass up to this cell and <span class="eqt" style="color:#d35400">&#946;<sub>t</sub>(s)</span> the suffix mass from it to the end. Each already includes this frame's probability <span class="eqt" style="color:#7d3c98">p<sub>t</sub>(l&#8242;<sub>s</sub>)</span>, so dividing by it undoes the double count; dividing by P(y|x), total_prob in the listing, turns the mass into a share.</div>
+        <div class="eq-why eq-active" data-eqline="0"><span class="eqt" style="color:#148f77">&#947;<sub>t</sub>(s)</span>, gamma, is the share of all probability that passes through column s at frame t. <span class="eqt" style="color:#3498db">&#945;<sub>t</sub>(s)</span> is the prefix mass up to this cell and <span class="eqt" style="color:#d35400">&#946;<sub>t</sub>(s)</span> the suffix mass from it to the end. Each already includes this frame's probability <span class="eqt" style="color:#7d3c98">p<sub>t</sub>(l&#8242;<sub>s</sub>)</span>, so dividing by it undoes the double count; dividing by P(y|x), total in the listing, turns the mass into a share.</div>
        <div class="eq-line eq-active" data-eqline="1"><span style="white-space:nowrap">share<sub>t</sub>(k)</span> <span style="white-space:nowrap">= &#931;<sub>s&#8712;lab(k)</sub> <span class="eqt" style="color:#148f77">&#947;<sub>t</sub>(s)</span></span></div>
         <div class="eq-why eq-active" data-eqline="1">lab(k) is the set of columns of l&#8242; that hold symbol k, and &#8712; means is one of. In _ c _ a _ t _ the blank sits in four columns, so its share adds four cells; each letter has one column.</div>
        <div class="eq-line eq-active" data-eqline="2"><span style="white-space:nowrap"><span class="frac"><span class="top">&#8706;<span class="eqt" style="color:#c0392b">L</span></span><span class="bot">&#8706;z<sub>t,k</sub></span></span></span> <span style="white-space:nowrap">= <span class="eqt" style="color:#7d3c98">p<sub>t</sub>(k)</span> &minus; share<sub>t</sub>(k)</span></div>
@@ -1923,15 +1892,20 @@ def ctc_forward_backward(probs, target):
    })();
    </script>
 
-   <pre><code class="language-python">alpha, beta, total_prob, extended = ctc_forward_backward(probs, target)
-vocab = {ch: i for i, ch in enumerate(dict.fromkeys(extended))}  # the listing's map
-cols = [vocab[ch] for ch in extended]
-post = alpha * beta / (probs[:, cols] * total_prob)  # the fraction, every (t, s) at once
+   <pre><code class="language-python">alpha, total = ctc_forward(
+    probs, ext, col)
+beta = ctc_backward(
+    probs, ext, col)
+# the card's fraction, all (t, s)
+post = alpha * beta / (
+    probs[:, col] * total)
 
 share = np.zeros_like(probs)
-for s, ch in enumerate(extended):
-    share[:, vocab[ch]] += post[:, s]  # columns with the same symbol add up
-grad = probs - share                   # the card's last line: dL/dz
+for s, k in enumerate(col):
+    # columns of one symbol add up
+    share[:, k] += post[:, s]
+# the card's dL/dz
+grad = probs - share
 </code></pre>
    <div class="demo" id="postDemo">
      <div class="btn-row" style="justify-content:center">
@@ -2159,56 +2133,10 @@ grad = probs - share                   # the card's last line: dL/dz
    })();
    </script>
 
-   <h2 id="beam-search">Inference: Beam Search</h2>
+   <h2 id="beam-search">Decoding with beam search</h2>
    
-   <p>At inference I must return one output sequence. Greedy decoding takes the best symbol at each frame, fine when the model is confident, but it throws away probability mass. <strong>Beam search</strong> keeps several candidate sequences alive and merges the paths that collapse to the same answer. The version below is the CTC prefix beam search of Hannun et al. (2014); Graves et al. used a different prefix search:</p>
+   <p>At inference the model must return one output sequence. Greedy decoding takes the best symbol per frame and throws away probability mass. <strong>Beam search</strong> keeps several candidate sequences alive and merges the paths that collapse to the same answer. The version on this page is the CTC prefix beam search of Hannun et al. (2014); Graves et al. used a different prefix search.</p>
 
-<pre><code class="language-python">import numpy as np
-
-def simple_ctc_beam_search(probs, vocab, beam_size=3, top_k=3):
-    """
-    probs: (T, V) softmax probabilities over vocab (incl blank "_")
-    vocab: the symbol for each column of probs, e.g. ["_", "c", "a", "t"]
-    """
-    # each prefix tracks two totals: prob of its paths ending in blank,
-    # and prob of its paths not ending in blank
-    beams = {"": (1.0, 0.0)}  # start with empty prefix, ending in blank
-
-    def add(new_beams, prefix, ends_blank, prob):
-        p_blank, p_not = new_beams.get(prefix, (0.0, 0.0))
-        if ends_blank:
-            new_beams[prefix] = (p_blank + prob, p_not)
-        else:
-            new_beams[prefix] = (p_blank, p_not + prob)
-
-    for t in range(len(probs)):
-        new_beams = {}
-        # pick top_k symbols at this frame (argsort gives column indices,
-        # so map each index back to its symbol through vocab)
-        top_idx = np.argsort(probs[t])[-top_k:]
-        for prefix, (p_blank, p_not) in beams.items():
-            for idx in top_idx:
-                sym = vocab[idx]
-                p = probs[t][idx]
-                if sym == "_":
-                    # blank: prefix stays, and the path now ends in blank
-                    add(new_beams, prefix, True, (p_blank + p_not) * p)
-                elif prefix.endswith(sym):
-                    # collapse rule: merge repeats first, then drop
-                    # blanks, so a repeat merges only when no blank
-                    # came between; after a blank it counts again
-                    add(new_beams, prefix, False, p_not * p)
-                    add(new_beams, prefix + sym, False, p_blank * p)
-                else:
-                    add(new_beams, prefix + sym, False,
-                        (p_blank + p_not) * p)
-        # prune to top beam_size by total prob (blank ending + not)
-        beams = dict(sorted(new_beams.items(),
-                            key=lambda x: -(x[1][0] + x[1][1]))[:beam_size])
-
-    best = max(beams.items(), key=lambda x: x[1][0] + x[1][1])
-    return best[0], best[1][0] + best[1][1]
-</code></pre>
    <style>
     #beamDemo .bm-table { border-collapse: collapse; margin: 0.4rem auto; font-size: 0.88em; }
     #beamDemo .bm-table th, #beamDemo .bm-table td { border: 1px solid #d5dbdb; padding: 4px 12px; text-align: center; }
@@ -2240,19 +2168,52 @@ def simple_ctc_beam_search(probs, vocab, beam_size=3, top_k=3):
     }
    </style>
 
-   <h3>Beam search merges hypotheses</h3>
+   <h3 id="beam-merge">Beam search merges hypotheses</h3>
 
-   <p>On the toy table below, greedy sees exactly one path to "ab". Fifteen paths collapse to "ab"; beam search with beam width 3 (candidates kept per frame) merges fourteen of them into that candidate and prunes (drops) the last, so its mass falls just short of the full total. <em>That stacking IS beam search.</em></p>
+   <p>On the toy table below, greedy sees exactly one path to "ab". Fifteen paths collapse to "ab"; beam search with beam width 3 (candidates kept per frame) merges fourteen of them and prunes (drops) the last.</p>
    <div class="eq-card" id="ctcBeamEq">
-       <div class="eq-what">A candidate prefix g keeps two totals, and each frame adds to them in one of three ways.</div>
-       <div class="eq-line eq-active" data-eqline="0"><span style="white-space:nowrap"><span class="eqt" style="color:#3498db">p<sub>blank</sub>(g)</span></span> <span style="white-space:nowrap">+= (<span class="eqt" style="color:#3498db">p<sub>blank</sub>(g)</span></span> <span style="white-space:nowrap">+ <span class="eqt" style="color:#1f618d">p<sub>not</sub>(g)</span>)</span> <span style="white-space:nowrap">&#183; <span class="eqt" style="color:#7d3c98">p<sub>t</sub>(_)</span></span></div>
-        <div class="eq-why eq-active" data-eqline="0">A blank keeps the prefix g as it is. As in the listing, <span class="eqt" style="color:#3498db">p<sub>blank</sub>(g)</span> is the probability of g's paths that end in a blank and <span class="eqt" style="color:#1f618d">p<sub>not</sub>(g)</span> of those that do not. += means add to this frame's new total, and <span class="eqt" style="color:#7d3c98">p<sub>t</sub>(_)</span> is this frame's blank probability.</div>
-       <div class="eq-line eq-active" data-eqline="1"><span style="white-space:nowrap"><span class="eqt" style="color:#1f618d">p<sub>not</sub>(g)</span></span> <span style="white-space:nowrap">+= <span class="eqt" style="color:#1f618d">p<sub>not</sub>(g)</span> &#183; <span class="eqt" style="color:#7d3c98">p<sub>t</sub>(c)</span></span></div>
-        <div class="eq-why eq-active" data-eqline="1">A repeat of g's last letter c with no blank between merges into it, so g stays g.</div>
-       <div class="eq-line eq-active" data-eqline="2"><span style="white-space:nowrap"><span class="eqt" style="color:#1f618d">p<sub>not</sub>(g+c)</span></span> <span style="white-space:nowrap">+= <span class="eqt" style="color:#3498db">p<sub>blank</sub>(g)</span> &#183; <span class="eqt" style="color:#7d3c98">p<sub>t</sub>(c)</span></span></div>
-        <div class="eq-why eq-active" data-eqline="2">The same letter after a blank counts again, so it extends g to g+c, g with c added at the end.</div>
-       <div class="eq-line eq-active" data-eqline="3"><span style="white-space:nowrap"><span class="eqt" style="color:#1f618d">p<sub>not</sub>(g+c)</span></span> <span style="white-space:nowrap">+= (<span class="eqt" style="color:#3498db">p<sub>blank</sub>(g)</span></span> <span style="white-space:nowrap">+ <span class="eqt" style="color:#1f618d">p<sub>not</sub>(g)</span>)</span> <span style="white-space:nowrap">&#183; <span class="eqt" style="color:#7d3c98">p<sub>t</sub>(c)</span></span></div>
-        <div class="eq-why eq-active" data-eqline="3">A letter c that differs from g's last letter extends g from both totals. After every frame only the beam width's best prefixes survive.</div>
+       <div class="eq-what">A candidate prefix g keeps two totals, and each frame adds to them in one of four ways.</div>
+       <div class="eq-line eq-active" data-eqline="0"><span style="white-space:nowrap"><span class="eqt" style="color:#1a5276">P<sup>t&#8722;1</sup>(g)</span></span>&#8201;<span style="white-space:nowrap">=&#8201;<span class="eqt" style="color:#3498db">p<span class="ss"><span>t&#8722;1</span><span>b</span></span>(g)</span> + <span class="eqt" style="color:#1f618d">p<span class="ss"><span>t&#8722;1</span><span>nb</span></span>(g)</span></span></div>
+        <div class="eq-why eq-active" data-eqline="0">Prefix g keeps two totals: p<sub>b</sub>, its paths ending in a blank, and p<sub>nb</sub>, its paths ending in a letter. P is their sum, and P(g) always means last frame's total. Superscript t&#8722;1 means last frame; superscript t on the left of the next lines means this frame's new total, which starts at 0, and += adds to it because several old prefixes can land on the same new one.</div>
+       <div class="eq-line eq-active" data-eqline="1"><span style="white-space:nowrap"><span class="eqt" style="color:#3498db">p<span class="ss"><span>t</span><span>b</span></span>(g)</span></span>&#8201;<span style="white-space:nowrap">+=&#8201;<span class="eqt" style="color:#1a5276">P(g)</span>&#8201;&#183;&#8201;<span class="eqt" style="color:#7d3c98">p<sub>t</sub>(_)</span></span></div>
+        <div class="eq-why eq-active" data-eqline="1">A blank keeps g as it is. <span class="eqt" style="color:#7d3c98">p<sub>t</sub>(_)</span> is this frame's blank probability.</div>
+       <div class="eq-line eq-active" data-eqline="2"><span style="white-space:nowrap"><span class="eqt" style="color:#1f618d">p<span class="ss"><span>t</span><span>nb</span></span>(g)</span></span>&#8201;<span style="white-space:nowrap">+=&#8201;<span class="eqt" style="color:#1f618d">p<span class="ss"><span>t&#8722;1</span><span>nb</span></span>(g)</span>&#8201;&#183;&#8201;<span class="eqt" style="color:#7d3c98">p<sub>t</sub>(c)</span></span></div>
+        <div class="eq-why eq-active" data-eqline="2">Repeating g's last letter c with no blank between merges into g, so g stays g.</div>
+       <div class="eq-line eq-active" data-eqline="3"><span style="white-space:nowrap"><span class="eqt" style="color:#1f618d">p<span class="ss"><span>t</span><span>nb</span></span>(g+c)</span></span>&#8201;<span style="white-space:nowrap">+=&#8201;<span class="eqt" style="color:#3498db">p<span class="ss"><span>t&#8722;1</span><span>b</span></span>(g)</span>&#8201;&#183;&#8201;<span class="eqt" style="color:#7d3c98">p<sub>t</sub>(c)</span></span></div>
+        <div class="eq-why eq-active" data-eqline="3">After a blank the same letter counts again, so g grows to g+c, g with c added at the end.</div>
+       <div class="eq-line eq-active" data-eqline="4"><span style="white-space:nowrap"><span class="eqt" style="color:#1f618d">p<span class="ss"><span>t</span><span>nb</span></span>(g+c)</span></span>&#8201;<span style="white-space:nowrap">+=&#8201;<span class="eqt" style="color:#1a5276">P(g)</span>&#8201;&#183;&#8201;<span class="eqt" style="color:#7d3c98">p<sub>t</sub>(c)</span></span></div>
+        <div class="eq-why eq-active" data-eqline="4">Any other letter c extends g from both totals. After every frame only the beam width's best prefixes survive.</div>
+     </div>
+
+   <p>Each card line is one branch of the listing. Start from beams = {"": (1.0, 0.0)}, call beam_step once per frame, and read off the prefix with the largest p<sub>b</sub> + p<sub>nb</sub>.</p>
+
+<pre><code class="language-python">import collections
+
+def beam_step(beams, p_t, vocab,
+              width=3):
+    # g -&gt; [p_b, p_nb] at frame t
+    n = collections.defaultdict(
+        lambda: [0.0, 0.0])
+    letters = list(
+        enumerate(vocab))[1:]
+    # old totals at frame t-1
+    for g, v in beams.items():
+        pb, pnb = v
+        P = pb + pnb
+        n[g][0] += P * p_t[0]
+        for k, c in letters:
+            q, gc = p_t[k], g + c
+            if g and c == g[-1]:
+                n[g][1] += pnb * q
+                n[gc][1] += pb * q
+            else:
+                n[gc][1] += P * q
+    rank = lambda kv: sum(kv[1])
+    best = sorted(
+        n.items(), key=rank,
+        reverse=True)
+    return dict(best[:width])
+</code></pre>
      </div>
    
 
@@ -2287,7 +2248,7 @@ def simple_ctc_beam_search(probs, vocab, beam_size=3, top_k=3):
        <button type="button" id="bmStep" class="ghost">Step</button>
        </div>
      </div>
-     <div class="demo-stats" id="bmFrame">Before frame t1: no candidates yet</div>
+     <div class="demo-stats" id="bmFrame"></div>
      <div class="canvas-wrap" id="bmPanelWrap">
        <div class="bm-hyp" id="bmPanel"></div>
      </div>
@@ -2381,7 +2342,6 @@ def simple_ctc_beam_search(probs, vocab, beam_size=3, top_k=3):
      }
 
      function render() {
-       document.getElementById('bmStep').disabled = frame >= 3;
        panel.innerHTML = '';
        mergeEl.style.display = 'none';
        punch.innerHTML = '';
@@ -2493,10 +2453,12 @@ def simple_ctc_beam_search(probs, vocab, beam_size=3, top_k=3):
        if (demo) playScrollEnsure(demo);
        startPlay(false);
      });
-     document.getElementById('bmStep').addEventListener('click', function () { stop(600); step(); });
+     document.getElementById('bmStep').addEventListener('click', function () { stop(600); if (frame >= 3) frame = -1; step(); });
+     /* rest state (load and Reset): the final frame's beams for the current
+        width; Play and Step replay from frame 1 */
      document.getElementById('bmReset').addEventListener('click', function () {
        stop(600);
-       frame = -1; previewing = false;
+       frame = 3; previewing = false;
        render();
      });
      wSlider.addEventListener('input', function () {
@@ -2506,17 +2468,60 @@ def simple_ctc_beam_search(probs, vocab, beam_size=3, top_k=3):
        if (frame < 0) { frame = 0; previewing = true; }
        render();
      });
-     render();
+     /* P34: reserve the tallest state's height (every width, every frame)
+        so Play, Step and the slider never reflow the page */
+     function reserveHeight() {
+       var keepW = width, keepF = frame, maxH = 0;
+       demo.style.minHeight = '';
+       for (var w = 1; w <= 5; w++) for (var f = -1; f <= 3; f++) {
+         width = w; frame = f; render();
+         maxH = Math.max(maxH, demo.getBoundingClientRect().height);
+       }
+       width = keepW; frame = keepF;
+       demo.style.minHeight = Math.ceil(maxH) + 'px';
+     }
+     var bmLastW = window.innerWidth;
+     window.addEventListener('resize', function () {
+       if (window.innerWidth === bmLastW) return;
+       bmLastW = window.innerWidth; reserveHeight(); render();
+     });
+     frame = 3; reserveHeight(); render();
    })();
    </script>
 
+   <h2 id="ctc-results">CTC beats HMM systems without frame labels</h2>
+
+   <p>Graves et al. (2006) trained a bidirectional LSTM with CTC on TIMIT, a corpus of read English sentences. An <a href="rnn.html">LSTM</a> is a recurrent network with a gated memory; bidirectional means one direction reads forward and one backward, so each frame sees both sides. Each frame is 26 numbers:</p>
+
+   <figure class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 342" style="max-width:480px" role="img" aria-label="The Graves 2006 TIMIT model: frames of 26 numbers (12 MFCCs, log energy, and their first derivatives) feed a bidirectional LSTM, one forward and one backward direction with 100 blocks each, then a per-frame softmax over 61 phonemes plus blank, trained with the CTC loss"><text class="" x="200.0" y="20.0" text-anchor="middle" style="font-size:16px;font-weight:700">TIMIT frames: 26 numbers each</text><rect class="mtd-box" x="38.0" y="32.0" width="44.0" height="30.0" rx="7" style="stroke:#7f8c8d;fill:#fbfcfd"/><text class="mtd-sub" x="60.0" y="53.0" text-anchor="middle" style="font-size:16px;font-weight:600">x</text><line class="mtd-s mtd-cg" x1="60.0" y1="62.0" x2="60.0" y2="84.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cg" points="60.0,92.0 54.0,80.0 66.0,80.0"/><rect class="mtd-box" x="108.0" y="32.0" width="44.0" height="30.0" rx="7" style="stroke:#7f8c8d;fill:#fbfcfd"/><text class="mtd-sub" x="130.0" y="53.0" text-anchor="middle" style="font-size:16px;font-weight:600">x</text><line class="mtd-s mtd-cg" x1="130.0" y1="62.0" x2="130.0" y2="84.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cg" points="130.0,92.0 124.0,80.0 136.0,80.0"/><rect class="mtd-box" x="178.0" y="32.0" width="44.0" height="30.0" rx="7" style="stroke:#7f8c8d;fill:#fbfcfd"/><text class="mtd-sub" x="200.0" y="53.0" text-anchor="middle" style="font-size:16px;font-weight:600">x</text><line class="mtd-s mtd-cg" x1="200.0" y1="62.0" x2="200.0" y2="84.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cg" points="200.0,92.0 194.0,80.0 206.0,80.0"/><rect class="mtd-box" x="248.0" y="32.0" width="44.0" height="30.0" rx="7" style="stroke:#7f8c8d;fill:#fbfcfd"/><text class="mtd-sub" x="270.0" y="53.0" text-anchor="middle" style="font-size:16px;font-weight:600">x</text><line class="mtd-s mtd-cg" x1="270.0" y1="62.0" x2="270.0" y2="84.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cg" points="270.0,92.0 264.0,80.0 276.0,80.0"/><rect class="mtd-box" x="318.0" y="32.0" width="44.0" height="30.0" rx="7" style="stroke:#7f8c8d;fill:#fbfcfd"/><text class="mtd-sub" x="340.0" y="53.0" text-anchor="middle" style="font-size:16px;font-weight:600">x</text><line class="mtd-s mtd-cg" x1="340.0" y1="62.0" x2="340.0" y2="84.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cg" points="340.0,92.0 334.0,80.0 346.0,80.0"/><rect class="mtd-box" x="16.0" y="94.0" width="368.0" height="92.0" rx="7" style="stroke:#1f618d;fill:#eaf2f8"/><text class="mtd-t1" x="200.0" y="116.0" text-anchor="middle" style="font-size:16px;font-weight:700">bidirectional LSTM</text><line class="mtd-s mtd-c1" x1="40.0" y1="140.0" x2="101.0" y2="140.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-c1" points="110.0,140.0 96.5,146.8 96.5,133.2"/><text class="mtd-t1" x="120.0" y="146.0" text-anchor="start" style="font-size:15px;font-weight:600">forward, 100 blocks</text><line class="mtd-s mtd-c2" x1="110.0" y1="168.0" x2="49.0" y2="168.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-c2" points="40.0,168.0 53.5,161.2 53.5,174.8"/><text class="mtd-t2" x="120.0" y="174.0" text-anchor="start" style="font-size:15px;font-weight:600">backward, 100 blocks</text><line class="mtd-s mtd-cg" x1="200.0" y1="186.0" x2="200.0" y2="208.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cg" points="200.0,216.0 194.0,204.0 206.0,204.0"/><rect class="mtd-box" x="16.0" y="218.0" width="368.0" height="44.0" rx="7" style="stroke:#7d3c98;fill:#f5eef8"/><text class="mtd-pu" x="200.0" y="246.0" text-anchor="middle" style="font-size:15px;font-weight:600">softmax per frame: 61 phonemes + blank</text><line class="mtd-s mtd-cg" x1="200.0" y1="262.0" x2="200.0" y2="284.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cg" points="200.0,292.0 194.0,280.0 206.0,280.0"/><rect class="mtd-box" x="120.0" y="294.0" width="160.0" height="40.0" rx="7" style="stroke:#2c3e50;fill:#ffffff;stroke-width:2px"/><text class="" x="200.0" y="320.0" text-anchor="middle" style="font-size:17px;font-weight:700">CTC loss</text></svg><figcaption class="caption">Each frame holds 12 MFCCs (mel-frequency cepstral coefficients, a compact summary of the frame's spectrum) plus log energy, plus their first derivatives: 26 numbers per frame. A block is one memory unit. From Graves et al., ICML 2006, section 5 (literature, not run here).</figcaption></figure>
+
+   <p>The score is label error rate (LER), the edit distance between output and target divided by the target length, on the TIMIT test set. Both are means over 5 runs &plusmn; standard error. An HMM (hidden Markov model) hybrid is the older system, a network scoring each frame for an HMM.</p>
+   <div class="stat-grid">
+     <div class="stat-card">
+       <div class="stat-num">30.51 <span class="stat-unit">&plusmn; 0.19 % LER</span></div>
+       <div class="stat-label">CTC with prefix search</div>
+       <div class="stat-note">prefix search is the paper's decoder; like beam search it keeps the most likely label prefixes</div>
+     </div>
+     <div class="stat-card">
+       <div class="stat-num">31.57 <span class="stat-unit">&plusmn; 0.06 % LER</span></div>
+       <div class="stat-label">Best bidirectional LSTM/HMM hybrid in the paper</div>
+       <div class="stat-note">a bidirectional LSTM inside an HMM system, trained with frame-level labels</div>
+     </div>
+   </div>
+   <p>The difference is significant (p &lt; 0.01, Table 1 caption), and CTC got there with no HMM and no frame-level labels.</p>
+
+   <h2 id="ctc-pitfalls">What breaks in practice</h2>
+   <ul>
+     <li><strong>Too few frames.</strong> CTC needs at least U frames plus one more for each pair of repeated adjacent letters, because a blank must separate repeats. With fewer, P(y|x) = 0 and the loss is infinite; nn.CTCLoss has zero_infinity=True to zero those losses (the call is in <a href="#loss-sums-paths">The loss sums over every alignment</a>).</li>
+     <li><strong>Peaky outputs.</strong> A trained CTC model emits each label as a one-frame spike with blanks between (Graves et al. 2006, Figure 1). The spike shows roughly where a label occurs, but not where it starts or ends, so CTC gives approximate timing, not segmentation.</li>
+     <li><strong>Length and index bugs.</strong> input_lengths must be the frame count after any downsampling, target_lengths must exclude padding, the inputs must be log-probabilities, and blank must match the model's blank index.</li>
+   </ul>
+
    <h2 id="beyond-ctc">Beyond CTC</h2>
 
-   <p>Everything above assumes each frame's prediction is independent of the others once the audio is given, so CTC cannot use what it already output. The named follow-up is <strong>RNN-T</strong> (recurrent neural network transducer): a prediction network reads the previous outputs, so the model learns a language model (how likely each token is after the ones before it) alongside the acoustics (what the audio itself says):</p>
+   <p>CTC treats each frame's prediction as independent of the others once the audio is given, so it cannot use what it already output. <strong>RNN-T</strong> (recurrent neural network transducer) adds a prediction network that reads the previous outputs, so the model learns how likely each token is after the ones before it alongside what the audio says:</p>
 
    <figure class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 310" style="max-width:480px" role="img" aria-label="CTC: audio goes through an encoder to a token, each frame deciding alone. RNN-T: the encoder reads the audio, a prediction network reads the previous outputs, both feed the next token, and each new token is fed back"><text class="" x="8.0" y="22.0" text-anchor="start" style="font-size:17px;font-weight:700">CTC</text><rect class="mtd-box" x="8.0" y="36.0" width="110.0" height="44.0" rx="7" style="stroke:#7f8c8d;fill:#fbfcfd"/><text class="mtd-sub" x="63.0" y="63.0" text-anchor="middle" style="font-size:16px;font-weight:600">audio</text><line class="mtd-s mtd-cg" x1="118.0" y1="58.0" x2="142.0" y2="58.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cg" points="150.0,58.0 138.0,64.0 138.0,52.0"/><rect class="mtd-box" x="152.0" y="36.0" width="110.0" height="44.0" rx="7" style="stroke:#1f618d;fill:#eaf2f8"/><text class="mtd-t1" x="207.0" y="63.0" text-anchor="middle" style="font-size:16px;font-weight:600">encoder</text><line class="mtd-s mtd-cg" x1="262.0" y1="58.0" x2="286.0" y2="58.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cg" points="294.0,58.0 282.0,64.0 282.0,52.0"/><rect class="mtd-box" x="296.0" y="36.0" width="96.0" height="44.0" rx="7" style="stroke:#7d3c98;fill:#f5eef8"/><text class="mtd-pu" x="344.0" y="63.0" text-anchor="middle" style="font-size:16px;font-weight:600">token</text><text class="mtd-sub" x="200.0" y="104.0" text-anchor="middle" style="font-size:15px">each frame decides alone</text><line class="mtd-sep" x1="0" y1="122" x2="400" y2="122"/><text class="" x="8.0" y="148.0" text-anchor="start" style="font-size:17px;font-weight:700">RNN-T</text><rect class="mtd-box" x="8.0" y="162.0" width="110.0" height="44.0" rx="7" style="stroke:#7f8c8d;fill:#fbfcfd"/><text class="mtd-sub" x="63.0" y="189.0" text-anchor="middle" style="font-size:16px;font-weight:600">audio</text><line class="mtd-s mtd-cg" x1="118.0" y1="184.0" x2="142.0" y2="184.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cg" points="150.0,184.0 138.0,190.0 138.0,178.0"/><rect class="mtd-box" x="152.0" y="162.0" width="110.0" height="44.0" rx="7" style="stroke:#1f618d;fill:#eaf2f8"/><text class="mtd-t1" x="207.0" y="189.0" text-anchor="middle" style="font-size:16px;font-weight:600">encoder</text><rect class="mtd-box" x="8.0" y="232.0" width="110.0" height="44.0" rx="7" style="stroke:#7f8c8d;fill:#fbfcfd"/><text class="mtd-sub" x="63.0" y="253.0" text-anchor="middle" style="font-size:15px;font-weight:600">previous</text><text class="mtd-sub" x="63.0" y="270.0" text-anchor="middle" style="font-size:15px;font-weight:600">outputs</text><line class="mtd-s mtd-cg" x1="118.0" y1="254.0" x2="142.0" y2="254.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cg" points="150.0,254.0 138.0,260.0 138.0,248.0"/><rect class="mtd-box" x="152.0" y="232.0" width="110.0" height="44.0" rx="7" style="stroke:#ca6f1e;fill:#fdf2e9"/><text class="mtd-t2" x="207.0" y="253.0" text-anchor="middle" style="font-size:15px;font-weight:600">prediction</text><text class="mtd-t2" x="207.0" y="270.0" text-anchor="middle" style="font-size:15px;font-weight:600">network</text><rect class="mtd-box" x="296.0" y="196.0" width="96.0" height="44.0" rx="7" style="stroke:#7d3c98;fill:#f5eef8"/><text class="mtd-pu" x="344.0" y="223.0" text-anchor="middle" style="font-size:16px;font-weight:600">token</text><line class="mtd-s mtd-cg" x1="262.0" y1="184.0" x2="287.8" y2="205.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cg" points="294.0,210.0 281.0,207.1 288.5,197.9"/><line class="mtd-s mtd-cg" x1="262.0" y1="254.0" x2="287.8" y2="233.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cg" points="294.0,228.0 288.5,240.1 281.0,230.9"/><path class="mtd-s mtd-cp" d="M344,240 L344,300 L63,300" style="stroke-width:3.5px;stroke-dasharray:5 4"/><line class="mtd-s mtd-cp" x1="63.0" y1="300.0" x2="63.0" y2="286.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cp" points="63.0,278.0 69.0,290.0 57.0,290.0"/><text class="mtd-pu mtd-halo" x="204.0" y="294.0" text-anchor="middle" style="font-size:15px">fed back</text><text class="mtd-sub" x="207.0" y="156.0" text-anchor="middle" style="font-size:15px">acoustics</text></svg><figcaption class="caption">CTC decides each frame alone. RNN-T feeds every output back through a prediction network.</figcaption></figure>
-
-   <p>It earns its place wherever the output has strong sequence structure, like language.</p>
 
    <h2 id="references">References</h2>
 

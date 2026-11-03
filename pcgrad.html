@@ -625,6 +625,30 @@
           margin:0 .25em 0 .6em;vertical-align:baseline}
 
         @media (max-width:480px){.eq-card{padding:.85rem .9rem}.eq-line{font-size:1.24rem;line-height:1.95}}
+/* P70 inline variables and inline code, one style site-wide (VAR-STYLE.md v2) */
+var,.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic;font-weight:400;font-size:1em;color:#1d4e89;background:#edf3fa;border-radius:3px;padding:0 .18em;white-space:nowrap;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+var sub,var sup,.mvar sub,.mvar sup{font-size:.72em;font-style:normal}
+pre var,code var,.eq-line var{font:inherit;color:inherit;background:none;padding:0}
+svg text.mvar,svg tspan.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic}
+:not(pre)>code:not(.eq-line code){font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,Courier,monospace;font-size:.86em;color:#24292f;background:#f1f3f5;border:1px solid #dfe3e8;border-radius:4px;padding:.06em .32em;white-space:normal;overflow-wrap:anywhere}
+/* P79 numbering (NUMBERING.md) */
+.secnum{font-variant-numeric:tabular-nums;margin-right:.4em;color:inherit;font-weight:inherit}
+.tab-strip .secnum{margin-right:.3em;opacity:.75}
+.fignum{font-weight:600;margin-right:.3em;font-variant-numeric:tabular-nums}
+/* P80 code sections (CODE-SECTIONS.md) */
+pre.cs{position:relative;background-attachment:local;padding-left:20px}
+pre.cs code{display:block;line-height:1.55}
+pre.cs .cs-g{position:absolute;left:3px;width:11px;text-align:center;font:700 11px/1 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;-webkit-user-select:none;user-select:none;pointer-events:none}
+pre.cs .cs-g::before{content:attr(data-n)}
+ol.cs-notes{list-style:none;padding-left:0;margin:-.4em 0 1em}
+ol.cs-notes li{margin:0 0 .3em;padding-left:1.9em;position:relative}
+ol.cs-notes .cs-n{position:absolute;left:0;top:.1em;min-width:1.35em;padding:0 .25em;border-radius:4px;font:700 .8em/1.45 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;text-align:center;color:#0d1117}
+ol.cs-notes li:nth-child(6n+1) .cs-n{background:#79b8ff}
+ol.cs-notes li:nth-child(6n+2) .cs-n{background:#ffab70}
+ol.cs-notes li:nth-child(6n+3) .cs-n{background:#85e89d}
+ol.cs-notes li:nth-child(6n+4) .cs-n{background:#d2a8ff}
+ol.cs-notes li:nth-child(6n+5) .cs-n{background:#ffa198}
+ol.cs-notes li:nth-child(6n+6) .cs-n{background:#76e3ea}
         /* diagram-side dim/highlight (SVG/DOM). Do NOT use .hl/.dim: taken. */
         .eq-dim{opacity:.32}
         .eq-hl{filter:drop-shadow(0 0 3px currentColor)}
@@ -812,182 +836,103 @@
 </nav>
     <p class="crumb"><a href="tutorial.html">&larr; All tutorials</a></p>
     <h1>PCGrad (Projecting Conflicting Gradients)</h1>
-    <p class="dek">When tasks pull against each other, cut only the part that interferes. Leave everything else alone.</p>
-
+    <p class="dek">PCGrad removes the conflicting part of each task&#8217;s gradient before the gradients are summed, and leaves the rest unchanged.</p>
 <p>
-        The weighting methods, <a href="gradnorm.html">GradNorm</a> and <a href="uncertainty-weighting.html">Uncertainty Weighting</a>, balance how loud each task's loss is, by giving each loss its own weight. A task's gradient is the direction, computed from its loss (the error score that task is trying to lower), in which that loss rises fastest, so training steps the other way. PCGrad works on these directions instead: it operates on <strong>conflicting
-        gradients</strong>, projecting away the part that fights another task and leaving the rest of each
-        gradient untouched. Projecting here means finding the part of one gradient that lies along
-        another task's gradient; PCGrad removes that part when it points against the other task.
+        PCGrad (projecting conflicting gradients), introduced by Yu, Kumar, Gupta, Levine, Hausman and Finn (2020), changes one line of a multitask training step: the sum of the task gradients. Two task gradients <strong>conflict</strong> when they point more than 90 degrees apart. For every conflicting pair, PCGrad removes from one gradient the part that points against the other, then sums the edited gradients. It runs every training step on that step&#8217;s batch and carries no state between steps. Its cost is one backward pass per task over the shared parameters, plus a dot product for each pair of tasks. It learns nothing and adds no hyperparameters. The weighting methods, <a href="gradnorm.html">GradNorm</a> and <a href="uncertainty-weighting.html">Uncertainty Weighting</a>, change each loss&#8217;s weight; PCGrad changes the gradients&#8217; directions.
     </p>
-
     <p class="tabs-label">On this page</p>
     <div class="tab-strip">
-        <a class="tab-link" href="#the-culprit">Conflicting gradients are the culprit</a>
-    <a class="tab-link" href="#the-deal">The deal: drop the part of your pull that fights me</a>
-        <a class="tab-link" href="#the-geometry">A negative cosine marks the conflict, and the fix cuts that part</a>
-        <a class="tab-link" href="#why-this-cut">Why this exact cut</a>
-        <a class="tab-link" href="#paper-figure">Cutting each gradient's conflicting part</a>
-        <a class="tab-link" href="#algorithm">One PCGrad training step</a>
-        <a class="tab-link" href="#surgery-stepper">The surgery on one pair, step by step</a>
-        <a class="tab-link" href="#tragic-triad">When the cut actually pays</a>
-        <a class="tab-link" href="#pc-training-loop">Loss scale and the optimizer bend PCGrad's direction</a>
-        <a class="tab-link" href="#pc-compare">How PCGrad compares with the other balancing methods</a>
-        <a class="tab-link" href="#references">References</a>
+        <a class="tab-link" href="#the-deal"><span class="secnum">1</span> Removing the conflicting parts</a>
+        <a class="tab-link" href="#algorithm"><span class="secnum">2</span> The PCGrad algorithm</a>
+        <a class="tab-link" href="#the-geometry"><span class="secnum">3</span> Conflict test and projection</a>
+        <a class="tab-link" href="#why-this-cut"><span class="secnum">4</span> Why this projection</a>
+        <a class="tab-link" href="#paper-figure"><span class="secnum">5</span> The paper&#8217;s illustration</a>
+        <a class="tab-link" href="#surgery-stepper"><span class="secnum">6</span> Both projections, step by step</a>
+        <a class="tab-link" href="#tragic-triad"><span class="secnum">7</span> The tragic triad</a>
+        <a class="tab-link" href="#pc-training-loop"><span class="secnum">8</span> Implementation in PyTorch</a>
+        <a class="tab-link" href="#pc-compare"><span class="secnum">9</span> Comparison with other methods</a>
+        <a class="tab-link" href="#references"><span class="secnum">10</span> References</a>
     </div>
-
-<h2 id="the-culprit">Conflicting gradients are the culprit</h2>
-        <p>
-        Joint training can come out worse than independent training. Some multitask reinforcement-learning methods quietly gave up: they trained each task separately and then merged the results into one model, which throws away the efficiency the whole thing was for.
-    </p>
-    <p>
-        The culprit is <strong>conflicting gradients</strong>: gradients from different tasks that point
-        away from each other, so stepping against their sum can be destructive. The damage turns severe when
-        three conditions hold together, the <strong>tragic triad</strong>: conflicting gradients, one task much louder than the other, and high curvature, the loss surface bending so fast the slope changes inside a single step. Each of the three is dissected in <a href="#tragic-triad">&#8220;When the cut actually pays&#8221;</a>.
-    </p>
-    <p>
-        Picture a deep valley with one task's pull much stronger than the other's: the combined
-        step follows the loud task downhill, the high curvature makes the optimizer, the rule that turns each gradient into a change to the network, misjudge both
-        moves, and the quiet task pays for it.
-    </p>
-    <p>
-        PCGrad's answer is to stop tuning around the gradients and operate on them directly. It works across
-        multitask supervised learning (learning from examples that come with the right answers) and multitask RL.
-    </p>
-
-    
-<h2 id="the-deal">The deal: drop the part of your pull that fights me</h2>
-    <p>
-        GradNorm fixes loudness by learning how loud each task should be, driven by how fast each task is training, to keep progress balanced. But loudness was never the only failure. Sometimes the directions
-        themselves fight: two task gradients point partly against each other, and adding them lets the
-        tasks cancel each other out before the step even happens. PCGrad does not try to fix
-        gradient sizes; it goes straight after the direction problem.
-    </p>
-    <p>
-        I picture it as two people steering one cart. One pulls east and a little north, the other pulls west and a little north,
-        so part of each person's effort is wasted fighting the other. Then they make a deal: &#8220;I will drop
-        the part of my pull that works against you, if you drop the part of yours that works against me.&#8221;
-        What is left still moves the cart forward for both of them. And nobody gave up any part of their
-        pull that was actually helping.
-    </p>
-
-    <figure class="figure mtd-fig">
-        <svg class="mtd-svg" viewBox="0 0 400 230" style="max-width:480px" role="img" aria-label="Before the deal, two pulls point mostly sideways in opposite directions and the net pull forward is short. After the deal, each pull drops the part that fights the other and the net pull forward is longer"><text class="" x="100.0" y="24.0" text-anchor="middle" style="font-size:18px;font-weight:700">Before the deal</text><rect class="mtd-cart" x="84" y="185" width="32" height="22" rx="4"/><text class="" x="100" y="225" text-anchor="middle" style="font-size:15px;font-weight:600">cart</text><line class="mtd-s mtd-c1" x1="100.0" y1="196.0" x2="172.6" y2="171.8" style="stroke-width:4px"/><polygon class="mtd-f mtd-c1" points="184.0,168.0 174.5,177.5 170.7,166.1"/><line class="mtd-s mtd-c2" x1="100.0" y1="196.0" x2="27.4" y2="171.8" style="stroke-width:4px"/><polygon class="mtd-f mtd-c2" points="16.0,168.0 29.3,166.1 25.5,177.5"/><line class="mtd-s mtd-cp" x1="100.0" y1="196.0" x2="100.0" y2="154.0" style="stroke-width:5px"/><polygon class="mtd-f mtd-cp" points="100.0,140.0 107.0,154.0 93.0,154.0"/><text class="mtd-t1" x="196.0" y="202.0" text-anchor="end" style="font-size:17px;font-weight:600">pull 1</text><text class="mtd-t2" x="4.0" y="202.0" text-anchor="start" style="font-size:17px;font-weight:600">pull 2</text><text class="mtd-pu" x="100.0" y="130.0" text-anchor="middle" style="font-size:17px;font-weight:600">net pull</text><text class="" x="300.0" y="24.0" text-anchor="middle" style="font-size:18px;font-weight:700">After the deal</text><rect class="mtd-cart" x="284" y="185" width="32" height="22" rx="4"/><text class="" x="300" y="225" text-anchor="middle" style="font-size:15px;font-weight:600">cart</text><line class="mtd-s mtd-c1" x1="300.0" y1="196.0" x2="374.5" y2="171.2" style="stroke-width:2.5px;opacity:0.25"/><polygon class="mtd-f mtd-c1" points="384.0,168.0 376.1,175.9 372.9,166.4" style="opacity:0.25"/><line class="mtd-s mtd-c2" x1="300.0" y1="196.0" x2="225.5" y2="171.2" style="stroke-width:2.5px;opacity:0.25"/><polygon class="mtd-f mtd-c2" points="216.0,168.0 227.1,166.4 223.9,175.9" style="opacity:0.25"/><line class="mtd-s mtd-c1" x1="300.0" y1="196.0" x2="313.0" y2="157.0" style="stroke-width:4px"/><polygon class="mtd-f mtd-c1" points="316.8,145.6 318.7,158.9 307.3,155.1"/><line class="mtd-s mtd-c2" x1="300.0" y1="196.0" x2="287.0" y2="157.0" style="stroke-width:4px"/><polygon class="mtd-f mtd-c2" points="283.2,145.6 292.7,155.1 281.3,158.9"/><line class="mtd-s mtd-cp" x1="300.0" y1="196.0" x2="300.0" y2="109.2" style="stroke-width:5px"/><polygon class="mtd-f mtd-cp" points="300.0,95.2 307.0,109.2 293.0,109.2"/><text class="mtd-t1" x="324.8" y="149.6" text-anchor="start" style="font-size:17px;font-weight:600">pull 1</text><text class="mtd-t2" x="275.2" y="149.6" text-anchor="end" style="font-size:17px;font-weight:600">pull 2</text><text class="mtd-pu" x="300.0" y="85.2" text-anchor="middle" style="font-size:17px;font-weight:600">net pull</text><line class="mtd-sep" x1="200" y1="8" x2="200" y2="226"/></svg>
-        <figcaption class="caption">Drop the parts that fight and the forward pull grows.</figcaption>
+<h2 id="the-deal"><span class="secnum">1</span> Removing the conflicting parts</h2>
+    <p>When two task gradients conflict, adding them cancels part of each, and the sum can raise one task&#8217;s loss. PCGrad does not change gradient norms. It removes only the part of each gradient that points against the other task&#8217;s gradient, and keeps every part that does not. The paper also calls this <strong>gradient surgery</strong>.</p>
+    <figure class="figure mtd-fig" id="pc-fig-cut">
+        <svg class="mtd-svg" viewBox="0 0 400 230" style="max-width:480px" role="img" aria-label="Left: two conflicting task gradients point mostly sideways in opposite directions, so their sum is short. Right: after PCGrad removes the conflicting parts, the sum is longer."><text class="" x="100.0" y="24.0" text-anchor="middle" style="font-size:18px;font-weight:700">Plain sum</text><rect class="mtd-cart" x="84" y="185" width="32" height="22" rx="4"/><text class="" x="100" y="225" text-anchor="middle" style="font-size:15px;font-weight:600">shared weights</text><line class="mtd-s mtd-c1" x1="100.0" y1="196.0" x2="172.6" y2="171.8" style="stroke-width:4px"/><polygon class="mtd-f mtd-c1" points="184.0,168.0 174.5,177.5 170.7,166.1"/><line class="mtd-s mtd-c2" x1="100.0" y1="196.0" x2="27.4" y2="171.8" style="stroke-width:4px"/><polygon class="mtd-f mtd-c2" points="16.0,168.0 29.3,166.1 25.5,177.5"/><line class="mtd-s mtd-cp" x1="100.0" y1="196.0" x2="100.0" y2="154.0" style="stroke-width:5px"/><polygon class="mtd-f mtd-cp" points="100.0,140.0 107.0,154.0 93.0,154.0"/><text class="mtd-t1" x="196.0" y="202.0" text-anchor="end" style="font-size:17px;font-weight:600"><tspan class="mvar">g</tspan><tspan class="mvar" baseline-shift="sub" font-size="70%">1</tspan></text><text class="mtd-t2" x="4.0" y="202.0" text-anchor="start" style="font-size:17px;font-weight:600"><tspan class="mvar">g</tspan><tspan class="mvar" baseline-shift="sub" font-size="70%">2</tspan></text><text class="mtd-pu" x="100.0" y="130.0" text-anchor="middle" style="font-size:17px;font-weight:600">sum</text><text class="" x="300.0" y="24.0" text-anchor="middle" style="font-size:18px;font-weight:700">After PCGrad</text><rect class="mtd-cart" x="284" y="185" width="32" height="22" rx="4"/><text class="" x="300" y="225" text-anchor="middle" style="font-size:15px;font-weight:600">shared weights</text><line class="mtd-s mtd-c1" x1="300.0" y1="196.0" x2="374.5" y2="171.2" style="stroke-width:2.5px;opacity:0.25"/><polygon class="mtd-f mtd-c1" points="384.0,168.0 376.1,175.9 372.9,166.4" style="opacity:0.25"/><line class="mtd-s mtd-c2" x1="300.0" y1="196.0" x2="225.5" y2="171.2" style="stroke-width:2.5px;opacity:0.25"/><polygon class="mtd-f mtd-c2" points="216.0,168.0 227.1,166.4 223.9,175.9" style="opacity:0.25"/><line class="mtd-s mtd-c1" x1="300.0" y1="196.0" x2="313.0" y2="157.0" style="stroke-width:4px"/><polygon class="mtd-f mtd-c1" points="316.8,145.6 318.7,158.9 307.3,155.1"/><line class="mtd-s mtd-c2" x1="300.0" y1="196.0" x2="287.0" y2="157.0" style="stroke-width:4px"/><polygon class="mtd-f mtd-c2" points="283.2,145.6 292.7,155.1 281.3,158.9"/><line class="mtd-s mtd-cp" x1="300.0" y1="196.0" x2="300.0" y2="109.2" style="stroke-width:5px"/><polygon class="mtd-f mtd-cp" points="300.0,95.2 307.0,109.2 293.0,109.2"/><text class="mtd-t1" x="324.8" y="149.6" text-anchor="start" style="font-size:17px;font-weight:600"><tspan class="mvar">g</tspan><tspan class="mvar" baseline-shift="sub" font-size="70%">1</tspan></text><text class="mtd-t2" x="275.2" y="149.6" text-anchor="end" style="font-size:17px;font-weight:600"><tspan class="mvar">g</tspan><tspan class="mvar" baseline-shift="sub" font-size="70%">2</tspan></text><text class="mtd-pu" x="300.0" y="85.2" text-anchor="middle" style="font-size:17px;font-weight:600">sum</text><line class="mtd-sep" x1="200" y1="8" x2="200" y2="226"/></svg>
+        <figcaption class="caption"><span class="fignum">Figure 1.</span> Left, the plain sum of two conflicting gradients. Right, PCGrad removes the conflicting part of each before summing, and the sum gets longer.</figcaption>
     </figure>
-    <p>
-        That deal is the whole method, introduced by Yu and colleagues in 2020. PCGrad stands for <strong>projecting conflicting
-        gradients</strong>, nicknamed <strong>gradient surgery</strong>. Its rule fits in one sentence.
-        If two task gradients fight, cut off the part of each one that works against the other, and only
-        then add them up.
-    </p>
-
-    
-<h2 id="the-geometry">A negative cosine marks the conflict, and the fix cuts that part</h2>
-    <p>
-        A fight is measured by the <strong>cosine</strong> of the angle between two task gradients, a number for how aligned the two arrows are that ignores their lengths: 1 when they point the same way, 0 at a right angle, and &#8722;1 when they point in opposite directions. When that cosine
-        is below zero, the pair is conflicting, and PCGrad cuts the interfering part: the part of one gradient
-        that points along (or against) the other.
-    </p>
-    <p>
-        When the pair conflicts, that part points against the other gradient, so it is exactly the piece
-        that fights. What is left sits at a right angle to the other gradient and is kept. Then the same
-        cut is done on the other gradient. Pairs that are not fighting are never touched, so cooperation costs nothing.
-    </p>
-    <div class="eq-card" id="pcEqStatic">
-        <div class="eq-what">The surgery fits in two lines. Take task i's gradient and subtract the part that fights task j, and only when they fight.</div>
-        <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="gipc" style="color:#8a6d1f">g<sub>i</sub><sup>PC</sup></span> = <span class="eqt" data-k="gi" style="color:#8e44ad">g<sub>i</sub></span> &#8722; <span class="eqt" data-k="sub" style="color:#c1553b"><span class="frac"><span class="top">&#10216;g<sub>i</sub>, g<sub>j</sub>&#10217;</span><span class="bot">&#8214;g<sub>j</sub>&#8214;&#178;</span></span>&#8201;g<sub>j</sub></span></div>
-        <div class="eq-why eq-active" data-eqline="0">The corrected gradient <span class="eqt" style="color:#8a6d1f">g<sub>i</sub><sup>PC</sup></span> is task i's gradient minus its fighting part. That part is the dot product <span class="eqt" style="color:#c1553b">&#10216;g<sub>i</sub>, g<sub>j</sub>&#10217;</span>, divided by task j's squared length, times <span class="eqt">g<sub>j</sub></span>. The angle brackets mark the dot product of two vectors (arrows), which equals their cosine times both lengths, so it has the cosine's sign. The double bars in &#8214;g<sub>j</sub>&#8214;&#178; mark g<sub>j</sub>'s length, squared.</div>
-        <div class="eq-line eq-active" data-eqline="1">when <span class="eqt" data-k="cond" style="color:#7f8c8d">&#10216;g<sub>i</sub>, g<sub>j</sub>&#10217; &lt; 0</span></div>
-        <div class="eq-why eq-active" data-eqline="1">Cut only when they fight. If the dot product is zero or positive, the gradients do not fight, and nothing needs cutting.</div>
-      </div>
-
-    <p>
-        Do the same cut on both gradients and each cut arrow lands at a right angle to the other
-        task's original gradient, so the two no longer point against each other. <a href="multitask-intro.html#mathKitDemo">Introduction to Multitask Learning</a>
-        has a draggable version of this cut, its panel &#8220;(c) Projection, one arrow's shadow on another&#8221;.
-    </p>
-
-    
-<h2 id="why-this-cut">Why this exact cut</h2>
-    <p>
-        The surgery is three choices, and each one has a reason.
-    </p>
+<h2 id="algorithm"><span class="secnum">2</span> The PCGrad algorithm</h2>
     <ol>
-        <li>
-            <strong>Why cut exactly the interfering part?</strong> For a small enough step, the interfering part is the only part of one task's gradient that the other
-            task can feel: the leftover sits at a right angle to the other gradient, so it cannot move the other
-            task's loss at all. Cutting less would leave some of the fight in place; cutting more would throw
-            away parts of the gradient that were helping its own task for free. The interfering part is the smallest
-            possible edit that makes the two gradients harmless to each other.
-        </li>
-        <li>
-            <strong>Why cut both gradients?</strong> One-sided surgery only moves the problem: the uncut gradient
-            still fights the cut task. With two tasks, cutting both sides leaves nothing in the sum that fights either
-            task. With three or more, a later cut can bring some of the fight back.
-        </li>
-        <li>
-            <strong>Why a random order?</strong> With more than two tasks, each gradient is cut against the
-            others one by one, and a later cut can undo an earlier one. So the answer depends on the
-            order, and shuffling it every step spreads the advantage evenly over the tasks.
-        </li>
+        <li>Compute each task&#8217;s gradient <var>g<sub>i</sub></var> over the shared parameters, one backward pass per task.</li>
+        <li>For each task <var>i</var>, visit every other task <var>j</var> in random order. If <var>g<sub>i</sub></var> conflicts with task <var>j</var>&#8217;s original gradient <var>g<sub>j</sub></var>, subtract from <var>g<sub>i</sub></var> its projection onto <var>g<sub>j</sub></var> (<a href="#the-geometry">Section 3</a>).</li>
+        <li>Sum the edited gradients and give the result to the optimizer as the shared parameters&#8217; gradient.</li>
     </ol>
+<h2 id="the-geometry"><span class="secnum">3</span> Conflict test and projection</h2>
+    <p>The test for a conflict is the <strong>dot product</strong> of two gradients, which equals their lengths times the cosine of the angle between them. Its sign is the sign of the <strong>cosine similarity</strong>: positive below 90 degrees, zero at 90 degrees, negative above. A negative dot product means a conflict. The part of <var>g<sub>i</sub></var> that points along <var>g<sub>j</sub></var> is its <strong>projection</strong> onto <var>g<sub>j</sub></var>; in a conflict that projection points against <var>g<sub>j</sub></var>, and PCGrad subtracts it. What remains is <strong>orthogonal</strong> to <var>g<sub>j</sub></var> (at 90 degrees). The introduction has a draggable <a href="multitask-intro.html#mathKitDemo">projection tool</a>.</p>
+    <div class="eq-card" id="pcEqStatic">
+        <div class="eq-what">Subtract from <var>g<sub>i</sub></var>, task <var>i</var>&#8217;s gradient, its projection onto <var>g<sub>j</sub></var>, task <var>j</var>&#8217;s gradient, but only when the two conflict.</div>
+        <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="gipc" style="color:#8a6d1f">g<sub>i</sub><sup>PC</sup></span> = <span class="eqt" data-k="gi" style="color:#8e44ad">g<sub>i</sub></span> &#8722; <span class="eqt" data-k="sub" style="color:#c1553b"><span class="frac"><span class="top">&#10216;g<sub>i</sub>, g<sub>j</sub>&#10217;</span><span class="bot">&#8214;g<sub>j</sub>&#8214;&#178;</span></span>&#8201;g<sub>j</sub></span></div>
+        <div class="eq-why eq-active" data-eqline="0"><span class="eqt" style="color:#8a6d1f"><var>g<sub>i</sub><sup>PC</sup></var></span> is <var>g<sub>i</sub></var> minus its projection onto <var>g<sub>j</sub></var>. The angle brackets are the dot product, the cosine of the angle times both lengths, so <span class="eqt" style="color:#c1553b">&#10216;<var>g<sub>i</sub></var>, <var>g<sub>j</sub></var>&#10217;</span> is negative exactly when the two point more than 90 degrees apart. Dividing by &#8214;<var>g<sub>j</sub></var>&#8214;&#178;, the squared length of <var>g<sub>j</sub></var>, gives the projection&#8217;s length in units of <var>g<sub>j</sub></var>, so a longer <var>g<sub>j</sub></var> does not make the cut larger. Multiplying by <span class="eqt"><var>g<sub>j</sub></var></span> turns it back into a vector. The result is orthogonal to <var>g<sub>j</sub></var>, so a small step along it no longer raises task <var>j</var>&#8217;s loss. The part of <var>g<sub>i</sub></var> that was already orthogonal to <var>g<sub>j</sub></var> is unchanged.</div>
+        <div class="eq-line eq-active" data-eqline="1">when <span class="eqt" data-k="cond" style="color:#7f8c8d">&#10216;g<sub>i</sub>, g<sub>j</sub>&#10217; &lt; 0</span></div>
+        <div class="eq-why eq-active" data-eqline="1">The projection is removed only when the dot product is negative. At zero or above the gradients do not conflict, and <var>g<sub>i</sub></var> is left unchanged.</div>
+      </div>
+<h2 id="why-this-cut"><span class="secnum">4</span> Why this projection</h2>
+    <ol>
+        <li><strong>Why remove exactly the projection?</strong> For a small step, only the projection of <var>g<sub>i</sub></var> onto <var>g<sub>j</sub></var> changes task <var>j</var>&#8217;s loss; the orthogonal remainder does not. Removing less leaves part of the conflict. Removing more discards parts that help task <var>i</var>. The projection is the smallest edit that removes the conflict.</li>
+        <li><strong>Why edit both gradients?</strong> Editing only one leaves the other still conflicting with it. With two tasks, editing both leaves nothing in the sum that conflicts with either task. With three or more, a later projection can bring part of a conflict back.</li>
+        <li><strong>Why a random order?</strong> With three or more tasks the result depends on the order of the projections. A new random order each step spreads that effect over the tasks.</li>
+    </ol>
+    <p>The core of PCGrad in PyTorch is two functions. <code>project</code> is the eq card in <a href="#the-geometry">Section 3</a>. <code>pcgrad</code> applies it to every pair in random order and sums the results; <var>G</var> holds one flattened task gradient per row.</p>
+    <pre class="cs" data-cs="4-9,11-22"><code class="language-python">import random
+import torch
 
-<h2 id="paper-figure">Cutting each gradient's conflicting part</h2>
-    <p>
-        The paper writes what is left of g<sub>i</sub> after the cut as
-        proj<sub>n<sub>j</sub></sub> g<sub>i</sub>, its projection onto n<sub>j</sub>, the direction at a right angle to g<sub>j</sub>.
-    </p>
+def project(g, g_j):
+    dot = g @ g_j
+    if dot &lt; 0:  # conflict
+        coef = dot / (g_j @ g_j)
+        g = g - coef * g_j
+    return g
 
-<div class="demo">
+def pcgrad(G):  # G: (K, P)
+    K = len(G)
+    out = []
+    for i in range(K):
+        g = G[i].clone()
+        others = list(range(K))
+        others.remove(i)
+        random.shuffle(others)
+        for j in others:
+            g = project(g, G[j])
+        out.append(g)
+    return torch.stack(out).sum(0)</code></pre>
+    <ol class="cs-notes">
+      <li><span class="cs-n">1</span>The conflict test and the projection, lines 2 and 1 of the eq card in <a href="#the-geometry">Section 3</a>.</li>
+      <li><span class="cs-n">2</span>Every other task in random order, against its original <var>g<sub>j</sub></var>, then the sum, steps 2 and 3 in <a href="#algorithm">Section 2</a>.</li>
+    </ol>
+<h2 id="paper-figure"><span class="secnum">5</span> The paper&#8217;s illustration</h2>
+<div class="demo" id="pcFigDemo">
         <img id="pcFigFull" src="figures/pcgrad-grads.png" alt="PCGrad paper figure: conflicting gradients and the projection surgery in four panels" style="box-sizing:border-box;display:block;width:100%;height:auto;border:1px solid #e1e4e8;border-radius:8px;">
         <p class="pf-cap" id="pcFigCredit">
-            Figure 2 of Yu et al. (NeurIPS 2020). <a href="https://arxiv.org/abs/2001.06782">arXiv:2001.06782</a>
+            The paper&#8217;s Figure 2. <a href="https://arxiv.org/abs/2001.06782">arXiv:2001.06782</a>
         </p>
         <figure class="pc-fig-phone">
             <div style="border:1px solid #e1e4e8;border-radius:8px;background:#fff;overflow:hidden;">
                 <div class="pc-figrow" style="max-width:270px;aspect-ratio:610 / 680"><img src="figures/pcgrad-grads.png" alt="Panel (a), two conflicting task gradients" style="width:450.49%;left:0.00%"></div>
                 <div class="pc-figrow" style="max-width:274px;aspect-ratio:620 / 680"><img src="figures/pcgrad-grads.png" alt="Panel (b), task i's gradient projected onto the normal of task j's gradient" style="width:443.23%;left:-125.81%"></div>
             </div>
-            <p class="pf-cap">Panels (a) and (b), the conflict and the first cut. Cropped from Figure 2 of Yu et al. (NeurIPS 2020).</p>
+            <p class="pf-cap">Panels (a) and (b), the conflict and the projection of <var>g<sub>i</sub></var>. Cropped from the paper&#8217;s Figure 2.</p>
         </figure>
         <figure class="pc-fig-phone">
             <div style="border:1px solid #e1e4e8;border-radius:8px;background:#fff;overflow:hidden;">
                 <div class="pc-figrow" style="max-width:274px;aspect-ratio:620 / 680"><img src="figures/pcgrad-grads.png" alt="Panel (c), task j's gradient projected onto the normal of task i's gradient" style="width:443.23%;left:-253.23%"></div>
                 <div class="pc-figrow" style="max-width:202px;aspect-ratio:458 / 680"><img src="figures/pcgrad-grads.png" alt="Panel (d), a non-conflicting pair left unchanged" style="width:600.00%;left:-500.00%"></div>
             </div>
-            <p class="pf-cap">Panels (c) and (d), the second cut and a pair that does not conflict. Cropped from Figure 2 of Yu et al. (NeurIPS 2020). <a href="https://arxiv.org/abs/2001.06782">arXiv:2001.06782</a></p>
+            <p class="pf-cap">Panels (c) and (d), the projection of <var>g<sub>j</sub></var> and a pair that does not conflict. Cropped from The paper&#8217;s Figure 2. <a href="https://arxiv.org/abs/2001.06782">arXiv:2001.06782</a></p>
         </figure>
         <p class="pf-cap">
-            <span class="verbatim">The original caption reads &#8220;Conflicting gradients and PCGrad. In (a), tasks i and j have conflicting gradient directions, which can lead to destructive interference. In (b) and (c), we illustrate the PCGrad algorithm in the case where gradients are conflicting. PCGrad projects task i's gradient onto the normal vector of task j's gradient, and vice versa. Non-conflicting task gradients (d) are not altered under PCGrad, allowing for constructive interaction.&#8221;</span>
+            <span class="verbatim">The original caption reads &#8220;Conflicting gradients and PCGrad. In (a), tasks <var>i</var> and <var>j</var> have conflicting gradient directions, which can lead to destructive interference. In (b) and (c), we illustrate the PCGrad algorithm in the case where gradients are conflicting. PCGrad projects task <var>i</var>'s gradient onto the normal vector of task <var>j</var>'s gradient, and vice versa. Non-conflicting task gradients (d) are not altered under PCGrad, allowing for constructive interaction.&#8221;</span>
         </p>
+        <p class="caption"><span class="fignum">Figure 2.</span> (a) conflicting gradients; (b) <var>g<sub>i</sub></var> projected onto the normal of <var>g<sub>j</sub></var>, written proj<sub><var>n<sub>j</sub></var></sub> <var>g<sub>i</sub></var>; (c) the same for <var>g<sub>j</sub></var>; (d) a pair that does not conflict is left unchanged.</p>
     </div>
-
-<h2 id="algorithm">One PCGrad training step</h2>
-    <p>
-        The full procedure, per training step:
-    </p>
-    <ol>
-        <li>Compute each task's gradient on the shared parameters, the weights every task uses (one backward pass per task, the pass that works back from a task's loss to produce its gradient).</li>
-        <li>For each task <code>i</code>, and for every other task <code>j</code> in random order, if the two gradients fight (a negative dot product, measured against task j's original, uncut gradient), cut the interfering part, which means subtracting the part of this gradient that points along the other task's line.</li>
-        <li>Combine the edited gradients (sum or average) and hand the result to any optimizer, such as SGD (stochastic gradient descent) or Adam (an optimizer that scales each parameter's step by its recent gradients).</li>
-    </ol>
-    <p>In the code, the @ sign is the dot product. The conflict test is the &#8220;when&#8221; line of the surgery equation, and the line under it makes the cut, the equation's first line.</p>
-    <pre><code class="language-python">import numpy as np
-def pcgrad_combine(grads):
-    # grads: list of per-task gradient vectors on the shared parameters
-    g = [x.copy() for x in grads]
-    for i in range(len(g)):
-        for j in np.random.permutation(len(g)):   # random order, fairness
-            if i != j and g[i] @ grads[j] < 0:     # conflict, measured against task j's original gradient
-                g[i] -= (g[i] @ grads[j]) / (grads[j] @ grads[j]) * grads[j]  # remove the interfering part
-    return sum(g)</code></pre>
-
-<h2 id="surgery-stepper">The surgery on one pair, step by step</h2>
-    <p>
-        The walkthrough makes both cuts at once. The method itself cuts one task at a time, in random order; for two tasks the result is the same.
-    </p>
-
+<h2 id="surgery-stepper"><span class="secnum">6</span> Both projections, step by step</h2>
 <div class="demo" id="pcgradStepper">
         <div class="stepper-grid">
         <div class="surgery-wrap" id="surgeryWrap">
@@ -1017,7 +962,7 @@ def pcgrad_combine(grads):
                 </g>
                 <g id="conflictG">
                     <path d="M 239.8 176.7 A 42 42 0 0 0 175.9 155.6" fill="none" stroke="#7f8c8d" stroke-width="2"></path>
-                    <text x="258" y="208" font-size="13" font-weight="700" fill="#7f8c8d" text-anchor="middle">&#10216;g1, g2&#10217; &lt; 0</text>
+                    <text x="258" y="208" font-size="13" font-weight="700" fill="#7f8c8d" text-anchor="middle">&#10216;<tspan class="mvar">g</tspan><tspan baseline-shift="sub" font-size="10">1</tspan>, <tspan class="mvar">g</tspan><tspan baseline-shift="sub" font-size="10">2</tspan>&#10217; &lt; 0</text>
                 </g>
                 <g id="sum0G">
                     <line x1="200" y1="190" x2="286" y2="38" stroke="#8a96a3" stroke-width="3.5" marker-end="url(#ah-s)"></line>
@@ -1034,18 +979,18 @@ def pcgrad_combine(grads):
                     <line x1="200" y1="190" x2="292.1" y2="-11.4" stroke="#c0924e" stroke-width="4" marker-end="url(#ah-o)"></line>
                 </g>
             </svg>
-            <div class="svg-label" id="lbl-g1" style="left:74.2%; top:62.6%; transform:translate(16px,4px); color:#8e6fb8;">g1</div>
-            <div class="svg-label" id="lbl-g2" style="left:8.7%; top:43.9%; transform:translate(calc(-100% - 10px),-8px); color:#3f9e4d;">g2</div>
-            <div class="svg-label" id="lbl-g1c" style="left:66.4%; top:47.6%; transform:translate(16px,-14px); color:#8e6fb8;">g1 cut</div>
-            <div class="svg-label" id="lbl-g2c" style="left:18.3%; top:39.7%; transform:translate(16px,-18px); color:#3f9e4d;">g2 cut</div>
-            <div class="svg-label" id="lbl-f1" style="left:70.3%; top:55.0%; transform:translate(8px,-50%); color:#c1553b;">fighting part</div>
-            <div class="svg-label" id="lbl-f2" style="left:13.5%; top:41.8%; transform:translate(-50%,-150%); color:#c1553b;">fighting part</div>
-            <div class="svg-label" id="lbl-sum" style="left:53.9%; top:24.0%; transform:translate(10px,-12px); color:#5d6d7e;">naive sum</div>
-            <div class="svg-label" id="lbl-d" style="left:49.4%; top:8.8%; transform:translate(calc(-100% - 14px),-50%); color:#8a6d1f; text-align:right;">d, the combined<br>gradient</div>
+            <div class="svg-label" id="lbl-g1" style="left:74.2%; top:62.6%; transform:translate(16px,4px); color:#8e6fb8;"><var>g<sub>1</sub></var></div>
+            <div class="svg-label" id="lbl-g2" style="left:8.7%; top:43.9%; transform:translate(calc(-100% - 10px),-8px); color:#3f9e4d;"><var>g<sub>2</sub></var></div>
+            <div class="svg-label" id="lbl-g1c" style="left:66.4%; top:47.6%; transform:translate(16px,-14px); color:#8e6fb8;"><var>g<sub>1</sub></var> cut</div>
+            <div class="svg-label" id="lbl-g2c" style="left:18.3%; top:39.7%; transform:translate(16px,-18px); color:#3f9e4d;"><var>g<sub>2</sub></var> cut</div>
+            <div class="svg-label" id="lbl-f1" style="left:70.3%; top:55.0%; transform:translate(8px,-50%); color:#c1553b;">conflicting part</div>
+            <div class="svg-label" id="lbl-f2" style="left:13.5%; top:41.8%; transform:translate(-50%,-150%); color:#c1553b;">conflicting part</div>
+            <div class="svg-label" id="lbl-sum" style="left:53.9%; top:24.0%; transform:translate(10px,-12px); color:#5d6d7e;">plain sum</div>
+            <div class="svg-label" id="lbl-d" style="left:49.4%; top:8.8%; transform:translate(calc(-100% - 14px),-50%); color:#8a6d1f; text-align:right;"><var>d</var>, the combined<br>gradient</div>
         </div>
         <div class="stepper-side">
         <div class="step-controls">
-            <button class="step-btn active" data-beat="1" aria-label="Step 1, check for a fight">1</button>
+            <button class="step-btn active" data-beat="1" aria-label="Step 1, check for a conflict">1</button>
             <button class="step-btn" data-beat="2" aria-label="Step 2, find the interfering parts">2</button>
             <button class="step-btn" data-beat="3" aria-label="Step 3, subtract them">3</button>
             <button class="step-btn" data-beat="4" aria-label="Step 4, add what is left">4</button>
@@ -1056,21 +1001,22 @@ def pcgrad_combine(grads):
             </div>
         </div>
         <div class="step-stage">
-            <div class="stage-title" id="stageTitle">Check for a fight (step 1 of 4)</div>
+            <div class="stage-title" id="stageTitle">Check for a conflict (step 1 of 4)</div>
             <div class="stage-desc" id="stageDesc"></div>
         </div>
         <div class="eq-card" id="pcgradStepperEq">
-            <div class="eq-what" id="pcEqWhat">This line is the check that decides whether any cut happens.</div>
             <div class="eq-line" data-eqline="0"><span class="eqt" data-k="gipc" style="color:#8e44ad">g<sub>i</sub><sup>PC</sup></span> = <span class="eqt" data-k="gi" style="color:#8e44ad">g<sub>i</sub></span> &#8722; <span class="eqt" data-k="sub" style="color:#c1553b"><span class="frac"><span class="top">&#10216;g<sub>i</sub>, g<sub>j</sub>&#10217;</span><span class="bot">&#8214;g<sub>j</sub>&#8214;&#178;</span></span>g<sub>j</sub></span></div>
-        <div class="eq-why" data-eqline="0">Task i's gradient loses the part that points against task j and keeps the rest. The fraction times g<sub>j</sub> is that fighting part: the dot product &#10216;g<sub>i</sub>, g<sub>j</sub>&#10217;, divided by task j's squared length, times g<sub>j</sub>.</div>
+        <div class="eq-why" data-eqline="0"><var>g<sub>i</sub></var> keeps everything except its projection onto <var>g<sub>j</sub></var>. The fraction is the projection&#8217;s length in units of <var>g<sub>j</sub></var>; dividing by &#8214;<var>g<sub>j</sub></var>&#8214;&#178; makes it independent of <var>g<sub>j</sub></var>&#8217;s length. Times <var>g<sub>j</sub></var> it is the red conflicting part. After subtracting it, the result is orthogonal to <var>g<sub>j</sub></var>, so a small step along it does not raise task <var>j</var>&#8217;s loss.</div>
             <div class="eq-line" data-eqline="1">when <span class="eqt" data-k="cond" style="color:#7f8c8d">&#10216;g<sub>i</sub>, g<sub>j</sub>&#10217; &lt; 0</span></div>
-        <div class="eq-why" data-eqline="1">Cut only when they fight. If the dot product is zero or positive, the gradients do not fight, and nothing needs cutting.</div>
+        <div class="eq-why" data-eqline="1">The cut applies only when the dot product is below zero, meaning the two gradients are more than a right angle apart and a step against <var>g<sub>i</sub></var> would raise task <var>j</var>'s loss. At zero or above, <var>g<sub>i</sub></var> is left exactly as it is.</div>
             <div class="eq-line" data-eqline="2"><span class="eqt" data-k="d" style="color:#8a6d1f">d</span> = <span class="eqt" data-k="s1" style="color:#8e44ad">g<sub>1</sub><sup>PC</sup></span> + <span class="eqt" data-k="s2" style="color:#3f9e4d">g<sub>2</sub><sup>PC</sup></span></div>
-        <div class="eq-why" data-eqline="2">Add the two cut gradients. Their sum is d, the combined gradient, and the step moves against d.</div>
-            <div class="eq-legend"><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#c1553b"></span><code><span class="frac"><span class="top">&#10216;g<sub>i</sub>, g<sub>j</sub>&#10217;</span><span class="bot">‖g<sub>j</sub>‖²</span></span>&#8201;g<sub>j</sub></code> the fighting part, cut away</span><span class="eq-item" data-lines="0,1"><span class="eq-sw" style="background:#8e44ad"></span><code>g<sub>i</sub></code> task i's gradient</span><span class="eq-item" data-lines="0,1"><span class="eq-sw" style="background:#3f9e4d"></span><code>g<sub>j</sub></code> task j's gradient</span><span class="eq-item" data-lines="1"><span class="eq-sw" style="background:#7f8c8d"></span><code>&#10216;g<sub>i</sub>, g<sub>j</sub>&#10217; &lt; 0</code> the conflict check, which allows a cut only when they fight</span><span class="eq-item" data-lines="0,2"><span class="eq-sw" style="background:linear-gradient(90deg,#8e6fb8 50%,#3f9e4d 50%)"></span><code>g<sub>i</sub><sup>PC</sup></code> the corrected gradient after surgery; step 3 draws it as the purple g1 cut and the green g2 cut</span><span class="eq-item" data-lines="2"><span class="eq-sw" style="background:#c0924e"></span><code>d</code> the combined gradient, the gold arrow</span><span class="eq-item" data-lines="0,1"><code>&#10216; , &#10217;</code> the dot product, negative when they fight</span><span class="eq-item" data-lines="0"><code>‖g<sub>j</sub>‖²</code> the squared length of g<sub>j</sub>, which the dot product is divided by</span><span class="eq-item"><code>i, j</code> the two tasks; the diagram's g1 and g2 are the same cut run both ways, first with i = 1 and j = 2, then with i = 2 and j = 1</span></div>
+        <div class="eq-why" data-eqline="2">The combined gradient <var>d</var> is the sum of the two projected gradients, and the training step moves against it. Each projected gradient is orthogonal to the other task&#8217;s original gradient, and only the conflicting parts were removed from the plain sum.</div>
+            <div class="eq-legend"><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#c1553b"></span><span class="frac"><span class="top">&#10216;<var>g<sub>i</sub></var>, <var>g<sub>j</sub></var>&#10217;</span><span class="bot">‖<var>g<sub>j</sub></var>‖²</span></span>&#8201;<var>g<sub>j</sub></var> the conflicting part, removed</span><span class="eq-item" data-lines="0,1"><span class="eq-sw" style="background:#8e44ad"></span><var>g<sub>i</sub></var> task <var>i</var>'s gradient</span><span class="eq-item" data-lines="0,1"><span class="eq-sw" style="background:#3f9e4d"></span><var>g<sub>j</sub></var> task <var>j</var>'s gradient</span><span class="eq-item" data-lines="1"><span class="eq-sw" style="background:#7f8c8d"></span>&#10216;<var>g<sub>i</sub></var>, <var>g<sub>j</sub></var>&#10217; &lt; 0 the conflict test: project only when it holds</span><span class="eq-item" data-lines="0,2"><span class="eq-sw" style="background:linear-gradient(90deg,#8e6fb8 50%,#3f9e4d 50%)"></span><var>g<sub>i</sub><sup>PC</sup></var> the projected gradient; step 3 draws it as the purple <var>g<sub>1</sub></var> cut and the green <var>g<sub>2</sub></var> cut</span><span class="eq-item" data-lines="2"><span class="eq-sw" style="background:#c0924e"></span><var>d</var> the combined gradient, the gold arrow</span><span class="eq-item" data-lines="0,1">&#10216; , &#10217; the dot product, negative when they conflict</span><span class="eq-item" data-lines="0">‖<var>g<sub>j</sub></var>‖² the squared length of <var>g<sub>j</sub></var>, which the dot product is divided by</span><span class="eq-item"><var>i</var>, <var>j</var> the two tasks; the diagram's <var>g<sub>1</sub></var> and <var>g<sub>2</sub></var> are the same cut run both ways, first with <var>i</var> = 1 and <var>j</var> = 2, then with <var>i</var> = 2 and <var>j</var> = 1</span></div>
         </div>
         </div>
-        </div>    </div>
+        </div>
+    <p class="caption"><span class="fignum">Figure 3.</span> Two conflicting gradients <var>g<sub>1</sub></var> and <var>g<sub>2</sub></var>; red marks the conflicting part of each, gold the combined gradient <var>d</var>. Both projections are drawn at once; the method does one task at a time, which gives the same result for two tasks.</p>
+    </div>
     <script>
     /* Phone (the one-column stack at 760 px and below): the eq-card already
        shows last, under the step text; it is also moved to be the demo's last
@@ -1092,101 +1038,101 @@ def pcgrad_combine(grads):
 
     
     
-<h2 id="tragic-triad">When the cut actually pays</h2>
-    <p>
-        Conflict alone is not fatal. It only turns destructive when three things come together:
-    </p>
+<h2 id="tragic-triad"><span class="secnum">7</span> The tragic triad</h2>
+    <p id="the-culprit">Joint training can do worse than training each task alone. The paper attributes this to <strong>conflicting gradients</strong>, and argues the damage is large when three conditions hold together, which it calls the <strong>tragic triad</strong>:</p>
     <ol>
-        <li>
-            <strong>Conflicting gradients</strong>, where the tasks pull against each other, so their cosine is negative.
-        </li>
-        <li>
-            <strong>Dominating gradients</strong>, where one task is much louder than the other.
-        </li>
-        <li>
-            <strong>High curvature</strong> along the combined direction, so the hopeful &#8220;everyone improves
-            a little&#8221; picture breaks within a single step.
-        </li>
+        <li><strong>Conflicting gradients</strong>: the task gradients have negative cosine similarity.</li>
+        <li><strong>Dominating gradients</strong>: one task&#8217;s gradient is much longer than the other&#8217;s.</li>
+        <li><strong>High curvature</strong> along the combined direction: the slope changes within a single step, so a step that should lower every loss can raise one.</li>
     </ol>
-    <p>
-        Yu and colleagues prove that one PCGrad step leaves the multitask loss no higher than one plain
-        gradient descent step from the same point, under three conditions. First, the two gradients must
-        point against each other strongly enough, and the more their lengths differ, the milder the fight
-        that qualifies; this one condition covers the triad's first two parts. Second, the landscape must be curved enough, the triad's third part. Third, the step must
-        be large enough, a condition outside the triad.
-    </p>
-    <p>
-        For two tasks with convex losses (bowl shaped, with no local traps where a run can get stuck) and a
-        small enough step, PCGrad is proven to reach either the best point or a standoff: a point where the
-        two gradients point in exactly opposite directions, so each cut removes the whole gradient and the
-        run stops.
-    </p>
-    <p>
-        Yu and colleagues test the gains on Meta-World, a suite of simulated robot manipulation tasks (a ten-task
-        and a fifty-task set). One shared robot policy, the rule the robot uses to pick its actions, learns
-        all the tasks at once. It is trained with multitask SAC (soft actor-critic), a reinforcement-learning
-        algorithm with two parts: an actor that picks the actions and a critic that scores them. The score is
-        the average success rate across the tasks, compared with the same training run without the surgery.
-        PCGrad improves that success rate by over <code>30%</code> absolute, meaning 30 percentage points,
-        not 30% of the starting rate.
-    </p>
+    <p>The paper proves that one PCGrad step leaves the total loss no higher than one plain gradient step from the same point, under three conditions: the gradients conflict strongly enough (a milder conflict suffices when their lengths differ more), the curvature is high enough, and the step is large enough. For two tasks with convex losses and a small enough step, PCGrad converges either to the optimum or to a point where the two gradients point in exactly opposite directions.</p>
+    <table class="cmp">
+        <thead><tr><th>Benchmark in the paper</th><th>Result with PCGrad</th></tr></thead>
+        <tbody>
+            <tr><td>Meta-World robot tasks (10 and 50 tasks), one shared policy trained with multitask SAC (soft actor-critic)</td><td>Average success rate more than 30 percentage points higher than the same training without PCGrad</td></tr>
+        </tbody>
+    </table>
+<h2 id="pc-training-loop"><span class="secnum">8</span> Implementation in PyTorch</h2>
+    <p>PCGrad replaces the usual single <code>loss.backward()</code>. Each task&#8217;s batch-mean loss is differentiated separately over the shared parameters, so a step costs <var>K</var> backward passes and <var>K</var> flattened gradient copies, plus <var>K</var>(<var>K</var>&#8722;1) dot products. The edited sum is written into the shared parameters&#8217; gradients. The heads keep their ordinary gradients, because each head receives only its own task&#8217;s loss (<a href="multitask-training-loop.html#task-gradients">Gradient Balancing Inside the Training Loop</a> shows this write-back style in detail).</p>
+    <p>The step below uses <code>pcgrad</code> and <code>project</code> from <a href="#why-this-cut">Section 4</a>, plus two functions defined here: <code>flat_grad</code> returns one task&#8217;s gradient over the shared parameters <code>body</code> as one vector, and <code>fill_grads</code> writes a vector back into each parameter&#8217;s <code>.grad</code>.</p>
+    <pre class="cs" data-cs="4-9,11-17,22-26,27-29,30-32"><code class="language-python">import torch
+from torch.autograd import grad
 
+KEEP = dict(retain_graph=True)
 
-    
-<h2 id="pc-training-loop">Loss scale and the optimizer bend PCGrad's direction</h2>
+def flat_grad(loss, body):
+    gs = grad(loss, body, **KEEP)
+    flat = [g.ravel() for g in gs]
+    return torch.cat(flat)
 
-    <p>PCGrad edits the task gradients at the balance stage; clipping and the optimizer then act on the edited sum, and two things outside PCGrad still bend it.</p>
-    <pre><code class="language-python"># flat makes one vector; write_grads
-# sets the shared layers' .grad
-grads = [flat(torch.autograd.grad(
-             L, shared,
-             retain_graph=True))
-         for L in losses]
-# a loss 10 times larger gives a
-# gradient 10 times longer: the sum
-# leans toward it
-write_grads(shared,
-            pcgrad_combine(grads))
-# momentum mixes in past steps, so
-# a part PCGrad cut can come back
-opt.step()</code></pre>
-    <figure class="t1f-wrap"><svg class="t1f-svg" focusable="false" viewBox="0 0 274 412" role="img" aria-label="One training step: forward, backward, balance, clip, optimizer step, log"><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-fwd" x="14" y="10" width="246" height="62" rx="10" ry="10"/><text class="t1f-title" x="26" y="31" text-anchor="start" style="font-size:15px;font-weight:700">1 &#183; Forward</text><text class="t1f-sub" x="26" y="47" text-anchor="start" style="font-size:13px">each task computes its loss</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-bwd" x="14" y="92" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="113" text-anchor="start" style="font-size:15px;font-weight:700">2 &#183; Backward</text><text class="t1f-sub" x="26" y="129" text-anchor="start" style="font-size:13px">per-task gradients, shared layers</text></g><g class="t1f-part t1f-on"><rect class="t1f-box t1f-box-bal" x="14" y="158" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="179" text-anchor="start" style="font-size:15px;font-weight:700">3 &#183; Balance</text><text class="t1f-sub" x="26" y="195" text-anchor="start" style="font-size:13px">combine the task gradients</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-clip" x="14" y="224" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="245" text-anchor="start" style="font-size:15px;font-weight:700">4 &#183; Clip</text><text class="t1f-sub" x="26" y="261" text-anchor="start" style="font-size:13px">cap the gradient's length</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-opt" x="14" y="290" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="311" text-anchor="start" style="font-size:15px;font-weight:700">5 &#183; Optimizer step</text><text class="t1f-sub" x="26" y="327" text-anchor="start" style="font-size:13px">update the network's parameters</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-log" x="14" y="356" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="377" text-anchor="start" style="font-size:15px;font-weight:700">6 &#183; Log</text><text class="t1f-sub" x="26" y="393" text-anchor="start" style="font-size:13px">record what this step did</text></g><g class="t1f-part t1f-dim"><rect class="t1f-chip-lw" x="22" y="52" width="230" height="17" rx="4"/><text class="t1f-chiptext" x="28" y="65" text-anchor="start" style="font-size:12px">loss-weighting methods act here</text></g><g class="t1f-part t1f-on"><rect class="t1f-chip-gm" x="112" y="166" width="140" height="16" rx="4"/><text class="t1f-chiptext-w" x="182" y="178" text-anchor="middle" textLength="130" lengthAdjust="spacingAndGlyphs" style="font-size:11px;font-weight:700">gradient methods act here</text></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="72" x2="54" y2="82" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,92 48.5,82 59.5,82"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="138" x2="54" y2="148" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,158 48.5,148 59.5,148"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="204" x2="54" y2="214" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,224 48.5,214 59.5,214"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="270" x2="54" y2="280" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,290 48.5,280 59.5,280"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="336" x2="54" y2="346" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,356 48.5,346 59.5,346"/></g></svg><figcaption class="t1f-cap">PCGrad replaces the plain sum; clipping and the optimizer act on its result.</figcaption></figure>
-    <p><a href="multitask-training-loop.html">Gradient Balancing Inside the Training Loop</a> covers these in <a href="multitask-training-loop.html#loss-scale">&#8220;The loss sets the scale every balancer sees&#8221;</a> and <a href="multitask-training-loop.html#momentum-returns">&#8220;Momentum can bring back a direction PCGrad removed&#8221;</a>.</p>
+def fill_grads(params, vec):
+    i = 0
+    for p in params:
+        n = p.numel()
+        part = vec[i:i + n]
+        p.grad = part.view_as(p)
+        i += n
 
-<h2 id="pc-compare">How PCGrad compares with the other balancing methods</h2>
+body = list(trunk.parameters())
+head_ps = list(heads.parameters())
 
-    <p>The two weighting methods, the volume knobs that learn each task's loss weight (GradNorm and Uncertainty Weighting), and the four gradient methods, PCGrad, GradVac, CAGrad, and MGDA, which stops at a Pareto-stationary point (where no small step lowers every task's loss at once), side by side:</p>
-
+def pcgrad_step(losses):
+    rows = []
+    for L in losses:
+        g_k = flat_grad(L, body)
+        rows.append(g_k)
+    g = pcgrad(torch.stack(rows))
+    opt.zero_grad()
+    fill_grads(body, g)
+    total = sum(losses)
+    total.backward(inputs=head_ps)
+    opt.step()</code></pre>
+    <ol class="cs-notes">
+      <li><span class="cs-n">1</span>One task&#8217;s gradient over the shared parameters as one flat vector, keeping the graph for the next task.</li>
+      <li><span class="cs-n">2</span>Writes a flat vector back into each shared parameter&#8217;s <code>.grad</code>, using <code>numel</code> and <code>view_as</code>.</li>
+      <li><span class="cs-n">3</span><var>K</var> backward passes, one per task, step 1 in <a href="#algorithm">Section 2</a>.</li>
+      <li><span class="cs-n">4</span>PCGrad replaces the plain sum; the result becomes the shared gradient, step 3 in <a href="#algorithm">Section 2</a>.</li>
+      <li><span class="cs-n">5</span>The heads get their ordinary gradients, then one optimizer step for all parameters.</li>
+    </ol>
+    <p>The official code is <a href="https://github.com/tianheyu927/PCGrad">tianheyu927/PCGrad</a>, a TensorFlow 1 optimizer wrapper used as <code>PCGrad(tf.train.AdamOptimizer())</code> followed by <code>optimizer.minimize(losses)</code> with a list of task losses. PCGrad adds no hyperparameters; the paper keeps the base method&#8217;s settings. <a href="https://github.com/median-research-group/LibMTL">LibMTL</a> ships a PyTorch version (<code>--weighting PCGrad</code>) that edits only the shared encoder&#8217;s gradients and shuffles the task order.</p>
+    <ul>
+        <li><strong>Test against the original gradients.</strong> The paper&#8217;s Algorithm 1 tests and projects against each task&#8217;s unedited <var>g<sub>j</sub></var>, as <code>G[j]</code> does here.</li>
+        <li><strong>Sum, not mean.</strong> Algorithm 1 sums the edited gradients; averaging divides the step by <var>K</var>.</li>
+        <li><strong>The task order.</strong> The authors&#8217; TensorFlow code calls a shuffle whose result is discarded, so its order is fixed in practice; LibMTL shuffles. With two tasks the order does not matter.</li>
+        <li><strong>Mixed precision.</strong> Unscale the gradients before projecting, and clip after the combined gradient is written back.</li>
+        <li><strong>Loss scale and momentum still matter.</strong> A loss 10 times larger gives a gradient 10 times longer, and momentum can bring back a removed direction; see <a href="multitask-training-loop.html#loss-scale">&#8220;Loss scale&#8221;</a> and <a href="multitask-training-loop.html#momentum-returns">&#8220;Momentum and the component PCGrad removes&#8221;</a>.</li>
+    </ul>
+    <figure class="t1f-wrap" id="pc-fig-loopstep"><svg class="t1f-svg" focusable="false" viewBox="0 0 274 412" role="img" aria-label="One training step: forward, backward, balance, clip, optimizer step, log"><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-fwd" x="14" y="10" width="246" height="62" rx="10" ry="10"/><text class="t1f-title" x="26" y="31" text-anchor="start" style="font-size:15px;font-weight:700">1 &#183; Forward</text><text class="t1f-sub" x="26" y="47" text-anchor="start" style="font-size:13px">each task computes its loss</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-bwd" x="14" y="92" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="113" text-anchor="start" style="font-size:15px;font-weight:700">2 &#183; Backward</text><text class="t1f-sub" x="26" y="129" text-anchor="start" style="font-size:13px">per-task gradients, shared layers</text></g><g class="t1f-part t1f-on"><rect class="t1f-box t1f-box-bal" x="14" y="158" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="179" text-anchor="start" style="font-size:15px;font-weight:700">3 &#183; Balance</text><text class="t1f-sub" x="26" y="195" text-anchor="start" style="font-size:13px">combine the task gradients</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-clip" x="14" y="224" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="245" text-anchor="start" style="font-size:15px;font-weight:700">4 &#183; Clip</text><text class="t1f-sub" x="26" y="261" text-anchor="start" style="font-size:13px">cap the gradient's length</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-opt" x="14" y="290" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="311" text-anchor="start" style="font-size:15px;font-weight:700">5 &#183; Optimizer step</text><text class="t1f-sub" x="26" y="327" text-anchor="start" style="font-size:13px">update the network's parameters</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-log" x="14" y="356" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="377" text-anchor="start" style="font-size:15px;font-weight:700">6 &#183; Log</text><text class="t1f-sub" x="26" y="393" text-anchor="start" style="font-size:13px">record what this step did</text></g><g class="t1f-part t1f-dim"><rect class="t1f-chip-lw" x="22" y="52" width="230" height="17" rx="4"/><text class="t1f-chiptext" x="28" y="65" text-anchor="start" style="font-size:12px">loss-weighting methods act here</text></g><g class="t1f-part t1f-on"><rect class="t1f-chip-gm" x="112" y="166" width="140" height="16" rx="4"/><text class="t1f-chiptext-w" x="182" y="178" text-anchor="middle" textLength="130" lengthAdjust="spacingAndGlyphs" style="font-size:11px;font-weight:700">gradient methods act here</text></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="72" x2="54" y2="82" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,92 48.5,82 59.5,82"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="138" x2="54" y2="148" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,158 48.5,148 59.5,148"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="204" x2="54" y2="214" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,224 48.5,214 59.5,214"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="270" x2="54" y2="280" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,290 48.5,280 59.5,280"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="336" x2="54" y2="346" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,356 48.5,346 59.5,346"/></g></svg><figcaption class="t1f-cap"><span class="fignum">Figure 4.</span> PCGrad replaces the plain sum; clipping and the optimizer act on its result.</figcaption></figure>
+<h2 id="pc-compare"><span class="secnum">9</span> Comparison with other methods</h2>
+    <p>Two methods learn each task&#8217;s loss weight (GradNorm and Uncertainty Weighting). Four methods edit the task gradients (PCGrad, GradVac, CAGrad and MGDA). The question each one answers:</p>
     <table class="cmp">
         <thead><tr><th>Method</th><th>The question it answers</th></tr></thead>
         <tbody>
-            <tr><td><a href="gradnorm.html"><strong>GradNorm</strong></a></td><td>How loud should each task be, to keep progress balanced? (learned, driven by training dynamics)</td></tr>
-            <tr><td><a href="uncertainty-weighting.html"><strong>Uncertainty Weighting</strong></a></td><td>How loud should each task be, given how noisy it inherently is? (learned, driven by the data)</td></tr>
-            <tr><td><strong>PCGrad</strong> (this page)</td><td>How should the directions be edited so tasks stop fighting?</td></tr>
-            <tr><td><a href="gradvac.html"><strong>GradVac</strong></a></td><td>How should each pair of tasks be nudged back to the agreement level where it learns best?</td></tr>
-            <tr><td><a href="cagrad.html"><strong>CAGrad</strong></a></td><td>How do we protect the worst-off task and stay near the average, with a guarantee?</td></tr>
-            <tr><td><a href="mgda.html"><strong>MGDA</strong></a></td><td>What direction helps every task at once, and where does the run stop?</td></tr>
+            <tr><td><a href="gradnorm.html"><strong>GradNorm</strong></a></td><td>How much weight should each task's loss get so all tasks train at a similar rate? (learned during training from how fast each loss falls)</td></tr>
+            <tr><td><a href="uncertainty-weighting.html"><strong>Uncertainty Weighting</strong></a></td><td>How much weight should each task's loss get, given how noisy that task's targets are? (the noise level is learned along with the model)</td></tr>
+            <tr><td><strong>PCGrad</strong> (this page)</td><td>How should a task gradient be edited when it conflicts with another task's gradient?</td></tr>
+            <tr><td><a href="gradvac.html"><strong>GradVac</strong></a></td><td>How should each pair of task gradients be moved toward a target cosine, a running average of that pair's past cosines?</td></tr>
+            <tr><td><a href="cagrad.html"><strong>CAGrad</strong></a></td><td>How do we raise the smallest per-task improvement while staying near the average gradient, with a convergence guarantee?</td></tr>
+            <tr><td><a href="mgda.html"><strong>MGDA</strong></a></td><td>Which blend of task gradients lowers every task's loss at once, and when does no such blend exist?</td></tr>
         </tbody>
     </table>
-
-<p>Each cut leaves the edited gradient at a right angle to the gradient it fought, a cosine of zero. But is zero the right target for every pair of tasks? That is <a href="gradvac.html">the GradVac page's question</a>.</p>
-
-<h2 id="references">References</h2>
+    <p>PCGrad leaves each edited gradient orthogonal to the one it conflicted with, a cosine similarity of zero. <a href="gradvac.html">GradVac</a> asks whether zero is the right target for every pair of tasks.</p>
+<h2 id="references"><span class="secnum">10</span> References</h2>
 <ol class="brefs"><li>Yu, T., et al. (2020). Gradient Surgery for Multi-Task Learning. NeurIPS. arXiv:<a href="https://arxiv.org/abs/2001.06782">2001.06782</a>.</li></ol>
 
 <script>
     (function () {
         var stageTitles = [
-            "Check for a fight (step 1 of 4)",
-            "Find the interfering parts (step 2 of 4)",
+            "Check for a conflict (step 1 of 4)",
+            "Find the conflicting parts (step 2 of 4)",
             "Subtract them (step 3 of 4)",
             "Add what is left (step 4 of 4)"
         ];
         var stageDescs = [
-            "They fight, so a cut is needed. The naive sum keeps the fighting parts; with one task much louder, a step against it could raise the quieter task's loss.",
-            "Only the fighting parts get removed.",
+            "The dot product is negative, so the gradients conflict. The plain sum keeps the conflicting parts; when one gradient is much longer, a step along the sum can raise the other task's loss.",
+            "Each conflicting part is the projection of one gradient onto the other. Only these parts are removed.",
             "Each cut arrow sits at a right angle to the other task's original gradient.",
-            "d points nearly like the naive sum but fights neither task, so a small step against it lowers both losses however loud either task is."
+            "<var>d</var> points almost like the plain sum but conflicts with neither task, so a small step against it lowers both losses, whatever the gradient lengths."
         ];
         var beat = 1;
         function show(el, on) { el.classList.toggle("dim-layer", !on); }
@@ -1271,18 +1217,12 @@ opt.step()</code></pre>
                head would sit under the gold d, so the head is dropped. */
             document.querySelector("#sum0G line").setAttribute("marker-end", b === 4 ? "none" : "url(#ah-s)");
             document.getElementById("stageTitle").textContent = stageTitles[b - 1];
-            document.getElementById("stageDesc").textContent = stageDescs[b - 1];
+            document.getElementById("stageDesc").innerHTML = stageDescs[b - 1];
             var btns = document.querySelectorAll("#pcgradStepper .step-btn[data-beat]");
             for (var i = 0; i < btns.length; i++) {
                 btns[i].classList.toggle("active", parseInt(btns[i].getAttribute("data-beat"), 10) === b);
             }
             syncEq("pcgradStepperEq", EQMAP[b - 1].lines, EQMAP[b - 1].terms);
-            /* The card's header names the line on show: the check at beat 1, the cut after. */
-            document.getElementById("pcEqWhat").textContent = (b === 1)
-                ? "This line is the check that decides whether any cut happens."
-                : (b === 4)
-                ? "This line adds the two cut gradients into d, the combined gradient."
-                : "This line is the surgery. Take task i's gradient and subtract the part that fights task j.";
             var pv = document.getElementById("beatPrev");
             pv.disabled = (b === 1);
             pv.style.opacity = (b === 1) ? "0.35" : "";
@@ -1310,13 +1250,13 @@ opt.step()</code></pre>
         function reserveStage() {
             var st = document.querySelector("#pcgradStepper .step-stage");
             var t = document.getElementById("stageTitle"), d = document.getElementById("stageDesc");
-            var keepT = t.textContent, keepD = d.textContent, mx = 0;
+            var keepT = t.textContent, keepD = d.innerHTML, mx = 0;
             st.style.minHeight = "";
             for (var k = 0; k < 4; k++) {
-                t.textContent = stageTitles[k]; d.textContent = stageDescs[k];
+                t.textContent = stageTitles[k]; d.innerHTML = stageDescs[k];
                 mx = Math.max(mx, st.offsetHeight);
             }
-            t.textContent = keepT; d.textContent = keepD;
+            t.textContent = keepT; d.innerHTML = keepD;
             st.style.minHeight = mx + "px";
         }
         setBeat(1);
@@ -1439,5 +1379,34 @@ opt.step()</code></pre>
     .series-nav a.nav-prev { margin-right: 0; }
 }
 </style>
+<script>
+/* P80 code sections (CODE-SECTIONS.md) */
+(function(){
+  var C=['121,184,255','255,171,112','133,232,157','210,168,255','255,161,152','118,227,234'];
+  function lay(pre){
+    var code=pre.querySelector('code'); if(!code) return;
+    var lh=parseFloat(getComputedStyle(code).lineHeight);
+    var pt=parseFloat(getComputedStyle(pre).paddingTop);
+    var old=pre.querySelectorAll('.cs-g'); for(var j=0;j<old.length;j++) pre.removeChild(old[j]);
+    var imgs=[],sizes=[],pos=[];
+    (pre.getAttribute('data-cs')||'').split(',').forEach(function(r,i){
+      var m=r.trim().match(/^(\d+)(?:-(\d+))?$/); if(!m) return;
+      var a=+m[1],b=+(m[2]||m[1]),c=C[i%C.length],top=pt+(a-1)*lh,h=(b-a+1)*lh;
+      imgs.push('linear-gradient(rgba('+c+',.55),rgba('+c+',.55))','linear-gradient(rgba('+c+',.13),rgba('+c+',.13))');
+      sizes.push('3px '+h+'px','100% '+h+'px'); pos.push('0 '+top+'px','0 '+top+'px');
+      var g=document.createElement('span'); g.className='cs-g'; g.setAttribute('aria-hidden','true');
+      g.setAttribute('data-n',String(i+1)); g.style.top=(top+(lh-11)/2)+'px'; g.style.color='rgb('+c+')';
+      pre.insertBefore(g,code);
+    });
+    pre.style.backgroundImage=imgs.join(','); pre.style.backgroundSize=sizes.join(',');
+    pre.style.backgroundPosition=pos.join(','); pre.style.backgroundRepeat='no-repeat';
+  }
+  function all(){ var p=document.querySelectorAll('pre.cs'); for(var i=0;i<p.length;i++) lay(p[i]); }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',all); else all();
+  window.addEventListener('load',all);
+  window.addEventListener('resize',all);
+  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(all);
+})();
+</script>
 </body>
 </html>

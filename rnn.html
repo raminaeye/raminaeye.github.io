@@ -756,6 +756,9 @@
 .mtd-svg .mtd-halo { stroke: #ffffff; stroke-width: 5px; stroke-linejoin: round; paint-order: stroke; }
 .mtd-svg .mtd-box.mtd-note { stroke-dasharray: 5 4; }
 </style>
+<style>
+    .datatable{border-collapse:collapse;margin:1.2em 0;width:100%;max-width:560px;font-size:.95em} .datatable th,.datatable td{border:1px solid #bdc3c7;padding:.45em .6em;text-align:left} .datatable th{background:#2c3e50;color:#fff;font-weight:600} .datatable tr:nth-child(even) td{background:#f7f9fb}
+</style>
 </head>
 <body>
         <nav class="topnav" aria-label="Site">
@@ -790,10 +793,10 @@
     <p class="tabs-label">On this page</p>
     <div class="tab-strip">
         <a class="tab-link" href="#idea">Order matters</a>
-        <a class="tab-link" href="#rnn-update">The RNN update: one equation, reused every timestep</a>
+        <a class="tab-link" href="#rnn-update">One equation, reused every timestep</a>
         <a class="tab-link" href="#bptt">Backpropagation through time unrolls the loop</a>
-        <a class="tab-link" href="#vanishing-gradients">Why gradients vanish (or explode)</a>
-        <a class="tab-link" href="#clipping-gradients">Clip exploding gradients: same direction, sane size</a>
+        <a class="tab-link" href="#vanishing-gradients">Why gradients vanish or explode</a>
+        <a class="tab-link" href="#clipping-gradients">Clipping keeps the direction and caps the size</a>
         <a class="tab-link" href="#gru">Gated Recurrent Unit (GRU)</a>
         <a class="tab-link" href="#gates">Gates decide what to keep and what to forget</a>
         <a class="tab-link" href="#gru-step">One GRU step, in code</a>
@@ -801,7 +804,7 @@
         <a class="tab-link" href="#lstm-update">The LSTM update</a>
         <a class="tab-link" href="#forget-gate">The forget gate was added later</a>
         <a class="tab-link" href="#results">Long sequences expose the vanilla RNN</a>
-        <a class="tab-link" href="#three-memories">Toy: same spike, three memories</a>
+        <a class="tab-link" href="#three-memories">One spike through RNN, GRU and LSTM</a>
         <a class="tab-link" href="#caveats">What goes wrong when you actually train one</a>
         <a class="tab-link" href="#references">References</a>
     </div>
@@ -813,18 +816,34 @@
         A <strong>feedforward network</strong> takes one fixed-size input, multiplies it by weights and applies non-linearities (functions that bend their input, so the network can learn curved patterns). Flatten a sentence, a price series or an audio clip into that one input and <em>which step came when</em> is lost, and sequences of different lengths need padding (dummy steps) or truncating.
     </p>
     <p>
-        With <strong>recurrence</strong>, you process one input at a time and carry forward <em>some memory</em>, the hidden state h. In code, with learned weight matrices W and U shared by every step, and one more matrix V that turns the memory into the prediction:
+        With <strong>recurrence</strong>, you process one input at a time and carry forward <em>some memory</em>, the hidden state h. In code, with learned weight matrices W and U shared by every step, and one more matrix V that turns the memory into the prediction. Each step is one dense layer, the building block of an <a href="mlp.html">MLP</a>, applied again and again:
     </p>
 <pre><code class="language-python">
 import numpy as np
 
-h = np.zeros(hidden_dim)          # memory starts empty
-for x_t in sequence:              # one input at a time, in order
-    h = np.tanh(W @ x_t + U @ h)  # mix today's input with yesterday's memory
-y = V @ h                         # the memory becomes the prediction
+# memory starts empty
+h = np.zeros(hidden_dim)
+# one input at a time, in order
+for x_t in sequence:
+    # mix input and memory
+    h = np.tanh(W @ x_t + U @ h)
+# memory becomes the prediction
+y = V @ h
 </code></pre>
 
-    <h3 id="rnn-update">The RNN update: one equation, reused every timestep</h3>
+    <table class="datatable map-table">
+        <thead><tr><th>Part</th><th>What it answers</th></tr></thead>
+        <tbody>
+            <tr><td><a href="#rnn-update">One equation, reused every timestep</a></td><td>how one cell mixes the new input with its memory</td></tr>
+            <tr><td><a href="#bptt">Backpropagation through time</a></td><td>why the gradient shrinks or blows up over many steps</td></tr>
+            <tr><td><a href="#clipping-gradients">Clipping</a></td><td>how to cap a gradient that blows up</td></tr>
+            <tr><td><a href="#gru">GRU</a> and <a href="#lstm">LSTM</a></td><td>how gates keep memory alive across many steps</td></tr>
+            <tr><td><a href="#results">Long sequences</a></td><td>why gating wins on long inputs</td></tr>
+            <tr><td><a href="#caveats">Training pitfalls</a></td><td>what breaks in practice</td></tr>
+        </tbody>
+    </table>
+
+    <h3 id="rnn-update">One equation, reused every timestep</h3>
     <p>
         Each step mixes today's input with yesterday's memory and squashes the mix with tanh into the range from minus one to one. That squeeze keeps the numbers sane, and it is the whole tragedy of the <strong>vanilla RNN</strong>: <em>it slowly erases the past</em>. Here is one step as dataflow:
     </p>
@@ -840,7 +859,7 @@ y = V @ h                         # the memory becomes the prediction
             <text x="200" y="59" text-anchor="middle" font-size="18" fill="#2c3e50">× W</text>
             <text x="8" y="114" font-size="16" fill="#666">yesterday's memory</text>
             <rect x="10" y="122" width="120" height="46" rx="8" fill="#ebf5fb" stroke="#2980b9" stroke-width="2"/>
-            <text x="70" y="151" text-anchor="middle" font-size="18" fill="#2c3e50">h<tspan baseline-shift="sub" font-size="70%">t-1</tspan> = 0</text>
+            <text x="70" y="151" text-anchor="middle" font-size="18" fill="#2c3e50">h<tspan baseline-shift="sub" font-size="70%">t&#8722;1</tspan> = 0</text>
             <line x1="130" y1="145" x2="156" y2="145" stroke="#2c3e50" stroke-width="2" marker-end="url(#rnnA)"/>
             <rect x="160" y="122" width="80" height="46" rx="8" fill="#fef9e7" stroke="#f39c12" stroke-width="2"/>
             <text x="200" y="151" text-anchor="middle" font-size="18" fill="#2c3e50">× U</text>
@@ -855,7 +874,7 @@ y = V @ h                         # the memory becomes the prediction
             <text x="300" y="240" text-anchor="middle" font-size="18" fill="#2c3e50">h<tspan baseline-shift="sub" font-size="70%">t</tspan></text>
             <line x1="300" y1="190" x2="300" y2="210" stroke="#2c3e50" stroke-width="2" marker-end="url(#rnnA)"/>
             <path d="M 260 234 L 70 234 L 70 172" fill="none" stroke="#27ae60" stroke-width="2" marker-end="url(#rnnA)"/>
-            <text x="165" y="262" text-anchor="middle" font-size="16" fill="#1e8449">becomes h<tspan baseline-shift="sub" font-size="70%">t-1</tspan> next step</text>
+            <text x="165" y="262" text-anchor="middle" font-size="16" fill="#1e8449">becomes h<tspan baseline-shift="sub" font-size="70%">t&#8722;1</tspan> next step</text>
         </svg>
         <figcaption>
             <strong>One vanilla RNN step.</strong> Every step mixes and squashes, which is why old information fades.
@@ -905,21 +924,19 @@ y = V @ h                         # the memory becomes the prediction
         </figcaption>
     </figure>
 
-    <p> One RNN step, in one line: </p>
     <div class="eq-card" id="rnnUpdateEq">
-            <div class="eq-what">The RNN update: one equation, reused every timestep. One RNN step in one line: mix the incoming word with the last cell's memory, squash, and that is the new memory.</div>
-            <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="ht" style="color:#2980b9">h<sub>t</sub></span> = tanh(W&#183;<span class="eqt" data-k="xt" style="color:#2c3e50">x<sub>t</sub></span> + U&#183;<span class="eqt" data-k="htprev" style="color:#27ae60">h<sub>t-1</sub></span>)</div>
-            <div class="eq-why eq-active" data-eqline="0">Mix the incoming word with the last step's memory, then squash: the new hidden state carries both forward. <span class="eqt" style="color:#2c3e50">x<sub>t</sub></span>, the word entering, and <span class="eqt" style="color:#27ae60">h<sub>t-1</sub></span>, memory from the last cell, are the two sides of the mix, and <span class="eqt" style="color:#2980b9">h<sub>t</sub></span>, the new hidden state, is what comes out. W, U, the learned weights, scale each side, tanh, the squasher, squeezes the total, and &#183; means times: scaling.</div>
+            <div class="eq-what">One RNN step: mix the new word with the last memory, then squash.</div>
+            <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="at" style="color:#af601a">a<sub>t</sub></span> = W&#183;<span class="eqt" data-k="xt" style="color:#2c3e50">x<sub>t</sub></span> + U&#183;<span class="eqt" data-k="htprev" style="color:#27ae60">h<sub>t&#8722;1</sub></span></div>
+            <div class="eq-why eq-active" data-eqline="0">The mix. <span class="eqt" style="color:#2c3e50">x<sub>t</sub></span> is the word entering and <span class="eqt" style="color:#27ae60">h<sub>t&#8722;1</sub></span> the memory from the last cell; W and U are learned weights that scale each, and &#183; means times. A learned bias also joins the mix, left off this line. <span class="eqt" style="color:#af601a">a<sub>t</sub></span> is the mix before squashing.</div>
+            <div class="eq-line eq-active" data-eqline="1"><span class="eqt" data-k="ht" style="color:#2980b9">h<sub>t</sub></span> = tanh(<span class="eqt" data-k="at" style="color:#af601a">a<sub>t</sub></span>)</div>
+            <div class="eq-why eq-active" data-eqline="1">The squash. tanh squeezes the mix to between &#8722;1 and 1, and <span class="eqt" style="color:#2980b9">h<sub>t</sub></span>, the new hidden state, carries both forward. The same W and U are reused at every step, which is why one RNN handles a sentence of any length.</div>
         </div>
-    <p>
-        A learned bias per neuron also joins the mix; it is left off this line.
-    </p>
     <p>
         Each hand-off fades the past; by the third cell the first word is barely there.
     </p>
 
     <div class="demo" id="unrollToy">
-<h4>Toy: one sentence through the unrolled RNN</h4>
+<h4>One sentence through the unrolled RNN</h4>
 <div class="demo-controls">
             <button type="button" class="btn sec" id="unrollPrev" disabled>Prev step</button>
             <button type="button" class="btn sec" id="unrollNext">Next step</button>
@@ -954,10 +971,12 @@ y = V @ h                         # the memory becomes the prediction
             <text id="uw-hlab-2" data-eqk="htprev" x="270" y="131" text-anchor="middle" font-size="21" fill="#27ae60" opacity="0">h<tspan baseline-shift="sub" font-size="78%">2</tspan></text>
         </svg>
 <div class="eq-card" id="unrollToyEq">
-            <div class="eq-what">One RNN step in one line: mix the incoming word with the last cell's memory, squash, and that is the new memory.</div>
-            <div class="eq-line" data-eqline="0"><span class="eqt" data-k="ht" style="color:#2980b9">h<sub>t</sub></span> = tanh(W&#183;<span class="eqt" data-k="xt" style="color:#2c3e50">x<sub>t</sub></span> + U&#183;<span class="eqt" data-k="htprev" style="color:#27ae60">h<sub>t-1</sub></span>)</div>
-        <div class="eq-why" data-eqline="0">Mix the incoming word with the last step's memory, then squash: the new hidden state carries both forward. The same weights are reused at every step, and that weight sharing is what makes the RNN handle sequences of any length.</div>
-            <div class="eq-legend"><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#2c3e50"></span><code>x<sub>t</sub></code> the word entering</span><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#27ae60"></span><code>h<sub>t-1</sub></code> memory from the last cell</span><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#2980b9"></span><code>h<sub>t</sub></code> the new hidden state</span><span class="eq-item" data-lines="0"><code>W</code>, <code>U</code> the learned weights; <code>tanh</code> the squasher</span><span class="eq-item" data-lines="0"><code>·</code> times: scaling</span></div>
+            <div class="eq-what">The same two lines run in every cell.</div>
+            <div class="eq-line" data-eqline="0"><span class="eqt" data-k="at" style="color:#af601a">a<sub>t</sub></span> = W&#183;<span class="eqt" data-k="xt" style="color:#2c3e50">x<sub>t</sub></span> + U&#183;<span class="eqt" data-k="htprev" style="color:#27ae60">h<sub>t&#8722;1</sub></span></div>
+        <div class="eq-why" data-eqline="0">The mix, as in the card above; the colours match the cells.</div>
+            <div class="eq-line" data-eqline="1"><span class="eqt" data-k="ht" style="color:#2980b9">h<sub>t</sub></span> = tanh(<span class="eqt" data-k="at" style="color:#af601a">a<sub>t</sub></span>)</div>
+        <div class="eq-why" data-eqline="1">The squash: the new memory each cell passes right.</div>
+            <div class="eq-legend"><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#2c3e50"></span><code>x<sub>t</sub></code> the word entering</span><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#27ae60"></span><code>h<sub>t&#8722;1</sub></code> memory from the last cell</span><span class="eq-item" data-lines="0,1"><span class="eq-sw" style="background:#af601a"></span><code>a<sub>t</sub></code> the mix</span><span class="eq-item" data-lines="1"><span class="eq-sw" style="background:#2980b9"></span><code>h<sub>t</sub></code> the new hidden state</span></div>
         </div></div>
 <p class="caption" id="unrollCap">Fade exaggerated for visibility, with fixed illustrative weights; real washout takes dozens of steps.</p>
 
@@ -1005,9 +1024,9 @@ y = V @ h                         # the memory becomes the prediction
                   terms.indexOf(ts[j].getAttribute('data-k')) >= 0);
             }
         var UNROLL_EQ = {
-          1: {lines:[0], terms:['xt','ht'], el:['uw-word-1','uw-in-1','uw-cell-1']},
-          2: {lines:[0], terms:['xt','htprev','ht'], el:['uw-word-2','uw-in-2','uw-cell-2','uw-arrow-1','uw-hlab-1']},
-          3: {lines:[0], terms:['xt','htprev','ht'], el:['uw-word-3','uw-in-3','uw-cell-3','uw-arrow-2','uw-hlab-2']}
+          1: {lines:[0,1], terms:['xt','ht','at'], el:['uw-word-1','uw-in-1','uw-cell-1']},
+          2: {lines:[0,1], terms:['xt','htprev','ht','at'], el:['uw-word-2','uw-in-2','uw-cell-2','uw-arrow-1','uw-hlab-1']},
+          3: {lines:[0,1], terms:['xt','htprev','ht','at'], el:['uw-word-3','uw-in-3','uw-cell-3','uw-arrow-2','uw-hlab-2']}
         };
         function syncUnrollEq() {
             var m = UNROLL_EQ[step];
@@ -1080,33 +1099,33 @@ y = V @ h                         # the memory becomes the prediction
             <div class="eq-why eq-active" data-eqline="0">The total loss L is the per-step loss L<sub>t</sub> summed over all T timesteps.</div>
             <div class="eq-line eq-active" data-eqline="1"><span class="frac"><span class="top">&#8706;L</span><span class="bot">&#8706;U</span></span> = &#8721;<sub>k=1..T</sub> <span class="frac"><span class="top">&#8706;L</span><span class="bot">&#8706;U<sub>(k)</sub></span></span></div>
             <div class="eq-why eq-active" data-eqline="1">U is shared, so its gradient is the sum of the gradients through each step's copy of it, U<sub>(k)</sub> at step k. The same holds for W and V.</div>
-            <div class="eq-line eq-active" data-eqline="2"><span class="frac"><span class="top">&#8706;<span class="eqt" data-k="hT" style="color:#2980b9">h<sub>T</sub></span></span><span class="bot">&#8706;<span class="eqt" data-k="h1" style="color:#27ae60">h<sub>1</sub></span></span></span> = <span class="frac"><span class="top">&#8706;<span class="eqt" data-k="hT" style="color:#2980b9">h<sub>T</sub></span></span><span class="bot">&#8706;h<sub>T&#8722;1</sub></span></span>&#183;<span class="frac"><span class="top">&#8706;h<sub>T&#8722;1</sub></span><span class="bot">&#8706;h<sub>T&#8722;2</sub></span></span> &#8943; <span class="frac"><span class="top">&#8706;h<sub>2</sub></span><span class="bot">&#8706;<span class="eqt" data-k="h1" style="color:#27ae60">h<sub>1</sub></span></span></span></div>
-            <div class="eq-why eq-active" data-eqline="2">The chain rule: how much the last hidden state <span class="eqt" data-k="hT" style="color:#2980b9">h<sub>T</sub></span> moves when the first one <span class="eqt" data-k="h1" style="color:#27ae60">h<sub>1</sub></span> moves is a product of per-step derivatives, one factor per timestep. Each factor carries a tanh derivative, which is at most 1.</div>
+            <div class="eq-line eq-active" data-eqline="2"><span class="frac"><span class="top">&#8706;<span class="eqt" data-k="hT" style="color:#2980b9">h<sub>T</sub></span></span><span class="bot">&#8706;<span class="eqt" data-k="h1" style="color:#27ae60">h<sub>1</sub></span></span></span> = &#8719;<sub>k=2..T</sub> <span class="frac"><span class="top">&#8706;h<sub>k</sub></span><span class="bot">&#8706;h<sub>k&#8722;1</sub></span></span></div>
+            <div class="eq-why eq-active" data-eqline="2">The chain rule: how far the last memory <span class="eqt" style="color:#2980b9">h<sub>T</sub></span> moves when the first one <span class="eqt" style="color:#27ae60">h<sub>1</sub></span> moves is a product of one factor per step, the newest on the left. &#8719; multiplies over every step k from 2 to T, so T &#8722; 1 factors, and each carries a tanh derivative, which is at most 1.</div>
         </div>
     <ul>
         <li><strong>Vanishing gradients.</strong> A product of T factors below 1 collapses: after a few dozen steps almost nothing from the loss reaches step 1, and the model never learns dependencies that long.</li>
-        <li><strong>Exploding gradients.</strong> With large recurrent weights the factors sit above 1 and the product blows up. Same mechanism, opposite disease, and at least a loud one: you see NaNs (not a number, the invalid value an overflowing calculation produces, which then spreads to every update it touches).</li>
+        <li><strong>Exploding gradients.</strong> With large recurrent weights the factors sit above 1 and the product blows up. Same mechanism, opposite disease, and a loud one: you see NaNs (not a number, the value an overflow produces).</li>
     </ul>
 
     <div class="eq-card" id="rnnGradEq">
-            <div class="eq-what">The model, stated plainly: a gradient multiplied at every timestep grows or shrinks exponentially, straight on a log scale (a scale where equal steps stand for multiplying by the same factor rather than adding the same amount, so steady multiplying draws as a straight line).</div>
-            <div class="eq-line eq-active" data-eqline="0">gradient size after t steps = <span class="eqt" data-k="w" style="color:#c0392b">w</span><sup>t</sup>, and after all T steps = <span class="eqt" data-k="w" style="color:#c0392b">w</span><sup>T</sup></div>
-            <div class="eq-why eq-active" data-eqline="0">Here <span class="eqt" style="color:#c0392b">w</span> is the per-step multiplier, the weight scale each timestep multiplies the gradient by. In the line, t counts the steps taken so far, T counts all the timesteps in the sequence, and the small raised number is the power: how many times <span class="eqt" style="color:#c0392b">w</span> is multiplied by itself. The gradient magnitude after t steps is <span class="eqt" style="color:#c0392b">w</span> raised to the power t, and after all T steps it is <span class="eqt" style="color:#c0392b">w</span> raised to the power T. That repeated multiplication is the mechanism behind everything after this card: below 1, the signal from early steps shrinks until those steps have nothing left to learn from, and above 1 it grows until the updates break, which is why gates and clipping follow.</div>
+            <div class="eq-what">The scalar model: a gradient multiplied by the same number at every step grows or shrinks exponentially.</div>
+            <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="s" style="color:#2c3e50">s<sub>t</sub></span> = <span class="eqt" data-k="w" style="color:#c0392b">w</span><sup>t</sup></div>
+            <div class="eq-why eq-active" data-eqline="0">s<sub>t</sub> is the gradient's size after it travels t steps back, and <span class="eqt" style="color:#c0392b">w</span> is the per-step multiplier, the weight scale; the raised t is how many times w multiplies itself. After all T steps the size is w<sup>T</sup>: below 1 it shrinks toward 0 (vanishing), above 1 it grows without limit (exploding).</div>
         </div>
 
     <figure class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 336" style="max-width:480px" role="img" aria-label="The gradient starts at the loss and flows back through steps 4, 3, 2 and 1, multiplied by w at every step. With w equal to 0.5 it shrinks to 0.125 by step 1; with w equal to 1.5 it grows to about 3.4"><rect class="mtd-box " x="2" y="8" width="62" height="44" rx="7"/><text class="" x="33.0" y="36.0" text-anchor="middle" style="font-size:17px">step 1</text><rect class="mtd-box " x="84" y="8" width="64" height="44" rx="7"/><text class="" x="116.0" y="36.0" text-anchor="middle" style="font-size:17px">step 2</text><rect class="mtd-box " x="168" y="8" width="64" height="44" rx="7"/><text class="" x="200.0" y="36.0" text-anchor="middle" style="font-size:17px">step 3</text><rect class="mtd-box " x="252" y="8" width="64" height="44" rx="7"/><text class="" x="284.0" y="36.0" text-anchor="middle" style="font-size:17px">step 4</text><rect class="mtd-box " x="336" y="8" width="62" height="44" rx="7"/><text class="" x="367.0" y="36.0" text-anchor="middle" style="font-size:17px;font-weight:700">loss</text><line class="mtd-s mtd-c1" x1="64.0" y1="30.0" x2="76.0" y2="30.0" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-c1" points="84.0,30.0 76.0,34.0 76.0,26.0"/><line class="mtd-s mtd-c1" x1="148.0" y1="30.0" x2="160.0" y2="30.0" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-c1" points="168.0,30.0 160.0,34.0 160.0,26.0"/><line class="mtd-s mtd-c1" x1="232.0" y1="30.0" x2="244.0" y2="30.0" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-c1" points="252.0,30.0 244.0,34.0 244.0,26.0"/><line class="mtd-s mtd-c1" x1="316.0" y1="30.0" x2="328.0" y2="30.0" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-c1" points="336.0,30.0 328.0,34.0 328.0,26.0"/><text class="mtd-red" x="200.0" y="80.0" text-anchor="middle" style="font-size:17px;font-weight:600">the gradient flows back, × w at every step</text><line class="mtd-s mtd-cr" x1="368.0" y1="94.0" x2="16.0" y2="94.0" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-cr" points="6.0,94.0 16.0,89.0 16.0,99.0"/><text class="mtd-t1" x="4.0" y="130.0" text-anchor="start" style="font-size:19px;font-weight:700">w = 0.5, it vanishes</text><rect class="mtd-f mtd-c1" x="14.0" y="159.8" width="36" height="2.2" rx="2"/><text class="mtd-sub" x="32.0" y="182.0" text-anchor="middle" style="font-size:18px">0.125</text><rect class="mtd-f mtd-c1" x="98.0" y="157.5" width="36" height="4.5" rx="2"/><text class="mtd-sub" x="116.0" y="182.0" text-anchor="middle" style="font-size:18px">0.25</text><rect class="mtd-f mtd-c1" x="182.0" y="153.0" width="36" height="9.0" rx="2"/><text class="mtd-sub" x="200.0" y="182.0" text-anchor="middle" style="font-size:18px">0.5</text><rect class="mtd-f mtd-c1" x="266.0" y="144.0" width="36" height="18.0" rx="2"/><text class="mtd-sub" x="284.0" y="182.0" text-anchor="middle" style="font-size:18px">1</text><line class="mtd-sep" x1="0" y1="162" x2="316" y2="162"/><text class="mtd-sub" x="368.0" y="158.0" text-anchor="middle" style="font-size:17px">gradient</text><text class="mtd-sub" x="368.0" y="176.0" text-anchor="middle" style="font-size:17px">size</text><text class="mtd-red" x="4.0" y="232.0" text-anchor="start" style="font-size:19px;font-weight:700">w = 1.5, it explodes</text><rect class="mtd-f mtd-cr" x="14.0" y="247.2" width="36" height="60.8" rx="2"/><text class="mtd-sub" x="32.0" y="328.0" text-anchor="middle" style="font-size:18px">3.4</text><rect class="mtd-f mtd-cr" x="98.0" y="267.5" width="36" height="40.5" rx="2"/><text class="mtd-sub" x="116.0" y="328.0" text-anchor="middle" style="font-size:18px">2.25</text><rect class="mtd-f mtd-cr" x="182.0" y="281.0" width="36" height="27.0" rx="2"/><text class="mtd-sub" x="200.0" y="328.0" text-anchor="middle" style="font-size:18px">1.5</text><rect class="mtd-f mtd-cr" x="266.0" y="290.0" width="36" height="18.0" rx="2"/><text class="mtd-sub" x="284.0" y="328.0" text-anchor="middle" style="font-size:18px">1</text><line class="mtd-sep" x1="0" y1="308" x2="316" y2="308"/><text class="mtd-sub" x="368.0" y="304.0" text-anchor="middle" style="font-size:17px">gradient</text><text class="mtd-sub" x="368.0" y="322.0" text-anchor="middle" style="font-size:17px">size</text></svg><figcaption class="caption">The gradient leaves the loss and is multiplied by w at every step on its way back. Below 1 it fades; above 1 it blows up.</figcaption></figure>
     <p>
-        A gradient magnitude above 1e2 (100) counts as exploded, below 1e-2 (0.01) as vanished, and the range between is safe.
+        A gradient size above 100 counts as exploded, below 0.01 as vanished, and the range between is safe. The tool draws s<sub>t</sub> on a log scale, where each grid step multiplies by 10, so steady multiplying draws as a straight line.
     </p>
     <p>
         Here each factor is one number w. In a real RNN each factor is a Jacobian (a matrix of partial derivatives), but the exponential dependence on T is the same.
     </p>
     <p>
-        The exploded end has a standard fix, clipping, right after this tool.
+        The exploded end has a standard fix, <a href="#clipping-gradients">clipping</a>.
     </p>
 
     <div class="demo" id="gradDemo">
-        <h3 id="vanishing-gradients" class="demo-h3">Why gradients vanish (or explode)</h3>
+        <h3 id="vanishing-gradients" class="demo-h3">Why gradients vanish or explode</h3>
         <div class="demo-controls">
             <button type="button" class="btn sec" id="gradPlay">Play</button>
             <button type="button" class="btn sec" id="gradReset">Reset</button>
@@ -1125,9 +1144,9 @@ y = V @ h                         # the memory becomes the prediction
     </div>
 
 
-    <h3 id="clipping-gradients">Clip exploding gradients: same direction, sane size</h3>
+    <h3 id="clipping-gradients">Clipping keeps the direction and caps the size</h3>
     <p>
-        Exploding gradients have a cheap fix, <strong>gradient clipping</strong>: if the gradient is too long, scale it down to a threshold. <em>Same direction, sane size.</em>
+        Exploding gradients have a cheap fix, <strong>gradient clipping</strong>: if the gradient is longer than a threshold &#964;, scale it down to that length and keep its direction.
     </p>
     <div class="eq-card" id="clipEq">
             <div class="eq-what">Clipping in one line: shrink the whole gradient to the threshold, never stretch it.</div>
@@ -1137,11 +1156,14 @@ y = V @ h                         # the memory becomes the prediction
 
     <figure class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 232" style="max-width:480px" role="img" aria-label="Before clipping, the gradient arrow reaches far past the threshold circle. After clipping, it points the same way but ends exactly on the threshold"><text class="" x="100.0" y="24.0" text-anchor="middle" style="font-size:20px;font-weight:700">Before clipping</text><path class="mtd-guide" d="M116.0,196 A78,78 0 0 0 38.0,118.0"/><line class="mtd-s mtd-cr" x1="38.0" y1="196.0" x2="119.6" y2="98.7" style="stroke-width:4.5px"/><polygon class="mtd-f mtd-cr" points="128.0,88.8 124.6,102.9 114.7,94.5"/><circle class="mtd-dot" cx="38" cy="196" r="3.5"/><text class="mtd-sub" x="120.0" y="218.0" text-anchor="middle" style="font-size:18px">threshold</text><text class="mtd-red" x="100.0" y="58.0" text-anchor="middle" style="font-size:19px;font-weight:600">too long</text><text class="" x="300.0" y="24.0" text-anchor="middle" style="font-size:20px;font-weight:700">After clipping</text><path class="mtd-guide" d="M316.0,196 A78,78 0 0 0 238.0,118.0"/><line class="mtd-s mtd-cr" x1="238.0" y1="196.0" x2="321.6" y2="96.4" style="stroke-width:2.5px;opacity:0.25"/><polygon class="mtd-f mtd-cr" points="328.0,88.8 325.4,99.6 317.7,93.2" style="opacity:0.25"/><line class="mtd-s mtd-cp" x1="238.0" y1="196.0" x2="279.8" y2="146.2" style="stroke-width:4.5px"/><polygon class="mtd-f mtd-cp" points="288.1,136.2 284.8,150.4 274.8,142.0"/><circle class="mtd-dot" cx="238" cy="196" r="3.5"/><text class="mtd-sub" x="320.0" y="218.0" text-anchor="middle" style="font-size:18px">threshold</text><text class="mtd-pu" x="300.0" y="58.0" text-anchor="middle" style="font-size:19px;font-weight:600">same direction</text><line class="mtd-sep" x1="200" y1="8" x2="200" y2="226"/></svg><figcaption class="caption">Clipping keeps the gradient's direction and shrinks its length to the threshold.</figcaption></figure>
     <p>
-        In PyTorch it is one line between backward and step; max_norm is the threshold &#964;:
+        In PyTorch it is one line between backward and step. To pick &#964;, Pascanu et al. (2013) suggest looking at "statistics on the average norm over a sufficiently large number of updates". <a href="optimizers.html#clipping">Gradient Clipping</a> on the optimizers page shows the same clip inside the update step.
     </p>
 <pre><code class="language-python">
 loss.backward()
-torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+# max_norm is &#964;
+torch.nn.utils.clip_grad_norm_(
+    model.parameters(),
+    max_norm=1.0)
 optimizer.step()
 </code></pre>
     <p>
@@ -1191,7 +1213,7 @@ optimizer.step()
             <defs><marker id="gruB" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#2c3e50"/></marker></defs>
             <text x="189" y="24" text-anchor="middle" font-size="16" fill="#666">keep stream</text>
             <rect x="6" y="34" width="116" height="52" rx="8" fill="#ebf5fb" stroke="#2980b9" stroke-width="2"/>
-            <text x="64" y="54" text-anchor="middle" font-size="18" fill="#2c3e50">h<tspan baseline-shift="sub" font-size="70%">t-1</tspan></text>
+            <text x="64" y="54" text-anchor="middle" font-size="18" fill="#2c3e50">h<tspan baseline-shift="sub" font-size="70%">t&#8722;1</tspan></text>
             <text x="64" y="80" text-anchor="middle" font-size="16" fill="#666">old</text>
             <line x1="122" y1="60" x2="140" y2="60" stroke="#2c3e50" stroke-width="2" marker-end="url(#gruB)"/>
             <rect x="144" y="34" width="90" height="52" rx="8" fill="#fef9e7" stroke="#f39c12" stroke-width="2"/>
@@ -1222,50 +1244,60 @@ optimizer.step()
     
 
     <p>
-        The GRU in four lines, where &#8857; means element-wise multiplication (matching entries multiplied one by one):
+        The GRU in five lines:
     </p>
     <div class="eq-card" id="gruStaticEq">
-            <div class="eq-what">The GRU in four lines, first the two gates: they decide what to keep and what to forget.</div>
-            <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="zt" style="color:#c0392b">z<sub>t</sub></span> = &#963;(W<sub>z</sub>&#183;<span class="eqt" data-k="xt" style="color:#555">x<sub>t</sub></span> + U<sub>z</sub>&#183;<span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t-1</sub></span> + b<sub>z</sub>)</div>
-            <div class="eq-why eq-active" data-eqline="0">The update gate decides: how much of the new candidate to let in versus keeping the old memory. <span class="eqt" style="color:#c0392b">z<sub>t</sub></span> is built from <span class="eqt" style="color:#555">x<sub>t</sub></span>, the input, scaled by W<sub>z</sub>, that gate's input weight, and <span class="eqt" style="color:#2a7fbf">h<sub>t-1</sub></span>, the old memory, scaled by U<sub>z</sub>, that gate's old-memory weight, plus b<sub>z</sub>, the gate's bias, all squashed by &#963;, the gate squasher, so it lands between 0 and 1. W, U are the learned weights, and &#183; means times: scaling.</div>
-            <div class="eq-line eq-active" data-eqline="1"><span class="eqt" data-k="rt" style="color:#c0392b">r<sub>t</sub></span> = &#963;(W<sub>r</sub>&#183;<span class="eqt" data-k="xt" style="color:#555">x<sub>t</sub></span> + U<sub>r</sub>&#183;<span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t-1</sub></span> + b<sub>r</sub>)</div>
-            <div class="eq-why eq-active" data-eqline="1">The reset gate decides: how much of the old memory the candidate gets to see. <span class="eqt" style="color:#c0392b">r<sub>t</sub></span> is built the same way, from the input <span class="eqt" style="color:#555">x<sub>t</sub></span> scaled by W<sub>r</sub> and the old memory <span class="eqt" style="color:#2a7fbf">h<sub>t-1</sub></span> scaled by U<sub>r</sub>, plus its bias b<sub>r</sub>, with &#963;, the gate squasher: outputs 0 to 1.</div>
+            <div class="eq-what">First the two gates: how much to keep, and how much old memory the candidate may see.</div>
+            <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="zt" style="color:#c0392b">z<sub>t</sub></span> = &#963;(W<sub>z</sub>&#183;[<span class="eqt" data-k="xt" style="color:#555">x<sub>t</sub></span>, <span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t&#8722;1</sub></span>])</div>
+            <div class="eq-why eq-active" data-eqline="0">The update gate: how much of the new candidate to let in versus keeping the old memory. <span class="eqt" style="color:#555">x<sub>t</sub></span> is the input and <span class="eqt" style="color:#2a7fbf">h<sub>t&#8722;1</sub></span> the old memory; the brackets stack them into one vector, so W<sub>z</sub>&#183;[x<sub>t</sub>, h<sub>t&#8722;1</sub>] is the RNN line's W&#183;x<sub>t</sub> + U&#183;h<sub>t&#8722;1</sub> written as one matrix on the stacked vector; each gate has its own pair. &#963;, the sigmoid, squashes the result to between 0 and 1. Each line also adds a learned bias, left off here.</div>
+            <div class="eq-line eq-active" data-eqline="1"><span class="eqt" data-k="rt" style="color:#c0392b">r<sub>t</sub></span> = &#963;(W<sub>r</sub>&#183;[<span class="eqt" data-k="xt" style="color:#555">x<sub>t</sub></span>, <span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t&#8722;1</sub></span>])</div>
+            <div class="eq-why eq-active" data-eqline="1">The reset gate: how much of the old memory the candidate gets to see. Built the same way from the input and the old memory, squashed to between 0 and 1.</div>
         </div>
     <div class="eq-card" id="gruStatic2Eq">
-            <div class="eq-what">Then the candidate the gates have been preparing, and the blend that decides what survives.</div>
-            <div class="eq-line eq-active" data-eqline="2"><span class="eqt" data-k="htilde" style="color:#8e44ad">h&#771;<sub>t</sub></span> = tanh(W<sub>h</sub>&#183;<span class="eqt" data-k="xt" style="color:#555">x<sub>t</sub></span> + U<sub>h</sub>&#183;(<span class="eqt" data-k="rt" style="color:#c0392b">r<sub>t</sub></span> &#8857; <span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t-1</sub></span>) + b<sub>h</sub>)</div>
-            <div class="eq-why eq-active" data-eqline="2">Build the candidate: mix the incoming word with the reset-filtered old memory, then squash. <span class="eqt" style="color:#8e44ad">h&#771;<sub>t</sub></span> mixes <span class="eqt" style="color:#555">x<sub>t</sub></span> scaled by W<sub>h</sub> with <span class="eqt" style="color:#c0392b">r<sub>t</sub></span> &#8857; <span class="eqt" style="color:#2a7fbf">h<sub>t-1</sub></span>, the reset gate element-wise mixing the old memory, scaled by U<sub>h</sub>, so the old memory enters only after the reset gate filters it. &#8857; is element-wise mix, tanh squashes to between -1 and 1, and b<sub>h</sub>, the last term inside the tanh, is the candidate's bias.</div>
-            <div class="eq-line eq-active" data-eqline="3"><span class="eqt" data-k="ht" style="color:#2a7fbf">h<sub>t</sub></span> = <span class="eqt" data-k="omzt" style="color:#c0392b">(1&#8722;z<sub>t</sub>)</span>&#183;<span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t-1</sub></span> + <span class="eqt" data-k="ztb" style="color:#c0392b">z<sub>t</sub></span>&#183;<span class="eqt" data-k="htilde" style="color:#8e44ad">h&#771;<sub>t</sub></span></div>
-            <div class="eq-why eq-active" data-eqline="3">Blend old and new: the update gate picks the mix between keeping the old memory and taking the candidate. <span class="eqt" style="color:#2a7fbf">h<sub>t</sub></span> adds the old memory <span class="eqt" style="color:#2a7fbf">h<sub>t-1</sub></span> scaled by (1 - <span class="eqt" style="color:#c0392b">z<sub>t</sub></span>), the keep share, to the candidate <span class="eqt" style="color:#8e44ad">h&#771;<sub>t</sub></span> scaled by <span class="eqt" style="color:#c0392b">z<sub>t</sub></span>, the replace share. z<sub>t</sub> = 0 keeps everything, z<sub>t</sub> = 1 replaces everything: the update gate is the blend knob.</div>
+            <div class="eq-what">Then the filtered memory, the candidate, and the blend that decides what survives.</div>
+            <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="mt" style="color:#16a085">m<sub>t</sub></span> = <span class="eqt" data-k="rt" style="color:#c0392b">r<sub>t</sub></span> &#8857; <span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t&#8722;1</sub></span></div>
+            <div class="eq-why eq-active" data-eqline="0">The reset gate filters the old memory first: <span class="eqt" style="color:#16a085">m<sub>t</sub></span> is the part of the memory the candidate gets to see. &#8857; multiplies element by element (matching entries one by one).</div>
+            <div class="eq-line eq-active" data-eqline="1"><span class="eqt" data-k="htilde" style="color:#8e44ad">h&#771;<sub>t</sub></span> = tanh(W<sub>h</sub>&#183;[<span class="eqt" data-k="xt" style="color:#555">x<sub>t</sub></span>, <span class="eqt" data-k="mt" style="color:#16a085">m<sub>t</sub></span>])</div>
+            <div class="eq-why eq-active" data-eqline="1">The candidate: the new word mixed with the filtered memory, squashed by tanh to between &#8722;1 and 1. It is only a proposal; the next line decides what survives.</div>
+            <div class="eq-line eq-active" data-eqline="2"><span class="eqt" data-k="ht" style="color:#2a7fbf">h<sub>t</sub></span> = <span class="eqt" data-k="omzt" style="color:#c0392b">(1&#8722;z<sub>t</sub>)</span>&#183;<span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t&#8722;1</sub></span> + <span class="eqt" data-k="ztb" style="color:#c0392b">z<sub>t</sub></span>&#183;<span class="eqt" data-k="htilde" style="color:#8e44ad">h&#771;<sub>t</sub></span></div>
+            <div class="eq-why eq-active" data-eqline="2">The blend: <span class="eqt" style="color:#2a7fbf">h<sub>t</sub></span> adds the old memory scaled by (1 &#8722; z<sub>t</sub>), the keep share, to the candidate scaled by z<sub>t</sub>, the replace share. z<sub>t</sub> = 0 keeps everything, z<sub>t</sub> = 1 replaces everything: the update gate is the blend knob.</div>
         </div>
     <p>
-        Each line is one line of the GRUCell code below.
+        Each card line is one step of the GRUCell code below.
     </p>
 
     <h3 id="gru-step">One GRU step, in code</h3>
     <p>
-        The whole cell is just those four equations. Here it is, one step:
+        The whole cell is those five lines; each nn.Linear holds one W and its bias, and torch.cat builds the stacked vector:
     </p>
 <pre><code class="language-python">
 import torch
-import torch.nn as nn
+from torch import nn
+L = nn.Linear
 
 class GRUCell(nn.Module):
-    def __init__(self, input_dim, hidden_dim):
+    def __init__(self, d_in, d_h):
         super().__init__()
-        self.W_z = nn.Linear(input_dim, hidden_dim)
-        self.U_z = nn.Linear(hidden_dim, hidden_dim, bias=False)
-        self.W_r = nn.Linear(input_dim, hidden_dim)
-        self.U_r = nn.Linear(hidden_dim, hidden_dim, bias=False)
-        self.W_h = nn.Linear(input_dim, hidden_dim)
-        self.U_h = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        d = d_in + d_h
+        self.W_z = L(d, d_h)
+        self.W_r = L(d, d_h)
+        self.W_h = L(d, d_h)
 
-    def forward(self, x_t, h_prev):
-        z_t = torch.sigmoid(self.W_z(x_t) + self.U_z(h_prev))  # update gate
-        r_t = torch.sigmoid(self.W_r(x_t) + self.U_r(h_prev))  # reset gate
-        h_tilde = torch.tanh(self.W_h(x_t) + self.U_h(r_t * h_prev))  # candidate
-        h_t = (1 - z_t) * h_prev + z_t * h_tilde  # the blend
-        return h_t
+    def forward(self, x_t, h):
+        # h is h_t-1
+        xh = torch.cat(
+            [x_t, h], -1)
+        z_t = torch.sigmoid(
+            self.W_z(xh))
+        r_t = torch.sigmoid(
+            self.W_r(xh))
+        m_t = r_t * h
+        xm = torch.cat(
+            [x_t, m_t], -1)
+        h_tilde = torch.tanh(
+            self.W_h(xm))
+        return ((1 - z_t) * h
+                + z_t * h_tilde)
 </code></pre>
     <p>
         The GRU has no separate <strong>cell state</strong> (a memory stream beside the hidden state); the update gate's identity path is enough to <em>preserve long-term memory</em>.
@@ -1281,11 +1313,11 @@ class GRUCell(nn.Module):
         <figcaption><strong>Figure 2.</strong> An illustration of the proposed hidden activation function. The update gate <code>z</code> selects whether the hidden state is to be updated with a new hidden state <code>h̃</code>. The reset gate <code>r</code> decides whether the previous hidden state is ignored. See Eqs. (5)-(8) for the detailed equations of <code>r</code>, <code>z</code>, <code>h</code> and <code>h̃</code>. Figure 2 of Cho et al. (EMNLP 2014). <a href="https://arxiv.org/abs/1406.1078">arXiv:1406.1078</a></figcaption>
     </figure>
     <p>
-        Cho et al. and PyTorch put z on the old state; this page follows Chung et al. (2014), which puts z on the candidate. Same idea, mirrored knob.
+        Cho et al. and PyTorch put z on the old state; this page follows Chung et al. (2014), which puts z on the candidate. PyTorch's nn.GRU also applies the reset after the matrix rather than before it; Chung et al. found the two forms perform alike.
     </p>
 
     <div class="demo" id="gruToy">
-<h4>Toy: the GRU blend, step by step</h4>
+<h4>The GRU blend, step by step</h4>
 <div class="demo-controls">
             <button type="button" class="btn sec" id="gruPrev">Prev step</button>
             <button type="button" class="btn sec" id="gruNext">Next step</button>
@@ -1293,14 +1325,14 @@ class GRUCell(nn.Module):
             <button type="button" class="btn sec" id="gruReset">Reset</button>
         </div>
 <div class="wk-dots" role="group" aria-label="GRU walkthrough steps">
-            <button type="button" class="wk-dot active current" data-step="gruS1"><span class="sr-only">First step: shut, the vault</span></button>
-            <button type="button" class="wk-dot" data-step="gruS2"><span class="sr-only">Second step: open, the reflex</span></button>
-            <button type="button" class="wk-dot" data-step="gruS3"><span class="sr-only">Third step: halfway, the blend</span></button>
-            <button type="button" class="wk-dot" data-step="gruS4"><span class="sr-only">Fourth step: the reset gate's job</span></button>
+            <button type="button" class="wk-dot active current" data-step="gruS1"><span class="sr-only">First step: gate shut keeps the old memory</span></button>
+            <button type="button" class="wk-dot" data-step="gruS2"><span class="sr-only">Second step: gate open replaces it</span></button>
+            <button type="button" class="wk-dot" data-step="gruS3"><span class="sr-only">Third step: halfway blends the two</span></button>
+            <button type="button" class="wk-dot" data-step="gruS4"><span class="sr-only">Fourth step: the reset gate filters what the candidate sees</span></button>
         </div>
 <div class="wk-panels">
-            <div class="wk-panel" id="gruS1" data-next="gruS2" data-prev="gruS4" data-eqlines="0,3" data-eqterms="omzt">
-                <p class="wk-step-title">Shut: the vault</p>
+            <div class="wk-panel" id="gruS1" data-next="gruS2" data-prev="gruS4" data-eqlines="0,4" data-eqterms="omzt">
+                <p class="wk-step-title">Gate shut keeps the old memory</p>
                 <svg class="wk-svg" viewBox="0 0 640 380" role="img" aria-label="GRU walkthrough, first step. The update valve is drawn shut across the pipe: blue old memory flows straight through to new memory while the purple candidate pipe is pinched off at the valve. The reset valve on the old memory branch stands open.">
                     <g data-eqk="htprev">
                     <rect x="4" y="92" width="160" height="56" rx="8" fill="#d6eaf8" stroke="#2a7fbf" stroke-width="2"/>
@@ -1336,8 +1368,8 @@ class GRUCell(nn.Module):
                 </svg>
                 <p class="demo-caption">z<sub>t</sub> = 0: the old memory survives unchanged.</p>
             </div>
-            <div class="wk-panel" id="gruS2" data-next="gruS3" data-prev="gruS1" data-eqlines="0,3" data-eqterms="ztb" hidden>
-                <p class="wk-step-title">Open: the reflex</p>
+            <div class="wk-panel" id="gruS2" data-next="gruS3" data-prev="gruS1" data-eqlines="0,4" data-eqterms="ztb" hidden>
+                <p class="wk-step-title">Gate open replaces it</p>
                 <svg class="wk-svg" viewBox="0 0 640 380" role="img" aria-label="GRU walkthrough, second step. The update valve is swung open: the purple candidate floods through the valve and the output to new memory is all purple, overwriting the old memory.">
                     <g data-eqk="htprev">
                     <rect x="4" y="92" width="160" height="56" rx="8" fill="#d6eaf8" stroke="#2a7fbf" stroke-width="2"/>
@@ -1371,8 +1403,8 @@ class GRUCell(nn.Module):
                 </svg>
                 <p class="demo-caption">z<sub>t</sub> = 1: the candidate overwrites the old memory.</p>
             </div>
-            <div class="wk-panel" id="gruS3" data-next="gruS4" data-prev="gruS2" data-eqlines="0,3" data-eqterms="zt,xt,htprev,omzt,ht,ztb,htilde" hidden>
-                <p class="wk-step-title">Halfway: the blend</p>
+            <div class="wk-panel" id="gruS3" data-next="gruS4" data-prev="gruS2" data-eqlines="0,4" data-eqterms="zt,xt,htprev,omzt,ht,ztb,htilde" hidden>
+                <p class="wk-step-title">Halfway blends the two</p>
                 <svg class="wk-svg" viewBox="0 0 640 380" role="img" aria-label="GRU walkthrough, third step. The update valve sits halfway: blue old memory and the purple candidate both pass the valve and merge as two side by side streams into new memory.">
                     <g data-eqk="htprev">
                     <rect x="4" y="92" width="160" height="56" rx="8" fill="#d6eaf8" stroke="#2a7fbf" stroke-width="2"/>
@@ -1407,8 +1439,8 @@ class GRUCell(nn.Module):
                 </svg>
                 <p class="demo-caption">z<sub>t</sub> = 0.5: part old memory, part candidate.</p>
             </div>
-            <div class="wk-panel" id="gruS4" data-next="gruS1" data-prev="gruS3" data-wrap="stop" data-eqlines="1,2" data-eqterms="rt" hidden>
-                <p class="wk-step-title">The reset gate's job</p>
+            <div class="wk-panel" id="gruS4" data-next="gruS1" data-prev="gruS3" data-wrap="stop" data-eqlines="1,2,3" data-eqterms="rt,mt" hidden>
+                <p class="wk-step-title">The reset gate filters what the candidate sees</p>
                 <div class="wk-twoframe">
                     <div>
                         <p class="wk-frame-title">reset gate open</p>
@@ -1417,7 +1449,10 @@ class GRUCell(nn.Module):
                             <rect x="16" y="64" width="120" height="52" rx="8" fill="#d6eaf8" stroke="#2a7fbf" stroke-width="2"/>
                             <text x="76" y="96" text-anchor="middle" font-size="14" fill="#2c3e50">old memory</text>
                             <path d="M136,90 H170" stroke="#2a7fbf" stroke-width="18" fill="none"/>
-                            <path d="M170,90 H200" stroke="#2a7fbf" stroke-width="18" fill="none"/>
+                            </g>
+                            <g data-eqk="mt">
+                            <path d="M170,90 H200" stroke="#16a085" stroke-width="18" fill="none"/>
+                            <text x="185" y="58" text-anchor="middle" font-size="13" fill="#117a65">filtered memory</text>
                             </g>
                             <g data-eqk="rt">
                             <circle cx="170" cy="90" r="22" fill="#ffffff" stroke="#2c3e50" stroke-width="2"/>
@@ -1486,16 +1521,18 @@ class GRUCell(nn.Module):
             Weights set aside: the two gates are the only moving parts here; a real GRU learns its weights too.
         </p>
 <div class="eq-card" id="gruToyEq">
-            <div class="eq-what">The GRU in four lines.</div>
-            <div class="eq-line" data-eqline="0"><span class="eqt" data-k="zt" style="color:#c0392b">z<sub>t</sub></span> = &#963;(W<sub>z</sub>&#183;<span class="eqt" data-k="xt" style="color:#555">x<sub>t</sub></span> + U<sub>z</sub>&#183;<span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t-1</sub></span> + b<sub>z</sub>)</div>
-        <div class="eq-why" data-eqline="0">The update gate decides: how much of the new candidate to let in versus keeping the old memory. It is the squashed mix of the input and the old memory, each scaled by its own weights, plus its bias, so it lands between 0 and 1. One gate decides how much of the old memory survives each step: shut keeps it whole, open replaces it, halfway blends.</div>
-            <div class="eq-line" data-eqline="1"><span class="eqt" data-k="rt" style="color:#c0392b">r<sub>t</sub></span> = &#963;(W<sub>r</sub>&#183;<span class="eqt" data-k="xt" style="color:#555">x<sub>t</sub></span> + U<sub>r</sub>&#183;<span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t-1</sub></span> + b<sub>r</sub>)</div>
-        <div class="eq-why" data-eqline="1">The reset gate decides: how much of the old memory the candidate gets to see. It is built the same way as the update gate, the input and the old memory mixed and squashed to between 0 and 1, and it starves the candidate of the past.</div>
-            <div class="eq-line" data-eqline="2"><span class="eqt" data-k="htilde" style="color:#8e44ad">h&#771;<sub>t</sub></span> = tanh(W<sub>h</sub>&#183;<span class="eqt" data-k="xt" style="color:#555">x<sub>t</sub></span> + U<sub>h</sub>&#183;(<span class="eqt" data-k="rt" style="color:#c0392b">r<sub>t</sub></span> &#8857; <span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t-1</sub></span>) + b<sub>h</sub>)</div>
-        <div class="eq-why" data-eqline="2">Build the candidate: mix the incoming word with the reset-filtered old memory, then squash. The candidate is only a proposal: the blend line, not this one, decides what survives.</div>
-            <div class="eq-line" data-eqline="3"><span class="eqt" data-k="ht" style="color:#2a7fbf">h<sub>t</sub></span> = <span class="eqt" data-k="omzt" style="color:#c0392b">(1&#8722;z<sub>t</sub>)</span>&#183;<span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t-1</sub></span> + <span class="eqt" data-k="ztb" style="color:#c0392b">z<sub>t</sub></span>&#183;<span class="eqt" data-k="htilde" style="color:#8e44ad">h&#771;<sub>t</sub></span></div>
-        <div class="eq-why" data-eqline="3">Blend old and new: the update gate picks the mix between keeping the old memory and taking the candidate. That blend is what lets memory survive many steps instead of being overwritten: z<sub>t</sub> = 0 keeps everything, z<sub>t</sub> = 1 replaces everything.</div>
-            <div class="eq-legend"><span class="eq-item" data-lines="0,3"><span class="eq-sw" style="background:#c0392b"></span><code>z<sub>t</sub></code> the update gate</span><span class="eq-item" data-lines="1,2"><span class="eq-sw" style="background:#c0392b"></span><code>r<sub>t</sub></code> the reset gate</span><span class="eq-item" data-lines="0,1,2,3"><span class="eq-sw" style="background:#2a7fbf"></span><code>h<sub>t-1</sub></code> the old memory; <code>h<sub>t</sub></code> the new memory</span><span class="eq-item" data-lines="2,3"><span class="eq-sw" style="background:#8e44ad"></span><code>h̃<sub>t</sub></code> the candidate memory</span><span class="eq-item" data-lines="0,1,2"><span class="eq-sw" style="background:#555"></span><code>x<sub>t</sub></code> the input</span><span class="eq-item" data-lines="0"><code>b<sub>z</sub></code> the update gate's bias, learned with the weights</span><span class="eq-item" data-lines="1"><code>b<sub>r</sub></code> the reset gate's bias</span><span class="eq-item" data-lines="2"><code>b<sub>h</sub></code> the candidate's bias</span><span class="eq-item" data-lines="0,1,2"><code>σ</code> the gate squasher: outputs 0 to 1; <code>W</code>, <code>U</code> the learned weights</span><span class="eq-item" data-lines="2"><code>⊙</code> element-wise mix</span><span class="eq-item" data-lines="2"><code>tanh</code> squashes to between -1 and 1</span><span class="eq-item" data-lines="0,1,2,3"><code>·</code> times: scaling</span></div>
+            <div class="eq-what">The GRU lines this step uses.</div>
+            <div class="eq-line" data-eqline="0"><span class="eqt" data-k="zt" style="color:#c0392b">z<sub>t</sub></span> = &#963;(W<sub>z</sub>&#183;[<span class="eqt" data-k="xt" style="color:#555">x<sub>t</sub></span>, <span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t&#8722;1</sub></span>])</div>
+            <div class="eq-why" data-eqline="0">As in the card above: one gate decides how much old memory survives each step.</div>
+            <div class="eq-line" data-eqline="1"><span class="eqt" data-k="rt" style="color:#c0392b">r<sub>t</sub></span> = &#963;(W<sub>r</sub>&#183;[<span class="eqt" data-k="xt" style="color:#555">x<sub>t</sub></span>, <span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t&#8722;1</sub></span>])</div>
+            <div class="eq-why" data-eqline="1">As in the card above: the reset gate filters what the candidate sees.</div>
+            <div class="eq-line" data-eqline="2"><span class="eqt" data-k="mt" style="color:#16a085">m<sub>t</sub></span> = <span class="eqt" data-k="rt" style="color:#c0392b">r<sub>t</sub></span> &#8857; <span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t&#8722;1</sub></span></div>
+            <div class="eq-why" data-eqline="2">The filtered memory, the teal stream from the reset gate into the candidate.</div>
+            <div class="eq-line" data-eqline="3"><span class="eqt" data-k="htilde" style="color:#8e44ad">h&#771;<sub>t</sub></span> = tanh(W<sub>h</sub>&#183;[<span class="eqt" data-k="xt" style="color:#555">x<sub>t</sub></span>, <span class="eqt" data-k="mt" style="color:#16a085">m<sub>t</sub></span>])</div>
+            <div class="eq-why" data-eqline="3">The candidate mixes the input with the filtered memory.</div>
+            <div class="eq-line" data-eqline="4"><span class="eqt" data-k="ht" style="color:#2a7fbf">h<sub>t</sub></span> = <span class="eqt" data-k="omzt" style="color:#c0392b">(1&#8722;z<sub>t</sub>)</span>&#183;<span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t&#8722;1</sub></span> + <span class="eqt" data-k="ztb" style="color:#c0392b">z<sub>t</sub></span>&#183;<span class="eqt" data-k="htilde" style="color:#8e44ad">h&#771;<sub>t</sub></span></div>
+            <div class="eq-why" data-eqline="4">The blend: shut keeps the old memory whole, open replaces it, halfway blends.</div>
+            <div class="eq-legend"><span class="eq-item" data-lines="0,4"><span class="eq-sw" style="background:#c0392b"></span><code>z<sub>t</sub></code> the update gate</span><span class="eq-item" data-lines="1,2"><span class="eq-sw" style="background:#c0392b"></span><code>r<sub>t</sub></code> the reset gate</span><span class="eq-item" data-lines="2,3"><span class="eq-sw" style="background:#16a085"></span><code>m<sub>t</sub></code> the filtered memory</span><span class="eq-item" data-lines="0,1,2,4"><span class="eq-sw" style="background:#2a7fbf"></span><code>h<sub>t&#8722;1</sub></code> the old memory; <code>h<sub>t</sub></code> the new memory</span><span class="eq-item" data-lines="3,4"><span class="eq-sw" style="background:#8e44ad"></span><code>h&#771;<sub>t</sub></code> the candidate</span><span class="eq-item" data-lines="0,1,3"><span class="eq-sw" style="background:#555"></span><code>x<sub>t</sub></code> the input</span></div>
         </div></div>
 
 
@@ -1610,6 +1647,8 @@ class GRUCell(nn.Module):
         });
         playBtn.addEventListener('click', function() {
             if (timer) { stop(); return; }
+            /* reduced motion: show the last step at once */
+            if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) { show(order[order.length - 1]); return; }
             var restart = isLast();
             playBtn.textContent = 'Pause';
             timer = setInterval(tick, dwellMs);
@@ -1637,7 +1676,7 @@ class GRUCell(nn.Module):
         <strong>LSTM (Long Short-Term Memory)</strong> separates memory into two parts and uses <em>three gates</em> to carefully control what flows into, out of, and stays within these memories.
     </p>
     <p>
-        The <strong>cell state</strong> C is the long ledger: it runs through the cell with no squashing nonlinearity, so information and gradients ride it across hundreds of steps. <em>That unbroken line is the entire trick.</em> The <strong>hidden state</strong> h is the short-term read, filtered from the ledger for this step.
+        The <strong>cell state</strong> C is the long ledger: it runs through the cell with no squashing nonlinearity, so information and gradients ride it across hundreds of steps. The <strong>hidden state</strong> h is the short-term read, filtered from the ledger for this step.
     </p>
     <p>
         <strong>Three gates</strong> guard the ledger, and each one is <em>a question the network asks every step</em>:
@@ -1653,7 +1692,7 @@ class GRUCell(nn.Module):
             <defs><marker id="arrow2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#2c3e50"/></marker></defs>
             <line x1="6" y1="110" x2="386" y2="110" stroke="#27ae60" stroke-width="6"/>
             <line x1="380" y1="110" x2="392" y2="110" stroke="#2c3e50" stroke-width="2" marker-end="url(#arrow2)"/>
-            <text x="8" y="136" font-size="16" fill="#1e8449">c(t-1): long-term memory</text>
+            <text x="8" y="136" font-size="16" fill="#1e8449">c(t&#8722;1): long-term memory</text>
             <text x="356" y="98" text-anchor="middle" font-size="16" fill="#1e8449">c(t)</text>
             <rect x="40" y="44" width="130" height="58" rx="8" fill="#fdedec" stroke="#e74c3c" stroke-width="2"/>
             <text x="105" y="68" text-anchor="middle" font-size="17" fill="#c0392b">forget gate</text>
@@ -1683,7 +1722,7 @@ class GRUCell(nn.Module):
             <defs><marker id="lstmC" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#2c3e50"/></marker></defs>
             <text x="189" y="24" text-anchor="middle" font-size="16" fill="#666">keep stream</text>
             <rect x="6" y="34" width="116" height="52" rx="8" fill="#ebf5fb" stroke="#2980b9" stroke-width="2"/>
-            <text x="64" y="57" text-anchor="middle" font-size="18" fill="#2c3e50">c<tspan baseline-shift="sub" font-size="70%">t-1</tspan></text>
+            <text x="64" y="57" text-anchor="middle" font-size="18" fill="#2c3e50">c<tspan baseline-shift="sub" font-size="70%">t&#8722;1</tspan></text>
             <text x="64" y="78" text-anchor="middle" font-size="16" fill="#666">old balance</text>
             <line x1="122" y1="60" x2="140" y2="60" stroke="#2c3e50" stroke-width="2" marker-end="url(#lstmC)"/>
             <rect x="144" y="34" width="90" height="52" rx="8" fill="#fdedec" stroke="#e74c3c" stroke-width="2"/>
@@ -1714,28 +1753,28 @@ class GRUCell(nn.Module):
     
 
     <p>
-        The LSTM in six lines: three gates guard a cell state: forget the stale, add the fresh, and output a filtered read.
+        The LSTM in six lines, in three cards.
     </p>
     <div class="eq-card" id="lstmStaticEq">
-            <div class="eq-what">The LSTM in six lines, first the two gates that guard the cell: forget the stale, let in the fresh.</div>
-            <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="ft" style="color:#c0392b">f<sub>t</sub></span> = &#963;(W<sub>f</sub>&#183;<span class="eqt" data-k="xt" style="color:#555">x<sub>t</sub></span> + U<sub>f</sub>&#183;<span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t-1</sub></span> + b<sub>f</sub>)</div>
-            <div class="eq-why eq-active" data-eqline="0">The forget gate: decides how much of the old cell state to keep versus drain away. <span class="eqt" style="color:#c0392b">f<sub>t</sub></span> is built from <span class="eqt" style="color:#555">x<sub>t</sub></span>, the input, scaled by W<sub>f</sub>, the forget gate's own input weight, and <span class="eqt" style="color:#2a7fbf">h<sub>t-1</sub></span>, the hidden state from the previous step, scaled by U<sub>f</sub>, its own hidden-state weight, plus b<sub>f</sub>, the forget gate's bias, squashed by &#963; to between 0 and 1, the gatekeeper. W, U are the learned weights, and &#183; means times: scaling.</div>
-            <div class="eq-line eq-active" data-eqline="1"><span class="eqt" data-k="it" style="color:#c0392b">i<sub>t</sub></span> = &#963;(W<sub>i</sub>&#183;<span class="eqt" data-k="xt" style="color:#555">x<sub>t</sub></span> + U<sub>i</sub>&#183;<span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t-1</sub></span> + b<sub>i</sub>)</div>
-            <div class="eq-why eq-active" data-eqline="1">The input gate: decides how much of the new candidate to pour into the cell. <span class="eqt" style="color:#c0392b">i<sub>t</sub></span> is built from the input <span class="eqt" style="color:#555">x<sub>t</sub></span> scaled by W<sub>i</sub> and the hidden state from the previous step, <span class="eqt" style="color:#2a7fbf">h<sub>t-1</sub></span>, scaled by U<sub>i</sub>, plus b<sub>i</sub>, the input gate's bias, all squashed by &#963; to between 0 and 1.</div>
+            <div class="eq-what">First the two gates that guard the cell: forget the stale, let in the fresh.</div>
+            <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="ft" style="color:#c0392b">f<sub>t</sub></span> = &#963;(W<sub>f</sub>&#183;[<span class="eqt" data-k="xt" style="color:#555">x<sub>t</sub></span>, <span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t&#8722;1</sub></span>])</div>
+            <div class="eq-why eq-active" data-eqline="0">The forget gate: how much of the old cell state to keep versus drain away. As in the GRU, W<sub>f</sub>&#183;[x<sub>t</sub>, h<sub>t&#8722;1</sub>] is one matrix on the input and the last hidden state stacked into one vector, and &#963; squashes it to between 0 and 1. Each line also adds a learned bias, left off here.</div>
+            <div class="eq-line eq-active" data-eqline="1"><span class="eqt" data-k="it" style="color:#c0392b">i<sub>t</sub></span> = &#963;(W<sub>i</sub>&#183;[<span class="eqt" data-k="xt" style="color:#555">x<sub>t</sub></span>, <span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t&#8722;1</sub></span>])</div>
+            <div class="eq-why eq-active" data-eqline="1">The input gate: how much of the new candidate to pour into the cell, built the same way.</div>
         </div>
     <div class="eq-card" id="lstmStatic2Eq">
             <div class="eq-what">Next the candidate and the cell update itself: the two streams merging.</div>
-            <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="ctilde" style="color:#8e44ad">C&#771;<sub>t</sub></span> = tanh(W<sub>c</sub>&#183;<span class="eqt" data-k="xt" style="color:#555">x<sub>t</sub></span> + U<sub>c</sub>&#183;<span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t-1</sub></span> + b<sub>c</sub>)</div>
-            <div class="eq-why eq-active" data-eqline="0">The candidate cell: fresh information mixed from the word and the last hidden state, squashed. <span class="eqt" style="color:#8e44ad">C&#771;<sub>t</sub></span> mixes the input <span class="eqt" style="color:#555">x<sub>t</sub></span>, scaled by W<sub>c</sub>, with <span class="eqt" style="color:#2a7fbf">h<sub>t-1</sub></span>, scaled by U<sub>c</sub>, plus b<sub>c</sub>, the candidate's bias, and tanh squashes the mix to between -1 and 1.</div>
-            <div class="eq-line eq-active" data-eqline="1"><span class="eqt" data-k="ct" style="color:#3498db">C<sub>t</sub></span> = <span class="eqt" data-k="ft" style="color:#c0392b">f<sub>t</sub></span> &#8857; <span class="eqt" data-k="ctprev" style="color:#3498db">C<sub>t-1</sub></span> + <span class="eqt" data-k="it" style="color:#c0392b">i<sub>t</sub></span> &#8857; <span class="eqt" data-k="ctilde" style="color:#8e44ad">C&#771;<sub>t</sub></span></div>
-            <div class="eq-why eq-active" data-eqline="1">Update the cell: keep what the forget gate saved, add what the input gate let in. <span class="eqt" style="color:#3498db">C<sub>t</sub></span> is <span class="eqt" style="color:#c0392b">f<sub>t</sub></span> element-wise mixing <span class="eqt" style="color:#3498db">C<sub>t-1</sub></span>, the cell state's previous value, plus <span class="eqt" style="color:#c0392b">i<sub>t</sub></span> element-wise mixing <span class="eqt" style="color:#8e44ad">C&#771;<sub>t</sub></span>. Here <span class="eqt" style="color:#c0392b">f<sub>t</sub></span> is the forget gate's share and <span class="eqt" style="color:#c0392b">i<sub>t</sub></span> is the input gate's share, the two gates built in the card above. These are the two streams from the dataflow figure: the forget gate scales the old balance, the input gate scales the deposit, and they add. No tanh on this line: the cell state is only scaled and added, which is why the cell state is a gradient highway.</div>
+            <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="ctilde" style="color:#8e44ad">C&#771;<sub>t</sub></span> = tanh(W<sub>c</sub>&#183;[<span class="eqt" data-k="xt" style="color:#555">x<sub>t</sub></span>, <span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t&#8722;1</sub></span>])</div>
+            <div class="eq-why eq-active" data-eqline="0">The candidate cell: fresh information mixed from the word and the last hidden state, squashed by tanh to between &#8722;1 and 1. It is what could be added; the input gate decides how much enters.</div>
+            <div class="eq-line eq-active" data-eqline="1"><span class="eqt" data-k="ct" style="color:#3498db">C<sub>t</sub></span> = <span class="eqt" data-k="ft" style="color:#c0392b">f<sub>t</sub></span> &#8857; <span class="eqt" data-k="ctprev" style="color:#3498db">C<sub>t&#8722;1</sub></span> + <span class="eqt" data-k="it" style="color:#c0392b">i<sub>t</sub></span> &#8857; <span class="eqt" data-k="ctilde" style="color:#8e44ad">C&#771;<sub>t</sub></span></div>
+            <div class="eq-why eq-active" data-eqline="1">Update the cell: keep what the forget gate saved, add what the input gate let in; &#8857; multiplies element by element, and C<sub>t&#8722;1</sub> is the cell state's previous value. No squash on this line: the cell state is only scaled and added, which is why it is a gradient highway.</div>
         </div>
     <div class="eq-card" id="lstmStatic3Eq">
             <div class="eq-what">Last the output gate and the filtered read it reveals.</div>
-            <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="ot" style="color:#c0392b">o<sub>t</sub></span> = &#963;(W<sub>o</sub>&#183;<span class="eqt" data-k="xt" style="color:#555">x<sub>t</sub></span> + U<sub>o</sub>&#183;<span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t-1</sub></span> + b<sub>o</sub>)</div>
-            <div class="eq-why eq-active" data-eqline="0">The output gate: decides how much of the cell state to reveal as the hidden state. <span class="eqt" style="color:#c0392b">o<sub>t</sub></span> is built from the input <span class="eqt" style="color:#555">x<sub>t</sub></span> scaled by W<sub>o</sub> and <span class="eqt" style="color:#2a7fbf">h<sub>t-1</sub></span>, the hidden state from the previous step, scaled by U<sub>o</sub>, plus b<sub>o</sub>, the output gate's bias, squashed by &#963; to between 0 and 1.</div>
+            <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="ot" style="color:#c0392b">o<sub>t</sub></span> = &#963;(W<sub>o</sub>&#183;[<span class="eqt" data-k="xt" style="color:#555">x<sub>t</sub></span>, <span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t&#8722;1</sub></span>])</div>
+            <div class="eq-why eq-active" data-eqline="0">The output gate: how much of the cell state to reveal as the hidden state, built the same way as the other gates.</div>
             <div class="eq-line eq-active" data-eqline="1"><span class="eqt" data-k="ht" style="color:#3498db">h<sub>t</sub></span> = <span class="eqt" data-k="ot" style="color:#c0392b">o<sub>t</sub></span> &#8857; tanh(<span class="eqt" data-k="ct" style="color:#3498db">C<sub>t</sub></span>)</div>
-            <div class="eq-why eq-active" data-eqline="1">The new hidden state: the squashed cell, filtered by the output gate. <span class="eqt" style="color:#3498db">C<sub>t</sub></span> is the cell state built in the update line above, and &#8857; is element-wise mixing, the output gate scaling the squashed cell entry by entry. The cell state is squashed by tanh to between -1 and 1, then the output gate lets through only its share: it picks how much of the squashed cell state to show as the hidden state <span class="eqt" style="color:#3498db">h<sub>t</sub></span>.</div>
+            <div class="eq-why eq-active" data-eqline="1">The new hidden state: the cell squashed by tanh, then filtered by the output gate. The cell itself stays private memory; only this filtered read reaches the next step and the output.</div>
         </div>
     
 
@@ -1757,7 +1796,7 @@ class GRUCell(nn.Module):
     })();
     </script>
     <div class="demo" id="lstmToy">
-<h4>Toy: the memory tank</h4>
+<h4>The LSTM memory tank</h4>
 <div class="demo-controls">
             <button type="button" class="btn sec" id="lstmPrev">Prev step</button>
             <button type="button" class="btn sec" id="lstmNext">Next step</button>
@@ -1765,14 +1804,14 @@ class GRUCell(nn.Module):
             <button type="button" class="btn sec" id="lstmReset">Reset</button>
         </div>
 <div class="wk-dots" role="group" aria-label="LSTM walkthrough steps">
-            <button type="button" class="wk-dot active current" data-step="lstmS1"><span class="sr-only">First step: the input pours in</span></button>
-            <button type="button" class="wk-dot" data-step="lstmS2"><span class="sr-only">Second step: sealed, the vault</span></button>
-            <button type="button" class="wk-dot" data-step="lstmS3"><span class="sr-only">Third step: the drain, the level falls</span></button>
-            <button type="button" class="wk-dot" data-step="lstmS4"><span class="sr-only">Fourth step: the output reveals</span></button>
+            <button type="button" class="wk-dot active current" data-step="lstmS1"><span class="sr-only">First step: the input gate pours in</span></button>
+            <button type="button" class="wk-dot" data-step="lstmS2"><span class="sr-only">Second step: all gates shut keep the level</span></button>
+            <button type="button" class="wk-dot" data-step="lstmS3"><span class="sr-only">Third step: the forget gate drains it</span></button>
+            <button type="button" class="wk-dot" data-step="lstmS4"><span class="sr-only">Fourth step: the output gate reveals a filtered read</span></button>
         </div>
 <div class="wk-panels">
             <div class="wk-panel" id="lstmS1" data-next="lstmS2" data-prev="lstmS4" data-eqlines="1,2" data-eqterms="it,ctilde">
-                <p class="wk-step-title">The input pours in</p>
+                <p class="wk-step-title">The input gate pours in</p>
                 <div class="wk-twoframe">
                     <div>
                         <p class="wk-frame-title">input gate shut</p>
@@ -1824,7 +1863,7 @@ class GRUCell(nn.Module):
                 <p class="demo-caption">Input gate open: the level rises.</p>
             </div>
             <div class="wk-panel" id="lstmS2" data-next="lstmS3" data-prev="lstmS1" data-eqlines="0,3" data-eqterms="ft,ctprev" hidden>
-                <p class="wk-step-title">Sealed: the vault</p>
+                <p class="wk-step-title">All gates shut keep the level</p>
                 <svg class="wk-svg" viewBox="0 0 640 388" role="img" aria-label="LSTM walkthrough, second step. The tank is sealed: the input valve, the forget drain valve, and the output shutter are all blocked, and the cell state tank sits full and steady.">
                     <path d="M320,12 V46" stroke="#8e44ad" stroke-width="16" fill="none"/>
                     <g data-eqk="it">
@@ -1870,7 +1909,7 @@ class GRUCell(nn.Module):
                 <p class="demo-caption">Sealed: the level holds step after step. That flat line is the whole trick.</p>
             </div>
             <div class="wk-panel" id="lstmS3" data-next="lstmS4" data-prev="lstmS2" data-eqlines="0,3" data-eqterms="ft,ct" hidden>
-                <p class="wk-step-title">The drain: the level falls</p>
+                <p class="wk-step-title">The forget gate drains it</p>
                 <svg class="wk-svg" viewBox="0 0 640 388" role="img" aria-label="LSTM walkthrough, third step. The tank is draining through the forget drain: a stream drains out of the tank bottom and the cell state level has fallen. The input valve and output shutter stay blocked.">
                     <path d="M320,12 V46" stroke="#8e44ad" stroke-width="16" fill="none"/>
                     <g data-eqk="it">
@@ -1917,7 +1956,7 @@ class GRUCell(nn.Module):
                 <p class="demo-caption">Forget gate keeps nothing: the level falls, and erasure is permanent.</p>
             </div>
             <div class="wk-panel" id="lstmS4" data-next="lstmS1" data-prev="lstmS3" data-wrap="stop" data-eqlines="4,5" data-eqterms="ot,ht" hidden>
-                <p class="wk-step-title">The output reveals</p>
+                <p class="wk-step-title">The output gate reveals a filtered read</p>
                 <div class="wk-twoframe">
                     <div>
                         <p class="wk-frame-title">output gate shut</p>
@@ -1967,20 +2006,20 @@ class GRUCell(nn.Module):
             The tank level is the memory. Only the gates move here; a real LSTM also learns the candidate's weights.
         </p>
 <div class="eq-card" id="lstmToyEq">
-            <div class="eq-what">The LSTM in six lines.</div>
-            <div class="eq-line" data-eqline="0"><span class="eqt" data-k="ft" style="color:#c0392b">f<sub>t</sub></span> = &#963;(W<sub>f</sub>&#183;<span class="eqt" data-k="xt" style="color:#555">x<sub>t</sub></span> + U<sub>f</sub>&#183;<span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t-1</sub></span> + b<sub>f</sub>)</div>
-        <div class="eq-why" data-eqline="0">The forget gate: decides how much of the old cell state to keep versus drain away. It is the squashed mix of the input and the last hidden state, each scaled by its own weights, plus its bias, so it lands between 0 and 1. In the tank above, the forget gate drains it: the cell is a tank whose level is the memory.</div>
-            <div class="eq-line" data-eqline="1"><span class="eqt" data-k="it" style="color:#c0392b">i<sub>t</sub></span> = &#963;(W<sub>i</sub>&#183;<span class="eqt" data-k="xt" style="color:#555">x<sub>t</sub></span> + U<sub>i</sub>&#183;<span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t-1</sub></span> + b<sub>i</sub>)</div>
-        <div class="eq-why" data-eqline="1">The input gate: decides how much of the new candidate to pour into the cell. It is built the same squashed way, from the input and the last hidden state, and in the tank above the input gate fills it.</div>
-            <div class="eq-line" data-eqline="2"><span class="eqt" data-k="ctilde" style="color:#8e44ad">C&#771;<sub>t</sub></span> = tanh(W<sub>c</sub>&#183;<span class="eqt" data-k="xt" style="color:#555">x<sub>t</sub></span> + U<sub>c</sub>&#183;<span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t-1</sub></span> + b<sub>c</sub>)</div>
-        <div class="eq-why" data-eqline="2">The candidate cell: fresh information mixed from the word and the last hidden state, squashed. The candidate is what could be added; the input gate decides how much of it actually enters.</div>
-            <div class="eq-line" data-eqline="3"><span class="eqt" data-k="ct" style="color:#3498db">C<sub>t</sub></span> = <span class="eqt" data-k="ft" style="color:#c0392b">f<sub>t</sub></span> &#8857; <span class="eqt" data-k="ctprev" style="color:#3498db">C<sub>t-1</sub></span> + <span class="eqt" data-k="it" style="color:#c0392b">i<sub>t</sub></span> &#8857; <span class="eqt" data-k="ctilde" style="color:#8e44ad">C&#771;<sub>t</sub></span></div>
-        <div class="eq-why" data-eqline="3">Update the cell: keep what the forget gate saved, add what the input gate let in. No squashing on this line: the cell state is only scaled and added, which is why the cell state is a gradient highway.</div>
-            <div class="eq-line" data-eqline="4"><span class="eqt" data-k="ot" style="color:#c0392b">o<sub>t</sub></span> = &#963;(W<sub>o</sub>&#183;<span class="eqt" data-k="xt" style="color:#555">x<sub>t</sub></span> + U<sub>o</sub>&#183;<span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t-1</sub></span> + b<sub>o</sub>)</div>
-        <div class="eq-why" data-eqline="4">The output gate: decides how much of the cell state to reveal as the hidden state. It is built the same squashed way as the other gates, and in the toy it opens its shutter: the hidden state flows out, as much as the shutter lets through.</div>
+            <div class="eq-what">The LSTM lines this step uses.</div>
+            <div class="eq-line" data-eqline="0"><span class="eqt" data-k="ft" style="color:#c0392b">f<sub>t</sub></span> = &#963;(W<sub>f</sub>&#183;[<span class="eqt" data-k="xt" style="color:#555">x<sub>t</sub></span>, <span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t&#8722;1</sub></span>])</div>
+            <div class="eq-why" data-eqline="0">As in the card above. In the tank, the forget gate drains it.</div>
+            <div class="eq-line" data-eqline="1"><span class="eqt" data-k="it" style="color:#c0392b">i<sub>t</sub></span> = &#963;(W<sub>i</sub>&#183;[<span class="eqt" data-k="xt" style="color:#555">x<sub>t</sub></span>, <span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t&#8722;1</sub></span>])</div>
+            <div class="eq-why" data-eqline="1">As in the card above. In the tank, the input gate fills it.</div>
+            <div class="eq-line" data-eqline="2"><span class="eqt" data-k="ctilde" style="color:#8e44ad">C&#771;<sub>t</sub></span> = tanh(W<sub>c</sub>&#183;[<span class="eqt" data-k="xt" style="color:#555">x<sub>t</sub></span>, <span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t&#8722;1</sub></span>])</div>
+            <div class="eq-why" data-eqline="2">The candidate, what could be poured in.</div>
+            <div class="eq-line" data-eqline="3"><span style="white-space:nowrap"><span class="eqt" data-k="ct" style="color:#3498db">C<sub>t</sub></span> = <span class="eqt" data-k="ft" style="color:#c0392b">f<sub>t</sub></span> &#8857; <span class="eqt" data-k="ctprev" style="color:#3498db">C<sub>t&#8722;1</sub></span></span> <span style="white-space:nowrap">+ <span class="eqt" data-k="it" style="color:#c0392b">i<sub>t</sub></span> &#8857; <span class="eqt" data-k="ctilde" style="color:#8e44ad">C&#771;<sub>t</sub></span></span></div>
+            <div class="eq-why" data-eqline="3">The cell update: scaled and added, never squashed.</div>
+            <div class="eq-line" data-eqline="4"><span class="eqt" data-k="ot" style="color:#c0392b">o<sub>t</sub></span> = &#963;(W<sub>o</sub>&#183;[<span class="eqt" data-k="xt" style="color:#555">x<sub>t</sub></span>, <span class="eqt" data-k="htprev" style="color:#2a7fbf;white-space:nowrap">h<sub>t&#8722;1</sub></span>])</div>
+            <div class="eq-why" data-eqline="4">The output gate opens its shutter.</div>
             <div class="eq-line" data-eqline="5"><span class="eqt" data-k="ht" style="color:#3498db">h<sub>t</sub></span> = <span class="eqt" data-k="ot" style="color:#c0392b">o<sub>t</sub></span> &#8857; tanh(<span class="eqt" data-k="ct" style="color:#3498db">C<sub>t</sub></span>)</div>
-        <div class="eq-why" data-eqline="5">The new hidden state: the squashed cell, filtered by the output gate. The cell itself stays private memory; only this filtered read is what the next step and the output see.</div>
-            <div class="eq-legend"><span class="eq-item" data-lines="0,3"><span class="eq-sw" style="background:#c0392b"></span><code>f<sub>t</sub></code> the forget gate</span><span class="eq-item" data-lines="1,3"><span class="eq-sw" style="background:#c0392b"></span><code>i<sub>t</sub></code> the input gate</span><span class="eq-item" data-lines="4,5"><span class="eq-sw" style="background:#c0392b"></span><code>o<sub>t</sub></code> the output gate</span><span class="eq-item" data-lines="3,5"><span class="eq-sw" style="background:#3498db"></span><code>C<sub>t</sub></code> the cell state (<code>C<sub>t-1</sub></code> is its previous value)</span><span class="eq-item" data-lines="5"><span class="eq-sw" style="background:#3498db"></span><code>h<sub>t</sub></code> the output</span><span class="eq-item" data-lines="0,1,2,4"><span class="eq-sw" style="background:#2a7fbf"></span><code>h<sub>t-1</sub></code> the hidden state from the previous step</span><span class="eq-item" data-lines="2,3"><span class="eq-sw" style="background:#8e44ad"></span><code>C̃<sub>t</sub></code> the candidate cell state</span><span class="eq-item" data-lines="0,1,2,4,5"><span class="eq-sw" style="background:#555"></span><code>x<sub>t</sub></code> the input</span><span class="eq-item" data-lines="0"><code>b<sub>f</sub></code> the forget gate's bias</span><span class="eq-item" data-lines="1"><code>b<sub>i</sub></code> the input gate's bias</span><span class="eq-item" data-lines="2"><code>b<sub>c</sub></code> the candidate's bias</span><span class="eq-item" data-lines="4"><code>b<sub>o</sub></code> the output gate's bias</span><span class="eq-item" data-lines="3,5"><code>⊙</code> element-wise mix</span><span class="eq-item" data-lines="0,1,2,4"><code>W</code>, <code>U</code> the learned weights</span><span class="eq-item" data-lines="0,1,2,4,5"><code>σ</code> squashes to between 0 and 1, the gatekeeper; <code>tanh</code> squashes to between -1 and 1; <code>·</code> times: scaling</span></div>
+            <div class="eq-why" data-eqline="5">The filtered read that leaves the cell.</div>
+            <div class="eq-legend"><span class="eq-item" data-lines="0,3"><span class="eq-sw" style="background:#c0392b"></span><code>f<sub>t</sub></code> the forget gate</span><span class="eq-item" data-lines="1,3"><span class="eq-sw" style="background:#c0392b"></span><code>i<sub>t</sub></code> the input gate</span><span class="eq-item" data-lines="4,5"><span class="eq-sw" style="background:#c0392b"></span><code>o<sub>t</sub></code> the output gate</span><span class="eq-item" data-lines="3,5"><span class="eq-sw" style="background:#3498db"></span><code>C<sub>t</sub></code> the cell state (<code>C<sub>t&#8722;1</sub></code> its previous value)</span><span class="eq-item" data-lines="5"><span class="eq-sw" style="background:#3498db"></span><code>h<sub>t</sub></code> the output</span><span class="eq-item" data-lines="0,1,2,4"><span class="eq-sw" style="background:#2a7fbf"></span><code>h<sub>t&#8722;1</sub></code> the last hidden state</span><span class="eq-item" data-lines="2,3"><span class="eq-sw" style="background:#8e44ad"></span><code>C&#771;<sub>t</sub></code> the candidate</span><span class="eq-item" data-lines="0,1,2,4"><span class="eq-sw" style="background:#555"></span><code>x<sub>t</sub></code> the input</span></div>
         </div></div>
 
 
@@ -2095,6 +2134,8 @@ class GRUCell(nn.Module):
         });
         playBtn.addEventListener('click', function() {
             if (timer) { stop(); return; }
+            /* reduced motion: show the last step at once */
+            if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) { show(order[order.length - 1]); return; }
             var restart = isLast();
             playBtn.textContent = 'Pause';
             timer = setInterval(tick, dwellMs);
@@ -2125,7 +2166,7 @@ class GRUCell(nn.Module):
     </p>
 
     <div class="demo" id="sfToy">
-        <h4>Toy: gate safari, you set the routing policy</h4>
+        <h4>Gate schedules decide what the cell remembers</h4>
         <div class="demo-controls">
             <button type="button" class="btn sec" id="sfP1">Remember everything</button>
             <button type="button" class="btn sec" id="sfP2">Block the distractor</button>
@@ -2139,7 +2180,6 @@ class GRUCell(nn.Module):
         </div>
         <p class="demo-readout" id="sfReadout"></p>
         <p class="demo-takeaway" id="sfTake"></p>
-        <p class="demo-note">Gating is a routing policy: the same cell remembers different things under different gate schedules.</p>
     </div>
 
 
@@ -2163,8 +2203,9 @@ class GRUCell(nn.Module):
         // live: whether the tank, the bar, and the verdict show the computed
         // result. Fresh load and Reset leave the tank empty and the verdict
         // pending; a pour (Play) or a preset is what fills them.
-        var live = false;
-        var poured = false;
+        var live = true;
+        var poured = true;
+        var sfReduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         // Gated RAF loop: it runs only while pouring, while the tank level is
         // still easing toward its target, or right after an interaction that
         // changed the canvas. At rest the tool sits dead still: no ambient
@@ -2218,18 +2259,17 @@ class GRUCell(nn.Module):
                 $('sfTake').innerHTML = '';
                 return;
             }
-            if (!poured) {
-                $('sfReadout').innerHTML = 'the tank is <strong>pouring</strong>';
-                $('sfTake').innerHTML = '';
-                return;
-            }
+            /* P33: the text is hidden while the pour runs and shown at its end */
+            $('sfReadout').style.visibility = poured ? 'visible' : 'hidden';
+            $('sfTake').style.visibility = poured ? 'visible' : 'hidden';
+            if (!poured) return;
             var allShut = vals.every(function (g) { return g < 0.05; });
             $('sfReadout').innerHTML = allShut ? 'every gate shut: <strong>nothing poured in</strong>' : 'the tank now <strong>holds the pour</strong>';
             var take;
-            if (info.m < 0.5) take = '<strong>Verdict: the network remembers nothing.</strong> Every write was blocked or trivial.';
-            else if (info.arg === 0) take = '<strong>Verdict: the network remembers the important signal.</strong> The important signal survived; the distractor never got written in.';
-            else if (info.arg === 3) take = '<strong>Verdict: the network remembers the loud distractor.</strong> When every gate is open, the loudest input wins, not the most important one.';
-            else take = '<strong>Verdict: the network remembers a quiet step.</strong>';
+            if (info.m < 0.5) take = 'The cell remembers <strong>nothing</strong>: every write was blocked or trivial.';
+            else if (info.arg === 0) take = 'The cell remembers <strong>the important signal</strong>: the distractor never got written in.';
+            else if (info.arg === 3) take = 'The cell remembers <strong>the loud distractor</strong>: with every gate open, the loudest input wins, not the most important one.';
+            else take = 'The cell remembers <strong>a quiet step</strong>.';
             $('sfTake').innerHTML = take;
         }
         function frame(now) {
@@ -2415,7 +2455,9 @@ class GRUCell(nn.Module):
         $('sfPlay').addEventListener('click', function() {
             var demo = $('sfToy');
             if (demo) playScrollEnsure(demo);
-            live = true; poured = false;
+            live = true;
+            if (sfReduce) { playing = false; playK = -1; poured = true; compute(); tankShown = total; draw(); sfKick(); return; }
+            poured = false;
             draw();
             playing = true; playK = 0; playBase = 0;
             sfStepStart = performance.now(); tankShown = 0;
@@ -2423,9 +2465,9 @@ class GRUCell(nn.Module):
             sfKick();
         });
         $('sfReset').addEventListener('click', function() {
-            playing = false; playK = -1; live = false; poured = false;
-            tankTarget = 0;
+            playing = false; playK = -1; live = true; poured = true;
             for (var k = 0; k < N; k++) vals[k] = 1;
+            compute(); tankShown = total; tankTarget = total;
             draw();
             sfKick();
         });
@@ -2436,10 +2478,9 @@ class GRUCell(nn.Module):
                 if (visible && !running) { running = true; requestAnimationFrame(frame); }
             }).observe(cv);
         }
-        sizeCanvas(); draw();
-        // Open in the exact rest state: empty tank, empty bar, pending
-        // verdict. The single draw above settles immediately (tankShown and
-        // tankTarget are both 0), so the gated loop stops itself.
+        sizeCanvas(); compute(); tankShown = total; draw();
+        // Open on the end state of the default schedule (every gate open):
+        // full tank, full bar, its verdict. Play replays the pour.
         running = true; frame(performance.now());
     })();
     </script>
@@ -2465,39 +2506,31 @@ class GRUCell(nn.Module):
     <h2 id="results">Long sequences expose the vanilla RNN</h2>
 
     <p>
-        The toy at the end of this section feeds one spike to all three: the RNN's echo decays to flat while the gated lanes hold it, at 3x to 4x the compute.
+        <a href="#three-memories">One spike through RNN, GRU and LSTM</a> feeds one spike to all three: the RNN's echo decays to flat while the gated lanes hold it, at three to four times the compute. Bidirectional LSTMs, one reading forward and one backward, transcribe speech when trained with the <a href="ctc-loss.html">CTC loss</a>.
     </p>
 
     <p>
         In practice you never write these cells by hand. PyTorch has them built in, and the call is <em>boring in the best way</em>:
     </p>
 <pre><code class="language-python">
-# A 2-layer LSTM; batch_first matches the (batch, seq, features) convention
-lstm = nn.LSTM(input_size=28, hidden_size=128, num_layers=2, batch_first=True)
-output, (hn, cn) = lstm(x)  # output: every step of the last layer; hn, cn: final states per layer
-# GRU is the same minus the cell state: output, hn = gru(x)
+# 2 layers; x: (batch, seq, feat)
+lstm = nn.LSTM(
+    input_size=28,
+    hidden_size=128,
+    num_layers=2,
+    batch_first=True)
+# output: every step, last layer
+# hn, cn: final states per layer
+output, (hn, cn) = lstm(x)
+# GRU: same, no cell state
+# output, hn = gru(x)
 </code></pre>
-    <p>
-        <em>So what does gating actually buy you?</em> The classic stress test is <strong>sequential MNIST</strong>: feed a 28 x 28 digit in one row at a time, so the model must remember early rows for 28 steps before it gets to classify. Here is how the three architectures compare:
-    </p>
-    <div class="result-block">
-        <h4>Result: sequential MNIST (28 steps, 1 hidden layer of 128, ~20 epochs, one epoch being one full pass over the training data)</h4>
-        <table class="results">
-            <tr><th>Model</th><th>Test accuracy</th><th>Notes</th></tr>
-            <tr><td>Vanilla RNN</td><td>~95%</td><td>Works, but the long gap between early rows and the label hurts it</td></tr>
-            <tr><td>GRU</td><td>~98%</td><td>The update gate holds early rows in memory across all 28 steps</td></tr>
-            <tr><td>LSTM</td><td>~98%</td><td>Same story; the cell-state highway carries the rows straight through</td></tr>
-        </table>
         <p>
-            <em>Honestly labeled:</em> these are reference values typical of published sequential-MNIST runs with this setup, not measured on this machine. The ordering is the point and it is robust: once the sequence gets long, the vanilla RNN falls behind and the gated models do not.
-        </p>
-    </div>
-    <p>
         GRUs typically achieve similar results to LSTMs with fewer parameters: no separate cell state, two gates instead of three. If you are not sure which to pick, <em>start with a GRU</em>.
     </p>
 
     <div class="demo" id="tripleToy">
-        <h3 id="three-memories" class="demo-h3">Toy: same spike, three memories</h3>
+        <h3 id="three-memories" class="demo-h3">One spike through RNN, GRU and LSTM</h3>
         <div class="demo-controls">
             <button type="button" class="btn sec" id="triplePlay">Play</button>
             <button type="button" class="btn sec" id="tripleReset">Reset</button>
@@ -2547,7 +2580,9 @@ output, (hn, cn) = lstm(x)  # output: every step of the last layer; hn, cn: fina
 
         var W = 640, H = 520;
         var STEP_MS = 800;
-        var playing = false, curT = 0, playT0 = 0, rafId = null, stepDelay = STEP_MS;
+        /* at rest the three full traces are drawn (curT = N); Play replays them */
+        var playing = false, curT = N, playT0 = 0, rafId = null, stepDelay = STEP_MS;
+        var trReduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         /* Responsive canvas like the sibling toys: the design space stays
            640x520 but the drawing is scaled, and fonts are upsized in compact
            mode so text renders at 12px+ effective on narrow screens. */
@@ -2570,14 +2605,14 @@ output, (hn, cn) = lstm(x)  # output: every step of the last layer; hn, cn: fina
         var IN = { y0: 8, labelY: 22, baseY: 62, x0: 150, x1: 620 };
         var LANES = [
             { name: 'plain RNN', color: '#2980b9', vals: rnnH, y0: 100,
-              cost: '3 params · 6 ops/step · 1x', valves: null,
-              verdict: function(v) { return v < 0.05 ? 'forgot' : ''; } },
+              cost: '3 params · 6 ops/step · 1\u00d7', valves: null,
+              verdict: function(v) { return v < 0.05 ? 'faded' : ''; } },
             { name: 'GRU', color: '#8e44ad', vals: gruR.h, y0: 230,
-              cost: '9 params · 18 ops/step · 3x',
-              valves: function(t) { var z = gruR.z[t]; return [['z let-in', z], ['1-z keep', 1 - z]]; },
+              cost: '9 params · 18 ops/step · 3\u00d7',
+              valves: function(t) { var z = gruR.z[t]; return [['z let-in', z], ['1\u2212z keep', 1 - z]]; },
               verdict: function(v) { return v > 0.5 ? 'held' : ''; } },
             { name: 'LSTM', color: '#27ae60', vals: lstmH, y0: 360,
-              cost: '12 params · 24 ops/step · 4x',
+              cost: '12 params · 24 ops/step · 4\u00d7',
               valves: function() { return [['f', 1], ['i', 1], ['o', 1]]; },
               verdict: function(v) { return v > 0.5 ? 'held' : ''; } }
         ];
@@ -2600,7 +2635,7 @@ output, (hn, cn) = lstm(x)  # output: every step of the last layer; hn, cn: fina
             ctx.textAlign = 'center';
             /* shared input strip */
             ctx.fillStyle = '#2c3e50'; ctx.font = FS13 + 'px sans-serif'; ctx.textAlign = 'left';
-            ctx.fillText('shared input x_t: one spike, then silence', 10, IN.labelY);
+            ctx.fillText('shared input: one spike, then silence', 10, IN.labelY);
             ctx.textAlign = 'center';
             for (var i = 0; i < N; i++) {
                 var bx = inX(i), lit = i < curT;
@@ -2667,21 +2702,19 @@ output, (hn, cn) = lstm(x)  # output: every step of the last layer; hn, cn: fina
                         ctx.beginPath(); ctx.arc(dx, dy, d === curT - 1 ? 5 : 3.5, 0, Math.PI * 2); ctx.fill();
                         ctx.strokeStyle = lane.color; ctx.lineWidth = 2; ctx.stroke();
                     }
-                    /* current value label (kept inside the canvas at the last step) */
+                    /* no numbers on the trace (gate-tool ruling): the end
+                       word below is the only label */
                     var cvv = lane.vals[curT - 1];
                     var vyv = ty0 - cvv * TRACE.h + 4;
-                    ctx.fillStyle = '#2c3e50'; ctx.font = 'bold ' + FS + 'px sans-serif';
-                    ctx.textAlign = 'left';
-                    ctx.fillText(cvv.toFixed(2), xPos(curT - 1) + 10, vyv);
                 }
                 /* verdict badge at the final step */
                 if (curT >= N) {
                     var fv = lane.vals[N - 1], vd = lane.verdict(fv);
                     if (vd) {
-                        ctx.fillStyle = vd === 'forgot' ? '#e74c3c' : '#27ae60';
+                        ctx.fillStyle = vd === 'faded' ? '#c0392b' : '#1e8449';
                         ctx.font = 'bold ' + FS13 + 'px sans-serif'; ctx.textAlign = 'left';
                         /* anchored to its own trace: directly under the end value */
-                        ctx.fillText(vd, xPos(N - 1) + 10, vyv + FS13 + 4);
+                        ctx.fillText(vd, xPos(N - 1) + 10, vyv);
                     }
                 }
                 ctx.textAlign = 'center';
@@ -2709,7 +2742,8 @@ output, (hn, cn) = lstm(x)  # output: every step of the last layer; hn, cn: fina
             if (playing) { stopPlay(2000); return; }
             var demo = $('tripleToy');
             if (demo) playScrollEnsure(demo);
-            if (curT >= N) curT = 0;
+            if (trReduce) { curT = N; draw(); return; }
+            curT = 0;
             playing = true; this.textContent = 'Pause';
             stepDelay = STEP_MS;
             playT0 = performance.now();
@@ -2717,7 +2751,7 @@ output, (hn, cn) = lstm(x)  # output: every step of the last layer; hn, cn: fina
             rafId = requestAnimationFrame(tick);
         });
         $('tripleReset').addEventListener('click', function() {
-            stopPlay(600); curT = 0; draw();
+            stopPlay(600); curT = N; draw();
         });
         window.addEventListener('resize', function() { sizeCanvas(); draw(); });
         sizeCanvas();
@@ -2731,7 +2765,7 @@ output, (hn, cn) = lstm(x)  # output: every step of the last layer; hn, cn: fina
     <h2 id="caveats">What goes wrong when you actually train one</h2>
     <ul>
         <li><strong>Vanishing gradients are real.</strong> A vanilla RNN on long sequences is a bad default. If your sequence is longer than a few dozen steps, reach for a GRU or LSTM first.</li>
-        <li><strong>Exploding gradients need clipping.</strong> Even gated models can blow up. Gradient clipping (above) is cheap insurance; a threshold around 1.0 is a common starting point.</li>
+        <li><strong>Exploding gradients need clipping.</strong> Even gated models can blow up. <a href="#clipping-gradients">Clipping</a> is cheap insurance; pick &#964; from the gradient norms you log over many updates.</li>
         <li><strong>Long sequences cost memory.</strong> BPTT stores every timestep's hidden states and outputs. For very long sequences, use truncated BPTT (code below the list): backprop within chunks and carry the hidden state between them.</li>
         <li><strong>Don't put dropout inside the recurrence.</strong> Dropout randomly zeroes activations during training. Apply it between stacked layers, not across timesteps within a cell; PyTorch's nn.LSTM and nn.GRU do this with their dropout argument.</li>
         <li><strong>When do RNNs still make sense?</strong> Transformers won the long-sequence game because attention sees everything at once. RNNs are still the right call for streaming data where you must decide now with constant memory: real-time sensor streams, on-device keyword spotting, low-latency control.</li>
@@ -2741,13 +2775,18 @@ output, (hn, cn) = lstm(x)  # output: every step of the last layer; hn, cn: fina
     </p>
 <pre><code class="language-python">
 h = None
-for x_c, y_c in zip(x.split(k, dim=1), y.split(k, dim=1)):  # k steps per chunk
-    out, h = gru(x_c, h)                # hidden state carried in
-    loss = loss_fn(head(out), y_c)      # loss on this chunk only
+# k steps per chunk; h carried in
+xs = x.split(k, 1)
+ys = y.split(k, 1)
+for x_c, y_c in zip(xs, ys):
+    out, h = gru(x_c, h)
+    # backprop stays in this chunk
+    loss = loss_fn(head(out), y_c)
     optimizer.zero_grad()
-    loss.backward()                     # backprop stays inside the chunk
+    loss.backward()
     optimizer.step()
-    h = h.detach()                      # keep the values, cut the graph
+    # keep values, cut the graph
+    h = h.detach()
 </code></pre>
 
     <hr>
@@ -2761,6 +2800,8 @@ for x_c, y_c in zip(x.split(k, dim=1), y.split(k, dim=1)):  # k steps per chunk
         <li>Cho et al. (2014). Learning Phrase Representations using RNN Encoder-Decoder for Statistical Machine Translation. EMNLP. arXiv:1406.1078.</li>
         <li>Hochreiter &amp; Schmidhuber (1997). Long Short-Term Memory. Neural Computation 9(8).</li>
         <li>Gers et al. (2000). Learning to Forget: Continual Prediction with LSTM. Neural Computation 12(10).</li>
+        <li>Chung, Gulcehre, Cho, Bengio (2014). Empirical Evaluation of Gated Recurrent Neural Networks on Sequence Modeling. arXiv:1412.3555.</li>
+        <li>Pascanu, Mikolov, Bengio (2013). On the difficulty of training recurrent neural networks. ICML. arXiv:1211.5063.</li>
     </ol>
 
     <script>
@@ -2773,21 +2814,29 @@ for x_c, y_c in zip(x.split(k, dim=1), y.split(k, dim=1)):  # k steps per chunk
         var canvas = document.getElementById('gradCanvas');
         var playBtn = document.getElementById('gradPlay');
         var gradPlaying = false, gradAnimK = null, gradTimer = null;
-        /* gradFull: after any slider move the whole w^t curve is drawn at once,
-           so every slider position shows its vanish or explode result; Play
-           still walks it one step at a time. Page load and Reset keep the
-           short preview so the tool never opens on the answer. */
-        var gradFull = false;
+        /* gradFull: the whole w^t curve is drawn at rest (page load, Reset
+           and every slider move); Play replays it one step at a time while
+           the readout stays on the verdict for the current sliders. */
+        var gradFull = true;
+        var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
         function fmt(x) {
+            /* 2 significant figures between 0.01 and 100, else 10 to a power */
             if (x === 0) return "0";
             var ax = Math.abs(x);
-            if (ax >= 0.01 && ax < 1000) {
-                return (Math.round(x * 1000) / 1000).toString();
-            }
-            var e = Math.floor(Math.log10(ax));
-            var m = x / Math.pow(10, e);
-            return m.toFixed(2) + "e" + e;
+            if (ax >= 0.01 && ax <= 100) return String(Number(x.toPrecision(2)));
+            return "10<sup>" + Math.round(Math.log10(ax)).toString().replace('-', '&#8722;') + "</sup>";
+        }
+        function powLabel(ctx, e, x, y) {
+            /* right-aligned "10" with a raised exponent, no e-notation */
+            if (e === 0) { ctx.textAlign = "right"; ctx.fillText("1", x, y); return; }
+            var ex = String(e).replace('-', '\u2212');
+            ctx.font = "10px sans-serif";
+            var we = ctx.measureText(ex).width;
+            ctx.textAlign = "right";
+            ctx.fillText(ex, x, y - 6);
+            ctx.font = "12px sans-serif";
+            ctx.fillText("10", x - we - 1, y);
         }
 
         function draw() {
@@ -2837,7 +2886,7 @@ for x_c, y_c in zip(x.split(k, dim=1), y.split(k, dim=1)):  # k steps per chunk
                 ctx.moveTo(padL, y);
                 ctx.lineTo(padL + pw, y);
                 ctx.stroke();
-                ctx.fillText(e === 0 ? "1" : "1e" + e, padL - 6, y + 4);
+                powLabel(ctx, e, padL - 6, y + 4);
             }
 
             // x ticks
@@ -2901,11 +2950,12 @@ for x_c, y_c in zip(x.split(k, dim=1), y.split(k, dim=1)):  # k steps per chunk
             ctx.arc(X(K), Y(Math.max(vmin, Math.min(vmax, vT))), 5, 0, 2 * Math.PI);
             ctx.fill();
 
-            // readout
-            var val = Math.pow(w, K);
-            var cls = val < 1e-2 ? "vanished" : (val > 1e2 ? "exploded" : "ok");
-            readout.innerHTML = "gradient at t = " + K + ": <strong>w^" + K + " = " +
-                fmt(val) + "</strong> <span class=\"tag " + cls + "\">" + cls + "</span>";
+            // readout: the verdict for the current sliders, still during Play
+            var val = Math.pow(w, T);
+            var cls = val < 0.01 ? "vanished" : (val > 100 ? "exploded" : "safe");
+            var html = "after " + T + " steps: <strong>s = w<sup>" + T + "</sup> &#8776; " +
+                fmt(val) + "</strong> <span class=\"tag " + (cls === "safe" ? "ok" : cls) + "\">" + cls + "</span>";
+            if (readout.innerHTML !== html) readout.innerHTML = html;
         }
 
         function gradStopPlay() {
@@ -2918,6 +2968,7 @@ for x_c, y_c in zip(x.split(k, dim=1), y.split(k, dim=1)):  # k steps per chunk
         if (playBtn) {
             playBtn.addEventListener('click', function() {
                 if (gradPlaying) { gradStopPlay(2000); return; }
+                if (reduceMotion) { gradStopPlay(0); return; }
                 var demo = document.getElementById('gradDemo');
                 if (demo) playScrollEnsure(demo);
                 gradPlaying = true; gradAnimK = 1;
@@ -2940,7 +2991,7 @@ for x_c, y_c in zip(x.split(k, dim=1), y.split(k, dim=1)):  # k steps per chunk
             gradStopPlay(600);
             tSlider.value = '28';
             wSlider.value = '0.90';
-            gradAnimK = null; gradFull = false;
+            gradAnimK = null; gradFull = true;
             draw();
         });
 

@@ -818,110 +818,67 @@ figcaption { margin-top: 1rem; }
 </nav>
     <p class="crumb"><a href="tutorial.html">&larr; All tutorials</a></p>
     <h1>Uncertainty Weighting</h1>
-    <p class="dek">Set each task's loss weight from the data's noise. Noisy tasks count less, automatically.</p>
-
+    <p class="dek">Uncertainty weighting learns each task&#8217;s loss weight from how noisy the task is. Noisier tasks get smaller weights.</p>
 <p>
-        A task's loss is the error score that task is trying to lower. On the <a href="gradnorm.html">GradNorm</a> page I set each task's loss weight, its volume, by watching training dynamics. Here I set them <em>from the data itself</em>: some tasks are just noisier than others, and a <em>noisy task should count less</em>.
-        The model learns exactly how much less.
+        Uncertainty weighting changes only the loss. Each task&#8217;s loss is multiplied by a weight that depends on a learned noise level <var>σ<sub>i</sub></var>, and a penalty term stops every noise level from growing without limit. The noise levels are trained every step, by the same optimizer and in the same backward pass as the network. The extra state is one number per task, and the extra cost is negligible. Where <a href="gradnorm.html">GradNorm</a> sets the weights from training speed, uncertainty weighting sets them from the data.
     </p>
-
     <p class="tabs-label">On this page</p>
     <div class="tab-strip">
-        <a class="tab-link" href="#uw-paper">Hand-tuning the weights is slow and costly</a>
-        <a class="tab-link" href="#uw-intuition">Set how loud each loss is, before touching gradients</a>
-        <a class="tab-link" href="#uw-noise">Turn down the tasks you can't trust</a>
-        <a class="tab-link" href="#uw-pricing">The noisier a task is, the smaller its weight</a>
-        <a class="tab-link" href="#uw-algorithm">One training step: measure, price, learn</a>
-        <a class="tab-link" href="#uw-fig7">Task uncertainties fall fast, then keep drifting down</a>
-        <a class="tab-link" href="#uw-training-loop">Sigma absorbs loss scale and sets the effective learning rate</a>
-        <a class="tab-link" href="#when-enough">When weighting is enough, and when it isn't</a>
-        <a class="tab-link" href="#references">References</a>
+        <a class="tab-link" href="#uw-paper"><span class="secnum">1</span> Hand-tuned loss weights</a>
+        <a class="tab-link" href="#uw-intuition"><span class="secnum">2</span> Loss weighting without gradients</a>
+        <a class="tab-link" href="#uw-noise"><span class="secnum">3</span> Task uncertainty</a>
+        <a class="tab-link" href="#uw-pricing"><span class="secnum">4</span> The uncertainty-weighted loss</a>
+        <a class="tab-link" href="#uw-algorithm"><span class="secnum">5</span> One training step</a>
+        <a class="tab-link" href="#uw-fig7"><span class="secnum">6</span> Learned uncertainties during training</a>
+        <a class="tab-link" href="#uw-training-loop"><span class="secnum">7</span> Implementation in PyTorch</a>
+        <a class="tab-link" href="#when-enough"><span class="secnum">8</span> When weighting is enough</a>
+        <a class="tab-link" href="#references"><span class="secnum">9</span> References</a>
     </div>
-
-<h2 id="uw-paper">Hand-tuning the weights is slow and costly</h2>
-    <p>Take <strong>scene understanding</strong> on Cityscapes, a benchmark dataset of street scenes: one monocular (one camera) image in, three tasks out. Per-pixel depth is a regression task, which means it predicts a number on a scale, how far away each pixel is. Instance segmentation, telling individual objects apart pixel by pixel, is regression too: for each pixel the model predicts an arrow pointing to the center of the object it belongs to. Semantic segmentation, labeling every pixel by what it shows, is a classification task, which means it picks which label fits. Different units, different scales, one shared representation, meaning one learned picture of the image that all three tasks read from.</p>
-    <p>The problem is that the loss weights strongly affect performance, and tuning them by hand is a difficult and expensive process. That can make multitask learning prohibitive in practice.</p>
-    <p>The way out, proposed by Kendall and colleagues in 2018 when they introduced uncertainty weighting, is to derive the weights from how uncertain each task is, instead of guessing them. One number per task, its <strong>task uncertainty</strong>, is learned during training as a parameter, one of the numbers training adjusts, and it tells the model how much to trust each loss.</p>
-
-    
-<h2 id="uw-intuition">Set how loud each loss is, before touching gradients</h2>
-
-    <p><a href="gradnorm.html">GradNorm</a> sets the loss weights from the size of each task's gradient, the arrow that points where that task's loss rises fastest, the direction training steps against. It measures those sizes during training, watching who falls behind. Uncertainty weighting also sets how loud each loss is, but it reads a different signal, how noisy each task's data is, and it never measures a gradient. It answers with a principle from probabilistic modeling, which treats each task's output as a probability spread over possible answers rather than one fixed answer: a loss that is inherently noisier should count less.</p>
-
-    
-<h2 id="uw-noise">Turn down the tasks you can't trust</h2>
-
-    <p>Think of each task's output as a measurement. Some measurements are crisp: given the same image, the right answer barely changes. Others are inherently fuzzy: predicting the exact depth of every pixel has a floor of guesswork no model can beat, because the information simply is not in the image. That irreducible fuzziness is task uncertainty: one learned number per task, bigger means noisier. A task with high uncertainty is one where even a perfect model would still spread probability over several answers.</p>
-
-    <p>If a task is that noisy, pushing hard on its loss is partly pushing on noise: the model chases fluctuations it cannot remove. So turn the volume down on exactly those tasks, by an amount tied to how noisy they are. Each task's weight is one over its noise squared, so a task twice as noisy counts a quarter as much. The noise levels are learned as parameters during training, not set by hand.</p>
-
-    <figure class="figure mtd-fig">
+<h2 id="uw-paper"><span class="secnum">1</span> Hand-tuned loss weights</h2>
+    <p>The paper that introduced the method, by Kendall, Gal and Cipolla (2018), uses <strong>scene understanding</strong> on Cityscapes, a dataset of street scenes. One camera image goes in and three tasks come out. <strong>Depth</strong> is a regression task: it predicts a number per pixel, the distance. <strong>Instance segmentation</strong> is also regression: for each pixel it predicts a vector pointing to the center of its object. <strong>Semantic segmentation</strong> is classification: it picks a label per pixel. The three losses have different units and scales but share one network.</p>
+    <p>The paper shows that performance depends strongly on the loss weights, and a grid search over weights is expensive. Its answer is to learn one number per task, the <strong>task uncertainty</strong>, as a parameter during training, and derive the loss weight from it.</p>
+<h2 id="uw-intuition"><span class="secnum">2</span> Loss weighting without gradients</h2>
+    <p>Like <a href="gradnorm.html">GradNorm</a>, uncertainty weighting is a <strong>loss-weighting</strong> method. Unlike GradNorm, it never measures a gradient. It treats each task&#8217;s output as a probability distribution over answers, and uses one rule from probabilistic modeling: a loss that is inherently noisier should count less.</p>
+<h2 id="uw-noise"><span class="secnum">3</span> Task uncertainty</h2>
+    <p>Some tasks have answers that are fully determined by the input. Others have a floor of error that no model can beat, because the information is not in the image; exact per-pixel depth is an example. The paper models this with one noise level <var>σ<sub>i</sub></var> per task, the same for every input, called <strong>homoscedastic</strong> task uncertainty. A larger <var>σ<sub>i</sub></var> means a noisier task. Pushing hard on a noisy loss partly fits the noise, so the loss weight falls as 1/<var>σ<sub>i</sub></var><sup>2</sup>.</p>
+    <figure class="figure mtd-fig" id="uw-fig-spread">
         <svg class="mtd-svg" viewBox="0 0 400 236" style="max-width:480px" role="img" aria-label="A crisp task's answers bunch tightly around the true value and keep full weight; a fuzzy task's answers spread twice as wide and get a quarter of the weight"><text class="" x="100.0" y="24.0" text-anchor="middle" style="font-size:18px;font-weight:700">Crisp task</text><text class="mtd-sub" x="100.0" y="46.0" text-anchor="middle" style="font-size:17px">noise 1×</text><circle class="mtd-ring" cx="100" cy="112" r="52"/><circle class="mtd-pt" cx="97.7" cy="116.6" r="3"/><circle class="mtd-pt" cx="98.0" cy="109.2" r="3"/><circle class="mtd-pt" cx="91.6" cy="110.1" r="3"/><circle class="mtd-pt" cx="110.0" cy="115.8" r="3"/><circle class="mtd-pt" cx="109.3" cy="114.2" r="3"/><circle class="mtd-pt" cx="103.6" cy="113.7" r="3"/><circle class="mtd-pt" cx="85.0" cy="119.7" r="3"/><circle class="mtd-pt" cx="104.6" cy="116.5" r="3"/><circle class="mtd-pt" cx="84.8" cy="96.3" r="3"/><circle class="mtd-pt" cx="92.0" cy="107.8" r="3"/><circle class="mtd-pt" cx="102.7" cy="111.6" r="3"/><circle class="mtd-pt" cx="104.7" cy="106.2" r="3"/><circle class="mtd-pt" cx="102.8" cy="115.5" r="3"/><circle class="mtd-pt" cx="94.0" cy="127.5" r="3"/><circle class="mtd-pt" cx="105.0" cy="122.8" r="3"/><circle class="mtd-pt" cx="94.4" cy="105.3" r="3"/><circle class="mtd-pt" cx="96.9" cy="111.0" r="3"/><circle class="mtd-pt" cx="105.7" cy="114.2" r="3"/><circle class="mtd-pt" cx="96.0" cy="103.4" r="3"/><circle class="mtd-pt" cx="95.3" cy="123.0" r="3"/><circle class="mtd-pt" cx="92.7" cy="114.2" r="3"/><circle class="mtd-pt" cx="103.8" cy="98.6" r="3"/><circle class="mtd-crossbg" cx="100" cy="112" r="9"/><line class="mtd-cross" x1="93" y1="112" x2="107" y2="112"/><line class="mtd-cross" x1="100" y1="105" x2="100" y2="119"/><line class="mtd-cross" x1="60" y1="176" x2="70" y2="176"/><line class="mtd-cross" x1="65" y1="171" x2="65" y2="181"/><text class="mtd-sub" x="75" y="181" text-anchor="start" style="font-size:15px">true value</text><rect class="mtd-barbg" x="30" y="188" width="140" height="18" rx="3"/><rect class="mtd-bar" x="30" y="188" width="140.0" height="18" rx="3"/><text class="mtd-pu" x="100.0" y="228.0" text-anchor="middle" style="font-size:17px;font-weight:600">weight 1</text><text class="" x="300.0" y="24.0" text-anchor="middle" style="font-size:18px;font-weight:700">Fuzzy task</text><text class="mtd-sub" x="300.0" y="46.0" text-anchor="middle" style="font-size:17px">noise 2×</text><circle class="mtd-ring" cx="300" cy="112" r="52"/><circle class="mtd-pt" cx="295.4" cy="121.2" r="3"/><circle class="mtd-pt" cx="295.9" cy="106.3" r="3"/><circle class="mtd-pt" cx="283.3" cy="108.2" r="3"/><circle class="mtd-pt" cx="320.0" cy="119.6" r="3"/><circle class="mtd-pt" cx="318.7" cy="116.5" r="3"/><circle class="mtd-pt" cx="307.1" cy="115.3" r="3"/><circle class="mtd-pt" cx="270.0" cy="127.4" r="3"/><circle class="mtd-pt" cx="309.1" cy="121.0" r="3"/><circle class="mtd-pt" cx="269.6" cy="80.6" r="3"/><circle class="mtd-pt" cx="284.0" cy="103.6" r="3"/><circle class="mtd-pt" cx="305.5" cy="111.2" r="3"/><circle class="mtd-pt" cx="309.4" cy="100.4" r="3"/><circle class="mtd-pt" cx="305.6" cy="119.1" r="3"/><circle class="mtd-pt" cx="288.1" cy="142.9" r="3"/><circle class="mtd-pt" cx="310.0" cy="133.5" r="3"/><circle class="mtd-pt" cx="288.8" cy="98.7" r="3"/><circle class="mtd-pt" cx="293.8" cy="110.1" r="3"/><circle class="mtd-pt" cx="311.4" cy="116.5" r="3"/><circle class="mtd-pt" cx="291.9" cy="94.8" r="3"/><circle class="mtd-pt" cx="290.6" cy="134.0" r="3"/><circle class="mtd-pt" cx="285.5" cy="116.4" r="3"/><circle class="mtd-pt" cx="307.7" cy="85.2" r="3"/><circle class="mtd-crossbg" cx="300" cy="112" r="9"/><line class="mtd-cross" x1="293" y1="112" x2="307" y2="112"/><line class="mtd-cross" x1="300" y1="105" x2="300" y2="119"/><circle class="mtd-pt" cx="273" cy="176" r="3"/><text class="mtd-sub" x="281" y="181" text-anchor="start" style="font-size:15px">answers</text><rect class="mtd-barbg" x="230" y="188" width="140" height="18" rx="3"/><rect class="mtd-bar" x="230" y="188" width="35.0" height="18" rx="3"/><text class="mtd-pu" x="300.0" y="228.0" text-anchor="middle" style="font-size:17px;font-weight:600">weight ¼</text><line class="mtd-sep" x1="200" y1="8" x2="200" y2="232"/></svg>
-        <figcaption class="caption">Twice the spread, a quarter of the weight.</figcaption>
+        <figcaption class="caption"><span class="fignum">Figure 1.</span> A task with twice the noise <var>σ</var> gets a quarter of the loss weight, because the weight is 1/(2<var>σ</var><sup>2</sup>).</figcaption>
     </figure>
-
-    <p>Then each task pays a small <strong>honesty price</strong> for claiming to be noisy. The model may quiet a task, but it pays a price for the privilege, so it only quiets tasks that truly are noisy. Without the price, the cheapest move would be inflating every noise level to infinity and paying nothing. And a confident task gets a small rebate for claiming to be easy.</p>
-
-    
-<h2 id="uw-pricing">The noisier a task is, the smaller its weight</h2>
+    <p>The weight alone would let the model declare every task infinitely noisy and pay no loss at all. A <strong>penalty term</strong>, log <var>σ<sub>i</sub></var>, grows with the noise level and prevents this.</p>
+<h2 id="uw-pricing"><span class="secnum">4</span> The uncertainty-weighted loss</h2>
 <div class="eq-card" id="uwEqStatic">
-        <div class="eq-what">One training step, priced in two forms: each task's loss is discounted by its learned noise, plus an honesty price that keeps the noise honest. The first line is regression, the second classification.</div>
+        <div class="eq-what">Each task&#8217;s loss is divided by a learned noise term, plus a penalty log <var>σ<sub>i</sub></var>. The first line is for regression tasks, the second for classification tasks.</div>
         <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="L" style="color:#2c3e50">L</span> = <span class="eqt" data-k="sum" style="color:#2c3e50">&#931;<sub>i</sub></span> (<span class="frac"><span class="top"><span class="eqt" data-k="loss" style="color:#2c3e50">L<sub>i</sub></span></span><span class="bot"><span class="eqt" data-k="w" style="color:#2c3e50">2&#963;<sub>i</sub>&#178;</span></span></span> + <span class="eqt" data-k="price" style="color:#5d6d7e">log &#963;<sub>i</sub></span>)</div>
-        <div class="eq-why eq-active" data-eqline="0">The total bill <span class="eqt" style="color:#2c3e50">L</span> is Σ<sub>i</sub>, the sum over all tasks i, of two parts per task. The first part is task i's loss <span class="eqt" style="color:#2c3e50">L<sub>i</sub></span>, how wrong task i is, divided by twice its squared noise, where σ<sub>i</sub> (read as sigma) is task i's learned noise level. So the noisier task gets the smaller share. The second part is <span class="eqt" style="color:#5d6d7e">log σ<sub>i</sub></span>, the honesty price. Log is the logarithm. It grows far more slowly than the noise itself, and it goes negative when the noise is below 1, which is the small rebate a confident task gets.</div>
+        <div class="eq-why eq-active" data-eqline="0">The total loss <span class="eqt" style="color:#2c3e50"><var>L</var></span> sums over every task <var>i</var>. <span class="eqt" style="color:#2c3e50"><var>L<sub>i</sub></var></span> is task <var>i</var>&#8217;s loss and <var>σ<sub>i</sub></var> (sigma) its learned noise level, so the loss weight is 1/(2<var>σ<sub>i</sub></var>&#178;): twice the noise, a quarter of the weight. On its own this term would push every <var>σ<sub>i</sub></var> to infinity, where every loss costs nothing. The penalty <span class="eqt" style="color:#5d6d7e">log <var>σ<sub>i</sub></var></span> grows with <var>σ<sub>i</sub></var> and stops that; below <var>σ<sub>i</sub></var> = 1 it is negative. The two terms balance where <var>σ<sub>i</sub></var>&#178; equals <var>L<sub>i</sub></var>, so the learned noise level follows the size of the task&#8217;s loss.</div>
         <div class="eq-line eq-active" data-eqline="1"><span class="eqt" data-k="L" style="color:#2c3e50">L</span> &#8776; <span class="eqt" data-k="sum" style="color:#2c3e50">&#931;<sub>i</sub></span> (<span class="frac"><span class="top"><span class="eqt" data-k="loss" style="color:#2c3e50">L<sub>i</sub></span></span><span class="bot"><span class="eqt" data-k="w" style="color:#2c3e50">&#963;<sub>i</sub>&#178;</span></span></span> + <span class="eqt" data-k="price" style="color:#5d6d7e">log &#963;<sub>i</sub></span>)</div>
-        <div class="eq-why eq-active" data-eqline="1">The classification line is an approximation, so it uses &#8776;, approximately equal: Kendall and colleagues reach it with a simplifying step that is exact only when &#963;<sub>i</sub> is 1. It reads the same way as the first line, and only the denominator changes: the factor of one half belongs only to regression, so in this line the classification weight is double the same-sigma regression weight. The honesty price <span class="eqt" style="color:#5d6d7e">log σ<sub>i</sub></span> works the same for both. Σ<sub>i</sub> again names the sum over all tasks.</div>
+        <div class="eq-why eq-active" data-eqline="1">A classification task has no factor 2 in the denominator, so at the same <var>σ<sub>i</sub></var> its loss weighs twice as much as a regression loss. The &#8776; is there because the paper derives this line with an approximation that is exact at <var>σ<sub>i</sub></var> = 1. The penalty is the same.</div>
       </div>
-    <p>Below, depth and instance are priced by the regression line and semantics by the classification line, with every loss set to 1. The honesty prices count toward the total bill but not toward the shares of the discounted losses.</p>
-
     <div class="demo" id="uncDemo">
 
         <div class="unc-row" id="uncRow2">
-            <label class="unc-lab" for="uncS2"><span class="unc-dot" style="background:#8ab2d1"></span>Depth noise σ = <span id="uncS2Val">2.40</span></label>
+            <label class="unc-lab" for="uncS2"><span class="unc-dot" style="background:#8ab2d1"></span>Depth noise <var>σ</var> = <span id="uncS2Val">2.40</span></label>
             <input type="range" id="uncS2" min="0.3" max="3" step="0.05" value="2.4" aria-label="Depth regression noise sigma">
             <div class="unc-read" id="uncR2"></div>
         </div>
 
-        <p class="unc-share-label">Share of the discounted losses (who gets heard)</p>
+        <p class="unc-share-label">Share of the weighted losses</p>
         <div class="unc-bar" id="uncBar" aria-hidden="true">
             <div class="unc-seg" id="uncB0" style="background:#c6a1ce"></div>
             <div class="unc-seg" id="uncB1" style="background:#aaf7b3"></div>
             <div class="unc-seg" id="uncB2" style="background:#8ab2d1"></div>
         </div>
         <div class="unc-legend">
-            <span><span class="unc-dot" style="background:#c6a1ce"></span>Semantics, σ = 0.70, <b id="uncL0"></b></span>
-            <span><span class="unc-dot" style="background:#aaf7b3"></span>Instance, σ = 1.50, <b id="uncL1"></b></span>
+            <span><span class="unc-dot" style="background:#c6a1ce"></span>Semantics, <var>σ</var> = 0.70, <b id="uncL0"></b></span>
+            <span><span class="unc-dot" style="background:#aaf7b3"></span>Instance, <var>σ</var> = 1.50, <b id="uncL1"></b></span>
             <span><span class="unc-dot" style="background:#8ab2d1"></span>Depth <b id="uncL2"></b></span>
-            <span class="unc-total">Total bill L (every loss 1): <b id="uncTotal"></b></span>
+            <span class="unc-total">Total loss <var>L</var> (every loss 1): <b id="uncTotal"></b></span>
         </div>
-        <svg class="unc-curve" id="uncCurve" viewBox="0 0 300 120" role="img" aria-label="Total bill against depth noise: it falls, bottoms out at noise 1, then rises again"></svg>
+        <svg class="unc-curve" id="uncCurve" viewBox="0 0 300 120" role="img" aria-label="Total loss against depth noise: it falls, bottoms out at noise 1, then rises again"></svg>
+        <p class="caption"><span class="fignum">Figure 2.</span> Depth and instance use the regression line of the eq card in <a href="#uw-pricing">Section 4</a>, semantics the classification line, with every loss set to 1. The bar shares leave out the log <var>σ</var> penalties; the curve shows the total loss <var>L</var> as depth&#8217;s <var>σ</var> changes.</p>
     </div>
-<p class="caption">Ten times the noise, a hundredth of the weight: the rule is quadratic.</p>
-
-    
-
-    
-<h2 id="uw-algorithm">One training step: measure, price, learn</h2>
-
-    <p>One training step ends with one backward pass, which works out a gradient for every parameter, showing which way the total rises fastest. Then the optimizer, the routine that moves each parameter the other way, takes one step. The listing stores each task's noise as log &#963;, the logarithm of &#963; (Kendall and colleagues store log &#963;&#178;, the same number doubled). Exponentiating twice log &#963; gives &#963; squared back, and log &#963; itself is the honesty price.</p>
-
-    <pre><code class="language-python"># K = number of tasks
-# log_sigma = learnable vector, one entry per task, init 0
-# (regression form shown; classification uses w_i = 1 / sigma2, no 1/2)
-total = 0
-for i in range(K):
-    sigma2 = exp(2 * log_sigma[i])   # sigma_i^2, always positive
-    w_i = 1 / (2 * sigma2)           # the volume knob, the task's loss weight
-    total += w_i * losses[i] + log_sigma[i]  # loss + the honesty price
-backward(total)   # one pass updates network AND log_sigma
-step(optimizer)   # network and sigmas learn together</code></pre>
-
-    <p>There is no separate tuning loop. The method adds one learned noise level per task to the loss, and those noise levels get their gradients from the same backward pass as the network.</p>
-
-    <p>The walkthrough runs one step on the three Cityscapes tasks with every loss at <code>1.0</code> and made-up noise levels: semantics <code>0.7</code> (classification), instance <code>1.5</code> and depth <code>2.4</code> (regression).</p>
-
-
-    
-
+<h2 id="uw-algorithm"><span class="secnum">5</span> One training step</h2>
+    <p>There is no separate tuning loop. The weighted losses and penalties are summed into one total, and one backward pass gives gradients to the network and the noise levels together. The code is in <a href="#uw-training-loop">Section 7</a>.</p>
     <div class="demo" id="uwStep">
 <style>
       .uw-dots{display:flex;gap:10px;justify-content:center;margin:0 0 0.6rem}
@@ -967,6 +924,30 @@ step(optimizer)   # network and sigmas learn together</code></pre>
         margin:0 .25em 0 .6em;vertical-align:baseline}
 
       @media (max-width:480px){.eq-card{padding:.85rem .9rem}.eq-line{font-size:1.24rem;line-height:1.95}}
+/* P70 inline variables and inline code, one style site-wide (VAR-STYLE.md v2) */
+var,.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic;font-weight:400;font-size:1em;color:#1d4e89;background:#edf3fa;border-radius:3px;padding:0 .18em;white-space:nowrap;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+var sub,var sup,.mvar sub,.mvar sup{font-size:.72em;font-style:normal}
+pre var,code var,.eq-line var{font:inherit;color:inherit;background:none;padding:0}
+svg text.mvar,svg tspan.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic}
+:not(pre)>code:not(.eq-line code){font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,Courier,monospace;font-size:.86em;color:#24292f;background:#f1f3f5;border:1px solid #dfe3e8;border-radius:4px;padding:.06em .32em;white-space:normal;overflow-wrap:anywhere}
+/* P79 numbering (NUMBERING.md) */
+.secnum{font-variant-numeric:tabular-nums;margin-right:.4em;color:inherit;font-weight:inherit}
+.tab-strip .secnum{margin-right:.3em;opacity:.75}
+.fignum{font-weight:600;margin-right:.3em;font-variant-numeric:tabular-nums}
+/* P80 code sections (CODE-SECTIONS.md) */
+pre.cs{position:relative;background-attachment:local;padding-left:20px}
+pre.cs code{display:block;line-height:1.55}
+pre.cs .cs-g{position:absolute;left:3px;width:11px;text-align:center;font:700 11px/1 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;-webkit-user-select:none;user-select:none;pointer-events:none}
+pre.cs .cs-g::before{content:attr(data-n)}
+ol.cs-notes{list-style:none;padding-left:0;margin:-.4em 0 1em}
+ol.cs-notes li{margin:0 0 .3em;padding-left:1.9em;position:relative}
+ol.cs-notes .cs-n{position:absolute;left:0;top:.1em;min-width:1.35em;padding:0 .25em;border-radius:4px;font:700 .8em/1.45 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;text-align:center;color:#0d1117}
+ol.cs-notes li:nth-child(6n+1) .cs-n{background:#79b8ff}
+ol.cs-notes li:nth-child(6n+2) .cs-n{background:#ffab70}
+ol.cs-notes li:nth-child(6n+3) .cs-n{background:#85e89d}
+ol.cs-notes li:nth-child(6n+4) .cs-n{background:#d2a8ff}
+ol.cs-notes li:nth-child(6n+5) .cs-n{background:#ffa198}
+ol.cs-notes li:nth-child(6n+6) .cs-n{background:#76e3ea}
       /* diagram-side dim/highlight (SVG/DOM). Do NOT use .hl/.dim: taken. */
       .eq-dim{opacity:.32}
       .eq-hl{filter:drop-shadow(0 0 3px currentColor)}
@@ -996,6 +977,7 @@ step(optimizer)   # network and sigmas learn together</code></pre>
         <button type="button" class="play-btn" id="uwNext">Next</button>
       </div>
 <svg id="uwSvg" viewBox="0 0 360 370" role="img" aria-label="Step-through of one uncertainty-weighting update on three tasks: the optimizer, the network, three noise dials, their weight bars and the total loss, all shown on every step" style="width:100%;max-width:470px;height:auto;display:block;margin:0 auto;"></svg>
+<p class="caption"><span class="fignum">Figure 3.</span> One step on the three Cityscapes tasks, every loss 1.0, with example noise levels: semantics 0.7 (classification), instance 1.5 and depth 2.4 (regression).</p>
 <p id="uwOutcome" aria-live="polite"></p>
 <style>
       /* Round 13: one unbroken underline under each highlighted term, set
@@ -1010,10 +992,10 @@ step(optimizer)   # network and sigmas learn together</code></pre>
       #uwSvg g.eq-hl :is(rect,path,polyline,polygon,line,circle) { filter: drop-shadow(0 0 3px currentColor); }
 </style>
 <div class="eq-card" id="uwStepEq">
-        <div class="eq-what">One training step, priced.</div>
+        <div class="eq-what">The total loss of the walkthrough: one bracket per task, each a weighted loss plus the penalty log <var>σ</var>.</div>
         <div class="eq-line" data-eqline="0" id="uwEqLine"></div>
-        <div class="eq-why" data-eqline="0">The total bill L adds one bracket per task. Each bracket is that task's loss times its weight, plus its honesty price log σ<sub>i</sub>. Semantics is classification, so its weight is about one over its squared noise. Instance and depth are regression, so each of their weights is one over twice the squared noise. Either way, the noisier the task, the smaller its weight. The price stops the model from quieting a task just by claiming it is noisy.</div>
-        <div class="eq-legend"><span class="eq-item" data-terms="loss,w,price"><code>sem, inst, depth</code> the semantics, instance and depth tasks, named in the diagram</span><span class="eq-item" data-terms="loss,w,price"><code>L<sub>i</sub></code> task i's loss, how wrong task i is</span><span class="eq-item" data-terms="loss,w,price"><code>σ<sub>i</sub></code> task i's learned noise: the dial the model turns for task i</span><span class="eq-item" data-terms="w,price"><span class="eq-sw" style="background:#5d6d7e"></span><code>log σ<sub>i</sub></code> the honesty price: stops the noise dial from maxing out</span><span class="eq-item" data-terms="sum,L"><span class="eq-sw" style="background:#2c3e50"></span><code>L</code> the total bill: all tasks together</span><span class="eq-item"><code>Σ<sub>inst, depth</sub></code> add the instance and depth brackets</span></div>
+        <div class="eq-why" data-eqline="0">Semantics is classification, so its loss is divided by <var>σ<sub>sem</sub></var>&#178;; instance and depth are regression, so theirs are divided by 2<var>σ</var>&#178;. A larger <var>σ</var> gives a smaller weight, and the penalty log <var>σ</var> grows with <var>σ</var>, so <var>σ</var> rises only when that lowers the total.</div>
+        <div class="eq-legend"><span class="eq-item" data-terms="loss,w,price"><code>sem, inst, depth</code> the semantics, instance and depth tasks, named in the diagram</span><span class="eq-item" data-terms="loss,w,price"><var>L<sub>i</sub></var> task <var>i</var>'s loss, how wrong task <var>i</var> is</span><span class="eq-item" data-terms="loss,w,price"><var>σ<sub>i</sub></var> task <var>i</var>&#8217;s learned noise level</span><span class="eq-item" data-terms="w,price"><span class="eq-sw" style="background:#5d6d7e"></span>log <var>σ<sub>i</sub></var> the penalty that stops <var>σ<sub>i</sub></var> from growing without limit</span><span class="eq-item" data-terms="sum,L"><span class="eq-sw" style="background:#2c3e50"></span><var>L</var> the total loss over all tasks</span><span class="eq-item">Σ<sub>inst, depth</sub> add the instance and depth brackets</span></div>
       </div></div>
 
 
@@ -1022,50 +1004,25 @@ step(optimizer)   # network and sigmas learn together</code></pre>
 
 
     
-<h2 id="uw-fig7">Task uncertainties fall fast, then keep drifting down</h2>
-
-    <p>Kendall and colleagues trained one network on the three Cityscapes tasks for a hundred thousand iterations, where one iteration is one training step. The uncertainty is plotted as σ², the noise level squared. All three uncertainties fall fast early in training and then keep drifting down slowly for the rest of the run; the instance task's keeps falling the longest. Nobody set them by hand.</p>
-
-    <style>
-      /* Crops of a published paper figure (same pattern as the GradNorm
-         Figure 2 crops): the full figure is too small to read at any page
-         width, so the same image is shown one column per figure, at every
-         width. On phones each crop runs the full screen width. */
-      .pf-phone { display: block; margin: 1.75rem 0; }
-      .pf-phone:has(+ p.caption) { margin-bottom: 0; }
-      .pf-phone:has(+ p.caption) > figcaption:last-child { margin-bottom: 0; }
-      p.caption.pf-phone { margin: 1rem auto 1.5em auto; }
-      .pf-wrap { border-radius: 8px; border: 1px solid #e9ecef; background: #fff; overflow: hidden; }
-      .pf-row { position: relative; overflow: hidden; margin: 0 auto; width: 100%; }
-      .pf-row + .pf-row { border-top: 1px solid #e9ecef; }
-      .pf-row img { position: absolute; height: auto; display: block; max-width: none; }
-      @media (min-width: 481px) {
-        #uwFig7a .pf-wrap, #uwFig7b .pf-wrap, #uwFig7c .pf-wrap { max-width: min(480px, calc((100vh - 190px) / 1.71)); margin: 0 auto; }
-      }
-      @media (max-width: 480px) {
-        #uwFig7a .pf-wrap, #uwFig7b .pf-wrap, #uwFig7c .pf-wrap { width: 100vw; margin-left: calc(50% - 50vw); border-radius: 0; border-left: 0; border-right: 0; }
-        /* Round 22: sized by height too, so each crop plus its caption fits in 90vh. */
-        #uwFig7a .pf-wrap, #uwFig7b .pf-wrap { width: min(100vw, calc((90vh - 100px) / 1.71)); margin-left: calc(50% - min(50vw, calc((90vh - 100px) / 3.42))); }
-        #uwFig7c .pf-wrap { width: min(100vw, calc((90vh - 125px) / 1.71)); margin-left: calc(50% - min(50vw, calc((90vh - 125px) / 3.42))); }
-      }
-    </style>
+<h2 id="uw-fig7"><span class="secnum">6</span> Learned uncertainties during training</h2>
+    <p>In the paper&#8217;s final model, trained on full-size Cityscapes, nobody sets the noise levels by hand. The figures plot the uncertainty as <var>σ</var><sup>2</sup>.</p>
     <figure class="pf-phone" id="uwFig7a">
       <div class="pf-wrap">
         <div class="pf-row" style="aspect-ratio:598 / 1016"><img src="figures/papers/uncertainty-fig7-full.png" alt="Column (a): semantic segmentation loss on top and its learned task uncertainty below, over 100,000 training iterations" style="width:328.93%;left:-2.68%;top:-1.38%"></div>
       </div>
-      <figcaption>Semantic segmentation: loss on top, uncertainty σ² below. Cropped from Figure 7 of Kendall et al. 2018 (CVPR).</figcaption>
+      <figcaption><span class="fignum">Figure 4.</span> Semantic segmentation: loss on top, uncertainty <var>σ</var>² below. Cropped from the paper&#8217;s Figure 7.</figcaption>
     </figure>
     <figure class="pf-phone" id="uwFig7b">
       <div class="pf-wrap">
         <div class="pf-row" style="aspect-ratio:594 / 1016"><img src="figures/papers/uncertainty-fig7-full.png" alt="Column (b): instance segmentation loss on top and its learned task uncertainty below, over 100,000 training iterations" style="width:331.14%;left:-116.84%;top:-1.38%"></div>
       </div>
-      <figcaption>Instance segmentation: loss on top, uncertainty σ² below. Cropped from Figure 7 of Kendall et al. 2018 (CVPR).</figcaption>
+      <figcaption><span class="fignum">Figure 5.</span> Instance segmentation: loss on top, uncertainty <var>σ</var>² below. Cropped from the paper&#8217;s Figure 7.</figcaption>
     </figure>
     <figure class="pf-phone" id="uwFig7c">
       <div class="pf-wrap">
         <div class="pf-row" style="aspect-ratio:594 / 1016"><img src="figures/papers/uncertainty-fig7-full.png" alt="Column (c): depth regression loss on top and its learned task uncertainty below, over 100,000 training iterations" style="width:331.14%;left:-230.30%;top:-1.38%"></div>
       </div>
-      <figcaption>Depth regression: loss on top, uncertainty σ² below. Cropped from Figure 7 of Kendall et al. 2018 (CVPR). <a href="https://arxiv.org/abs/1705.07115">arXiv:1705.07115</a></figcaption>
+      <figcaption><span class="fignum">Figure 6.</span> Depth regression: loss on top, uncertainty <var>σ</var>² below. Cropped from the paper&#8217;s Figure 7. <a href="https://arxiv.org/abs/1705.07115">arXiv:1705.07115</a></figcaption>
     </figure>
     <p class="caption pf-phone">The paper's caption for the whole figure reads &#8220;<strong>Learning task uncertainty.</strong> These training plots show the losses and task uncertainty estimates for each task during training. Results are shown for the final model, trained on the fullsize CityScapes dataset.&#8221;</p>
 
@@ -1073,52 +1030,77 @@ step(optimizer)   # network and sigmas learn together</code></pre>
 
 
     
-<h2 id="uw-training-loop">Sigma absorbs loss scale and sets the effective learning rate</h2>
+<h2 id="uw-training-loop"><span class="secnum">7</span> Implementation in PyTorch</h2>
+    <p>The method runs every training step on that step&#8217;s batch. Its state is <var>K</var> numbers. Its cost is a few extra operations on <var>K</var> numbers, with no extra backward pass. The weight multiplies the whole task loss, so the heads also receive gradients scaled by the weight (<a href="multitask-training-loop.html#task-gradients">Gradient Balancing Inside the Training Loop</a> compares this with methods that edit only the shared gradients).</p>
+    <p>The code learns <var>s<sub>i</sub></var> = log <var>σ<sub>i</sub></var><sup>2</sup> instead of <var>σ<sub>i</sub></var>; the paper does this because it is &#8220;more numerically stable&#8221; and avoids division by zero. Then 1/<var>σ<sub>i</sub></var><sup>2</sup> is <code>exp(-s)</code> and log <var>σ<sub>i</sub></var> is <var>s</var>/2. <code>REG</code> marks the regression tasks (instance and depth here), whose weight gets the extra factor &#189;. <code>losses</code> are batch means, as in the paper.</p>
+    <pre class="cs" data-cs="5-9,10-11,14-16,17-19"><code class="language-python">import torch
+import torch.nn as nn
+from torch.optim import Adam
 
-    <p>Uncertainty weighting acts through the loss, and one optimizer step trains the network and the log sigmas together.</p>
-    <pre><code class="language-python"># log_var[k] = log sigma_k squared,
-# learned with the network
-log_var = nn.Parameter(torch.zeros(K))
-# L / (2 sigma^2) + log sigma; the
-# best sigma^2 equals the loss, so a
-# sum instead of a mean grows sigma
-loss = sum(
-    0.5 * torch.exp(-log_var[k]) * L[k]
-    + 0.5 * log_var[k]
-    for k in range(K))
-loss.backward()
-# under SGD a falling sigma raises
-# the task's effective lr
-opt.step()</code></pre>
-    <figure class="t1f-wrap"><svg class="t1f-svg" focusable="false" viewBox="0 0 274 412" role="img" aria-label="One training step: forward, backward, balance, clip, optimizer step, log"><g class="t1f-part t1f-on"><rect class="t1f-box t1f-box-fwd" x="14" y="10" width="246" height="62" rx="10" ry="10"/><text class="t1f-title" x="26" y="31" text-anchor="start" style="font-size:15px;font-weight:700">1 &#183; Forward</text><text class="t1f-sub" x="26" y="47" text-anchor="start" style="font-size:13px">each task computes its loss</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-bwd" x="14" y="92" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="113" text-anchor="start" style="font-size:15px;font-weight:700">2 &#183; Backward</text><text class="t1f-sub" x="26" y="129" text-anchor="start" style="font-size:13px">per-task gradients, shared layers</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-bal" x="14" y="158" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="179" text-anchor="start" style="font-size:15px;font-weight:700">3 &#183; Balance</text><text class="t1f-sub" x="26" y="195" text-anchor="start" style="font-size:13px">combine the task gradients</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-clip" x="14" y="224" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="245" text-anchor="start" style="font-size:15px;font-weight:700">4 &#183; Clip</text><text class="t1f-sub" x="26" y="261" text-anchor="start" style="font-size:13px">cap the gradient's length</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-opt" x="14" y="290" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="311" text-anchor="start" style="font-size:15px;font-weight:700">5 &#183; Optimizer step</text><text class="t1f-sub" x="26" y="327" text-anchor="start" style="font-size:13px">update the network's parameters</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-log" x="14" y="356" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="377" text-anchor="start" style="font-size:15px;font-weight:700">6 &#183; Log</text><text class="t1f-sub" x="26" y="393" text-anchor="start" style="font-size:13px">record what this step did</text></g><g class="t1f-part t1f-on"><rect class="t1f-chip-lw" x="22" y="52" width="230" height="17" rx="4"/><text class="t1f-chiptext" x="28" y="65" text-anchor="start" style="font-size:12px">loss-weighting methods act here</text></g><g class="t1f-part t1f-dim"><rect class="t1f-chip-gm" x="112" y="166" width="140" height="16" rx="4"/><text class="t1f-chiptext-w" x="182" y="178" text-anchor="middle" textLength="130" lengthAdjust="spacingAndGlyphs" style="font-size:11px;font-weight:700">gradient methods act here</text></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="72" x2="54" y2="82" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,92 48.5,82 59.5,82"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="138" x2="54" y2="148" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,158 48.5,148 59.5,148"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="204" x2="54" y2="214" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,224 48.5,214 59.5,214"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="270" x2="54" y2="280" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,290 48.5,280 59.5,280"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="336" x2="54" y2="346" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,356 48.5,346 59.5,346"/></g></svg><figcaption class="t1f-cap">Weights set in the loss reach every gradient after backward.</figcaption></figure>
+# s[i] = log sigma_i^2
+s = nn.Parameter(torch.zeros(K))
+params = list(model.parameters())
+params.append(s)
+opt = Adam(params, lr=lr)
+# 1 marks a regression task
+REG = torch.tensor([0., 1., 1.])
 
-    <p><a href="multitask-training-loop.html">Gradient Balancing Inside the Training Loop</a> covers these, and what Adam and weight decay do to the log sigmas, in its sections <a href="multitask-training-loop.html#sigma-lr">&#8220;As sigma falls, a task's effective learning rate rises under SGD&#8221;</a> and <a href="multitask-training-loop.html#weight-decay">&#8220;Weight decay skips the balancer, unless it decays the balancer's own numbers&#8221;</a>.</p>
-
-<h2 id="when-enough">When weighting is enough, and when it isn't</h2>
-
-    <p>GradNorm and uncertainty weighting are both <strong>scale methods</strong>: they change how loud each loss is, never what the gradients say. GradNorm learns the volumes from training dynamics; uncertainty weighting sets them from the data. Both beat fixed weights found by search. Kendall and colleagues trained on the three Cityscapes tasks at a reduced image size, and uncertainty weighting scored better on all three than an equal-weight sum and than near-optimal fixed weights from a grid search, which tries candidate values on a grid. Chen and colleagues trained 100 networks on NYUv2, a dataset of indoor scenes, each with random fixed weights, and the best still fell short of GradNorm at the same training step.</p>
-
-    <p>Uncertainty weighting can also be <strong>stacked</strong> with a gradient method, because it only ever sees losses. Weight the losses by learned uncertainty, then run a gradient method on the resulting gradients, such as <a href="pcgrad.html">PCGrad</a>, which cuts the part of one task's gradient that fights another, or <a href="cagrad.html">CAGrad</a>, which favors the worst-off task in each step. The learned noise levels handle scale while the gradient method handles direction.</p>
-
-    <p>And that is the boundary. Neither weighting method fixes <strong>direction</strong>. Two tasks can be perfectly weighted by noise and still have gradients that point against each other. Uncertainty weighting never looks at gradients; GradNorm measures only their lengths, never their angles.</p>
-
-    <p>The two weighting methods, the volume knobs that learn each task's loss weight (GradNorm and Uncertainty Weighting), and the four gradient methods, PCGrad, GradVac, CAGrad, and MGDA, which stops at a Pareto-stationary point (where no small step lowers every task's loss at once), side by side:</p>
-
+def uw_step(losses):
+    L = torch.stack(losses)
+    w = torch.exp(-s) / (1 + REG)
+    total = (w * L + s / 2).sum()
+    opt.zero_grad()
+    total.backward()
+    opt.step()</code></pre>
+    <ol class="cs-notes">
+      <li><span class="cs-n">1</span>State kept across steps: one <var>s<sub>i</sub></var> per task, trained by the same optimizer as the network.</li>
+      <li><span class="cs-n">2</span>Marks which tasks use the regression line of the eq card in <a href="#uw-pricing">Section 4</a>.</li>
+      <li><span class="cs-n">3</span>Weighted losses plus penalties: line 1 of that eq card for regression tasks, line 2 for classification.</li>
+      <li><span class="cs-n">4</span>One backward pass and one step for the network and <var>s</var> together, step 4 in <a href="#uwStep">Figure 3</a>.</li>
+    </ol>
+    <table class="cmp">
+        <thead><tr><th>Setting</th><th>Source value</th></tr></thead>
+        <tbody>
+            <tr><td>Start value of <var>s</var></td><td>0 (<var>σ</var> = 1); the paper reports the result is robust to the start value and the noise levels converge within a few hundred training iterations</td></tr>
+            <tr><td>Learning rate for <var>s</var></td><td>Not stated by the paper; the GradNorm paper used 0.025 with Adam for its uncertainty-weighting baseline</td></tr>
+            <tr><td>Training length</td><td>50,000 iterations at 128&#215;256 for the comparison runs; about 100,000 iterations in the runs of <a href="#uwFig7a">Figure 4</a>, read from its axis</td></tr>
+            <tr><td>Final loss weights</td><td>43 : 1 : 0.16 for semantics, depth and instance (full-size model)</td></tr>
+        </tbody>
+    </table>
+    <p>A larger start value of <var>s</var> starts every weight smaller, and a smaller one starts them larger; the paper found the end result insensitive to it. There is no official code. <a href="https://github.com/median-research-group/LibMTL">LibMTL</a> ships a version (<code>--weighting UW</code>) that uses the same <var>s</var> = log <var>σ</var><sup>2</sup> form with the regression factor &#189; for every task.</p>
+    <ul>
+        <li><strong>Add <var>s</var> to the optimizer.</strong> Otherwise the weights never change.</li>
+        <li><strong>Use mean losses.</strong> Each <var>σ<sub>i</sub></var><sup>2</sup> settles near its task&#8217;s loss, so a summed loss makes <var>σ</var> grow with the batch size.</li>
+        <li><strong>Expect a negative total loss.</strong> The penalty log <var>σ</var> is negative when <var>σ</var> is below 1.</li>
+        <li><strong>Check weight decay on <var>s</var>.</strong> No source we found states whether <var>s</var> gets weight decay. Decay pulls <var>s</var> toward 0, which pulls every weight toward its start value.</li>
+    </ul>
+    <figure class="t1f-wrap" id="uw-fig-loopstep"><svg class="t1f-svg" focusable="false" viewBox="0 0 274 412" role="img" aria-label="One training step: forward, backward, balance, clip, optimizer step, log"><g class="t1f-part t1f-on"><rect class="t1f-box t1f-box-fwd" x="14" y="10" width="246" height="62" rx="10" ry="10"/><text class="t1f-title" x="26" y="31" text-anchor="start" style="font-size:15px;font-weight:700">1 &#183; Forward</text><text class="t1f-sub" x="26" y="47" text-anchor="start" style="font-size:13px">each task computes its loss</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-bwd" x="14" y="92" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="113" text-anchor="start" style="font-size:15px;font-weight:700">2 &#183; Backward</text><text class="t1f-sub" x="26" y="129" text-anchor="start" style="font-size:13px">per-task gradients, shared layers</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-bal" x="14" y="158" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="179" text-anchor="start" style="font-size:15px;font-weight:700">3 &#183; Balance</text><text class="t1f-sub" x="26" y="195" text-anchor="start" style="font-size:13px">combine the task gradients</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-clip" x="14" y="224" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="245" text-anchor="start" style="font-size:15px;font-weight:700">4 &#183; Clip</text><text class="t1f-sub" x="26" y="261" text-anchor="start" style="font-size:13px">cap the gradient's length</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-opt" x="14" y="290" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="311" text-anchor="start" style="font-size:15px;font-weight:700">5 &#183; Optimizer step</text><text class="t1f-sub" x="26" y="327" text-anchor="start" style="font-size:13px">update the network's parameters</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-log" x="14" y="356" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="377" text-anchor="start" style="font-size:15px;font-weight:700">6 &#183; Log</text><text class="t1f-sub" x="26" y="393" text-anchor="start" style="font-size:13px">record what this step did</text></g><g class="t1f-part t1f-on"><rect class="t1f-chip-lw" x="22" y="52" width="230" height="17" rx="4"/><text class="t1f-chiptext" x="28" y="65" text-anchor="start" style="font-size:12px">loss-weighting methods act here</text></g><g class="t1f-part t1f-dim"><rect class="t1f-chip-gm" x="112" y="166" width="140" height="16" rx="4"/><text class="t1f-chiptext-w" x="182" y="178" text-anchor="middle" textLength="130" lengthAdjust="spacingAndGlyphs" style="font-size:11px;font-weight:700">gradient methods act here</text></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="72" x2="54" y2="82" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,92 48.5,82 59.5,82"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="138" x2="54" y2="148" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,158 48.5,148 59.5,148"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="204" x2="54" y2="214" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,224 48.5,214 59.5,214"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="270" x2="54" y2="280" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,290 48.5,280 59.5,280"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="336" x2="54" y2="346" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,356 48.5,346 59.5,346"/></g></svg><figcaption class="t1f-cap"><span class="fignum">Figure 7.</span> Weights set in the loss reach every gradient after backward.</figcaption></figure>
+    <p><a href="multitask-training-loop.html">Gradient Balancing Inside the Training Loop</a> covers how the noise levels interact with the optimizer in <a href="multitask-training-loop.html#sigma-lr">&#8220;Uncertainty and the effective learning rate&#8221;</a> and <a href="multitask-training-loop.html#weight-decay">&#8220;Weight decay&#8221;</a>.</p>
+<h2 id="when-enough"><span class="secnum">8</span> When weighting is enough</h2>
+    <p>GradNorm and uncertainty weighting both change only the loss weights. Both beat fixed weights in their papers:</p>
+    <table class="cmp">
+        <thead><tr><th>Paper</th><th>Comparison</th><th>Result</th></tr></thead>
+        <tbody>
+            <tr><td>Uncertainty weighting</td><td>Three Cityscapes tasks at 128&#215;256, against equal weights and the best fixed weights from a grid search</td><td>Better on all three tasks</td></tr>
+            <tr><td>GradNorm</td><td>NYUv2, against 100 networks with random fixed weights</td><td>The best of the 100 fell short of GradNorm at the same training step</td></tr>
+        </tbody>
+    </table>
+    <p>Uncertainty weighting can be combined with a gradient method, because it only changes the losses. The weights handle scale; a method such as <a href="pcgrad.html">PCGrad</a> or <a href="cagrad.html">CAGrad</a> then handles direction.</p>
+    <p>Neither weighting method fixes <strong>conflicting gradients</strong>, gradients that point against each other. Uncertainty weighting never looks at gradients, and GradNorm measures only their norms.</p>
+    <p>Two methods learn each task&#8217;s loss weight (GradNorm and Uncertainty Weighting). Four methods edit the task gradients (PCGrad, GradVac, CAGrad and MGDA). The question each one answers:</p>
     <table class="cmp">
         <thead><tr><th>Method</th><th>The question it answers</th></tr></thead>
         <tbody>
-            <tr><td><a href="gradnorm.html"><strong>GradNorm</strong></a></td><td>How loud should each task be, to keep progress balanced? (learned, driven by training dynamics)</td></tr>
-            <tr><td><strong>Uncertainty Weighting</strong> (this page)</td><td>How loud should each task be, given how noisy it inherently is? (learned, driven by the data)</td></tr>
-            <tr><td><a href="pcgrad.html"><strong>PCGrad</strong></a></td><td>How should the directions be edited so tasks stop fighting?</td></tr>
-            <tr><td><a href="gradvac.html"><strong>GradVac</strong></a></td><td>How should each pair of tasks be nudged back to the agreement level where it learns best?</td></tr>
-            <tr><td><a href="cagrad.html"><strong>CAGrad</strong></a></td><td>How do we protect the worst-off task and stay near the average, with a guarantee?</td></tr>
-            <tr><td><a href="mgda.html"><strong>MGDA</strong></a></td><td>What direction helps every task at once, and where does the run stop?</td></tr>
+            <tr><td><a href="gradnorm.html"><strong>GradNorm</strong></a></td><td>How much weight should each task's loss get so all tasks train at a similar rate? (learned during training from how fast each loss falls)</td></tr>
+            <tr><td><strong>Uncertainty Weighting</strong> (this page)</td><td>How much weight should each task's loss get, given how noisy that task's targets are? (the noise level is learned along with the model)</td></tr>
+            <tr><td><a href="pcgrad.html"><strong>PCGrad</strong></a></td><td>How should a task gradient be edited when it conflicts with another task's gradient?</td></tr>
+            <tr><td><a href="gradvac.html"><strong>GradVac</strong></a></td><td>How should each pair of task gradients be moved toward a target cosine, a running average of that pair's past cosines?</td></tr>
+            <tr><td><a href="cagrad.html"><strong>CAGrad</strong></a></td><td>How do we raise the smallest per-task improvement while staying near the average gradient, with a convergence guarantee?</td></tr>
+            <tr><td><a href="mgda.html"><strong>MGDA</strong></a></td><td>Which blend of task gradients lowers every task's loss at once, and when does no such blend exist?</td></tr>
         </tbody>
     </table>
-
-    <p>The volume knobs are balanced. But what if the directions themselves fight? That is <a href="pcgrad.html">the PCGrad page's question</a>.</p>
-
-<h2 id="references">References</h2>
+    <p>When the weights are right but the gradients still conflict, <a href="pcgrad.html">PCGrad</a> edits the directions.</p>
+<h2 id="references"><span class="secnum">9</span> References</h2>
 
     <ol class="brefs">
         <li>Kendall, A., et al. (2018). Multi-Task Learning Using Uncertainty to Weigh Losses for Scene Geometry and Semantics. CVPR. arXiv:<a href="https://arxiv.org/abs/1705.07115">1705.07115</a>.</li>
@@ -1158,8 +1140,8 @@ opt.step()</code></pre>
                 /* Each readout always shows that task's own taught form.
                    Instance and depth (i = 1, 2) are regression, 1/(2 sigma^2);
                    semantics is classification, 1/(sigma^2). */
-                var wform = i === 0 ? "1/σ²" : "1/(2σ²)";
-                if (reads[i]) reads[i].textContent = "weight " + wform + " = " + fmt(mw[i], 2) + "  ·  honesty price log σ = " + fmt(p, 2).replace("-", "\u2212");
+                var wform = i === 0 ? "1/<var>σ</var>²" : "1/(2<var>σ</var>²)";
+                if (reads[i]) reads[i].innerHTML = "weight " + wform + " = " + fmt(mw[i], 2) + "  ·  penalty log <var>σ</var> = " + fmt(p, 2).replace("-", "\u2212");
                 if (i === 2) document.getElementById("uncS2Val").textContent = fmt(sig[i], 2);
                 segs[i].style.width = (100 * mw[i] / totalW) + "%";
                 legs[i].textContent = fmt(tenths[i] / 10, 1) + "%";
@@ -1186,10 +1168,21 @@ opt.step()</code></pre>
         var BMIN = billAt(1), BMAX = billAt(SMIN);
         function cx(sd) { return CX0 + (sd - SMIN) / (SMAX - SMIN) * (CX1 - CX0); }
         function cy(b) { return CY1 - (b - BMIN) / (BMAX - BMIN) * (CY1 - CY0); }
+        /* P70: symbols in SVG labels are drawn in the math style. */
+        function mvText(t, s) {
+            var re = /(σ|\bL\b)/g, last = 0, m;
+            while ((m = re.exec(s))) {
+                if (m.index > last) t.appendChild(document.createTextNode(s.slice(last, m.index)));
+                var v = document.createElementNS("http://www.w3.org/2000/svg", "tspan");
+                v.setAttribute("class", "mvar"); v.textContent = m[0]; t.appendChild(v);
+                last = re.lastIndex;
+            }
+            if (last < s.length) t.appendChild(document.createTextNode(s.slice(last)));
+        }
         function mk(tag, a, txt) {
             var e = document.createElementNS(NSV, tag);
             for (var k in a) e.setAttribute(k, a[k]);
-            if (txt != null) e.textContent = txt;
+            if (txt != null) mvText(e, String(txt));
             curve.appendChild(e);
             return e;
         }
@@ -1206,7 +1199,7 @@ opt.step()</code></pre>
             mk("text", { x: cx(1), y: CY1 + 22, "text-anchor": "middle", style: "font-size:12px;fill:#5d6d7e" }, "lowest at σ = 1");
             mk("text", { x: CX0, y: CY1 + 22, "text-anchor": "middle", style: "font-size:12px;fill:#5d6d7e" }, "0.3");
             mk("text", { x: CX1, y: CY1 + 22, "text-anchor": "end", style: "font-size:12px;fill:#5d6d7e" }, "σ = 3");
-            mk("text", { x: CX1, y: CY0 + 2, "text-anchor": "end", style: "font-size:12px;fill:#5d6d7e" }, "total bill L as depth noise changes");
+            mk("text", { x: CX1, y: CY0 + 2, "text-anchor": "end", style: "font-size:12px;fill:#5d6d7e" }, "total loss L as depth noise changes");
             curveDot = mk("circle", { r: 5, style: "fill:#8ab2d1;stroke:#2c3e50;stroke-width:1.5" });
         }
         function drawCurve() {
@@ -1248,11 +1241,11 @@ opt.step()</code></pre>
     var CSEM = '#c6a1ce', CINS = '#aaf7b3', CDEP = '#8ab2d1';
     var GRAD = '#e67e22', GRADT = '#b9770e', OPT = '#27ae60';
 
-    var titles = ['1 \u00b7 Measure', '2 \u00b7 Price', '3 \u00b7 Total', '4 \u00b7 Learn'];
+    var titles = ['1 \u00b7 Measure', '2 \u00b7 Penalty', '3 \u00b7 Total', '4 \u00b7 Learn'];
     var outcomes = [
-      'Three losses, three noise dials; the dials will be learned, not set.',
-      'Noisier dial, shorter weight bar: depth counts least. Each bill is the weighted loss plus the price log \u03c3.',
-      'One backward pass reaches the network and every noise dial.',
+      'Three losses and three noise levels \u03c3; training learns the noise levels.',
+      'Larger \u03c3, smaller weight: depth counts least. Each task adds its weighted loss plus the penalty log \u03c3.',
+      'One backward pass gives gradients to the network and to every \u03c3.',
       'One optimizer steps the network and the noise levels together; nothing else tunes the weights.'
     ];
 
@@ -1342,7 +1335,7 @@ opt.step()</code></pre>
     function tx(x, y, s, size, anchor, fill, weight) {
       var t = el('text', { x: x, y: y, 'text-anchor': anchor || 'start', 'font-size': size || 13.5, fill: fill || INK });
       if (weight) t.setAttribute('font-weight', weight);
-      t.textContent = s;
+      if (/σ/.test(s)) { var mv = s.split('σ'); t.appendChild(document.createTextNode(mv[0])); var sv = el('tspan', { 'class': 'mvar' }); sv.textContent = 'σ'; t.appendChild(sv); t.appendChild(document.createTextNode(mv.slice(1).join('σ'))); } else t.textContent = s;
       return t;
     }
     function part(key, color) {
@@ -1377,11 +1370,11 @@ opt.step()</code></pre>
     var DIAL_Y = 96, R = 20;
     var TASKS = [
       { name: 'Semantics', sigma: '0.70', sval: 0.7, color: CSEM, cx: 120,
-        w: 2.0408, wlab: 'weight 2.04', price: 'price \u22120.36', bill: 'bill 1.68' },
+        w: 2.0408, wlab: 'weight 2.04', price: 'penalty \u22120.36', bill: 'sum 1.68' },
       { name: 'Instance', sigma: '1.50', sval: 1.5, color: CINS, cx: 210,
-        w: 0.2222, wlab: 'weight 0.22', price: 'price 0.41', bill: 'bill 0.63' },
+        w: 0.2222, wlab: 'weight 0.22', price: 'penalty 0.41', bill: 'sum 0.63' },
       { name: 'Depth', sigma: '2.40', sval: 2.4, color: CDEP, cx: 300,
-        w: 0.0868, wlab: 'weight 0.09', price: 'price 0.88', bill: 'bill 0.96' }
+        w: 0.0868, wlab: 'weight 0.09', price: 'penalty 0.88', bill: 'sum 0.96' }
     ];
     var NET = { x: 6, y: 76, w: 64, h: 40 };
     var TOT = { x: 130, y: 316, w: 100, h: 28 };
@@ -1615,5 +1608,34 @@ opt.step()</code></pre>
     .series-nav a.nav-prev { margin-right: 0; }
 }
 </style>
+<script>
+/* P80 code sections (CODE-SECTIONS.md) */
+(function(){
+  var C=['121,184,255','255,171,112','133,232,157','210,168,255','255,161,152','118,227,234'];
+  function lay(pre){
+    var code=pre.querySelector('code'); if(!code) return;
+    var lh=parseFloat(getComputedStyle(code).lineHeight);
+    var pt=parseFloat(getComputedStyle(pre).paddingTop);
+    var old=pre.querySelectorAll('.cs-g'); for(var j=0;j<old.length;j++) pre.removeChild(old[j]);
+    var imgs=[],sizes=[],pos=[];
+    (pre.getAttribute('data-cs')||'').split(',').forEach(function(r,i){
+      var m=r.trim().match(/^(\d+)(?:-(\d+))?$/); if(!m) return;
+      var a=+m[1],b=+(m[2]||m[1]),c=C[i%C.length],top=pt+(a-1)*lh,h=(b-a+1)*lh;
+      imgs.push('linear-gradient(rgba('+c+',.55),rgba('+c+',.55))','linear-gradient(rgba('+c+',.13),rgba('+c+',.13))');
+      sizes.push('3px '+h+'px','100% '+h+'px'); pos.push('0 '+top+'px','0 '+top+'px');
+      var g=document.createElement('span'); g.className='cs-g'; g.setAttribute('aria-hidden','true');
+      g.setAttribute('data-n',String(i+1)); g.style.top=(top+(lh-11)/2)+'px'; g.style.color='rgb('+c+')';
+      pre.insertBefore(g,code);
+    });
+    pre.style.backgroundImage=imgs.join(','); pre.style.backgroundSize=sizes.join(',');
+    pre.style.backgroundPosition=pos.join(','); pre.style.backgroundRepeat='no-repeat';
+  }
+  function all(){ var p=document.querySelectorAll('pre.cs'); for(var i=0;i<p.length;i++) lay(p[i]); }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',all); else all();
+  window.addEventListener('load',all);
+  window.addEventListener('resize',all);
+  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(all);
+})();
+</script>
 </body>
 </html>

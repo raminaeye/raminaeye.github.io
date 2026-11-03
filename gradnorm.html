@@ -824,132 +824,35 @@ figcaption { margin-top: 1rem; }
 </nav>
     <p class="crumb"><a href="tutorial.html">&larr; All tutorials</a></p>
     <h1>GradNorm (Gradient Normalization)</h1>
-    <p class="dek">Learn one loss weight per task, its volume knob, so every task trains at the same pace. No hand-tuned task weights.</p>
-
+    <p class="dek">GradNorm learns one loss weight per task so that every task&#8217;s gradient has a similar size and every task learns at a similar pace.</p>
 <p>
-        <a href="multitask-intro.html#the-summary">Introduction to Multitask Learning</a> named three failures that break the naive sum, which adds the task losses (the error scores the tasks are trying to lower) as they are. GradNorm takes on the
-        first two, scale and speed: it watches how training is going and turns each task's
-        volume until nobody is falling behind.
+        The introduction lists <a href="multitask-intro.html#three-diseases">three causes of negative transfer</a> when training on the plain sum of task losses. GradNorm, introduced by Chen, Badrinarayanan, Lee and Rabinovich (2018), fixes the first two, scale and speed. At every training step it measures each task&#8217;s gradient norm and how far each task has progressed. It then adjusts one loss weight per task so that each gradient norm moves toward a target, and the target is higher for a task that is behind.
     </p>
-
     <p class="tabs-label">On this page</p>
     <div class="tab-strip">
-        <a class="tab-link" href="#loudness">One loud task drowns out the rest</a>
-        <a class="tab-link" href="#gn-moderator">Turn down the loud tasks, turn up the ones that are behind</a>
-        <a class="tab-link" href="#gn-measurements">Measure loudness where the tasks fight</a>
-        <a class="tab-link" href="#gn-thermostat">Tasks that are behind get a louder target</a>
-        <a class="tab-link" href="#gn-loop">Four steps, repeated every batch</a>
-        <a class="tab-link" href="#gn-fig2">The quiet task catches up</a>
-        <a class="tab-link" href="#gn-replay">GradNorm rebalancing frees the quiet task</a>
-        <a class="tab-link" href="#gn-training-loop">GradNorm restores the step's direction after a loss is rescaled</a>
-        <a class="tab-link" href="#gn-when">When GradNorm helps and when it does not</a>
-        <a class="tab-link" href="#references">References</a>
+        <a class="tab-link" href="#loudness"><span class="secnum">1</span> Unequal gradient norms</a>
+        <a class="tab-link" href="#gn-moderator"><span class="secnum">2</span> One loss weight per task</a>
+        <a class="tab-link" href="#gn-loop"><span class="secnum">3</span> The GradNorm update</a>
+        <a class="tab-link" href="#gn-measurements"><span class="secnum">4</span> Gradient norm, loss ratio and training rate</a>
+        <a class="tab-link" href="#gn-thermostat"><span class="secnum">5</span> Target norm and gradient loss</a>
+        <a class="tab-link" href="#gn-replay"><span class="secnum">6</span> Simulation with two tasks</a>
+        <a class="tab-link" href="#gn-fig2"><span class="secnum">7</span> Results on the paper&#8217;s toy systems</a>
+        <a class="tab-link" href="#gn-training-loop"><span class="secnum">8</span> Implementation in PyTorch</a>
+        <a class="tab-link" href="#gn-when"><span class="secnum">9</span> When to use GradNorm</a>
+        <a class="tab-link" href="#references"><span class="secnum">10</span> References</a>
     </div>
-
-<h2 id="loudness">One loud task drowns out the rest</h2>
-
-    <p>Picture several tasks sharing one <strong>trunk</strong>, the shared part of the model that every task trains, with a small part of its own on top. Each task reports a loss, but the losses sit on very different scales: a depth loss near <code>800</code>, from the task that predicts how far away each point in the scene is, a classification loss near <code>2</code>. Add them up as-is and <em>the big one dominates the sum</em>. And even after you fix the scales, one task can still dominate: its <strong>gradients</strong>, the arrows that point where that task's loss rises fastest in the shared parameters (the numbers training adjusts; training steps the other way), are simply larger, so the shared parameters move mostly for it. Hand-tuned weights go stale when the tasks' fortunes change mid-training.</p>
-
-    <p>GradNorm is a loss-weighting method. It changes how loud each loss is. Gradient methods, such as PCGrad, GradVac and CAGrad, instead edit the gradients' directions.</p>
-
-    <p>The key fact is that a task dominates training through large gradients, so gradient size is the thing to measure and even out. This bites hardest when one network learns several dense tasks at once, tasks that make a prediction for every pixel of an image, for example segmentation (labeling each part of an image by what it shows), depth, and surface normals (the direction each point on a surface faces) together.</p>
-
-    <figure class="figure mtd-fig">
-        <svg class="mtd-svg" viewBox="0 0 400 240" style="max-width:480px" role="img" aria-label="Left: task A's gradient is far longer, so the sum points almost along it. Right: with sizes evened out, the sum points between the two tasks"><text class="" x="100.0" y="24.0" text-anchor="middle" style="font-size:18px;font-weight:700">One task is loud</text><line class="mtd-guide" x1="170.4" y1="89.6" x2="137.7" y2="66.6"/><line class="mtd-guide" x1="67.2" y1="199.1" x2="137.7" y2="66.6"/><line class="mtd-s mtd-c1" x1="100.0" y1="222.0" x2="164.8" y2="100.2" style="stroke-width:4px"/><polygon class="mtd-f mtd-c1" points="170.4,89.6 170.1,103.0 159.5,97.3"/><line class="mtd-s mtd-c2" x1="100.0" y1="222.0" x2="76.2" y2="205.4" style="stroke-width:4px"/><polygon class="mtd-f mtd-c2" points="67.2,199.1 79.4,200.9 73.1,209.9"/><line class="mtd-s mtd-cp" x1="100.0" y1="222.0" x2="134.4" y2="80.2" style="stroke-width:5px"/><polygon class="mtd-f mtd-cp" points="137.7,66.6 141.2,81.9 127.6,78.6"/><circle class="mtd-dot" cx="100" cy="222" r="3.5"/><text class="mtd-t1" x="168.4" y="125.6" text-anchor="start" style="font-size:17px;font-weight:600">task A</text><text class="mtd-t2" x="61.2" y="203.1" text-anchor="end" style="font-size:17px;font-weight:600">task B</text><text class="mtd-pu" x="129.7" y="60.6" text-anchor="end" style="font-size:17px;font-weight:600">sum</text><text class="" x="300.0" y="24.0" text-anchor="middle" style="font-size:18px;font-weight:700">Sizes evened out</text><line class="mtd-guide" x1="339.9" y1="146.9" x2="270.3" y2="98.2"/><line class="mtd-guide" x1="230.4" y1="173.2" x2="270.3" y2="98.2"/><line class="mtd-s mtd-c1" x1="300.0" y1="222.0" x2="334.3" y2="157.5" style="stroke-width:4px"/><polygon class="mtd-f mtd-c1" points="339.9,146.9 339.6,160.4 329.0,154.7"/><line class="mtd-s mtd-c2" x1="300.0" y1="222.0" x2="239.4" y2="179.6" style="stroke-width:4px"/><polygon class="mtd-f mtd-c2" points="230.4,173.2 242.5,175.1 236.2,184.1"/><line class="mtd-s mtd-cp" x1="300.0" y1="222.0" x2="273.5" y2="111.8" style="stroke-width:5px"/><polygon class="mtd-f mtd-cp" points="270.3,98.2 280.4,110.2 266.7,113.4"/><circle class="mtd-dot" cx="300" cy="222" r="3.5"/><text class="mtd-t1" x="345.9" y="160.9" text-anchor="start" style="font-size:17px;font-weight:600">task A</text><text class="mtd-t2" x="224.4" y="177.2" text-anchor="end" style="font-size:17px;font-weight:600">task B</text><text class="mtd-pu" x="278.3" y="102.2" text-anchor="start" style="font-size:17px;font-weight:600">sum</text></svg>
-        <figcaption class="caption">Even out the sizes and both tasks steer the sum.</figcaption>
+<h2 id="loudness"><span class="secnum">1</span> Unequal gradient norms</h2>
+    <p>Several tasks share one <strong>trunk</strong>, the part of the model every task uses; each task also has its own small <strong>head</strong>. Task losses often sit on very different scales, for example a depth loss near 800 and a classification loss near 2. In the plain sum the larger loss dominates. Even with similar losses, one task can have much larger <strong>gradients</strong> on the shared parameters, so the trunk moves mostly for that task. Hand-tuned loss weights also go out of date as training progresses.</p>
+    <p>A task dominates through the size of its gradient, so GradNorm measures and evens out the gradient <strong>norm</strong>, the gradient&#8217;s length. GradNorm is a <strong>loss-weighting</strong> method: it changes each task&#8217;s weight, never the gradients&#8217; directions. Gradient methods such as <a href="pcgrad.html">PCGrad</a> edit directions instead.</p>
+    <figure class="figure mtd-fig" id="gn-fig-norms">
+        <svg class="mtd-svg" viewBox="0 0 400 240" style="max-width:480px" role="img" aria-label="Left: task A's gradient is far longer, so the sum points almost along it. Right: with equal norms, the sum points between the two tasks"><text class="" x="100.0" y="24.0" text-anchor="middle" style="font-size:18px;font-weight:700">Unequal norms</text><line class="mtd-guide" x1="170.4" y1="89.6" x2="137.7" y2="66.6"/><line class="mtd-guide" x1="67.2" y1="199.1" x2="137.7" y2="66.6"/><line class="mtd-s mtd-c1" x1="100.0" y1="222.0" x2="164.8" y2="100.2" style="stroke-width:4px"/><polygon class="mtd-f mtd-c1" points="170.4,89.6 170.1,103.0 159.5,97.3"/><line class="mtd-s mtd-c2" x1="100.0" y1="222.0" x2="76.2" y2="205.4" style="stroke-width:4px"/><polygon class="mtd-f mtd-c2" points="67.2,199.1 79.4,200.9 73.1,209.9"/><line class="mtd-s mtd-cp" x1="100.0" y1="222.0" x2="134.4" y2="80.2" style="stroke-width:5px"/><polygon class="mtd-f mtd-cp" points="137.7,66.6 141.2,81.9 127.6,78.6"/><circle class="mtd-dot" cx="100" cy="222" r="3.5"/><text class="mtd-t1" x="168.4" y="125.6" text-anchor="start" style="font-size:17px;font-weight:600">task A</text><text class="mtd-t2" x="61.2" y="203.1" text-anchor="end" style="font-size:17px;font-weight:600">task B</text><text class="mtd-pu" x="129.7" y="60.6" text-anchor="end" style="font-size:17px;font-weight:600">sum</text><text class="" x="300.0" y="24.0" text-anchor="middle" style="font-size:18px;font-weight:700">Equal norms</text><line class="mtd-guide" x1="339.9" y1="146.9" x2="270.3" y2="98.2"/><line class="mtd-guide" x1="230.4" y1="173.2" x2="270.3" y2="98.2"/><line class="mtd-s mtd-c1" x1="300.0" y1="222.0" x2="334.3" y2="157.5" style="stroke-width:4px"/><polygon class="mtd-f mtd-c1" points="339.9,146.9 339.6,160.4 329.0,154.7"/><line class="mtd-s mtd-c2" x1="300.0" y1="222.0" x2="239.4" y2="179.6" style="stroke-width:4px"/><polygon class="mtd-f mtd-c2" points="230.4,173.2 242.5,175.1 236.2,184.1"/><line class="mtd-s mtd-cp" x1="300.0" y1="222.0" x2="273.5" y2="111.8" style="stroke-width:5px"/><polygon class="mtd-f mtd-cp" points="270.3,98.2 280.4,110.2 266.7,113.4"/><circle class="mtd-dot" cx="300" cy="222" r="3.5"/><text class="mtd-t1" x="345.9" y="160.9" text-anchor="start" style="font-size:17px;font-weight:600">task A</text><text class="mtd-t2" x="224.4" y="177.2" text-anchor="end" style="font-size:17px;font-weight:600">task B</text><text class="mtd-pu" x="278.3" y="102.2" text-anchor="start" style="font-size:17px;font-weight:600">sum</text></svg>
+        <figcaption class="caption"><span class="fignum">Figure 1.</span> Left, task A&#8217;s gradient is much longer, so the sum points almost along it. Right, with equal norms the sum points between the two tasks.</figcaption>
     </figure>
-
-<h2 id="gn-moderator">Turn down the loud tasks, turn up the ones that are behind</h2>
-
-    <p>Picture K tasks, K being the number of tasks, all pushing on the shared trunk at once. The task with the biggest gradient moves the trunk the most, and a task that has nearly finished learning keeps pushing just as hard. <strong>GradNorm</strong> gives each task a volume knob, a weight that multiplies its loss, and keeps turning the knobs so that (a) every task's gradient is about equally large, and (b) a task that is <em>falling behind gets turned up</em> for a while. A strength dial sets how hard GradNorm pushes for equal progress.</p>
-
-<h2 id="gn-measurements">Measure loudness where the tasks fight</h2>
-
-    <p>Every training step, each task's <strong>gradient</strong> is a list of numbers, one per shared parameter. If task <code>1</code>'s list is full of small numbers and task <code>2</code>'s is full of huge ones, <em>the sum looks like task <code>2</code>'s list</em>. GradNorm's answer is to adjust the knobs a little every step using three measurements. Loudness is read at the last shared layer <code>W</code>. The tasks fight over every shared layer, but Chen and colleagues, who introduced GradNorm in 2018, read only this one to keep the extra cost small. Progress and pace are read from the losses.</p>
-
-    <h3>How loud is each task</h3>
-
-    <p>Each task's loudness at each step is the length of the gradient of its weighted loss, measured at the last shared layer. The gradient of a weighted loss is just the weight times the gradient of the loss, so loudness is <em>knob times raw gradient length</em>. Turning the knob up makes the task louder by exactly that much. That is the lever GradNorm pulls. The average loudness across tasks is the reference volume everyone is compared against.</p>
-
-    <div class="eq-card" id="gnEqS1">
-        <div class="eq-what">How loud each task is right now.</div>
-        <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="Gw" style="color:#8e44ad">G<sub>W</sub>(i)</span> = &#8214;&#8711;<sub>W</sub> <span class="eqt" data-k="w" style="color:#27ae60">w<sub>i</sub></span>L<sub>i</sub>&#8214;</div>
-        <div class="eq-why eq-active" data-eqline="0">Task i's loudness <span class="eqt" style="color:#8e44ad">G<sub>W</sub>(i)</span> is the length, the norm, of the gradient of its weighted loss, measured at the last shared layer <span class="eqt">W</span>: &#8711;<sub>W</sub> is the gradient with respect to the parameters of W, and <span class="eqt" style="color:#27ae60">w<sub>i</sub></span>L<sub>i</sub> is task i's loss times its knob.</div>
-      </div>
-
-    <h3>How much progress each task has made</h3>
-
-    <p>Progress is the current loss divided by the loss at the start of training, a ratio with no units. The division is what makes tasks comparable: a depth loss near <code>800</code> and a classification loss near <code>2</code> cannot be compared directly, but &#8220;how much of my journey is left?&#8221; means the same thing for both. Chen and colleagues call this ratio the <em>inverse training rate</em>, because a small ratio means the task learned fast.</p>
-
-    <div class="eq-card" id="gnEqS2">
-        <div class="eq-what">How much progress each task has made.</div>
-        <div class="eq-line eq-active" data-eqline="0"><span class="eqt" style="color:#2c3e50"><span class="gn-tl">L</span><sub>i</sub>(t)</span> = <span class="frac"><span class="top">L<sub>i</sub>(t)</span><span class="bot">L<sub>i</sub>(0)</span></span></div>
-        <div class="eq-why eq-active" data-eqline="0">Task i's progress ratio <span class="eqt" style="color:#2c3e50"><span class="gn-tl">L</span><sub>i</sub>(t)</span> is its loss at training step t divided by its loss at step 0, the start of training.</div>
-      </div>
-
-    <h3>How each task's progress compares with the group</h3>
-
-    <p>Next, each task's progress ratio is divided by the group average. A value of <code>1</code> means on pace; <code>0.5</code> means ahead; <code>1.5</code> means behind and needing attention. The speed problem is tasks falling <em>out of sync</em>, and you only spot that by comparing each task to the group. If all tasks move at the same speed, every value stays at <code>1</code>, the extra push for tasks that are behind does nothing, and GradNorm only evens out loudness. That push acts only when tasks drift apart.</p>
-
-    <div class="eq-card" id="gnEqS3">
-        <div class="eq-what">How each task's progress compares with the group.</div>
-        <div class="eq-line eq-active" data-eqline="0"><span class="eqt" style="color:#2c3e50">r<sub>i</sub>(t)</span> = <span class="frac"><span class="top"><span class="gn-tl">L</span><sub>i</sub>(t)</span><span class="bot"><span class="frac"><span class="top">1</span><span class="bot">K</span></span> &#931;<sub>j</sub> <span class="gn-tl">L</span><sub>j</sub>(t)</span></span></div>
-        <div class="eq-why eq-active" data-eqline="0">Task i's pace <span class="eqt" style="color:#2c3e50">r<sub>i</sub>(t)</span> is its progress ratio divided by the group average. &#931;<sub>j</sub> adds up the progress ratio of every task j, and dividing by <span class="eqt">K</span>, the number of tasks, turns that sum into the average.</div>
-      </div>
-
-<h2 id="gn-thermostat">Tasks that are behind get a louder target</h2>
-
-    <p>Each task gets a target loudness, the average loudness across tasks boosted for whoever is behind. That one rule makes two fixes. The average pulls everyone toward the same volume, fixing the scale problem. The boost turns the volume up for tasks that are behind, fixing the speed problem. A strength dial, written <code>α</code> in the target equation, sets <em>how hard the boost pushes</em>.</p>
-
-    <div class="eq-card" id="gnEqS4">
-        <div class="eq-what">Each task's target loudness.</div>
-        <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="T" style="color:#b9770e">T<sub>i</sub></span> = <span class="eqt" data-k="Gbar" style="color:#7f8c8d">Ḡ<sub>W</sub></span>[r<sub>i</sub>]<sup>&#945;</sup></div>
-        <div class="eq-why eq-active" data-eqline="0">Each task's target <span class="eqt" style="color:#b9770e">T<sub>i</sub></span> is the average loudness <span class="eqt" style="color:#7f8c8d">Ḡ<sub>W</sub></span> times <span class="eqt">[r<sub>i</sub>]<sup>α</sup></span>, which is r<sub>i</sub> raised to the power α.</div>
-      </div>
-
-    <p>Then GradNorm penalizes the gap between each task's actual loudness and its target. It lowers this penalty with an ordinary optimizer (Chen and colleagues used Adam, which scales each parameter's step by its own running gradient size), but the things being adjusted are the <strong>knobs, not the network</strong>.</p>
-
-    <div class="eq-card" id="gnEqS5">
-        <div class="eq-what">The gap penalty.</div>
-        <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="Lgrad" style="color:#2c3e50">L<sub>grad</sub></span> = &#931;<sub>i</sub> |<span class="eqt" data-k="Gw" style="color:#8e44ad">G<sub>W</sub>(i)</span> &#8722; <span class="eqt" data-k="T" style="color:#b9770e">T<sub>i</sub></span>|</div>
-        <div class="eq-why eq-active" data-eqline="0">The rebalancing loss <span class="eqt" style="color:#2c3e50">L<sub>grad</sub></span> adds up, over every task, how far its actual loudness is from its target <span class="eqt" style="color:#b9770e">T<sub>i</sub></span>. The bars drop the sign, so a task counts the same whether it sits above or below its target. Σ<sub>i</sub> is the sum over every task i.</div>
-      </div>
-
-    <p>Three details of how the knobs are updated matter.</p>
-
-    <ol class="key-steps">
-        <li><strong>The penalty updates only the weights.</strong> The network still takes its usual step on the weighted task losses. Updating the knobs is cheap, one small nudge to each of the K numbers per step.</li>
-        <li><strong>The target is held fixed.</strong> Chen and colleagues treat the target as a constant the knobs cannot move. Otherwise shrinking every knob together would shrink the target too, lowering the penalty without balancing anything.</li>
-        <li><strong>The weights are rescaled to sum to K after every update.</strong> Without this, the weight sum wanders. Renormalizing pins it to <code>K</code>, so one task gets louder only if another gets quieter. In Chen's words, it is done &#8220;to decouple gradient normalization from the global learning rate&#8221;, the step size you set for the network.</li>
-    </ol>
-
-    <div class="eq-card" id="gnEqS6">
-        <div class="eq-what">The fixed weight budget.</div>
-        <div class="eq-line eq-active" data-eqline="0">&#931;<sub>i</sub> <span class="eqt" data-k="w" style="color:#27ae60">w<sub>i</sub></span> = <span class="eqt" data-k="const" style="color:#7f8c8d">K</span></div>
-        <div class="eq-why eq-active" data-eqline="0">The task weights <span class="eqt" style="color:#27ae60">w<sub>i</sub></span> always sum to K, the number of tasks, so turning one up means turning another down.</div>
-      </div>
-
-    <p>Because GradNorm re-measures after every correction, the starting weights do not have to be lucky.</p>
-
-    <p>The listing starts after the forward pass, the run through the model that produces the losses. The task weights have their own learning rate, separate from the network's.</p>
-
-    <pre><code class="language-python"># after the forward pass: losses = [L_1..L_K]; w = trainable task weights
-G      = [norm(grad(w[i] * losses[i], W)) for i in range(K)]  # loudness per task
-ratio  = losses / losses_0            # progress so far, unit-free
-r      = ratio / mean(ratio)           # who is behind the pack? (r > 1 = behind)
-target = const(mean(G) * r ** alpha)  # average loudness, boosted for laggards, held fixed
-L_grad = sum(abs(G - target))         # how far each norm is from its target
-w = w - lr_w * grad(L_grad, w)        # nudge ONLY the weights
-w = w * K / sum(w)                    # fixed budget: one task up, another down</code></pre>
-
-    <p>Each line is one of the page's equations in code, plus one line that nudges the weights against the gap penalty's gradient.</p>
-
-
-<h2 id="gn-loop">Four steps, repeated every batch</h2>
-
-    <p>GradNorm runs as a loop on every batch, the small group of training examples one training step learns from: measure, set targets, nudge the weights, rescale the weights, then measure again. The walkthrough after the loop diagram draws loudness on a log scale, where equal distances mean equal multiples, so loudness <code>3</code> and <code>300</code> fit on one axis. Its two tasks: task <code>1</code> is quiet and behind (loudness <code>3</code>, progress <code>0.95</code>), task <code>2</code> is loud and ahead (loudness <code>300</code>, progress <code>0.40</code>), and the weights move by plain gradient descent.</p>
-
-        <figure class="figure" style="margin:1.75rem 0;">
+<h2 id="gn-moderator"><span class="secnum">2</span> One loss weight per task</h2>
+    <p>With <var>K</var> tasks, GradNorm gives each task <var>i</var> a <strong>loss weight</strong> <var>w<sub>i</sub></var> that multiplies its loss. Every step it adjusts the weights toward two goals. First, every task&#8217;s weighted gradient norm should be about the same. Second, a task whose loss is falling more slowly than the others should get a larger gradient norm until it catches up. One hyperparameter, <var>α</var>, sets how strongly the second goal acts.</p>
+<h2 id="gn-loop"><span class="secnum">3</span> The GradNorm update</h2>
+    <p>Each step has four parts: measure each task&#8217;s gradient norm, set each task&#8217;s target norm, move the weights toward the targets, and rescale the weights so they sum to <var>K</var>. The weights start at 1. In the walkthrough, task 1 has small gradients and is behind (norm 3, loss ratio 0.95), and task 2 has large gradients and is ahead (norm 300, loss ratio 0.40). The norm axis is logarithmic, so 3 and 300 fit on one axis.</p>
+        <figure class="figure" id="gn-fig-loop" style="margin:1.75rem 0;">
       <style>.gn-loop-phone{display:none}@media (max-width:480px){.gn-loop-desk{display:none!important}.gn-loop-phone{display:block!important}}</style>
       <svg class="gn-loop-desk" viewBox="0 30 460 230" role="img" aria-label="The GradNorm loop: measure, set targets, nudge the weights, rescale the weights, repeated every training step" style="width:100%;max-width:520px;height:auto;display:block;margin:0 auto;">
         <line x1="215" y1="70" x2="234" y2="70" stroke="#5d6d7e" stroke-width="3.5"></line>
@@ -960,18 +863,18 @@ w = w * K / sum(w)                    # fixed budget: one task up, another down<
         <polygon points="226,213.5 215,220 226,226.5" fill="#5d6d7e"></polygon>
         <line x1="70" y1="190" x2="70" y2="111" stroke="#5d6d7e" stroke-width="3.5"></line>
         <polygon points="63.5,111 70,100 76.5,111" fill="#5d6d7e"></polygon>
-        <text x="230" y="150" text-anchor="middle" fill="#6c757d" font-size="12">repeat every training step:</text>
-        <text x="230" y="166" text-anchor="middle" fill="#6c757d" font-size="12">the loop re-measures after every correction,</text>
-        <text x="230" y="182" text-anchor="middle" fill="#6c757d" font-size="12">so no lucky initial weights are needed</text>
+        <text x="230" y="150" text-anchor="middle" fill="#6c757d" font-size="12">repeated every training step;</text>
+        <text x="230" y="166" text-anchor="middle" fill="#6c757d" font-size="12">the norms are measured again after</text>
+        <text x="230" y="182" text-anchor="middle" fill="#6c757d" font-size="12">so each update, so all weights start at 1</text>
         <g>
           <rect x="5" y="40" width="210" height="60" rx="12" fill="#8ab2d1" fill-opacity="0.22" stroke="#8ab2d1" stroke-width="1.5"></rect>
           <text x="110" y="62" text-anchor="middle" fill="#2c3e50" font-size="13" font-weight="700">1 · Measure</text>
-          <text x="110" y="82" text-anchor="middle" fill="#5d6d7e" font-size="11.5">how loud? how far along?</text>
+          <text x="110" y="82" text-anchor="middle" fill="#5d6d7e" font-size="11.5">gradient norms, loss ratios</text>
         </g>
         <g>
           <rect x="245" y="40" width="210" height="60" rx="12" fill="#c0924e" fill-opacity="0.22" stroke="#c0924e" stroke-width="1.5"></rect>
           <text x="350" y="62" text-anchor="middle" fill="#2c3e50" font-size="13" font-weight="700">2 · Set targets</text>
-          <text x="350" y="82" text-anchor="middle" fill="#5d6d7e" font-size="11.5">average loudness, boosted if behind</text>
+          <text x="350" y="82" text-anchor="middle" fill="#5d6d7e" font-size="11.5">average norm, raised if behind</text>
         </g>
         <g>
           <rect x="245" y="190" width="210" height="60" rx="12" fill="#8ac1a0" fill-opacity="0.22" stroke="#8ac1a0" stroke-width="1.5"></rect>
@@ -981,7 +884,7 @@ w = w * K / sum(w)                    # fixed budget: one task up, another down<
         <g>
           <rect x="5" y="190" width="210" height="60" rx="12" fill="#c6a1ce" fill-opacity="0.22" stroke="#c6a1ce" stroke-width="1.5"></rect>
           <text x="110" y="212" text-anchor="middle" fill="#2c3e50" font-size="13" font-weight="700">4 · Rescale the weights</text>
-          <text x="110" y="232" text-anchor="middle" fill="#5d6d7e" font-size="11.5">weights sum to K, always</text>
+          <text x="110" y="232" text-anchor="middle" fill="#5d6d7e" font-size="11.5">weights sum to <tspan class="mvar">K</tspan>, always</text>
         </g>
       </svg>
       <svg class="gn-loop-phone" viewBox="0 0 300 392" role="img" aria-label="The GradNorm loop: measure, set targets, nudge the weights, rescale the weights, repeated every training step" style="width:100%;max-width:340px;height:auto;margin:0 auto;">
@@ -996,12 +899,12 @@ w = w * K / sum(w)                    # fixed budget: one task up, another down<
         <g>
           <rect x="16" y="10" width="236" height="62" rx="12" fill="#8ab2d1" fill-opacity="0.22" stroke="#8ab2d1" stroke-width="1.5"></rect>
           <text x="134" y="35" text-anchor="middle" fill="#2c3e50" font-size="15" font-weight="700">1 · Measure</text>
-          <text x="134" y="56" text-anchor="middle" fill="#5d6d7e" font-size="13">how loud? how far along?</text>
+          <text x="134" y="56" text-anchor="middle" fill="#5d6d7e" font-size="13">gradient norms, loss ratios</text>
         </g>
         <g>
           <rect x="16" y="94" width="236" height="62" rx="12" fill="#c0924e" fill-opacity="0.22" stroke="#c0924e" stroke-width="1.5"></rect>
           <text x="134" y="119" text-anchor="middle" fill="#2c3e50" font-size="15" font-weight="700">2 · Set targets</text>
-          <text x="134" y="140" text-anchor="middle" fill="#5d6d7e" font-size="13">average loudness, boosted if behind</text>
+          <text x="134" y="140" text-anchor="middle" fill="#5d6d7e" font-size="13">average norm, raised if behind</text>
         </g>
         <g>
           <rect x="16" y="178" width="236" height="62" rx="12" fill="#8ac1a0" fill-opacity="0.22" stroke="#8ac1a0" stroke-width="1.5"></rect>
@@ -1011,12 +914,13 @@ w = w * K / sum(w)                    # fixed budget: one task up, another down<
         <g>
           <rect x="16" y="262" width="236" height="62" rx="12" fill="#c6a1ce" fill-opacity="0.22" stroke="#c6a1ce" stroke-width="1.5"></rect>
           <text x="134" y="287" text-anchor="middle" fill="#2c3e50" font-size="15" font-weight="700">4 · Rescale the weights</text>
-          <text x="134" y="308" text-anchor="middle" fill="#5d6d7e" font-size="13">weights sum to K, always</text>
+          <text x="134" y="308" text-anchor="middle" fill="#5d6d7e" font-size="13">weights sum to <tspan class="mvar">K</tspan>, always</text>
         </g>
-        <text x="150" y="350" text-anchor="middle" fill="#6c757d" font-size="13">repeat every training step: the loop</text>
-        <text x="150" y="368" text-anchor="middle" fill="#6c757d" font-size="13">re-measures after every correction, so</text>
-        <text x="150" y="386" text-anchor="middle" fill="#6c757d" font-size="13">no lucky initial weights are needed</text>
+        <text x="150" y="350" text-anchor="middle" fill="#6c757d" font-size="13">repeated every training step;</text>
+        <text x="150" y="368" text-anchor="middle" fill="#6c757d" font-size="13">the norms are measured again after</text>
+        <text x="150" y="386" text-anchor="middle" fill="#6c757d" font-size="13">each update, so all weights start at 1</text>
       </svg>
+      <figcaption class="caption"><span class="fignum">Figure 2.</span> The four parts of one GradNorm update. Part 4 leads back to part 1 at the next training step.</figcaption>
     </figure>
 
     <div class="demo" id="gsStep">
@@ -1064,6 +968,30 @@ w = w * K / sum(w)                    # fixed budget: one task up, another down<
         margin:0 .25em 0 .6em;vertical-align:baseline}
 
       @media (max-width:480px){.eq-card{padding:.85rem .9rem}.eq-line{font-size:1.24rem;line-height:1.95}}
+/* P70 inline variables and inline code, one style site-wide (VAR-STYLE.md v2) */
+var,.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic;font-weight:400;font-size:1em;color:#1d4e89;background:#edf3fa;border-radius:3px;padding:0 .18em;white-space:nowrap;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+var sub,var sup,.mvar sub,.mvar sup{font-size:.72em;font-style:normal}
+pre var,code var,.eq-line var{font:inherit;color:inherit;background:none;padding:0}
+svg text.mvar,svg tspan.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic}
+:not(pre)>code:not(.eq-line code){font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,Courier,monospace;font-size:.86em;color:#24292f;background:#f1f3f5;border:1px solid #dfe3e8;border-radius:4px;padding:.06em .32em;white-space:normal;overflow-wrap:anywhere}
+/* P79 numbering (NUMBERING.md) */
+.secnum{font-variant-numeric:tabular-nums;margin-right:.4em;color:inherit;font-weight:inherit}
+.tab-strip .secnum{margin-right:.3em;opacity:.75}
+.fignum{font-weight:600;margin-right:.3em;font-variant-numeric:tabular-nums}
+/* P80 code sections (CODE-SECTIONS.md) */
+pre.cs{position:relative;background-attachment:local;padding-left:20px}
+pre.cs code{display:block;line-height:1.55}
+pre.cs .cs-g{position:absolute;left:3px;width:11px;text-align:center;font:700 11px/1 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;-webkit-user-select:none;user-select:none;pointer-events:none}
+pre.cs .cs-g::before{content:attr(data-n)}
+ol.cs-notes{list-style:none;padding-left:0;margin:-.4em 0 1em}
+ol.cs-notes li{margin:0 0 .3em;padding-left:1.9em;position:relative}
+ol.cs-notes .cs-n{position:absolute;left:0;top:.1em;min-width:1.35em;padding:0 .25em;border-radius:4px;font:700 .8em/1.45 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;text-align:center;color:#0d1117}
+ol.cs-notes li:nth-child(6n+1) .cs-n{background:#79b8ff}
+ol.cs-notes li:nth-child(6n+2) .cs-n{background:#ffab70}
+ol.cs-notes li:nth-child(6n+3) .cs-n{background:#85e89d}
+ol.cs-notes li:nth-child(6n+4) .cs-n{background:#d2a8ff}
+ol.cs-notes li:nth-child(6n+5) .cs-n{background:#ffa198}
+ol.cs-notes li:nth-child(6n+6) .cs-n{background:#76e3ea}
       /* diagram-side dim/highlight (SVG/DOM). Do NOT use .hl/.dim: taken. */
       .eq-dim{opacity:.32}
       .eq-hl{filter:drop-shadow(0 0 3px currentColor)}
@@ -1093,27 +1021,93 @@ w = w * K / sum(w)                    # fixed budget: one task up, another down<
         <button type="button" class="play-btn" id="gsNext">Next</button>
       </div>
 <svg id="gsSvg" viewBox="0 0 560 240" role="img" aria-label="Step-through of one GradNorm update on two tasks" style="width:100%;max-width:720px;height:auto;display:block;margin:0 auto;"></svg>
+<p class="caption"><span class="fignum">Figure 3.</span> Task 1 (small gradients, behind) and task 2 (large gradients, ahead) through the four parts of one update.</p>
 <p id="gsOutcome" aria-live="polite"></p>
 <div class="eq-card" id="gsStepEq">
-        <div class="eq-what">One GradNorm step in four lines, which measure each task's loudness, set each task's target from how far behind it is, penalize the gap, and keep the total weight budget fixed.</div>
+        <div class="eq-what">One GradNorm update: measure each norm, set each target, lower the gap, and rescale the weights.</div>
         <div class="eq-line" data-eqline="0"><span class="eqt" data-k="Gw" style="color:#8e44ad">G<sub>W</sub>(i)</span> = &#8214;&#8711;<sub>W</sub> <span class="eqt" data-k="w" style="color:#27ae60">w<sub>i</sub></span>L<sub>i</sub>&#8214;</div>
-        <div class="eq-why" data-eqline="0">Each task's loudness is its knob times its raw gradient length at the last shared layer W, so turning a knob up makes that task louder by the same factor. In the GradNorm listing, this is the <code>G</code> line.</div>
+        <div class="eq-why" data-eqline="0">Each task&#8217;s norm is its weight times its unweighted gradient norm at <var>W</var>. In the code in <a href="#gn-training-loop">Section 8</a>, this is the loop that builds <var>G</var>.</div>
         <div class="eq-line" data-eqline="1"><span class="eqt" data-k="T" style="color:#b9770e">T<sub>i</sub></span> = <span class="eqt" data-k="Gbar" style="color:#7f8c8d">Ḡ<sub>W</sub></span>[r<sub>i</sub>]<sup>&#945;</sup></div>
-        <div class="eq-why" data-eqline="1">Each target starts from the average loudness and is scaled up for a task that is behind, by r<sub>i</sub> raised to the power α. In the GradNorm listing, this is the <code>target</code> line.</div>
+        <div class="eq-why" data-eqline="1">Each target is the average norm times <var>r<sub>i</sub></var> raised to the power <var>α</var>, so it is higher for a task that is behind. In the code, these are the two <var>T</var> lines.</div>
         <div class="eq-line" data-eqline="2"><span class="eqt" data-k="Lgrad" style="color:#2c3e50">L<sub>grad</sub></span> = &#931;<sub>i</sub> |<span class="eqt" data-k="Gw" style="color:#8e44ad">G<sub>W</sub>(i)</span> &#8722; <span class="eqt" data-k="T" style="color:#b9770e">T<sub>i</sub></span>|</div>
-        <div class="eq-why" data-eqline="2">The penalty adds up how far each task's loudness sits from its target, and gradient descent on it moves only the knobs.</div>
+        <div class="eq-why" data-eqline="2"><var>L<sub>grad</sub></var> sums each norm&#8217;s gap to its target. Its gradient moves only the weights.</div>
         <div class="eq-line" data-eqline="3">&#931;<sub>i</sub> <span class="eqt" data-k="w" style="color:#27ae60">w<sub>i</sub></span> = <span class="eqt" data-k="const" style="color:#7f8c8d">K</span></div>
-        <div class="eq-why" data-eqline="3">The knobs are rescaled to sum to K, the number of tasks, so turning one up means turning another down.</div>
-        <div class="eq-legend"><span class="eq-item" data-lines="0,2"><span class="eq-sw" style="background:#8e44ad"></span><code>G<sub>W</sub>(i)</code> task i's loudness, its gradient size at W</span><span class="eq-item" data-lines="1,2"><span class="eq-sw" style="background:#b9770e"></span><code>T<sub>i</sub></code> task i's target loudness</span><span class="eq-item" data-lines="1"><span class="eq-sw" style="background:#7f8c8d"></span><code>Ḡ<sub>W</sub></code> the mean loudness</span><span class="eq-item" data-lines="3"><span class="eq-sw" style="background:#7f8c8d"></span><code>Σ<sub>i</sub> w<sub>i</sub> = K</code> the fixed weight budget</span><span class="eq-item" data-lines="0,3"><span class="eq-sw" style="background:#27ae60"></span><code>w<sub>i</sub></code> the task weights</span><span class="eq-item" data-lines="1"><code>r<sub>i</sub></code> how far behind task i is</span><span class="eq-item" data-lines="1"><code>α</code> how strongly falling behind pulls the target up</span><span class="eq-item" data-lines="2"><code>L<sub>grad</sub></code> the rebalancing loss</span><span class="eq-item" data-lines="0"><code>L<sub>i</sub></code> task i's loss</span><span class="eq-item" data-lines="0"><code>‖‖</code> norm: the length of the vector inside</span><span class="eq-item" data-lines="2"><code>| |</code> absolute value: drop the sign</span><span class="eq-item" data-lines="0"><code>∇</code> gradient</span><span class="eq-item" data-lines="0"><code>W</code> the last shared layer's parameters</span><span class="eq-item" data-lines="2"><code>Σ<sub>i</sub></code> add up over every task i</span></div>
+        <div class="eq-why" data-eqline="3">The weights are rescaled to sum to <var>K</var>, so raising one weight lowers the others.</div>
+        <div class="eq-legend"><span class="eq-item" data-lines="0,2"><span class="eq-sw" style="background:#8e44ad"></span><var>G<sub>W</sub></var>(<var>i</var>) task <var>i</var>&#8217;s gradient norm at <var>W</var></span><span class="eq-item" data-lines="1,2"><span class="eq-sw" style="background:#b9770e"></span><var>T<sub>i</sub></var> task <var>i</var>&#8217;s target norm</span><span class="eq-item" data-lines="1"><span class="eq-sw" style="background:#7f8c8d"></span><var>Ḡ<sub>W</sub></var> the average norm</span><span class="eq-item" data-lines="3"><span class="eq-sw" style="background:#7f8c8d"></span>Σ<sub>i</sub> <var>w<sub>i</sub></var> = <var>K</var> the fixed weight budget</span><span class="eq-item" data-lines="0,3"><span class="eq-sw" style="background:#27ae60"></span><var>w<sub>i</sub></var> the loss weights</span><span class="eq-item" data-lines="1"><var>r<sub>i</sub></var> how far behind task <var>i</var> is</span><span class="eq-item" data-lines="1"><var>α</var> how strongly falling behind pulls the target up</span><span class="eq-item" data-lines="2"><var>L<sub>grad</sub></var> the rebalancing loss</span><span class="eq-item" data-lines="0"><var>L<sub>i</sub></var> task <var>i</var>'s loss</span><span class="eq-item" data-lines="0">‖‖ norm: the length of the vector inside</span><span class="eq-item" data-lines="2">| | absolute value: drop the sign</span><span class="eq-item" data-lines="0">∇ gradient</span><span class="eq-item" data-lines="0"><var>W</var> the last shared layer's parameters</span><span class="eq-item" data-lines="2">Σ<sub>i</sub> add up over every task <var>i</var></span></div>
       </div></div>
-
-
-<h2 id="gn-fig2">The quiet task catches up</h2>
-
-    <p>Chen and colleagues built two toy systems, deliberately tiny artificial setups made to show one effect cleanly, one with <code>2</code> tasks and one with <code>10</code>, each task's target outputs multiplied by a different scale &#963;, so its squared loss grows with &#963; squared. Here &#963; means only that loss scale, not the noise level it names on <a href="uncertainty-weighting.html">the Uncertainty Weighting page</a>.</p>
-
-    <p>The small-scale tasks end with larger weights than the big-scale ones, the rebalancing the replay in <a href="#gn-replay">&#8220;GradNorm rebalancing frees the quiet task&#8221;</a> reproduces. On the task-normalized loss (each task's loss divided by its starting loss, so big and small scales compare fairly, summed into one curve per method), GradNorm finishes below equal weights in both toys. The toys differ only in loss scale, so evening out loudness does all the work.</p>
-
+<h2 id="gn-measurements"><span class="secnum">4</span> Gradient norm, loss ratio and training rate</h2>
+    <p>GradNorm uses three measurements. The gradient norm says how strongly each task pushes on the shared weights. The loss ratio says how much of its starting loss each task still has. The relative training rate compares that ratio with the other tasks. The norms are measured only at the last shared layer, whose weights are <var>W</var>; the paper chose it to keep the extra cost small.</p>
+    <h3 id="gn-norm"><span class="secnum">4.1</span> Gradient norm</h3>
+    <div class="eq-card" id="gnEqS1">
+        <div class="eq-what">The gradient norm of task <var>i</var>&#8217;s weighted loss at the last shared layer.</div>
+        <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="Gw" style="color:#8e44ad">G<sub>W</sub>(i)</span> = &#8214;&#8711;<sub>W</sub> <span class="eqt" data-k="w" style="color:#27ae60">w<sub>i</sub></span>L<sub>i</sub>&#8214;</div>
+        <div class="eq-why eq-active" data-eqline="0"><span class="eqt" style="color:#8e44ad"><var>G<sub>W</sub></var>(<var>i</var>)</span> is the length (norm, the double bars) of the gradient of the weighted loss <span class="eqt" style="color:#27ae60"><var>w<sub>i</sub></var></span><var>L<sub>i</sub></var> with respect to <var>W</var>, the last shared layer&#8217;s weights (&#8711;<sub><var>W</var></sub>). A longer gradient moves the shared layer further, so the norm measures how much the task affects the step. The weight is a plain multiplier, so <var>G<sub>W</sub></var>(<var>i</var>) equals <var>w<sub>i</sub></var> times the unweighted gradient norm: doubling <var>w<sub>i</sub></var> doubles the norm.</div>
+      </div>
+    <h3 id="gn-ratio"><span class="secnum">4.2</span> Loss ratio</h3>
+    <p>Losses of different tasks cannot be compared directly. Dividing each loss by its value at the start of training gives a number with no units: 1 at the start, smaller as the task learns. The paper calls it the <strong>inverse training rate</strong>, because a small value means the task learned fast. For a classification task whose starting loss depends strongly on the random initialization, the paper suggests the theoretical starting value log <var>C</var> for <var>C</var> classes instead.</p>
+    <div class="eq-card" id="gnEqS2">
+        <div class="eq-what">The loss ratio: the fraction of its starting loss a task still has.</div>
+        <div class="eq-line eq-active" data-eqline="0"><span class="eqt" style="color:#2c3e50"><span class="gn-tl">L</span><sub>i</sub>(t)</span> = <span class="frac"><span class="top">L<sub>i</sub>(t)</span><span class="bot">L<sub>i</sub>(0)</span></span></div>
+        <div class="eq-why eq-active" data-eqline="0"><span class="eqt" style="color:#2c3e50"><var><span class="gn-tl">L</span><sub>i</sub></var>(<var>t</var>)</span> is task <var>i</var>&#8217;s loss at training step <var>t</var> divided by its loss at step 0. It starts at 1 and falls toward 0 as the task learns. Dividing by the task&#8217;s own starting loss removes its units and scale, so a depth loss near 800 and a classification loss near 2 become comparable.</div>
+      </div>
+    <h3 id="gn-rate"><span class="secnum">4.3</span> Relative inverse training rate</h3>
+    <p>Each task&#8217;s loss ratio is then divided by the average ratio over all tasks. A value above 1 means the task is behind the others; below 1 means it is ahead. If all tasks learn at the same pace, every value is 1 and GradNorm only evens out the gradient norms.</p>
+    <div class="eq-card" id="gnEqS3">
+        <div class="eq-what">The relative inverse training rate: above 1 the task is behind, below 1 it is ahead.</div>
+        <div class="eq-line eq-active" data-eqline="0"><span class="eqt" style="color:#2c3e50">r<sub>i</sub>(t)</span> = <span class="frac"><span class="top"><span class="gn-tl">L</span><sub>i</sub>(t)</span><span class="bot"><span class="frac"><span class="top">1</span><span class="bot">K</span></span> &#931;<sub>j</sub> <span class="gn-tl">L</span><sub>j</sub>(t)</span></span></div>
+        <div class="eq-why eq-active" data-eqline="0"><span class="eqt" style="color:#2c3e50"><var>r<sub>i</sub></var>(<var>t</var>)</span> divides task <var>i</var>&#8217;s loss ratio by the average loss ratio over all <span class="eqt"><var>K</var></span> tasks (Σ<sub><var>j</var></sub> sums over every task <var>j</var>, and 1/<var>K</var> turns the sum into an average). Above 1 the task has more of its loss left than the average task. Tasks that slow down together all stay at 1.</div>
+      </div>
+<h2 id="gn-thermostat"><span class="secnum">5</span> Target norm and gradient loss</h2>
+    <p>Each task gets a target norm: the average gradient norm, multiplied by a factor that is larger for tasks that are behind. The average fixes the scale problem. The factor fixes the speed problem.</p>
+    <div class="eq-card" id="gnEqS4">
+        <div class="eq-what">The target norm: the average norm, raised for tasks that are behind.</div>
+        <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="T" style="color:#b9770e">T<sub>i</sub></span> = <span class="eqt" data-k="Gbar" style="color:#7f8c8d">Ḡ<sub>W</sub></span>[r<sub>i</sub>]<sup>&#945;</sup></div>
+        <div class="eq-why eq-active" data-eqline="0">The target <span class="eqt" style="color:#b9770e"><var>T<sub>i</sub></var></span> is the average gradient norm <span class="eqt" style="color:#7f8c8d"><var>Ḡ<sub>W</sub></var></span> times <span class="eqt">[<var>r<sub>i</sub></var>]<sup><var>α</var></sup></span>. The average gives every task the same base norm. The factor is above 1 for a task that is behind (<var>r<sub>i</sub></var> above 1) and below 1 for a task that is ahead. At <var>α</var> = 0 the factor is 1 for every task; a larger <var>α</var> spreads the targets further apart.</div>
+      </div>
+    <p>GradNorm then defines a loss on the weights that measures how far each norm is from its target, and lowers it with an ordinary optimizer. This loss updates only the weights, never the network.</p>
+    <div class="eq-card" id="gnEqS5">
+        <div class="eq-what">The gradient loss: how far the norms are from their targets.</div>
+        <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="Lgrad" style="color:#2c3e50">L<sub>grad</sub></span> = &#931;<sub>i</sub> |<span class="eqt" data-k="Gw" style="color:#8e44ad">G<sub>W</sub>(i)</span> &#8722; <span class="eqt" data-k="T" style="color:#b9770e">T<sub>i</sub></span>|</div>
+        <div class="eq-why eq-active" data-eqline="0"><span class="eqt" style="color:#2c3e50"><var>L<sub>grad</sub></var></span> sums, over every task <var>i</var>, the absolute gap between <span class="eqt" style="color:#8e44ad"><var>G<sub>W</sub></var>(<var>i</var>)</span> and <span class="eqt" style="color:#b9770e"><var>T<sub>i</sub></var></span>. The absolute value makes a norm that is too large cost the same as one that is too small. Because <var>G<sub>W</sub></var>(<var>i</var>) is <var>w<sub>i</sub></var> times the unweighted norm, gradient descent on <var>L<sub>grad</sub></var> lowers the weight of a task above its target and raises the weight of a task below it. It is zero only when every norm equals its target.</div>
+      </div>
+    <p>Two rules keep the weight update well behaved.</p>
+    <ol class="key-steps">
+        <li><strong>The target is held fixed.</strong> The target is treated as a constant when the weights are updated. Otherwise shrinking every weight would also shrink the target and lower the loss without balancing anything; the paper does this &#8220;to prevent loss weights from spuriously drifting towards zero&#8221;.</li>
+        <li><strong>The weights are rescaled to sum to <var>K</var> after every update.</strong> The paper does this &#8220;to decouple gradient normalization from the global learning rate&#8221;. Without it the sum of the weights drifts, and a larger sum acts like a larger learning rate.</li>
+    </ol>
+    <div class="eq-card" id="gnEqS6">
+        <div class="eq-what">The weights always sum to the number of tasks.</div>
+        <div class="eq-line eq-active" data-eqline="0">&#931;<sub>i</sub> <span class="eqt" data-k="w" style="color:#27ae60">w<sub>i</sub></span> = <span class="eqt" data-k="const" style="color:#7f8c8d">K</span></div>
+        <div class="eq-why eq-active" data-eqline="0">After every update the weights <span class="eqt" style="color:#27ae60"><var>w<sub>i</sub></var></span> are multiplied by <var>K</var> / Σ<sub><var>i</var></sub> <var>w<sub>i</sub></var>, so they sum to <var>K</var>. Equal weights are then all 1, the plain sum. Raising one weight lowers the others, and the overall step size stays set by the network&#8217;s learning rate.</div>
+      </div>
+<h2 id="gn-replay"><span class="secnum">6</span> Simulation with two tasks</h2>
+    <p>The simulation is a schematic model, not a real network. Two tasks start at loss 1, and task 2&#8217;s gradient starts 300 times larger. Each step, each task&#8217;s loss shrinks by about 2 percent times its share of the total gradient norm. Under equal weights task 1&#8217;s loss barely moves for the first hundred steps. GradNorm, with <var>α</var> = 0.5 and weights kept above 0.02 and summing to 2, raises task 1&#8217;s weight within those steps.</p>
+    <div class="demo" id="gnSim">
+      <div class="demo-controls">
+        <label for="gnScale">Task 2 gradient: <span id="gnScaleVal">300</span>&#215; larger</label>
+        <input type="range" id="gnScale" min="30" max="600" step="10" value="300">
+        <button type="button" class="play-btn" id="gnPlay">Play</button>
+        <button type="button" class="play-btn" id="gnReset">Reset</button>
+      </div>
+      <div class="gn-grid">
+        <div class="gn-panel" id="gnPanel0">
+          <p class="gn-ptitle">(a) task 1 loss (small gradients), log scale</p>
+          <svg id="gnSvg0" viewBox="0 0 320 150" role="img" aria-label="Chart: task 1 loss over training for three runs"></svg>
+          <div class="gn-legend"><span><span class="gn-dot" style="background:#7f8c8d"></span>trained alone</span><span><span class="gn-dot" style="background:#e74c3c"></span>equal weights</span><span><span class="gn-dot" style="background:#8e44ad"></span>GradNorm</span><span><span class="gn-dot gn-ring"></span>loss halved</span></div>
+          <p class="gn-readout" id="gnRead0"></p>
+        </div>
+        <div class="gn-panel" id="gnPanel2">
+          <p class="gn-ptitle">(b) the loss weights GradNorm learns (sum 2)</p>
+          <svg id="gnSvg2" viewBox="0 0 320 150" role="img" aria-label="Chart: the two task weights over training"></svg>
+          <div class="gn-legend"><span><span class="gn-dot" style="background:#2e86c1"></span><var>w<sub>1</sub></var>, task 1</span><span><span class="gn-dot" style="background:#d68910"></span><var>w<sub>2</sub></var>, task 2</span></div>
+          <p class="gn-readout" id="gnRead2"></p>
+        </div>
+      </div>
+      <p class="caption"><span class="fignum">Figure 4.</span> GradNorm (purple) lowers task 1&#8217;s loss long before equal weights (red), because it raises <var>w<sub>1</sub></var> early.</p>
+      <p class="gn-narr" id="gnNarr" aria-live="polite"></p>
+    </div>
+<h2 id="gn-fig2"><span class="secnum">7</span> Results on the paper&#8217;s toy systems</h2>
+    <p>The paper built two small artificial systems, one with 2 tasks and one with 10. Each task&#8217;s target outputs are multiplied by a different scale <var>&#963;</var>, so its squared loss grows with <var>&#963;</var><sup>2</sup>. Here <var>&#963;</var> is only that loss scale, not the noise level of the same name on <a href="uncertainty-weighting.html">the Uncertainty Weighting page</a>. The tasks differ only in loss scale, so evening out the gradient norms does all the work. The <strong>task-normalized loss</strong> divides each task&#8217;s loss by its starting loss and sums them, so large and small scales count equally.</p>
     <style>
       /* Crops of a published paper figure (same pattern as the CAGrad
          Figure 3 crops): the full figure is too small to read at any page
@@ -1147,129 +1141,140 @@ w = w * K / sum(w)                    # fixed budget: one task up, another down<
         <div class="pf-row" style="max-width:240px;aspect-ratio:620 / 685"><img src="figures/papers/gradnorm-fig2.png" alt="Left column, top: the 2-task toy network with loss scales 1.0 and 100.0" style="width:394.84%;left:-3.23%;top:-1.46%"></div>
         <div class="pf-row" style="max-width:240px;aspect-ratio:620 / 720"><img src="figures/papers/gradnorm-fig2.png" alt="Left column, bottom: the 10-task toy network with its ten loss scales" style="width:394.84%;left:-3.23%;top:-103.47%"></div>
       </div>
-      <p class="caption">The toy networks and their loss scales σ. Cropped from Figure 2 of Chen et al. 2018 (ICML).</p>
+      <p class="caption"><span class="fignum">Figure 5.</span> The toy networks and their loss scales <var>σ</var>. Cropped from the paper&#8217;s Figure 2.</p>
     </figure>
     <figure class="figure pf-phone" id="gnFig2b">
       <div class="pf-wrap">
         <div class="pf-row" style="aspect-ratio:862 / 685"><img src="figures/papers/gradnorm-fig2.png" alt="Middle column, top: the two task weights over 25,000 training steps" style="width:283.99%;left:-77.49%;top:-1.46%"></div>
         <div class="pf-row" style="aspect-ratio:862 / 720"><img src="figures/papers/gradnorm-fig2.png" alt="Middle column, bottom: the ten task weights over 25,000 training steps" style="width:283.99%;left:-77.49%;top:-103.47%"></div>
       </div>
-      <p class="caption">Small-scale tasks end with the larger weights, about 1.9 against 0.1 in the 2-task toy (the paper's "easy" σ = 1.0 and "hard" σ = 100.0 tasks). Cropped from Figure 2 of Chen et al. 2018 (ICML).</p>
+      <p class="caption"><span class="fignum">Figure 6.</span> Small-scale tasks end with the larger weights, about 1.9 against 0.1 in the 2-task toy (the paper's "easy" <var>σ</var> = 1.0 and "hard" <var>σ</var> = 100.0 tasks). Cropped from the paper&#8217;s Figure 2.</p>
     </figure>
     <figure class="figure pf-phone" id="gnFig2c">
       <div class="pf-wrap">
         <div class="pf-row" style="aspect-ratio:868 / 685"><img src="figures/papers/gradnorm-fig2.png" alt="Right column, top: task-normalized loss of the 2-task toy for equal weighting, GradNorm and uncertainty weighting" style="width:282.03%;left:-181.11%;top:-1.46%"></div>
         <div class="pf-row" style="aspect-ratio:868 / 720"><img src="figures/papers/gradnorm-fig2.png" alt="Right column, bottom: task-normalized loss of the 10-task toy for the same three methods" style="width:282.03%;left:-181.11%;top:-103.47%"></div>
       </div>
-      <p class="caption">GradNorm ends below equal weights in both toys. Cropped from Figure 2 of Chen et al. 2018 (ICML). <a href="https://arxiv.org/abs/1711.02257">arXiv:1711.02257</a></p>
+      <p class="caption"><span class="fignum">Figure 7.</span> GradNorm ends below equal weights in both toys. Cropped from the paper&#8217;s Figure 2. <a href="https://arxiv.org/abs/1711.02257">arXiv:1711.02257</a></p>
     </figure>
-    <p class="caption pf-phone">The paper's caption for the whole figure reads &#8220;<strong>Gradient Normalization on a toy 2-task (top) and 10-task (bottom) system.</strong> Diagrams of the network structure with loss scales are on the left, traces of w<sub>i</sub>(t) during training in the middle, and task-normalized test loss curves on the right. &alpha;=0.12 for all runs.&#8221;</p>
+    <p class="caption pf-phone">The paper's caption for the whole figure reads &#8220;<strong>Gradient Normalization on a toy 2-task (top) and 10-task (bottom) system.</strong> Diagrams of the network structure with loss scales are on the left, traces of <var>w<sub>i</sub></var>(t) during training in the middle, and task-normalized test loss curves on the right. <var>&alpha;</var>=0.12 for all runs.&#8221;</p>
+<h2 id="gn-training-loop"><span class="secnum">8</span> Implementation in PyTorch</h2>
+    <p>GradNorm runs once every training step, on that step&#8217;s batch. Its state is the <var>K</var> weights, their optimizer and each task&#8217;s starting loss. Its extra cost is one gradient per task down to the last shared layer, plus a second-order term through that layer; the paper measured about 5 percent more training time on NYUv2. The weighted loss is backpropagated as usual, so the heads also receive gradients scaled by <var>w<sub>i</sub></var> (<a href="multitask-training-loop.html#task-gradients">Gradient Balancing Inside the Training Loop</a> compares this with methods that write into the shared gradients).</p>
+    <p>This step follows the paper&#8217;s Algorithm 1. <var>W</var> is the last shared layer&#8217;s weight tensor, <code>params</code> holds all network parameters, <code>losses</code> holds the <var>K</var> batch-mean losses and <code>L0</code> the losses at step 0. <code>HIGH</code> sets <code>create_graph=True</code>, which makes each norm <var>G</var> differentiable with respect to <var>w</var>, and <code>detach()</code> holds the target <var>T</var> fixed.</p>
+    <pre class="cs" data-cs="5-11,14-20,21-24,25-26,28-31,32-35"><code class="language-python">import torch
+from torch.autograd import grad
+from torch.optim import Adam
 
+ALPHA = 1.5  # NYUv2 in the paper
+KEEP = dict(retain_graph=True)
+HIGH = dict(create_graph=True)
 
-<h2 id="gn-replay">GradNorm rebalancing frees the quiet task</h2>
+w = torch.ones(K).requires_grad_()
+opt_w = Adam([w], lr=0.025)
+opt = Adam(params, lr=2e-5)
 
-    <p>This replay is a schematic model, not a real network. Two tasks start at loss <code>1</code>, and the second task's gradient starts <code>300</code> times louder by default. Every step, each task's loss shrinks by about 2 percent times its share of the total loudness, so under equal weights the quiet task's loss barely moves for the first hundred steps. GradNorm, with α at <code>0.5</code> and weights kept above <code>0.02</code> and summing to <code>2</code>, turns the quiet task up within those steps, and its loss starts falling much sooner.</p>
+def gradnorm_step(losses, L0, W):
+    L = torch.stack(losses)
+    G = []
+    for k in range(K):
+        wL = w[k] * L[k]
+        g_k, = grad(wL, W, **HIGH)
+        G.append(g_k.norm())
+    G = torch.stack(G)
+    ratio = L.detach() / L0
+    r = ratio / ratio.mean()
+    T = G.mean() * r ** ALPHA
+    T = T.detach()  # fixed target
+    L_grad = (G - T).abs().sum()
+    gw, = grad(L_grad, w, **KEEP)
 
-    <div class="demo" id="gnSim">
-      <div class="demo-controls">
-        <label for="gnScale">Loud task: <span id="gnScaleVal">300</span>&#215; louder</label>
-        <input type="range" id="gnScale" min="30" max="600" step="10" value="300">
-        <button type="button" class="play-btn" id="gnPlay">Play</button>
-        <button type="button" class="play-btn" id="gnReset">Reset</button>
-      </div>
-      <div class="gn-grid">
-        <div class="gn-panel" id="gnPanel0">
-          <p class="gn-ptitle">(a) task <code>1</code> loss, the quiet one, on a log scale</p>
-          <svg id="gnSvg0" viewBox="0 0 320 150" role="img" aria-label="Chart: quiet task loss over training for three runs"></svg>
-          <div class="gn-legend"><span><span class="gn-dot" style="background:#7f8c8d"></span>trained alone</span><span><span class="gn-dot" style="background:#e74c3c"></span>equal weights</span><span><span class="gn-dot" style="background:#8e44ad"></span>GradNorm</span><span><span class="gn-dot gn-ring"></span>loss halved</span></div>
-          <p class="gn-readout" id="gnRead0"></p>
-        </div>
-        <div class="gn-panel" id="gnPanel2">
-          <p class="gn-ptitle">(b) the knobs GradNorm turns (their sum is always <code>2</code>)</p>
-          <svg id="gnSvg2" viewBox="0 0 320 150" role="img" aria-label="Chart: the two task weights over training"></svg>
-          <div class="gn-legend"><span><span class="gn-dot" style="background:#2e86c1"></span>w<sub>1</sub>, quiet task</span><span><span class="gn-dot" style="background:#d68910"></span>w<sub>2</sub>, loud task</span></div>
-          <p class="gn-readout" id="gnRead2"></p>
-        </div>
-      </div>
-      <p class="gn-narr" id="gnNarr" aria-live="polite"></p>    </div>
-<p class="caption">A wider starting gap makes the first imbalance bigger, and GradNorm still closes it.</p>
-
-
-<h2 id="gn-training-loop">GradNorm restores the step's direction after a loss is rescaled</h2>
-
-    <p>GradNorm sits on both sides of the backward pass: its knobs <code>w</code> multiply the losses, and it reads each task's gradient size at <code>W</code>, the last shared layer.</p>
-    <pre><code class="language-python"># each task's gradient size at W
-G = torch.stack([torch.autograd.grad(
-        w[k] * L[k], W,
-        retain_graph=True,
-        create_graph=True)[0].norm()
-     for k in range(K)])
-# pace vs the group; L0 is step 0's
-r = (L.detach() / L0)
-r = r / r.mean()
-target = (G.mean() * r ** alpha)
-target = target.detach()
-# a loss rescaled from the start:
-# its w moves until G is on target,
-# so the step's direction returns
-w.grad = torch.autograd.grad(
-    (G - target).abs().sum(), w)[0]
-opt_w.step()
-# knobs sum to K: your lr is safe
-with torch.no_grad():
-    w.mul_(K / w.sum())</code></pre>
-    <figure class="t1f-wrap"><svg class="t1f-svg" focusable="false" viewBox="0 0 300 428" role="img" aria-label="One training step: forward, backward, balance, clip, optimizer step, log"><g class="t1f-part t1f-on"><rect class="t1f-box t1f-box-fwd" x="14" y="10" width="246" height="62" rx="10" ry="10"/><text class="t1f-title" x="26" y="31" text-anchor="start" style="font-size:15px;font-weight:700">1 &#183; Forward</text><text class="t1f-sub" x="26" y="47" text-anchor="start" style="font-size:13px">each task computes its loss</text></g><g class="t1f-part t1f-on"><rect class="t1f-box t1f-box-bwd" x="14" y="92" width="246" height="62" rx="10" ry="10"/><text class="t1f-title" x="26" y="113" text-anchor="start" style="font-size:15px;font-weight:700">2 &#183; Backward</text><text class="t1f-sub" x="26" y="129" text-anchor="start" style="font-size:13px">per-task gradients, shared layers</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-bal" x="14" y="174" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="195" text-anchor="start" style="font-size:15px;font-weight:700">3 &#183; Balance</text><text class="t1f-sub" x="26" y="211" text-anchor="start" style="font-size:13px">combine the task gradients</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-clip" x="14" y="240" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="261" text-anchor="start" style="font-size:15px;font-weight:700">4 &#183; Clip</text><text class="t1f-sub" x="26" y="277" text-anchor="start" style="font-size:13px">cap the gradient's length</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-opt" x="14" y="306" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="327" text-anchor="start" style="font-size:15px;font-weight:700">5 &#183; Optimizer step</text><text class="t1f-sub" x="26" y="343" text-anchor="start" style="font-size:13px">update the network's parameters</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-log" x="14" y="372" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="393" text-anchor="start" style="font-size:15px;font-weight:700">6 &#183; Log</text><text class="t1f-sub" x="26" y="409" text-anchor="start" style="font-size:13px">record what this step did</text></g><g class="t1f-part t1f-on"><rect class="t1f-chip-lw" x="22" y="52" width="230" height="17" rx="4"/><text class="t1f-chiptext" x="28" y="65" text-anchor="start" style="font-size:12px">loss-weighting methods act here</text></g><g class="t1f-part t1f-on"><rect class="t1f-chip-gn" x="22" y="134" width="230" height="17" rx="4"/><text class="t1f-chiptext" x="28" y="147" text-anchor="start" style="font-size:12px">GradNorm also reads sizes at W</text><path class="t1f-gnpath" d="M260,142.5 H280 V41 H271" style="stroke-width:3.5px"/><polygon class="t1f-gnpath-h" points="260,41 271,35 271,47"/></g><g class="t1f-part t1f-dim"><rect class="t1f-chip-gm" x="112" y="182" width="140" height="16" rx="4"/><text class="t1f-chiptext-w" x="182" y="194" text-anchor="middle" textLength="130" lengthAdjust="spacingAndGlyphs" style="font-size:11px;font-weight:700">gradient methods act here</text></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="72" x2="54" y2="82" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,92 48.5,82 59.5,82"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="154" x2="54" y2="164" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,174 48.5,164 59.5,164"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="220" x2="54" y2="230" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,240 48.5,230 59.5,230"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="286" x2="54" y2="296" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,306 48.5,296 59.5,296"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="352" x2="54" y2="362" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,372 48.5,362 59.5,362"/></g></svg><figcaption class="t1f-cap">GradNorm acts before backward and reads what backward produces.</figcaption></figure>
-
-    <p><a href="multitask-training-loop.html">Gradient Balancing Inside the Training Loop</a> works through these effects in its sections <a href="multitask-training-loop.html#gradnorm-sum">&#8220;GradNorm keeps its task weights summing to the task count&#8221;</a> and <a href="multitask-training-loop.html#adam-scale">&#8220;Adam cancels a steady scale, and absorbs a sudden change only slowly&#8221;</a>.</p>
-
-    <h2 id="gn-when">When GradNorm helps and when it does not</h2>
-
-    <p>GradNorm has two settings. The more the tasks differ, the higher the best strength dial <code>α</code>: Chen uses 0.12 on toy tasks that differ only in loss scale, and about 1.5 on NYUv2, a dataset of indoor scenes, where one network learns depth, surface normals and room-layout keypoints. The second setting is the knobs' own learning rate. Chen updates the task weights with Adam at 0.025, while the NYUv2 network starts at 0.00002, so the weights move far faster than the network. Weights that keep swinging mean one of the two is too high.</p>
-
-    <p>The three charts below come from the replay in <a href="#gn-replay">&#8220;GradNorm rebalancing frees the quiet task&#8221;</a>, with the loud task's scale set to <code>30</code>, over <code>200</code> steps.</p>
-
+    opt.zero_grad()
+    total = (w.detach() * L).sum()
+    total.backward()
+    opt.step()
+    w.grad = gw
+    opt_w.step()
+    with torch.no_grad():
+        w.mul_(K / w.sum())</code></pre>
+    <ol class="cs-notes">
+      <li><span class="cs-n">1</span>State kept across steps: the weights <var>w</var> start at 1, with their own Adam optimizer.</li>
+      <li><span class="cs-n">2</span>Gradient norm of each weighted loss at <var>W</var>, the eq card in <a href="#gn-norm">Section 4.1</a>.</li>
+      <li><span class="cs-n">3</span>Loss ratio, relative rate <var>r</var> and the fixed target <var>T</var>, the eq cards in <a href="#gn-ratio">Section 4.2</a>, <a href="#gn-rate">Section 4.3</a> and <a href="#gn-thermostat">Section 5</a>.</li>
+      <li><span class="cs-n">4</span><var>L<sub>grad</sub></var> and its gradient with respect to the weights only, part 3 in <a href="#gn-fig-loop">Figure 2</a>.</li>
+      <li><span class="cs-n">5</span>The ordinary network step on the weighted sum; heads and trunk both get it.</li>
+      <li><span class="cs-n">6</span>Weight step, then rescaling so the weights sum to <var>K</var>, part 4 in <a href="#gn-fig-loop">Figure 2</a>.</li>
+    </ol>
+    <table class="cmp">
+        <thead><tr><th>Setting</th><th>Paper value (NYUv2)</th></tr></thead>
+        <tbody>
+            <tr><td>Weight learning rate</td><td>0.025 with Adam, about 1250 times the network&#8217;s</td></tr>
+            <tr><td>Network learning rate</td><td>2&#215;10<sup>&#8722;5</sup> with Adam</td></tr>
+            <tr><td>Batch size</td><td>24</td></tr>
+            <tr><td><var>α</var></td><td>1.5</td></tr>
+            <tr><td>Starting weights</td><td>1</td></tr>
+            <tr><td>Extra training time</td><td>about 5 percent</td></tr>
+        </tbody>
+    </table>
+    <p>The paper does not say how raising or lowering the weight learning rate changes the result. There is no official code. <a href="https://github.com/median-research-group/LibMTL">LibMTL</a> ships a version (<code>--weighting GradNorm</code>) that differs from the paper: by default it measures norms over the whole shared encoder instead of the last shared layer, it keeps the weights summing to <var>K</var> through a softmax instead of rescaling, and it trains the heads on the unweighted losses.</p>
+    <ul>
+        <li><strong>Keep the target detached.</strong> A target that can move lets every weight shrink together.</li>
+        <li><strong>Rescale after every weight step.</strong> Otherwise the weights change the effective learning rate.</li>
+        <li><strong>Pick <var>W</var> as one shared layer.</strong> A larger <var>W</var> costs more, and the paper does not report its effect on accuracy.</li>
+        <li><strong>Watch for negative weights.</strong> A large weight learning rate can push a weight below zero; the simulation above keeps them above 0.02.</li>
+    </ul>
+    <figure class="t1f-wrap" id="gn-fig-loopstep"><svg class="t1f-svg" focusable="false" viewBox="0 0 300 428" role="img" aria-label="One training step: forward, backward, balance, clip, optimizer step, log"><g class="t1f-part t1f-on"><rect class="t1f-box t1f-box-fwd" x="14" y="10" width="246" height="62" rx="10" ry="10"/><text class="t1f-title" x="26" y="31" text-anchor="start" style="font-size:15px;font-weight:700">1 &#183; Forward</text><text class="t1f-sub" x="26" y="47" text-anchor="start" style="font-size:13px">each task computes its loss</text></g><g class="t1f-part t1f-on"><rect class="t1f-box t1f-box-bwd" x="14" y="92" width="246" height="62" rx="10" ry="10"/><text class="t1f-title" x="26" y="113" text-anchor="start" style="font-size:15px;font-weight:700">2 &#183; Backward</text><text class="t1f-sub" x="26" y="129" text-anchor="start" style="font-size:13px">per-task gradients, shared layers</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-bal" x="14" y="174" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="195" text-anchor="start" style="font-size:15px;font-weight:700">3 &#183; Balance</text><text class="t1f-sub" x="26" y="211" text-anchor="start" style="font-size:13px">combine the task gradients</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-clip" x="14" y="240" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="261" text-anchor="start" style="font-size:15px;font-weight:700">4 &#183; Clip</text><text class="t1f-sub" x="26" y="277" text-anchor="start" style="font-size:13px">cap the gradient's length</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-opt" x="14" y="306" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="327" text-anchor="start" style="font-size:15px;font-weight:700">5 &#183; Optimizer step</text><text class="t1f-sub" x="26" y="343" text-anchor="start" style="font-size:13px">update the network's parameters</text></g><g class="t1f-part t1f-dim"><rect class="t1f-box t1f-box-log" x="14" y="372" width="246" height="46" rx="10" ry="10"/><text class="t1f-title" x="26" y="393" text-anchor="start" style="font-size:15px;font-weight:700">6 &#183; Log</text><text class="t1f-sub" x="26" y="409" text-anchor="start" style="font-size:13px">record what this step did</text></g><g class="t1f-part t1f-on"><rect class="t1f-chip-lw" x="22" y="52" width="230" height="17" rx="4"/><text class="t1f-chiptext" x="28" y="65" text-anchor="start" style="font-size:12px">loss-weighting methods act here</text></g><g class="t1f-part t1f-on"><rect class="t1f-chip-gn" x="22" y="134" width="230" height="17" rx="4"/><text class="t1f-chiptext" x="28" y="147" text-anchor="start" style="font-size:12px">GradNorm also reads sizes at <tspan class="mvar">W</tspan></text><path class="t1f-gnpath" d="M260,142.5 H280 V41 H271" style="stroke-width:3.5px"/><polygon class="t1f-gnpath-h" points="260,41 271,35 271,47"/></g><g class="t1f-part t1f-dim"><rect class="t1f-chip-gm" x="112" y="182" width="140" height="16" rx="4"/><text class="t1f-chiptext-w" x="182" y="194" text-anchor="middle" textLength="130" lengthAdjust="spacingAndGlyphs" style="font-size:11px;font-weight:700">gradient methods act here</text></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="72" x2="54" y2="82" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,92 48.5,82 59.5,82"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="154" x2="54" y2="164" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,174 48.5,164 59.5,164"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="220" x2="54" y2="230" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,240 48.5,230 59.5,230"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="286" x2="54" y2="296" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,306 48.5,296 59.5,296"/></g><g class="t1f-part t1f-arrow"><line class="t1f-flow" x1="54" y1="352" x2="54" y2="362" style="stroke-width:3.5px"/><polygon class="t1f-flow-h" points="54,372 48.5,362 59.5,362"/></g></svg><figcaption class="t1f-cap"><span class="fignum">Figure 8.</span> GradNorm acts before backward and reads what backward produces.</figcaption></figure>
+    <p><a href="multitask-training-loop.html">Gradient Balancing Inside the Training Loop</a> covers how the weights interact with the optimizer in <a href="multitask-training-loop.html#gradnorm-sum">&#8220;Renormalizing GradNorm&#8217;s weights&#8221;</a> and <a href="multitask-training-loop.html#adam-scale">&#8220;Steady and sudden changes of gradient scale&#8221;</a>.</p>
+    <h2 id="gn-when"><span class="secnum">9</span> When to use GradNorm</h2>
+    <p>The hyperparameter <var>α</var> sets how strongly a task that is behind is pushed to catch up. Raising it pushes the weights further apart and cuts fast-learning tasks harder; lowering it toward 0 leaves only the equal-norm goal. The more the tasks differ, the larger the best <var>α</var>.</p>
+    <table class="cmp">
+        <thead><tr><th><var>α</var></th><th>Setting in the paper and what happened</th></tr></thead>
+        <tbody>
+            <tr><td>0</td><td>Every target is the average norm, so only the gradient norms are equalized</td></tr>
+            <tr><td>0.12</td><td>Toy tasks that differ only in loss scale</td></tr>
+            <tr><td>0.2 to 0.3</td><td>Face-landmark dataset (MTFL)</td></tr>
+            <tr><td>1.5</td><td>NYUv2: depth, surface normals and room-layout keypoints in one network</td></tr>
+            <tr><td>1.75</td><td>NYUv2: the depth weight fell below 0.02</td></tr>
+            <tr><td>0 to 3</td><td>NYUv2: almost any value beat equal weights</td></tr>
+            <tr><td>above 2</td><td>A VGG16 network&#8217;s weights became unstable</td></tr>
+        </tbody>
+    </table>
+    <figure class="figure" id="gn-fig-alpha">
       <div class="gn-alpha-strip">
         <div class="gn-alpha-card">
-          <p class="gn-alpha-title">Strength dial at <code>0</code> switches the behind-task boost off</p>
-          <svg viewBox="0 -9 120 79" role="img" aria-label="Alpha zero: the behind task's weight climbs from 1 to about 1.82, where the two gradient sizes are even, and stays there"><line x1="16" y1="8" x2="114" y2="8" style="stroke:#e5e8e8;stroke-width:1"/><line x1="16" y1="52" x2="114" y2="52" style="stroke:#bdc3c7;stroke-width:1.5"/><text x="11" y="11" text-anchor="end" style="font-size:9px;fill:#5d6d7e">2</text><text x="11" y="55" text-anchor="end" style="font-size:9px;fill:#5d6d7e">1</text><text x="16" y="-2" text-anchor="start" style="font-size:7px;fill:#5d6d7e">quiet task's weight</text><text x="65" y="66" text-anchor="middle" style="font-size:7px;fill:#5d6d7e">training steps 0 to 200</text><path d="M16.0,51.4 L18.0,48.9 L19.9,46.5 L21.9,44.2 L23.8,41.8 L25.8,39.6 L27.8,37.4 L29.7,35.3 L31.7,33.2 L33.6,31.3 L35.6,29.5 L37.6,27.8 L39.5,26.2 L41.5,24.8 L43.4,23.5 L45.4,22.3 L47.4,21.3 L49.3,20.4 L51.3,19.6 L53.2,19.0 L55.2,18.4 L57.2,18.0 L59.1,17.6 L61.1,17.3 L63.0,17.0 L65.0,16.8 L67.0,16.6 L68.9,16.5 L70.9,16.4 L72.8,16.3 L74.8,16.2 L76.8,16.2 L78.7,16.1 L80.7,16.1 L82.6,16.1 L84.6,16.0 L86.6,16.0 L88.5,16.0 L90.5,16.0 L92.4,16.0 L94.4,16.0 L96.4,16.0 L98.3,16.0 L100.3,16.0 L102.2,16.0 L104.2,16.0 L106.2,16.0 L108.1,16.0 L110.1,16.0 L112.0,16.0 L114.0,16.0" style="fill:none;stroke:#5d6d7e;stroke-width:2.5"/></svg>
-          <p>Gradient sizes are evened out, so the weight still climbs, but being behind adds no extra boost.</p>
+          <p class="gn-alpha-title">At <var>α</var> = 0 only the norms are equalized</p>
+          <svg viewBox="0 -9 120 79" role="img" aria-label="Alpha zero: the behind task's weight climbs from 1 to about 1.82, where the two gradient sizes are even, and stays there"><line x1="16" y1="8" x2="114" y2="8" style="stroke:#e5e8e8;stroke-width:1"/><line x1="16" y1="52" x2="114" y2="52" style="stroke:#bdc3c7;stroke-width:1.5"/><text x="11" y="11" text-anchor="end" style="font-size:9px;fill:#5d6d7e">2</text><text x="11" y="55" text-anchor="end" style="font-size:9px;fill:#5d6d7e">1</text><text x="16" y="-2" text-anchor="start" style="font-size:7px;fill:#5d6d7e">task 1 weight</text><text x="65" y="66" text-anchor="middle" style="font-size:7px;fill:#5d6d7e">training steps 0 to 200</text><path d="M16.0,51.4 L18.0,48.9 L19.9,46.5 L21.9,44.2 L23.8,41.8 L25.8,39.6 L27.8,37.4 L29.7,35.3 L31.7,33.2 L33.6,31.3 L35.6,29.5 L37.6,27.8 L39.5,26.2 L41.5,24.8 L43.4,23.5 L45.4,22.3 L47.4,21.3 L49.3,20.4 L51.3,19.6 L53.2,19.0 L55.2,18.4 L57.2,18.0 L59.1,17.6 L61.1,17.3 L63.0,17.0 L65.0,16.8 L67.0,16.6 L68.9,16.5 L70.9,16.4 L72.8,16.3 L74.8,16.2 L76.8,16.2 L78.7,16.1 L80.7,16.1 L82.6,16.1 L84.6,16.0 L86.6,16.0 L88.5,16.0 L90.5,16.0 L92.4,16.0 L94.4,16.0 L96.4,16.0 L98.3,16.0 L100.3,16.0 L102.2,16.0 L104.2,16.0 L106.2,16.0 L108.1,16.0 L110.1,16.0 L112.0,16.0 L114.0,16.0" style="fill:none;stroke:#5d6d7e;stroke-width:2.5"/></svg>
+          <p>The norms are equalized, so the weight rises, but being behind adds nothing.</p>
         </div>
         <div class="gn-alpha-card">
-          <p class="gn-alpha-title">Strength dial at <code>0.5</code> rebalances steadily</p>
-          <svg viewBox="0 -9 120 79" role="img" aria-label="Alpha one half: the behind task's weight climbs past the alpha-zero line to about 1.92"><line x1="16" y1="8" x2="114" y2="8" style="stroke:#e5e8e8;stroke-width:1"/><line x1="16" y1="52" x2="114" y2="52" style="stroke:#bdc3c7;stroke-width:1.5"/><text x="11" y="11" text-anchor="end" style="font-size:9px;fill:#5d6d7e">2</text><text x="11" y="55" text-anchor="end" style="font-size:9px;fill:#5d6d7e">1</text><text x="16" y="-2" text-anchor="start" style="font-size:7px;fill:#5d6d7e">quiet task's weight</text><text x="65" y="66" text-anchor="middle" style="font-size:7px;fill:#5d6d7e">training steps 0 to 200</text><path d="M16.0,51.4 L18.0,48.9 L19.9,46.5 L21.9,44.2 L23.8,41.8 L25.8,39.6 L27.8,37.4 L29.7,35.3 L31.7,33.2 L33.6,31.3 L35.6,29.5 L37.6,27.8 L39.5,26.2 L41.5,24.8 L43.4,23.5 L45.4,22.3 L47.4,21.3 L49.3,20.4 L51.3,19.6 L53.2,19.0 L55.2,18.4 L57.2,18.0 L59.1,17.6 L61.1,17.3 L63.0,17.0 L65.0,16.8 L67.0,16.6 L68.9,16.5 L70.9,16.4 L72.8,16.3 L74.8,16.2 L76.8,16.2 L78.7,16.1 L80.7,16.1 L82.6,16.1 L84.6,16.0 L86.6,16.0 L88.5,16.0 L90.5,16.0 L92.4,16.0 L94.4,16.0 L96.4,16.0 L98.3,16.0 L100.3,16.0 L102.2,16.0 L104.2,16.0 L106.2,16.0 L108.1,16.0 L110.1,16.0 L112.0,16.0 L114.0,16.0" style="fill:none;stroke:#95a5a6;stroke-width:1.5;stroke-dasharray:4 3"/><text x="112" y="25" text-anchor="end" style="font-size:7px;fill:#7f8c8d">α = 0</text><path d="M16.0,51.4 L18.0,48.9 L19.9,46.4 L21.9,43.9 L23.8,41.4 L25.8,38.9 L27.8,36.4 L29.7,34.0 L31.7,31.7 L33.6,29.4 L35.6,27.2 L37.6,25.2 L39.5,23.3 L41.5,21.5 L43.4,19.9 L45.4,18.5 L47.4,17.3 L49.3,16.2 L51.3,15.4 L53.2,14.7 L55.2,14.1 L57.2,13.6 L59.1,13.3 L61.1,13.0 L63.0,12.8 L65.0,12.6 L67.0,12.5 L68.9,12.4 L70.9,12.3 L72.8,12.2 L74.8,12.2 L76.8,12.1 L78.7,12.1 L80.7,12.1 L82.6,12.0 L84.6,12.0 L86.6,12.0 L88.5,11.9 L90.5,11.9 L92.4,11.9 L94.4,11.9 L96.4,11.8 L98.3,11.8 L100.3,11.8 L102.2,11.8 L104.2,11.8 L106.2,11.7 L108.1,11.7 L110.1,11.7 L112.0,11.7 L114.0,11.7" style="fill:none;stroke:#1e8449;stroke-width:2.5"/></svg>
-          <p>The gap above the α = 0 line is the extra boost for being behind.</p>
+          <p class="gn-alpha-title">At <var>α</var> = 0.5 the weight rises further</p>
+          <svg viewBox="0 -9 120 79" role="img" aria-label="Alpha one half: the behind task's weight climbs past the alpha-zero line to about 1.92"><line x1="16" y1="8" x2="114" y2="8" style="stroke:#e5e8e8;stroke-width:1"/><line x1="16" y1="52" x2="114" y2="52" style="stroke:#bdc3c7;stroke-width:1.5"/><text x="11" y="11" text-anchor="end" style="font-size:9px;fill:#5d6d7e">2</text><text x="11" y="55" text-anchor="end" style="font-size:9px;fill:#5d6d7e">1</text><text x="16" y="-2" text-anchor="start" style="font-size:7px;fill:#5d6d7e">task 1 weight</text><text x="65" y="66" text-anchor="middle" style="font-size:7px;fill:#5d6d7e">training steps 0 to 200</text><path d="M16.0,51.4 L18.0,48.9 L19.9,46.5 L21.9,44.2 L23.8,41.8 L25.8,39.6 L27.8,37.4 L29.7,35.3 L31.7,33.2 L33.6,31.3 L35.6,29.5 L37.6,27.8 L39.5,26.2 L41.5,24.8 L43.4,23.5 L45.4,22.3 L47.4,21.3 L49.3,20.4 L51.3,19.6 L53.2,19.0 L55.2,18.4 L57.2,18.0 L59.1,17.6 L61.1,17.3 L63.0,17.0 L65.0,16.8 L67.0,16.6 L68.9,16.5 L70.9,16.4 L72.8,16.3 L74.8,16.2 L76.8,16.2 L78.7,16.1 L80.7,16.1 L82.6,16.1 L84.6,16.0 L86.6,16.0 L88.5,16.0 L90.5,16.0 L92.4,16.0 L94.4,16.0 L96.4,16.0 L98.3,16.0 L100.3,16.0 L102.2,16.0 L104.2,16.0 L106.2,16.0 L108.1,16.0 L110.1,16.0 L112.0,16.0 L114.0,16.0" style="fill:none;stroke:#95a5a6;stroke-width:1.5;stroke-dasharray:4 3"/><text x="112" y="25" text-anchor="end" style="font-size:7px;fill:#7f8c8d"><tspan class="mvar">α</tspan> = 0</text><path d="M16.0,51.4 L18.0,48.9 L19.9,46.4 L21.9,43.9 L23.8,41.4 L25.8,38.9 L27.8,36.4 L29.7,34.0 L31.7,31.7 L33.6,29.4 L35.6,27.2 L37.6,25.2 L39.5,23.3 L41.5,21.5 L43.4,19.9 L45.4,18.5 L47.4,17.3 L49.3,16.2 L51.3,15.4 L53.2,14.7 L55.2,14.1 L57.2,13.6 L59.1,13.3 L61.1,13.0 L63.0,12.8 L65.0,12.6 L67.0,12.5 L68.9,12.4 L70.9,12.3 L72.8,12.2 L74.8,12.2 L76.8,12.1 L78.7,12.1 L80.7,12.1 L82.6,12.0 L84.6,12.0 L86.6,12.0 L88.5,11.9 L90.5,11.9 L92.4,11.9 L94.4,11.9 L96.4,11.8 L98.3,11.8 L100.3,11.8 L102.2,11.8 L104.2,11.8 L106.2,11.7 L108.1,11.7 L110.1,11.7 L112.0,11.7 L114.0,11.7" style="fill:none;stroke:#1e8449;stroke-width:2.5"/></svg>
+          <p>The gap above the <var>α</var> = 0 line is the extra rise from being behind.</p>
         </div>
         <div class="gn-alpha-card">
-          <p class="gn-alpha-title">Strength dial at <code>2.0</code> rebalances aggressively</p>
-          <svg viewBox="0 -9 120 79" role="img" aria-label="Alpha two: the behind task's weight climbs fastest, overshoots to about 1.96, and settles near 1.94"><line x1="16" y1="8" x2="114" y2="8" style="stroke:#e5e8e8;stroke-width:1"/><line x1="16" y1="52" x2="114" y2="52" style="stroke:#bdc3c7;stroke-width:1.5"/><text x="11" y="11" text-anchor="end" style="font-size:9px;fill:#5d6d7e">2</text><text x="11" y="55" text-anchor="end" style="font-size:9px;fill:#5d6d7e">1</text><text x="16" y="-2" text-anchor="start" style="font-size:7px;fill:#5d6d7e">quiet task's weight</text><text x="65" y="66" text-anchor="middle" style="font-size:7px;fill:#5d6d7e">training steps 0 to 200</text><path d="M16.0,51.4 L18.0,48.9 L19.9,46.5 L21.9,44.2 L23.8,41.8 L25.8,39.6 L27.8,37.4 L29.7,35.3 L31.7,33.2 L33.6,31.3 L35.6,29.5 L37.6,27.8 L39.5,26.2 L41.5,24.8 L43.4,23.5 L45.4,22.3 L47.4,21.3 L49.3,20.4 L51.3,19.6 L53.2,19.0 L55.2,18.4 L57.2,18.0 L59.1,17.6 L61.1,17.3 L63.0,17.0 L65.0,16.8 L67.0,16.6 L68.9,16.5 L70.9,16.4 L72.8,16.3 L74.8,16.2 L76.8,16.2 L78.7,16.1 L80.7,16.1 L82.6,16.1 L84.6,16.0 L86.6,16.0 L88.5,16.0 L90.5,16.0 L92.4,16.0 L94.4,16.0 L96.4,16.0 L98.3,16.0 L100.3,16.0 L102.2,16.0 L104.2,16.0 L106.2,16.0 L108.1,16.0 L110.1,16.0 L112.0,16.0 L114.0,16.0" style="fill:none;stroke:#95a5a6;stroke-width:1.5;stroke-dasharray:4 3"/><text x="112" y="25" text-anchor="end" style="font-size:7px;fill:#7f8c8d">α = 0</text><path d="M16.0,51.4 L18.0,48.8 L19.9,46.1 L21.9,43.5 L23.8,40.8 L25.8,38.2 L27.8,35.6 L29.7,32.9 L31.7,30.3 L33.6,27.6 L35.6,25.0 L37.6,22.4 L39.5,19.7 L41.5,17.3 L43.4,15.1 L45.4,13.4 L47.4,12.0 L49.3,11.1 L51.3,10.5 L53.2,10.1 L55.2,9.9 L57.2,9.8 L59.1,9.8 L61.1,9.8 L63.0,9.8 L65.0,9.9 L67.0,9.9 L68.9,10.0 L70.9,10.0 L72.8,10.1 L74.8,10.1 L76.8,10.1 L78.7,10.2 L80.7,10.2 L82.6,10.3 L84.6,10.3 L86.6,10.3 L88.5,10.4 L90.5,10.4 L92.4,10.4 L94.4,10.4 L96.4,10.5 L98.3,10.5 L100.3,10.5 L102.2,10.5 L104.2,10.6 L106.2,10.6 L108.1,10.6 L110.1,10.6 L112.0,10.6 L114.0,10.7" style="fill:none;stroke:#e67e22;stroke-width:2.5"/></svg>
-          <p>The weight climbs fastest and overshoots a little before it settles. In the paper, values above this turned one network's weights unstable.</p>
+          <p class="gn-alpha-title">At <var>α</var> = 2 the weight rises fastest</p>
+          <svg viewBox="0 -9 120 79" role="img" aria-label="Alpha two: the behind task's weight climbs fastest, overshoots to about 1.96, and settles near 1.94"><line x1="16" y1="8" x2="114" y2="8" style="stroke:#e5e8e8;stroke-width:1"/><line x1="16" y1="52" x2="114" y2="52" style="stroke:#bdc3c7;stroke-width:1.5"/><text x="11" y="11" text-anchor="end" style="font-size:9px;fill:#5d6d7e">2</text><text x="11" y="55" text-anchor="end" style="font-size:9px;fill:#5d6d7e">1</text><text x="16" y="-2" text-anchor="start" style="font-size:7px;fill:#5d6d7e">task 1 weight</text><text x="65" y="66" text-anchor="middle" style="font-size:7px;fill:#5d6d7e">training steps 0 to 200</text><path d="M16.0,51.4 L18.0,48.9 L19.9,46.5 L21.9,44.2 L23.8,41.8 L25.8,39.6 L27.8,37.4 L29.7,35.3 L31.7,33.2 L33.6,31.3 L35.6,29.5 L37.6,27.8 L39.5,26.2 L41.5,24.8 L43.4,23.5 L45.4,22.3 L47.4,21.3 L49.3,20.4 L51.3,19.6 L53.2,19.0 L55.2,18.4 L57.2,18.0 L59.1,17.6 L61.1,17.3 L63.0,17.0 L65.0,16.8 L67.0,16.6 L68.9,16.5 L70.9,16.4 L72.8,16.3 L74.8,16.2 L76.8,16.2 L78.7,16.1 L80.7,16.1 L82.6,16.1 L84.6,16.0 L86.6,16.0 L88.5,16.0 L90.5,16.0 L92.4,16.0 L94.4,16.0 L96.4,16.0 L98.3,16.0 L100.3,16.0 L102.2,16.0 L104.2,16.0 L106.2,16.0 L108.1,16.0 L110.1,16.0 L112.0,16.0 L114.0,16.0" style="fill:none;stroke:#95a5a6;stroke-width:1.5;stroke-dasharray:4 3"/><text x="112" y="25" text-anchor="end" style="font-size:7px;fill:#7f8c8d"><tspan class="mvar">α</tspan> = 0</text><path d="M16.0,51.4 L18.0,48.8 L19.9,46.1 L21.9,43.5 L23.8,40.8 L25.8,38.2 L27.8,35.6 L29.7,32.9 L31.7,30.3 L33.6,27.6 L35.6,25.0 L37.6,22.4 L39.5,19.7 L41.5,17.3 L43.4,15.1 L45.4,13.4 L47.4,12.0 L49.3,11.1 L51.3,10.5 L53.2,10.1 L55.2,9.9 L57.2,9.8 L59.1,9.8 L61.1,9.8 L63.0,9.8 L65.0,9.9 L67.0,9.9 L68.9,10.0 L70.9,10.0 L72.8,10.1 L74.8,10.1 L76.8,10.1 L78.7,10.2 L80.7,10.2 L82.6,10.3 L84.6,10.3 L86.6,10.3 L88.5,10.4 L90.5,10.4 L92.4,10.4 L94.4,10.4 L96.4,10.5 L98.3,10.5 L100.3,10.5 L102.2,10.5 L104.2,10.6 L106.2,10.6 L108.1,10.6 L110.1,10.6 L112.0,10.6 L114.0,10.7" style="fill:none;stroke:#e67e22;stroke-width:2.5"/></svg>
+          <p>The weight overshoots a little, then settles.</p>
         </div>
       </div>
-
-    <p><strong>Reach for it when</strong> your tasks have very different loss scales or learning speeds. The classic case is dense prediction, a prediction for every pixel or point in the input rather than one answer for the whole input (segmentation, depth and surface normals together).</p>
-
-    <p><strong>It costs</strong> one extra gradient read per task, a backward pass that stops at the last shared layer <code>W</code>. Chen and colleagues measured only about 5% more training time on NYUv2.</p>
-
-    <p><strong>Keep in mind that</strong> GradNorm is a heuristic, a practical rule of thumb with no proof that training settles, and it says nothing about gradient <em>direction</em>. Two perfectly balanced gradients can still point against each other.</p>
-
-    <p>GradNorm sets the volume by watching <em>pace</em>, who is falling behind right now. What if the right volume is knowable from the data itself? Some tasks are just noisier, and a noisy task should count less. That is <a href="uncertainty-weighting.html">the Uncertainty Weighting page's whole idea</a>.</p>
-
-
-    <p>The two weighting methods, the volume knobs that learn each task's loss weight (GradNorm and Uncertainty Weighting), and the four gradient methods, PCGrad, GradVac, CAGrad, and MGDA, which stops at a Pareto-stationary point (where no small step lowers every task's loss at once), side by side:</p>
-
+      <figcaption class="caption"><span class="fignum">Figure 9.</span> Task 1&#8217;s weight over 200 steps of the simulation in <a href="#gnSim">Figure 4</a>, with task 2&#8217;s gradient 30 times larger, at three values of <var>α</var>.</figcaption>
+    </figure>
+    <p><strong>Reach for it when</strong> tasks have very different loss scales or learn at very different speeds. The classic case is <strong>dense prediction</strong>, one prediction per pixel, such as segmentation, depth and surface normals in one network.</p>
+    <p><strong>It costs</strong> one extra gradient per task down to the last shared layer, about 5 percent more training time on NYUv2.</p>
+    <p><strong>It does not</strong> come with a convergence proof, and it ignores gradient <em>direction</em>. Two gradients with equal norms can still point against each other.</p>
+    <p>GradNorm sets the weights from training speed. <a href="uncertainty-weighting.html">Uncertainty Weighting</a> sets them from how noisy each task is.</p>
+    <p>Two methods learn each task&#8217;s loss weight (GradNorm and Uncertainty Weighting). Four methods edit the task gradients (PCGrad, GradVac, CAGrad and MGDA). The question each one answers:</p>
     <table class="cmp">
         <thead><tr><th>Method</th><th>The question it answers</th></tr></thead>
         <tbody>
-            <tr><td><strong>GradNorm</strong> (this page)</td><td>How loud should each task be, to keep progress balanced? (learned, driven by training dynamics)</td></tr>
-            <tr><td><a href="uncertainty-weighting.html"><strong>Uncertainty Weighting</strong></a></td><td>How loud should each task be, given how noisy it inherently is? (learned, driven by the data)</td></tr>
-            <tr><td><a href="pcgrad.html"><strong>PCGrad</strong></a></td><td>How should the directions be edited so tasks stop fighting?</td></tr>
-            <tr><td><a href="gradvac.html"><strong>GradVac</strong></a></td><td>How should each pair of tasks be nudged back to the agreement level where it learns best?</td></tr>
-            <tr><td><a href="cagrad.html"><strong>CAGrad</strong></a></td><td>How do we protect the worst-off task and stay near the average, with a guarantee?</td></tr>
-            <tr><td><a href="mgda.html"><strong>MGDA</strong></a></td><td>What direction helps every task at once, and where does the run stop?</td></tr>
+            <tr><td><strong>GradNorm</strong> (this page)</td><td>How much weight should each task's loss get so all tasks train at a similar rate? (learned during training from how fast each loss falls)</td></tr>
+            <tr><td><a href="uncertainty-weighting.html"><strong>Uncertainty Weighting</strong></a></td><td>How much weight should each task's loss get, given how noisy that task's targets are? (the noise level is learned along with the model)</td></tr>
+            <tr><td><a href="pcgrad.html"><strong>PCGrad</strong></a></td><td>How should a task gradient be edited when it conflicts with another task's gradient?</td></tr>
+            <tr><td><a href="gradvac.html"><strong>GradVac</strong></a></td><td>How should each pair of task gradients be moved toward a target cosine, a running average of that pair's past cosines?</td></tr>
+            <tr><td><a href="cagrad.html"><strong>CAGrad</strong></a></td><td>How do we raise the smallest per-task improvement while staying near the average gradient, with a convergence guarantee?</td></tr>
+            <tr><td><a href="mgda.html"><strong>MGDA</strong></a></td><td>Which blend of task gradients lowers every task's loss at once, and when does no such blend exist?</td></tr>
         </tbody>
     </table>
-
-<h2 id="references">References</h2>
+<h2 id="references"><span class="secnum">10</span> References</h2>
 
     <ol class="brefs">
         <li>Chen, Z., et al. (2018). GradNorm: Gradient Normalization for Adaptive Loss Balancing in Deep Multitask Networks. ICML. arXiv:1711.02257.</li>
@@ -1530,8 +1535,8 @@ with torch.no_grad():
         document.getElementById(b.p.readId).textContent = b.p.readFinal(d);
       });
       document.getElementById('gnNarr').textContent = (d.gn.l1[STEPS - 1] < d.eq.l1[STEPS - 1])
-        ? 'The quiet task\'s loss ends lower with GradNorm than with equal weights, closer to its solo run.'
-        : 'At this scale GradNorm\'s quiet-task loss ends no lower than with equal weights.';
+        ? 'Task 1\'s loss ends lower with GradNorm than with equal weights, closer to its solo run.'
+        : 'At this scale task 1\'s loss ends no lower with GradNorm than with equal weights.';
       document.getElementById('gnPlay').textContent = 'Play';
       document.getElementById('gnPlay').classList.remove('playing');
     }
@@ -1541,6 +1546,11 @@ with torch.no_grad():
     function playRun(startI) {
       var d = state.d, MID = Math.floor((NPTS - 1) / 2), LAST = NPTS - 1;
       var SEG_MS = 2400, FR = 24, HOLD_MS = 2200;
+      /* Reduced motion: show the finished run at once, no animation. */
+      if (window.matchMedia &&
+          window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        drawTo(d, LAST); finish(d); return;
+      }
       state.stage = 0;
       built.forEach(function (b) {
         document.getElementById(b.p.box).classList.add('stage-focus');
@@ -1601,8 +1611,8 @@ with torch.no_grad():
         NARR_RUN1,
         NARR_MID,
         NARR_RUN2,
-        'The quiet task\'s loss ends lower with GradNorm than with equal weights, closer to its solo run.',
-        'At this scale GradNorm\'s quiet-task loss ends no lower than with equal weights.'
+        'Task 1\'s loss ends lower with GradNorm than with equal weights, closer to its solo run.',
+        'At this scale task 1\'s loss ends no lower with GradNorm than with equal weights.'
       ]);
       built.forEach(function (bx, bi) {
         reserveBox(document.getElementById(bx.p.readId), [bx.p.readRest(d), bx.p.readFinal(d), readLive(bi, d, LAST)]);
@@ -1689,13 +1699,23 @@ with torch.no_grad():
     /* Label with a real subscript: base text, then a lowered smaller part. */
     function txSub(x, y, base, sub, after, size, anchor, fill) {
       var t = el('text', { x: x, y: y, 'text-anchor': anchor || 'start', 'font-size': size, fill: fill || INK });
-      t.appendChild(document.createTextNode(base));
+      /* P70: the symbol (the last letter of base) is drawn in the math style. */
+      var bm = /^(.*?)([A-Za-z])$/.exec(base);
+      if (bm) {
+        t.appendChild(document.createTextNode(bm[1]));
+        var tv = el('tspan', { 'class': 'mvar' }); tv.textContent = bm[2]; t.appendChild(tv);
+      } else t.appendChild(document.createTextNode(base));
       var ts = el('tspan', { 'baseline-shift': 'sub', 'font-size': '90%' });
       ts.textContent = sub;
       t.appendChild(ts);
       if (after) {
         var ta = el('tspan', { 'baseline-shift': '0' });
-        ta.textContent = after;
+        var am = /^\((\w)\)$/.exec(after);
+        if (am) {
+          ta.appendChild(document.createTextNode('('));
+          var av = el('tspan', { 'class': 'mvar' }); av.textContent = am[1]; ta.appendChild(av);
+          ta.appendChild(document.createTextNode(')'));
+        } else ta.textContent = after;
         t.appendChild(ta);
       }
       return t;
@@ -1708,13 +1728,13 @@ with torch.no_grad():
     /* Per-task progress (step 1) and pace (step 2), tagged under each row so
        the reader can see why task 1 counts as behind. */
     var rowTags = [
-      ['progress ratio 0.95', 'progress ratio 0.40'],
-      ['pace 1.41, behind', 'pace 0.59, ahead']
+      ['loss ratio 0.95', 'loss ratio 0.40'],
+      ['rate 1.41, behind', 'rate 0.59, ahead']
     ];
     var outcomes = [
-      'Task 2 is 100 times louder, so the sum is basically task 2\'s gradient.',
-      'Task 1 is behind, so its target sits far above its loudness; task 2\'s sits below.',
-      'Task 2\'s weight drops most, since plain gradient descent scales with its 100 times longer gradient. Adam, which Chen and colleagues used, would move both by about the same amount.',
+      'Task 2\'s gradient norm is 100 times larger, so the sum is almost task 2\'s gradient.',
+      'Task 1 is behind, so its target is far above its norm; task 2\'s target is below its norm.',
+      'Task 2\'s weight drops most, since plain gradient descent scales with its 100 times longer gradient. Adam, which the paper used, would move both by about the same amount.',
       'Rescaling to a sum of 2 hands task 2\'s lost weight to task 1.'
     ];
 
@@ -1792,9 +1812,15 @@ with torch.no_grad():
       while (svg.firstChild) svg.removeChild(svg.firstChild);
       pickLayout();
       var R1 = LY.R1, R2 = LY.R2;
-      svg.appendChild(tx(LY.title[0], LY.title[1], titles[k], 16, 'middle', INK, 700));
+      var tt = tx(LY.title[0], LY.title[1], titles[k], 16, 'middle', INK, 700);
+      if (titles[k].indexOf('\u03b1') >= 0) {
+        var tp = titles[k].split('\u03b1'); tt.textContent = tp[0];
+        var tav = el('tspan', { 'class': 'mvar' }); tav.textContent = '\u03b1'; tt.appendChild(tav);
+        tt.appendChild(document.createTextNode(tp[1]));
+      }
+      svg.appendChild(tt);
       /* One scene: loudness bars and weight bars, shared dash convention. */
-      svg.appendChild(txSub(LY.lLab[0], LY.lLab[1], 'loudness G', 'W', '(i)', 14, 'middle', MUT));
+      svg.appendChild(txSub(LY.lLab[0], LY.lLab[1], 'gradient norm G', 'W', '(i)', 14, 'middle', MUT));
       svg.appendChild(txSub(LY.rLab[0], LY.rLab[1], 'weights w', 'i', '', 14, 'middle', MUT));
       svg.appendChild(el('line', { x1: LY.div[0], y1: LY.div[1], x2: LY.div[2], y2: LY.div[3], stroke: '#e2e8f0', 'stroke-width': 1 }));
       /* LEFT group: loudness bars (log scale), always drawn. */
@@ -2016,5 +2042,34 @@ with torch.no_grad():
     .series-nav a.nav-prev { margin-right: 0; }
 }
 </style>
+<script>
+/* P80 code sections (CODE-SECTIONS.md) */
+(function(){
+  var C=['121,184,255','255,171,112','133,232,157','210,168,255','255,161,152','118,227,234'];
+  function lay(pre){
+    var code=pre.querySelector('code'); if(!code) return;
+    var lh=parseFloat(getComputedStyle(code).lineHeight);
+    var pt=parseFloat(getComputedStyle(pre).paddingTop);
+    var old=pre.querySelectorAll('.cs-g'); for(var j=0;j<old.length;j++) pre.removeChild(old[j]);
+    var imgs=[],sizes=[],pos=[];
+    (pre.getAttribute('data-cs')||'').split(',').forEach(function(r,i){
+      var m=r.trim().match(/^(\d+)(?:-(\d+))?$/); if(!m) return;
+      var a=+m[1],b=+(m[2]||m[1]),c=C[i%C.length],top=pt+(a-1)*lh,h=(b-a+1)*lh;
+      imgs.push('linear-gradient(rgba('+c+',.55),rgba('+c+',.55))','linear-gradient(rgba('+c+',.13),rgba('+c+',.13))');
+      sizes.push('3px '+h+'px','100% '+h+'px'); pos.push('0 '+top+'px','0 '+top+'px');
+      var g=document.createElement('span'); g.className='cs-g'; g.setAttribute('aria-hidden','true');
+      g.setAttribute('data-n',String(i+1)); g.style.top=(top+(lh-11)/2)+'px'; g.style.color='rgb('+c+')';
+      pre.insertBefore(g,code);
+    });
+    pre.style.backgroundImage=imgs.join(','); pre.style.backgroundSize=sizes.join(',');
+    pre.style.backgroundPosition=pos.join(','); pre.style.backgroundRepeat='no-repeat';
+  }
+  function all(){ var p=document.querySelectorAll('pre.cs'); for(var i=0;i<p.length;i++) lay(p[i]); }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',all); else all();
+  window.addEventListener('load',all);
+  window.addEventListener('resize',all);
+  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(all);
+})();
+</script>
 </body>
 </html>

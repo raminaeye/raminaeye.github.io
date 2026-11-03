@@ -1,0 +1,1555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>How Subword Tokenizers Are Built: BPE, WordPiece and Unigram</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem;
+      line-height: 1.6;
+      color: #333;
+    }
+    h1, h2, h3, h4 {
+      color: #2c3e50;
+      margin-top: 1.5em;
+      margin-bottom: 0.5em;
+    }
+    h1 { font-size: 2.5em; border-bottom: 2px solid #3498db; padding-bottom: 0.3em;}
+    h2 { font-size: 2em; border-bottom: 1px solid #bdc3c7; padding-bottom: 0.2em;}
+    h3 { font-size: 1.5em; }
+    h4 { font-size: 1.2em; color: #555;}
+
+    /* Shared site nav (matches index.html topnav) */
+    body { padding-top: calc(64px + 1.5rem); }
+    h1, h2, h3 { scroll-margin-top: 84px; }
+    .topnav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        z-index: 1000;
+        background: rgba(255, 255, 255, 0.65);
+        backdrop-filter: blur(18px) saturate(1.5);
+        -webkit-backdrop-filter: blur(18px) saturate(1.5);
+        border-bottom: 1px solid transparent;
+        transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+    .topnav.scrolled {
+        background: rgba(255, 255, 255, 0.88);
+        border-bottom-color: #dee2e6;
+        box-shadow: 0 6px 24px rgba(33, 37, 41, 0.07);
+    }
+    .nav-inner {
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 0 1.5rem;
+        height: 64px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+    .wordmark {
+        font-weight: 700;
+        color: #212529;
+        text-decoration: none;
+        font-size: 1.05rem;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+    }
+    .nav-links {
+        display: flex;
+        gap: 2px;
+        align-items: center;
+    }
+    .nav-links a {
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        font-size: 0.95rem;
+        padding: 8px 14px;
+        border-radius: 999px;
+        transition: color 0.18s ease, background-color 0.18s ease;
+    }
+    .nav-links a:hover {
+        color: #007bff;
+        background-color: #e7f1ff;
+    }
+    .nav-links a.active {
+        color: #007bff;
+        background-color: #e7f1ff;
+        font-weight: 600;
+    }
+    .nav-links a:focus-visible,
+    .wordmark:focus-visible,
+    .nav-toggle:focus-visible,
+    .panel-link:focus-visible,
+    .panel-social a:focus-visible {
+        outline: 2px solid #007bff;
+        outline-offset: 2px;
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .topnav,
+        .nav-links a,
+        .nav-toggle span,
+        .nav-panel,
+        .nav-panel a.panel-link {
+            transition: none;
+        }
+    }
+    @media (hover: hover) {
+        .nav-toggle:hover { background-color: #e7f1ff; }
+    }
+    .nav-toggle {
+        display: none;
+        width: 42px;
+        height: 42px;
+        padding: 0;
+        background: none;
+        border: 0;
+        border-radius: 10px;
+        cursor: pointer;
+        flex: 0 0 auto;
+    }
+    .nav-panel {
+        display: grid;
+        grid-template-rows: 0fr;
+        visibility: hidden;
+        transition: grid-template-rows 0.32s ease, visibility 0s linear 0.32s;
+    }
+    .nav-panel.open {
+        grid-template-rows: 1fr;
+        visibility: visible;
+        transition: grid-template-rows 0.32s ease, visibility 0s;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner {
+        min-height: 0;
+        overflow: hidden;
+    }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link:hover {
+        background-color: #e7f1ff;
+        color: #007bff;
+    }
+    .nav-panel a.panel-link.active {
+        color: #007bff;
+        font-weight: 600;
+        background-color: #e7f1ff;
+    }
+    .panel-social a:hover {
+        border-color: #007bff;
+    }
+    /* Section tab strip: one slim row, scrolls sideways when it overflows. */
+    .tabs-label {
+        float: left;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #6c757d;
+        font-weight: 700;
+        line-height: 1.2;
+        margin: 0;
+        padding: 8px 12px 0 0;
+    }
+    .tab-strip {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 2px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        margin: 0 0 1.25rem;
+        max-width: 100%;
+    }
+    .tab-strip::-webkit-scrollbar { display: none; }
+    .tab-strip a.tab-chip,
+    .tab-strip a.tab-link {
+        display: inline-block;
+        flex: 0 0 auto;
+        padding: 6px 10px;
+        border-radius: 999px;
+        color: #495057;
+        text-decoration: none;
+        font-size: 0.82rem;
+        font-weight: 500;
+        line-height: 1.35;
+        white-space: nowrap;
+    }
+    .tab-strip a.tab-chip:hover,
+    .tab-strip a.tab-link:hover { color: #007bff; }
+    .tab-strip a.tab-chip.active,
+    .tab-strip a.tab-link.active { background: #007bff; color: #ffffff; }
+    @media (max-width: 768px) {
+        .tabs-label { display: none; }
+        .tab-strip {
+            width: 100vw;
+            max-width: 100vw;
+            box-sizing: border-box;
+            margin-left: calc((100% - 100vw) / 2);
+            padding-left: calc((100vw - 100%) / 2);
+        }
+        .tab-strip a.tab-chip,
+        .tab-strip a.tab-link { font-size: 0.75rem; padding: 6px 8px; }
+    }
+        .crumb { margin: 0 0 0.8em; }
+        .crumb a {
+            display: inline-block;
+            padding: 4px 14px;
+            border: 1px solid #dee2e6;
+            border-radius: 999px;
+            background: #f8f9fa;
+            color: #0056b3;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+        .crumb a:hover { border-color: #007bff; color: #007bff; }
+    .nav-panel a.panel-link {
+        display: flex;
+        align-items: center;
+        padding: 0.8rem 0.75rem;
+        margin: 0 0.25rem;
+        border-radius: 10px;
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        min-height: 48px;
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+    .panel-social {
+        display: flex;
+        gap: 0.5rem;
+        padding: 0.9rem 1rem 0.25rem;
+        flex-wrap: wrap;
+    }
+    .panel-social a {
+        color: #007bff;
+        text-decoration: none;
+        font-weight: 500;
+        font-size: 0.9rem;
+        padding: 6px 12px;
+        border: 1px solid #dee2e6;
+        border-radius: 999px;
+        transition: border-color 0.15s ease;
+    }
+    @media (max-width: 768px) {
+        .nav-links { display: none; }
+        .nav-toggle { display: block; }
+    }
+
+    pre {
+      background: #0d1117;
+      color: #e6edf3;
+      padding: 14px 16px;
+      overflow-x: auto;
+      border-radius: 8px;
+      font-size: 0.9em;
+      margin: 1em 0;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+    }
+    /* P52 canonical inline items in prose: numbers and variables wear the body
+       font at body size and read as part of the sentence (keeps P50's quiet
+       treatment, no pill; code blocks and eq-cards keep the mono treatment). */
+    code {
+        font-family: inherit;
+        font-size: 1em;
+        color: #1a1a1a;
+        background: none;
+        padding: 0 0.08em;
+        overflow-wrap: break-word;
+    }
+    pre code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 1em; }
+    .eq-card code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 0.92em; }
+    pre code {
+      background: none;
+      padding: 0;
+      font-size: 1em;
+      color: inherit;
+    }
+    ul, ol {
+      padding-left: 20px;
+    }
+    li {
+      margin-bottom: 0.5em;
+    }
+    strong {
+      color: #2980b9;
+    }
+    hr {
+      border: 0;
+      height: 1px;
+      background: #bdc3c7;
+      margin-top: 2em;
+      margin-bottom: 2em;
+    }
+    /* Rendered output block, not a print() cell */
+    .output {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 1rem 1.2rem;
+      border-radius: 6px;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+      font-size: 0.9em;
+      margin: 1em 0;
+      overflow-x: auto;
+      border-left: 4px solid #22c55e;
+    }
+    .output .dim { color: #94a3b8; }
+    /* Readability sweep: stat cards, data tables, numbered walkthroughs */
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 1.2em 0; }
+    .stat-card { border: 1px solid #bdc3c7; border-radius: 8px; padding: 14px 16px; background: #f7f9fb; }
+    .stat-num { font-size: 1.9em; font-weight: 800; color: #2c3e50; line-height: 1.15; }
+    .stat-unit { font-size: .55em; font-weight: 600; color: #7f8c8d; } .stat-vs { font-size: max(12px, .55em); font-weight: 600; color: #7f8c8d; }
+    .stat-label { font-size: .92em; font-weight: 600; margin-top: 6px; color: #2c3e50; }
+    .stat-note { font-size: .82em; color: #7f8c8d; margin-top: 3px; }
+    .datatable { border-collapse: collapse; margin: 1.2em 0; width: 100%; max-width: 560px; font-size: .95em; }
+    .datatable th, .datatable td { border: 1px solid #bdc3c7; padding: .45em .6em; text-align: center; }
+    .datatable th { background: #2c3e50; color: #fff; font-weight: 600; }
+    .datatable tr:nth-child(even) td { background: #f7f9fb; }
+    .datatable tr td.mask { background: #d8dee3; color: #6b7a89; font-weight: 600; }
+    .datatable caption { caption-side: bottom; text-align: left; font-size: .85em; color: #555; padding: .5em 0 0; border-left: 3px solid #3498db; padding-left: .8em; }
+/* Worked-example card (Round 9 template): a calm sage card that sets
+           math walkthrough steps apart from body text. Body font throughout,
+           all math in MathJax, one computation per line, generous spacing. */
+        .worked-example {
+            background: #f1f6ed;
+            border: 1px solid #d9e4d1;
+            border-left: 3px solid #6f9a63;
+            border-radius: 10px;
+            padding: 14px 20px;
+            margin: 1.1em 0;
+            max-width: 680px;
+            color: #2c3e50;
+            line-height: 1.8;
+            overflow-x: auto;
+        }
+        ol.worked-example {
+            list-style: none;
+            counter-reset: wex-step;
+            padding-left: 20px;
+        }
+        ol.worked-example > li {
+            counter-increment: wex-step;
+            position: relative;
+            margin: 0;
+            padding: 8px 0 8px 44px;
+        }
+        ol.worked-example > li + li { border-top: 1px dashed #cbdabf; }
+        ol.worked-example > li::before {
+            content: counter(wex-step);
+            position: absolute;
+            left: 0;
+            top: 9px;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: #6f9a63;
+            color: #ffffff;
+            font-size: 13px;
+            font-weight: 700;
+            line-height: 28px;
+            text-align: center;
+        }
+        @media (max-width: 480px) {
+            .worked-example { padding: 12px; font-size: 15px; }
+            ol.worked-example { padding-left: 12px; }
+            ol.worked-example > li { padding-left: 38px; }
+        }
+    .caption {
+      font-size: 0.9em; color: #555; margin-top: 1rem;
+      border-left: 3px solid #3498db; padding-left: 0.8em;
+    }
+    .diagram {
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      padding: 1rem;
+      margin: 1.75rem 0;
+      background: #fbfcfd;
+      overflow-x: auto;
+    }
+    /* Interactive demo */
+    .demo {
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      padding: 1.25rem;
+      margin: 1.75rem 0;
+      background: #fbfcfd;
+    }
+    .demo-controls { margin: 0.8rem 0 1rem; }
+    .demo-controls label { display: block; margin: 0.6em 0 0.3em; color: #2c3e50; }
+    .demo-controls input[type="range"] { width: 100%; }
+    .demo-controls select { font-size: 1em; padding: 0.3em 0.6em; }
+    .attn-toggle { display: inline-flex; border: 1px solid #bdc3c7; border-radius: 6px; overflow: hidden; margin: 0.6rem 0.6rem 1rem 0; flex-wrap: wrap; }
+    .attn-toggle button {
+      border: none; background: #fff; padding: 0.45em 1.0em; cursor: pointer;
+      font-size: 1em; color: #2c3e50; font-family: inherit;
+    }
+    .attn-toggle button.active { background: #3498db; color: #fff; font-weight: bold; }
+    .table-scroll { overflow-x: auto; margin: 0 auto 1rem; }
+    .attn-mini { border-collapse: collapse; margin: 0 auto; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; font-size: 0.85em; }
+    .attn-mini th, .attn-mini td { border: 1px solid #bdc3c7; padding: 0.35em 0.55em; text-align: center; white-space: nowrap; }
+    .attn-mini th { background: #ecf0f1; color: #2c3e50; }
+    .attn-mini tr.hl td { background: #d6eafb; }
+    .attn-mini tr.hl th.rowhead { background: #3498db; color: #fff; }
+    .attn-mini td.blocked { background: rgba(231,76,60,0.45); color: #7b241c; font-weight: bold; }
+    .attn-bars { max-width: 560px; margin: 0 auto; }
+    .attn-bar-row { display: flex; align-items: center; gap: 0.6em; margin: 0.45em 0; }
+    .attn-bar-row .lbl { width: 4.2em; text-align: right; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; color: #2c3e50; flex: none; font-size: 0.9em; }
+    .attn-bar-track { flex: 1; background: #ecf0f1; border-radius: 4px; height: 1.4em; min-width: 0; }
+    .attn-bar-fill { background: #3498db; border-radius: 4px; height: 100%; }
+    .attn-bar-fill.alt { background: #e67e22; }
+    .attn-bar-row .val { width: 2.8em; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; color: #2c3e50; flex: none; }
+    /* headRoles paired bars: both heads side by side per token */
+    .pair-tracks { display: flex; gap: 0.5em; flex: 1; min-width: 0; }
+    .pair-tracks .attn-bar-track.dim { opacity: 0.3; }
+    .attn-bar-row .val.pair { width: 6.6em; font-size: 0.85em; }
+    /* Fit-in-one-page: tighter bar rows for the 12-token headRoles viz. */
+    #headRoles .attn-bar-row { margin: 0.28em 0; }
+    #headRoles .attn-bar-track { height: 1.15em; }
+        /* Shared walkthrough equation-card contract (verbatim, all pages) */
+        
+        .eq-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+
+          padding:1rem 1.2rem;margin:1.75rem auto;max-width:640px;overflow-x:auto}
+
+        .eq-what{font-size:.95rem;color:#334155;margin:0 0 .6rem;line-height:1.55}
+
+        .eq-line{font-size:1.38rem;line-height:2.0;letter-spacing:.015em;padding:.5rem .6rem;white-space:normal;font-weight:500;opacity:.38;border-left:3px solid transparent}
+
+        .eq-line.eq-active{opacity:1;border-left-color:#2c3e50}
+.eq-line sub,.eq-line sup{font-size:.68em}
+.frac{display:inline-flex;flex-direction:column;text-align:center;vertical-align:middle;margin:0 .18em;font-size:.8em;line-height:1.3}
+.frac .top{padding:0 .3em .1em}
+.frac .bot{border-top:2px solid currentColor;padding:.1em .3em 0}
+      .eq-why{display:none;visibility:hidden;font-size:1rem;color:#475569;padding:.15rem .35rem .4rem;line-height:1.65}
+      .eq-why.eq-active{display:block;visibility:visible}
+      .eq-card.eq-stepped .eq-line{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-line.eq-active{display:block;opacity:1;visibility:visible}
+      .eq-card.eq-stepped .eq-legend .eq-item{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-legend .eq-item.eq-active{display:block;visibility:visible}
+
+        .eqt{font-weight:600;padding:0 .1em;border-radius:3px}
+
+        .eqt.eqt-active{text-decoration:underline;text-underline-offset:2px}
+
+        .eq-legend{font-size:.85rem;color:#475569;margin-top:.6rem;line-height:1.75}
+
+        .eq-legend .eq-item{display:block}
+
+        .eq-legend .eq-item code{white-space:nowrap}
+
+        .eq-sw{display:inline-block;width:.7em;height:.7em;border-radius:2px;
+
+          margin:0 .25em 0 .6em;vertical-align:baseline}
+
+        @media (max-width:480px){.eq-card{padding:.85rem .9rem}.eq-line{font-size:1.24rem;line-height:1.95}}
+/* P70 inline variables and inline code, one style site-wide (VAR-STYLE.md v2) */
+var,.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic;font-weight:400;font-size:1em;color:#1d4e89;background:#edf3fa;border-radius:3px;padding:0 .18em;white-space:nowrap;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+var sub,var sup,.mvar sub,.mvar sup{font-size:.72em;font-style:normal}
+pre var,code var,.eq-line var{font:inherit;color:inherit;background:none;padding:0}
+svg text.mvar,svg tspan.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic}
+:not(pre)>code:not(.eq-line code){font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,Courier,monospace;font-size:.86em;color:#24292f;background:#f1f3f5;border:1px solid #dfe3e8;border-radius:4px;padding:.06em .32em;white-space:normal;overflow-wrap:anywhere}
+/* P79 numbering (NUMBERING.md) */
+.secnum{font-variant-numeric:tabular-nums;margin-right:.4em;color:inherit;font-weight:inherit}
+.tab-strip .secnum{margin-right:.3em;opacity:.75}
+.fignum{font-weight:600;margin-right:.3em;font-variant-numeric:tabular-nums}
+/* P80 code sections (CODE-SECTIONS.md) */
+pre.cs{position:relative;background-attachment:local;padding-left:20px}
+pre.cs code{display:block;line-height:1.55}
+pre.cs .cs-g{position:absolute;left:3px;width:11px;text-align:center;font:700 11px/1 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;-webkit-user-select:none;user-select:none;pointer-events:none}
+pre.cs .cs-g::before{content:attr(data-n)}
+ol.cs-notes{list-style:none;padding-left:0;margin:-.4em 0 1em}
+ol.cs-notes li{margin:0 0 .3em;padding-left:1.9em;position:relative}
+ol.cs-notes .cs-n{position:absolute;left:0;top:.1em;min-width:1.35em;padding:0 .25em;border-radius:4px;font:700 .8em/1.45 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;text-align:center;color:#0d1117}
+ol.cs-notes li:nth-child(6n+1) .cs-n{background:#79b8ff}
+ol.cs-notes li:nth-child(6n+2) .cs-n{background:#ffab70}
+ol.cs-notes li:nth-child(6n+3) .cs-n{background:#85e89d}
+ol.cs-notes li:nth-child(6n+4) .cs-n{background:#d2a8ff}
+ol.cs-notes li:nth-child(6n+5) .cs-n{background:#ffa198}
+ol.cs-notes li:nth-child(6n+6) .cs-n{background:#76e3ea}
+    /* diagram-side dim/highlight (SVG/DOM). Do NOT use .hl/.dim: taken. */
+    .eq-dim{opacity:.58}
+    .eq-hl{filter:drop-shadow(0 0 3px currentColor)}
+    .head-key { display: flex; flex-wrap: wrap; gap: 1.2em; justify-content: center; margin: 0.4rem 0 0.6rem; font-size: 0.9em; color: #555; }
+    .head-key .sw { display: inline-block; width: 1.4em; height: 0.9em; border-radius: 3px; margin-right: 0.4em; vertical-align: middle; }
+    .head-key .sw.blue { background: #3498db; }
+    .head-key .sw.orange { background: #e67e22; }
+    /* maskDemo legend key: lives outside the grid, so 0/-inf text never has to fit a cell */
+    .mask-legend { display: flex; flex-wrap: wrap; gap: 1.2em; justify-content: center; margin: 0.6rem 0; font-size: 0.9em; color: #555; }
+    .mask-legend .sw { display: inline-block; width: 1.4em; height: 1em; border-radius: 3px; margin-right: 0.4em; vertical-align: middle; border: 1px solid #bdc3c7; }
+    .mask-legend .sw.allow { background: rgba(46,204,113,0.55); }
+    .mask-legend .sw.block { background: rgba(231,76,60,0.55); }
+    .demo-stats {
+      text-align: center; margin-top: 1rem; font-size: 0.95em; color: #2c3e50;
+    }
+    .demo-stats strong { color: #2980b9; }
+    .big-nums { display: flex; flex-wrap: wrap; gap: 1rem; justify-content: center; margin: 1rem 0; }
+    .big-num { text-align: center; min-width: 140px; }
+    .big-num .v { font-size: 1.5em; font-weight: bold; color: #2980b9; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; }
+    .big-num .k { font-size: 0.85em; color: #555; }
+    .chart-legend { display: flex; flex-wrap: wrap; gap: 1.2em; justify-content: center; margin: 0.4rem 0 0.6rem; font-size: 0.9em; color: #555; }
+    .chart-legend .sw { display: inline-block; width: 24px; height: 0; border-top: 3px solid #3498db; vertical-align: middle; margin-right: 0.4em; }
+    .chart-legend .sw.orange { border-top-color: #e67e22; }
+    .chart-legend .sw.gray { border-top: 3px dashed #95a5a6; }
+    canvas.flopchart { width: 100%; max-width: 600px; height: auto; display: block; margin: 0 auto; }
+    .kvbar-row { display: flex; align-items: center; gap: 0.6em; margin: 0.5em 0; }
+    .kvbar-row .lbl { width: 11em; text-align: right; color: #2c3e50; flex: none; font-size: 0.9em; }
+    .kvbar-track { flex: 1; background: #ecf0f1; border-radius: 4px; height: 1.5em; min-width: 0; position: relative; }
+    .kvbar-fill { background: #e74c3c; border-radius: 4px; height: 100%; }
+    .kvbar-fill.cache { background: #27ae60; }
+    .kvbar-row .val { width: 7em; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; color: #2c3e50; flex: none; font-size: 0.85em; }
+    .kvbar-title { font-weight: bold; color: #2c3e50; margin: 0.7em 0 0.1em; }
+    .mask-grid {
+      border-collapse: collapse;
+      table-layout: fixed;
+      margin: 0 auto;
+    }
+    .mask-grid td {
+      border: 1px solid #7f8c8d;
+      width: 26px; height: 26px;
+      padding: 0;
+    }
+    /* Fit-in-one-page: streamMask uses a slightly tighter grid. */
+    #streamMask .mask-grid td { width: 22px; height: 22px; }
+    #streamMask .ctl-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 1rem; margin: 0.8rem 0 0.2rem; }
+    #streamMask .ctl-row .play-row { margin: 0; }
+    #streamMask .ctl-row .demo-buttons { margin-bottom: 0; justify-content: flex-start; }
+    .mask-grid td.allow { background: #3498db; }
+    .mask-grid td.block { background: #f4f6f7; }
+    .demo-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      justify-content: center;
+      margin-bottom: 1rem;
+    }
+    .demo-buttons button {
+      border: 1px solid #bdc3c7;
+      background: #fff;
+      padding: 0.5em 1.1em;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.9em;
+      color: #2c3e50;
+    }
+    .demo-buttons button.active {
+      background: #3498db;
+      color: #fff;
+      font-weight: bold;
+      border-color: #3498db;
+    }
+    /* Play buttons and plain-English walkthroughs */
+    .play-row { margin: 0.8rem 0 0.2rem; display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
+    .play-btn {
+      border: 1px solid #2980b9; background: #2980b9; color: #fff;
+      padding: 0.45em 1.3em; border-radius: 6px; cursor: pointer;
+      font-size: 0.95em; font-weight: bold; font-family: inherit;
+      flex: 0 0 auto;
+    }
+    .play-btn:hover { background: #1f6fa5; }
+    .play-btn.stop { background: #e74c3c; border-color: #e74c3c; }
+    .play-btn.stop:hover { background: #c0392b; }
+    .howto {
+      background: #eef6fb; border-left: 4px solid #3498db;
+      padding: 0.7em 1em; border-radius: 0 6px 6px 0;
+      font-size: 0.95em; color: #2c3e50; margin: 0.8rem 0;
+    }
+    .howto strong { color: #2980b9; }
+    /* Caption card (refocus round, shared across widgets) */
+    .capcard {
+      background: #ffffff;
+      border: 1px solid #e3e8ee;
+      border-left: 3px solid #2c3e50;
+      border-radius: 10px;
+      padding: 18px;
+      margin-top: 14px;
+      font-size: 15px;
+      line-height: 1.65;
+      color: #2c3e50;
+    }
+    .howto.capcard strong, .caption.capcard strong { color: #2c3e50; }
+    .capcard .cap-title {
+      display: block;
+      font-size: 15px;
+      font-weight: bold;
+      color: #2c3e50;
+      margin-bottom: 8px;
+    }
+    .capcard ul { list-style: none; margin: 0; padding: 0; }
+    .capcard li { position: relative; padding-left: 16px; margin: 0 0 7px; }
+    .capcard li:last-child { margin-bottom: 0; }
+    /* Fit-in-one-page: tighter how-to cards on phones. */
+    @media (max-width: 480px) {
+      .howto.capcard { padding: 12px 13px; font-size: 14px; line-height: 1.55; }
+      .capcard li { margin: 0 0 5px; }
+      .capcard .cap-title { margin-bottom: 6px; }
+    }
+    .capcard li::before {
+      content: ""; position: absolute; left: 2px; top: 0.68em;
+      width: 6px; height: 6px; border-radius: 50%; background: #2c3e50;
+    }
+    .canvas-wrap { position: relative; }
+    
+    .attn-bar-fill { transition: width 0.4s ease; }
+    /* KV cache blocks */
+    .kv-blocks { display: flex; flex-wrap: wrap; gap: 3px; margin: 0.8rem 0; }
+    .kv-block { width: 14px; height: 14px; border-radius: 3px; background: #ecf0f1; }
+    .kv-block.on { background: #27ae60; animation: kvpop 0.4s ease; }
+    @keyframes kvpop { from { transform: scale(0.4); } to { transform: scale(1); } }
+    .kv-stage { font-size: 0.9em; color: #555; margin: 0.6rem 0 0.2rem; }
+    /* Pinned-total flash (headParams) */
+    .big-num .v.pinned-flash { animation: pinflash 0.5s ease; }
+    @keyframes pinflash { 0% { color: #27ae60; } 100% { color: #2980b9; } }
+    /* Streaming token strips */
+    .stream-strip { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 0.5rem 0; font-size: 0.9em; color: #2c3e50; }
+    .tok {
+      display: inline-block; min-width: 1.8em; padding: 0.25em 0.4em; text-align: center;
+      border-radius: 4px; background: #ecf0f1; color: #7f8c8d;
+      font-family: 'SFMono-Regular', Consolas, Menlo, monospace; font-size: 0.85em;
+    }
+    .tok.arrived { background: #d6eaf8; color: #2c3e50; }
+    .tok.emitted { background: #27ae60; color: #fff; }
+    .mask-grid td.pending { background: #e9ecef; }
+    /* Head slicing visual (headParams): the 512-dim pie being re-sliced */
+    .slice-wrap { max-width: 560px; margin: 0.8rem auto 0.2rem; }
+    .slice-bar { display: flex; height: 34px; border-radius: 6px; overflow: hidden; border: 1px solid #bdc3c7; }
+    .slice-seg {
+      height: 100%; border-right: 1px solid #fff; box-sizing: border-box;
+      transition: width 0.45s ease, background-color 0.45s ease;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; color: #fff; font-weight: bold; min-width: 0; overflow: hidden;
+      white-space: nowrap;
+    }
+    .slice-cap { text-align: center; font-size: 0.9em; color: #555; margin-top: 0.35rem; }
+    /* Param bill bar (headParams): fixed-length bar, constant total, 75/25 QKV vs output-proj */
+    .bill-bar { display: flex; height: 30px; border-radius: 6px; overflow: hidden; border: 2px solid #2c3e50; }
+    .bill-seg { height: 100%; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+      font-size: 12px; color: #fff; font-weight: bold; white-space: nowrap; overflow: hidden; }
+    .bill-bar.bill-pulse { animation: billpulse 0.5s ease; }
+    @keyframes billpulse { 0% { box-shadow: 0 0 0 4px rgba(39,174,96,.55); } 100% { box-shadow: 0 0 0 0 rgba(39,174,96,0); } }
+    .bill-cap { text-align: center; font-size: 0.9em; color: #555; margin-top: 0.35rem; }
+    /* Let wide display equations scroll instead of pushing the page wide */
+    .mjx-chtml.MJXc-display { overflow-x: auto; overflow-y: hidden; max-width: 100%; }
+    /* Source-level containment for raw $$ display math before MathJax typesets */
+    .dmath { overflow-x: auto; max-width: 100%; margin: 1.4rem 0; }
+    /* Small screens: keep heatmaps and bars usable */
+    @media (max-width: 520px) {
+      .attn-mini { font-size: 0.75em; }
+      .attn-mini th, .attn-mini td { padding: 0.3em 0.45em; }
+      .kvbar-row { flex-wrap: wrap; }
+      .kvbar-row .lbl { width: 100%; text-align: left; margin-bottom: 0.2em; }
+      .kvbar-track { flex: 1 1 55%; }
+      .kvbar-row .val { width: auto; }
+      .big-num { min-width: 110px; }
+      .big-num .v { font-size: 1.25em; }
+    }
+    /* Static paper-figure citation */
+    .fig-cite { border-left: 3px solid #bdc3c7; margin: 1em 0; padding: 0.4em 0 0.4em 1em; color: #555; font-size: 0.9em; }
+
+  
+/* canonical spacing: display math */
+.MathJax_Display, mjx-container[display="true"] { margin: 1.4rem 0 !important; }
+figcaption { margin-top: 1rem; }
+    /* Compact phone walkthrough layout (canonical block, every tutorial page):
+       two-column eq legends, tightened demo spacing, and diagrams capped so
+       controls and diagram share the first phone screen. Phone widths only;
+       desktop rendering and equation typography are unchanged. */
+    @media (max-width:480px){
+      .demo{padding:.75rem}
+      .demo>*{margin-top:.6rem;margin-bottom:.6rem}
+      .demo>*:first-child{margin-top:0}
+      .demo .eq-card{margin:1rem auto;padding:.7rem .8rem}
+      .demo .cap-card,.demo .capcard{padding:.85rem .95rem}
+      .eq-legend{display:grid;grid-template-columns:1fr 1fr;column-gap:.9rem;row-gap:.1rem;line-height:1.5}
+      .eq-legend .eq-item:has(> code ~ code){grid-column:1/-1}
+      .demo svg,.demo canvas{max-height:55vh}
+    }
+</style>
+
+  <script type="text/javascript" async
+    src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML">
+  </script>
+  <script type="text/x-mathjax-config">
+    MathJax.Hub.Config({
+      tex2jax: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        displayMath: [['$$','$$'], ['\\[','\\]']],
+        processEscapes: true
+      },
+      showProcessingMessages: false,
+      messageStyle: "none"
+    });
+  </script>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+<style>
+/* Static teaching diagrams (mtd), shared across tutorials, 2026-11-01 */
+.figure.mtd-fig { margin: 1.75rem 0; }
+.mtd-fig > svg.mtd-svg { display: block; width: 100%; height: auto; margin: 0 auto; }
+.mtd-fig .caption { margin-top: 1rem; }
+.mtd-svg text { fill: #2c3e50; font-family: sans-serif; }
+.mtd-svg .mtd-sub { fill: #555; }
+.mtd-svg .mtd-t1 { fill: #1f618d; }
+.mtd-svg .mtd-t2 { fill: #ca6f1e; }
+.mtd-svg .mtd-pu { fill: #7d3c98; }
+.mtd-svg .mtd-red { fill: #c0392b; }
+.mtd-svg .mtd-grn { fill: #148f77; }
+.mtd-svg line, .mtd-svg path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.mtd-svg .mtd-s.mtd-c1 { stroke: #1f618d; } .mtd-svg .mtd-f.mtd-c1 { fill: #1f618d; }
+.mtd-svg .mtd-s.mtd-c2 { stroke: #ca6f1e; } .mtd-svg .mtd-f.mtd-c2 { fill: #ca6f1e; }
+.mtd-svg .mtd-s.mtd-cp { stroke: #7d3c98; } .mtd-svg .mtd-f.mtd-cp { fill: #7d3c98; }
+.mtd-svg .mtd-s.mtd-cr { stroke: #c0392b; } .mtd-svg .mtd-f.mtd-cr { fill: #c0392b; }
+.mtd-svg .mtd-s.mtd-cg { stroke: #2c3e50; } .mtd-svg .mtd-f.mtd-cg { fill: #2c3e50; }
+.mtd-svg .mtd-sep { stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-pic { fill: #fbfcfd; stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-axis { stroke: #7f8c8d; stroke-width: 1.5px; }
+.mtd-svg .mtd-arc { stroke: #2c3e50; stroke-width: 2px; }
+.mtd-svg .mtd-dot { fill: #2c3e50; }
+.mtd-svg .mtd-guide { stroke: #7f8c8d; stroke-width: 1.4px; stroke-dasharray: 4 4; }
+.mtd-svg .mtd-ring { fill: #fbfcfd; stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-pt { fill: #1f618d; opacity: .55; }
+.mtd-svg .mtd-cross { stroke: #2c3e50; stroke-width: 2.2px; }
+.mtd-svg .mtd-barbg { fill: #eef1f4; }
+.mtd-svg .mtd-bar { fill: #7d3c98; }
+.mtd-svg .mtd-cart { fill: #ffffff; stroke: #2c3e50; stroke-width: 2px; }
+.mtd-svg .mtd-zero { stroke: #95a5a6; stroke-width: 1.2px; stroke-dasharray: 4 4; }
+.mtd-svg .mtd-axisl { stroke: #7f8c8d; stroke-width: 2px; }
+.mtd-svg .mtd-norm { stroke: #148f77; stroke-width: 4px; }
+.mtd-svg .mtd-read { fill: #ffffff; stroke: #2c3e50; stroke-width: 2.5px; }
+.mtd-svg .mtd-ball { fill: #7d3c98; fill-opacity: .08; stroke: #7d3c98; stroke-width: 1.6px; stroke-dasharray: 5 4; }
+.mtd-svg .mtd-box { fill: #fbfcfd; stroke: #bdc3c7; stroke-width: 1.4px; }
+.mtd-svg .mtd-crossbg { fill: #ffffff; }
+.mtd-svg .mtd-halo { stroke: #ffffff; stroke-width: 5px; stroke-linejoin: round; paint-order: stroke; }
+.mtd-svg .mtd-box.mtd-note { stroke-dasharray: 5 4; }
+</style>
+<style>
+.dc-svg { display: block; width: 100%; max-width: 460px; margin: 0 auto; height: auto; }
+.dc-svg .dc-t { font-family: inherit; font-size: 15px; fill: #2c3e50; }
+.dc-svg .dc-s { font-size: 15px; fill: #4a5568; }
+.dc-svg .dc-b { font-weight: 700; }
+.dc-svg .dc-zc { fill: #1f6aa5; }
+.dc-svg .dc-pc { fill: #1e8449; }
+.dc-svg .dc-gc { fill: #a85a14; }
+.dc-svg .dc-bc { fill: #117864; }
+.dc-svg .dc-tauc { fill: #c0392b; }
+.dc-svg .dc-cutc { fill: #7d3c98; }
+.dc-svg .dc-oddc { fill: #b03a7a; }
+.dc-svg .dc-arrow { stroke: #7f8c8d; stroke-width: 1.8px; fill: none; }
+.dc-svg .dc-arrow-head { fill: #7f8c8d; }
+.dc-svg .dc-zbox { stroke: #1f6aa5; }
+.dc-svg .dc-pbox { stroke: #1e8449; }
+.dc-svg .dc-gbox { stroke: #a85a14; }
+.dc-svg .dc-bbox { stroke: #117864; }
+.dc-svg .dc-pill { fill: #ffffff; stroke-width: 1.6px; }
+.dc-svg .dc-taupill { stroke: #c0392b; }
+.dc-svg .dc-cutpill { stroke: #7d3c98; }
+.dc-svg .dc-minbar { stroke: #7d3c98; stroke-width: 1.6px; stroke-dasharray: 5 3; }
+.dc-svg .dc-reppill { stroke: #7d6608; }
+.dc-svg .dc-repc { fill: #7d6608; }
+.dc-svg .dc-zero { stroke: #95a5a6; stroke-width: 1.2px; stroke-dasharray: 4 3; }
+.dc-svg .dc-base { stroke: #7f8c8d; stroke-width: 1.2px; }
+.dc-svg .dc-zbar { fill: #1f6aa5; }
+.dc-svg .dc-pbar { fill: #1e8449; }
+.dc-svg .dc-oddbar { fill: #b03a7a; }
+.dc-svg .dc-before { fill: none; stroke: #7f8c8d; stroke-width: 1.4px; }
+.dc-svg .dc-brace { fill: none; stroke: #b03a7a; stroke-width: 1.6px; }
+.dc-svg .dc-curve { fill: none; stroke: #b03a7a; stroke-width: 2.6px; }
+.dc-svg .dc-dot { fill: #b03a7a; }
+.dc-svg .dc-human { stroke: #2c3e50; stroke-width: 1.4px; stroke-dasharray: 5 4; }
+.dc-svg .dc-hbar { fill: #95a5a6; }
+.dc-svg .dc-gbar { fill: #a85a14; }
+.dc-svg .dc-bbar { fill: #117864; }
+.dc-svg .dc-sbar { fill: #5d6d7e; }
+.dc-svg .dc-cutbar { fill: #7d3c98; }
+.dc-odd { color: #b03a7a; font-weight: 600; }
+.dc-qfig { margin: 1.75rem 0; }
+.dc-qfig .caption { margin-top: 1rem; }
+.dc-quotes { display: grid; gap: .8rem; max-width: 640px; margin: 0 auto; }
+.dc-quote { border-left: 4px solid #95a5a6; background: #f8fafc; border-radius: 6px; padding: .7rem .9rem; font-size: .95rem; line-height: 1.6; }
+.dc-quote.dc-q-beam { border-left-color: #117864; }
+.dc-quote.dc-q-pure { border-left-color: #b03a7a; }
+.dc-quote .dc-qhead { display: block; font-weight: 700; font-size: .9rem; color: #2c3e50; margin-bottom: .2rem; }
+.dc-quote .dc-loop { background: #fdebd0; border-radius: 3px; }
+.dc-fig5 { display: flex; flex-wrap: wrap; gap: 1rem 1.5rem; justify-content: center; align-items: flex-end; }
+.dc-fig5 figure { margin: 0; text-align: center; }
+.dc-fig5 .dc-ctx { display: block; font-size: .95rem; color: #2c3e50; margin-bottom: .35rem; }
+.dc-fig5 img { display: block; margin: 0 auto; height: auto; max-width: 100%; }
+.dc-fig5 .dc-f5flat { width: 200px; }
+.dc-fig5 .dc-f5peak { width: 300px; }
+.dc-pick { list-style: none; padding: 0; margin: 1.2rem auto; max-width: 640px; display: grid; gap: .55rem; }
+.dc-pick li { border: 1px solid #e2e8f0; border-radius: 8px; padding: .55rem .8rem; line-height: 1.55; }
+.dc-pick b { color: #2c3e50; }
+.dc-pick .dc-risk { color: #8a4b0f; }
+.dc-svg .dc-axt { font-size: 16px; fill: #4a5568; }
+.demo-buttons button.active var { color: inherit; background: none; }
+.dc-mk { display: inline-block; min-width: 1.35em; height: 1.35em; line-height: 1.35em; border-radius: 50%; background: #2c3e50; color: #ffffff; font-size: 12.5px; font-weight: 700; text-align: center; font-style: normal; margin-right: .2em; vertical-align: .1em; }
+.dc-costline { display: block; }
+.dc-knobrow { margin: -1rem .2rem 1.75rem; padding: .45rem .8rem; border-left: 3px solid #cbd5e1; font-size: 1rem; line-height: 1.6; color: #334155; }
+.dc-svg .dc-mkc { fill: #2c3e50; }
+.dc-svg .dc-mkt { fill: #ffffff; font-size: 15px; font-weight: 700; }
+.dc-svg .dc-st { font-size: 15px; }
+.dc-tablewrap { overflow-x: auto; max-width: 100%; margin: 0 auto; }
+.dc-table { border-collapse: collapse; width: 100%; min-width: 520px; font-size: .85rem; line-height: 1.4; }
+.dc-table th, .dc-table td { border-bottom: 1px solid #e2e8f0; padding: .4rem .45rem; text-align: left; vertical-align: top; color: #2c3e50; }
+.dc-table th { background: #f4f6f8; font-weight: 700; }
+.dc-table td:first-child { font-weight: 600; white-space: nowrap; }
+.dc-table code { font-size: .95em; }
+.dc-gotchas { margin: .8rem 0 1rem; padding-left: 1.2rem; }
+.dc-gotchas li { margin: .35rem 0; line-height: 1.55; }
+@media (max-width: 600px) {
+  .dc-stack table, .dc-stack tbody, .dc-stack tr, .dc-stack td { display: block; min-width: 0; width: auto; }
+  .dc-stack thead { display: none; }
+  .dc-stack tr { border-bottom: 1px solid #e2e8f0; padding: .3rem 0; }
+  .dc-stack td { border: 0; padding: .06rem .2rem; }
+  .dc-stack td::before { content: attr(data-h) " "; font-weight: 700; color: #4a5568; }
+  .dc-stack td:first-child::before { content: none; }
+  .dc-stack td:first-child { white-space: normal; font-size: 1rem; }
+}
+</style>
+<style>
+/* tokenizers.html and subword-tokenization.html page styles: static diagrams (tk-), bpeStep, alphaTool, tokCompare */
+.dc-svg .tk-tok { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 14px; fill: #1f2933; }
+.dc-svg .tk-code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 14px; fill: #1f2933; }
+.dc-svg .tk-sm { font-size: 14px; }
+.dc-svg .tk-big { font-size: 20px; fill: #1f2933; }
+.dc-svg .tk-raw { fill: #4a5568; }
+.dc-svg .tk-ctl { fill: #a85a14; font-weight: 700; }
+.dc-svg .tk-toy { font-style: italic; }
+.dc-svg .tk-ex { fill: #4a5568; font-style: italic; }
+.dc-svg .tk-cell { fill: #fbfcfd; stroke: #94a3b8; stroke-width: 1.2px; }
+.dc-svg .tk-text { fill: #ffffff; }
+.dc-svg .tk-idc { fill: #eef4fb; stroke: #1f6aa5; }
+.dc-svg .tk-idt { fill: #1f4f7d; }
+.dc-svg .tk-byte { fill: #f4f6f8; }
+.dc-svg .tk-fused { fill: #fdf0e1; stroke: #a85a14; stroke-width: 1.8px; }
+.dc-svg .tk-best { fill: #e7f5ec; stroke: #1e8449; stroke-width: 1.8px; }
+.dc-svg .tk-emb { fill: #f3eaf8; stroke: #7d3c98; stroke-width: 1.2px; }
+.dc-svg .tk-embl { stroke: #c9a6dc; stroke-width: 1px; }
+.dc-svg .tk-bar { fill: #9aa7b4; }
+.dc-svg .tk-bar-c { fill: #1f6aa5; }
+.dc-svg .tk-lab-bg { fill: #ffffff; }
+.dc-svg .tk-bar-acc { fill: #a85a14; }
+.dc-svg .tk-bar-wp { fill: #5d6d7e; }
+.dc-svg .tk-bar-sb { fill: #7f97b2; }
+.dc-svg .tk-bar-bb { fill: #1e8449; }
+.dc-svg .tk-c-wp { fill: #5d6d7e; }
+.dc-svg .tk-c-uni { fill: #7d3c98; }
+.dc-svg .tk-c-spb { fill: #1f6aa5; }
+.dc-svg .tk-c-bb { fill: #1e8449; }
+.dc-svg .tk-approx { fill-opacity: .45; stroke: #1e8449; stroke-width: 1.4px; stroke-dasharray: 4 3; }
+.dc-svg .tk-pc { fill: #7d3c98; }
+.dc-svg .tk-ps { fill: #1e8449; }
+.dc-svg .tk-pw { fill: #1f6aa5; }
+.dc-svg .tk-sc { fill: #1e8449; }
+.dc-svg .tk-merc { fill: #1f6aa5; }
+.dc-svg .tk-prc { fill: #7d3c98; }
+.dc-svg .tk-merbox { stroke: #1f6aa5; }
+.dc-svg .tk-prbox { stroke: #7d3c98; }
+.dc-svg .tk-spbox { stroke: #2c3e50; stroke-dasharray: 5 4; }
+.dc-svg .tk-filebox { stroke: #2c3e50; }
+.dc-svg .tk-brk { stroke: #2c3e50; stroke-width: 1.4px; stroke-dasharray: 3 3; fill: none; }
+/* eq-line terms that must not break inside; a line may break only between these groups */
+.eq-line .tk-nw { white-space: nowrap; }
+/* phones up to 380 px: narrower side padding so 360-unit SVG text renders at 12 px or more */
+@media (max-width: 380px) { body { padding-left: 1rem; padding-right: 1rem; } }
+/* bpeStep */
+#bpeStep .bw-ctl { display: flex; align-items: center; justify-content: center; gap: .6rem; }
+#bpeStep .bw-ctl button { min-height: 44px; min-width: 44px; }
+#bpeStep .bw-count { min-width: 7em; text-align: center; font-weight: 600; color: #2c3e50; }
+#bpeStep .bw-nav { padding: .4rem .9rem; border: 1px solid #bdc3c7; border-radius: 6px; background: #ffffff; color: #2c3e50; font: inherit; cursor: pointer; }
+#bpeStep .bw-nav:disabled { color: #5f6b6d; border-color: #e1e4e8; cursor: default; }
+#bpeStep svg { display: block; width: 100%; max-width: 460px; margin: .3rem auto; height: auto; }
+#bpeStep .bp-h { font-size: 15px; font-weight: 700; fill: #2c3e50; font-family: inherit; }
+#bpeStep .bp-s { font-size: 15px; fill: #4a5568; font-family: inherit; }
+#bpeStep .bp-tok { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 15px; fill: #1f2933; }
+#bpeStep .bp-cell { fill: #fbfcfd; stroke: #94a3b8; stroke-width: 1.2px; }
+#bpeStep .bp-fused { fill: #fdf0e1; stroke: #a85a14; stroke-width: 1.8px; }
+#bpeStep .bp-bar { fill: #1f6aa5; }
+#bpeStep .bp-next { fill: #a85a14; }
+#bpeStep .demo-stats { min-height: 3.3em; }
+#bpeStepEq .bp-lines, #bpeStepEq .bp-whys { display: grid; }
+#bpeStepEq .bp-lines .eq-line, #bpeStepEq .bp-whys .eq-why { display: block; grid-area: 1 / 1; visibility: hidden; }
+#bpeStepEq .bp-lines .eq-line.eq-active, #bpeStepEq .bp-whys .eq-why.eq-active { visibility: visible; }
+#bpeStepEq .eq-line { padding: .25rem .3rem; }
+@media (max-width: 480px) { #bpeStep #bpeStepEq { padding: .6rem .5rem; } }
+/* alphaTool */
+#alphaTool .db-ctl { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin: .2rem 0 .5rem; }
+#alphaTool .db-ctl label { font-weight: 600; color: #2c3e50; min-width: 6.2em; }
+#alphaTool .db-slide { flex: 1 1 140px; display: flex; flex-direction: column; min-width: 0; }
+#alphaTool input[type=range] { width: 100%; margin: 0; min-height: 44px; accent-color: #c0392b; }
+#alphaTool .db-ends { display: flex; justify-content: space-between; font-size: .85rem; color: #4a5568; margin: -.5rem 0 0; }
+#alphaTool .db-rows { display: grid; gap: 6px; margin: .4rem 0; }
+#alphaTool .db-row { display: grid; grid-template-columns: 7.2em 1fr 3em; align-items: center; gap: .4rem; font-size: .92rem; }
+#alphaTool .db-w { text-align: right; color: #2c3e50; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size: .85rem; white-space: nowrap; }
+#alphaTool .db-track { position: relative; height: 18px; background: #f1f4f7; border-radius: 3px; }
+#alphaTool .db-fill { position: absolute; left: 0; top: 0; bottom: 0; background: #1e8449; border-radius: 3px; transition: width .2s ease; }
+#alphaTool .db-v { font-size: .85rem; color: #4a5568; font-variant-numeric: tabular-nums; }
+#alphaTool .demo-stats { min-height: 1.7em; }
+@media (prefers-reduced-motion: reduce) { #alphaTool .db-fill { transition: none; } }
+</style>
+<style>
+/* Series and page map (B-TF, 2026-11-02) */
+.sermap { margin: .5rem 0 1.1rem; font-size: .8rem; line-height: 1.3; }
+.sermap ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; row-gap: 5px; }
+.sermap li { display: flex; align-items: center; margin: 0; padding: 0; line-height: 1.25; }
+.sermap li + li::before { content: "\2192"; color: #95a5a6; margin: 0 5px; }
+.sermap a, .sermap .sm-here { display: inline-block; padding: 2px 7px; line-height: 1.25; border-radius: 6px; text-decoration: none; }
+.sermap .sm-series a { padding: 1px 2px; color: #1f618d; text-decoration: underline; text-decoration-color: #a9cce3; text-underline-offset: 2px; }
+.sermap .sm-series .sm-here { padding: 1px 6px; background: #117a65; color: #fff; font-weight: 600; }
+.sermap .sm-series { row-gap: 0; }
+.sermap .sm-series a, .sermap .sm-series .sm-here, .sermap .sm-also a { display: inline-flex; align-items: center; min-height: 44px; box-sizing: border-box; }
+.sermap .sm-flow { margin-top: 6px; padding-left: 8px; border-left: 3px solid #117a65; }
+.sermap .sm-flow a { border: 1px solid #d5dbdb; background: #f8f9fa; color: #2c3e50; }
+.sermap .sm-also { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin: 6px 0 0; line-height: 1.25; color: #566573; }
+.sermap .sm-also a { border: 1px dashed #a9cce3; color: #1f618d; background: #fff; }
+.sermap a:hover { border-color: #1f618d; }
+@media (max-width: 400px) { .sermap { font-size: .72rem; } .sermap a, .sermap .sm-here { padding: 2px 5px; } .sermap li + li::before { margin: 0 3px; } }
+</style>
+</head>
+<body>
+      <nav class="topnav" aria-label="Site">
+    <div class="nav-inner">
+        <a class="wordmark" href="index.html">Ramin Anushiravani</a>
+        <div class="nav-links">
+            <a href="tutorial.html" class="active">Tutorials</a>
+            <a href="pubs.html">Publications</a>
+            <a href="index.html">About</a>
+            <a href="work.html">Projects</a>
+        </div>
+        <button class="nav-toggle" id="navToggle" aria-expanded="false" aria-controls="navPanel" aria-label="Menu"><span></span><span></span><span></span></button>
+    </div>
+    <div class="nav-panel" id="navPanel">
+        <div class="nav-panel-inner">
+            <div class="nav-panel-body">
+                <a class="panel-link active" href="tutorial.html">Tutorials</a>
+                <a class="panel-link" href="pubs.html">Publications</a>
+                <a class="panel-link" href="index.html">About</a>
+                <a class="panel-link" href="work.html">Projects</a>
+                <div class="panel-social">
+                    <a href="https://linkedin.com/in/raminanushiravani" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+                    <a href="https://github.com/raminaeye/" target="_blank" rel="noopener noreferrer">GitHub</a>
+                    <a href="https://scholar.google.com/citations?user=kouXx8gAAAAJ&hl=en" target="_blank" rel="noopener noreferrer">Google Scholar</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</nav>
+
+  <p class="crumb"><a href="tutorial.html">&larr; All tutorials</a></p>
+
+  <h1>How Subword Tokenizers Are Built: BPE, WordPiece and Unigram</h1>
+  <nav class="sermap" aria-label="The Tokenizers series">
+      <ol class="sm-series">
+        <li><a href="tokenizers.html">Tokenizers: Vocabulary Size, What Models Use and Side Effects</a></li>
+        <li><span class="sm-here" aria-current="page">How Subword Tokenizers Are Built: BPE, WordPiece and Unigram</span></li>
+      </ol>
+    </nav>
+
+  <p class="tabs-label">On this page</p>
+  <div class="tab-strip">
+    <a class="tab-chip" href="#bpe"><span class="secnum">1</span> Byte Pair Encoding merges the most frequent pair</a>
+    <a class="tab-chip" href="#byte-level-bpe"><span class="secnum">2</span> Byte-level BPE starts from 256 bytes</a>
+    <a class="tab-chip" href="#wordpiece"><span class="secnum">3</span> WordPiece divides the pair count by the counts of its parts</a>
+    <a class="tab-chip" href="#unigram"><span class="secnum">4</span> Unigram starts big and prunes</a>
+    <a class="tab-chip" href="#sentencepiece"><span class="secnum">5</span> SentencePiece runs BPE or Unigram on raw text</a>
+    <a class="tab-chip" href="#practice-train"><span class="secnum">6</span> Training your own vocabulary</a>
+    <a class="tab-chip" href="#references"><span class="secnum">7</span> References</a>
+  </div>
+
+  <figure class="figure mtd-fig" id="tokFigFamily">
+<svg class="mtd-svg dc-svg" viewBox="0 0 360 300" role="img" aria-label="Family map. Grow by merging: BPE, Section 1, merges the top pair; byte-level BPE, Section 2, is BPE on 256 bytes, used by GPT-2, GPT-4o and Llama 3; WordPiece, Section 3, merges by a score, used by BERT. Shrink by pruning: Unigram, Section 4, prunes a big list, used by T5. SentencePiece, Section 5, is a toolkit that runs BPE or Unigram on raw text, used by Llama 2, Gemma and T5."><text class="dc-t dc-b tk-merc" x="90.0" y="16.0" text-anchor="middle">grow by merging</text><text class="dc-t dc-b tk-prc" x="274.0" y="16.0" text-anchor="middle">shrink by pruning</text><rect class="mtd-box tk-merbox" x="8" y="26" width="164" height="64" rx="8"/><text class="dc-t dc-b" x="90.0" y="47.0" text-anchor="middle">BPE</text><a href="#bpe"><text class="dc-t dc-s" x="90.0" y="65.0" text-anchor="middle">Section 1</text></a><text class="dc-t" x="90.0" y="83.0" text-anchor="middle">merges the top pair</text><line class="dc-arrow" x1="90.0" y1="90" x2="90.0" y2="104"/><polygon class="dc-arrow-head" points="90.0,112 95.0,103 85.0,103"/><rect class="mtd-box tk-merbox" x="8" y="112" width="164" height="82" rx="8"/><text class="dc-t dc-b" x="90.0" y="133.0" text-anchor="middle">byte-level BPE</text><a href="#byte-level-bpe"><text class="dc-t dc-s" x="90.0" y="151.0" text-anchor="middle">Section 2</text></a><text class="dc-t" x="90.0" y="169.0" text-anchor="middle">BPE on 256 bytes</text><text class="dc-t tk-ex tk-sm" x="90.0" y="187.0" text-anchor="middle">GPT-2, GPT-4o, Llama 3</text><rect class="mtd-box tk-merbox" x="8" y="212" width="164" height="82" rx="8"/><text class="dc-t dc-b" x="90.0" y="233.0" text-anchor="middle">WordPiece</text><a href="#wordpiece"><text class="dc-t dc-s" x="90.0" y="251.0" text-anchor="middle">Section 3</text></a><text class="dc-t" x="90.0" y="269.0" text-anchor="middle">merges by a score</text><text class="dc-t tk-ex tk-sm" x="90.0" y="287.0" text-anchor="middle">BERT</text><rect class="mtd-box tk-prbox" x="196" y="26" width="156" height="82" rx="8"/><text class="dc-t dc-b" x="274.0" y="47.0" text-anchor="middle">Unigram</text><a href="#unigram"><text class="dc-t dc-s" x="274.0" y="65.0" text-anchor="middle">Section 4</text></a><text class="dc-t" x="274.0" y="83.0" text-anchor="middle">prunes a big list</text><text class="dc-t tk-ex tk-sm" x="274.0" y="101.0" text-anchor="middle">T5</text><rect class="mtd-box tk-spbox" x="196" y="150" width="156" height="100" rx="8"/><text class="dc-t dc-b" x="274.0" y="171.0" text-anchor="middle">SentencePiece</text><a href="#sentencepiece"><text class="dc-t dc-s" x="274.0" y="189.0" text-anchor="middle">Section 5, a toolkit</text></a><text class="dc-t" x="274.0" y="207.0" text-anchor="middle">runs BPE or Unigram</text><text class="dc-t" x="274.0" y="225.0" text-anchor="middle">on raw text</text><text class="dc-t tk-ex tk-sm" x="274.0" y="243.0" text-anchor="middle">Llama 2, Gemma, T5</text><line class="dc-arrow" x1="274.0" y1="150" x2="274.0" y2="117"/><polygon class="dc-arrow-head" points="274.0,108 279.0,117 269.0,117"/><polyline class="dc-arrow" points="196,170 182,170 182,58 181,58"/><polygon class="dc-arrow-head" points="172,58 181,53 181,63"/></svg>
+    <figcaption class="caption"><span class="fignum">Figure 1.</span> Merging algorithms on the left, pruning on the right, the SentencePiece toolkit running either.</figcaption>
+  </figure>
+
+
+  <p>
+    How does a tokenizer get its vocabulary? Byte Pair Encoding (BPE), byte-level BPE, WordPiece and Unigram each build a fixed list of pieces once, from a large training text called a <strong>corpus</strong>, and then split every new text with it. SentencePiece is the toolkit that runs BPE or Unigram on raw text. They differ in how the pieces are chosen: BPE and WordPiece grow the list by merging (byte-level BPE is BPE run on bytes), and Unigram shrinks a big list by pruning.
+  </p>
+  <p>
+    A <strong>token</strong> is one piece of text, its <strong>token id</strong> is its position in the <strong>vocabulary</strong>, <var>V</var> is the number of vocabulary entries and <var>T</var> the number of tokens in one input, as in <a href="tokenizers.html">Tokenizers: Vocabulary Size, What Models Use and Side Effects</a>. Turning text into ids is <strong>encoding</strong>; turning ids back into text is <strong>decoding</strong>. A bigger <var>V</var> holds longer pieces, so the same text needs a smaller <var>T</var> (<a href="tokenizers.html#trade-off">how big the vocabulary should be</a>). A word-level vocabulary maps every word it lacks to one unknown token, <code>&lt;unk&gt;</code>. UTF-8 writes every character as 1 to 4 <strong>bytes</strong>, and a byte has only 256 values.
+  </p>
+  <p>
+    Each algorithm runs once, on the corpus, before the model is trained, and saves a fixed file (<a href="tokenizers.html#cadence">when a tokenizer runs</a>). Encoding replays that file on every text and keeps no state between calls; only optional sampling (<a href="#subword-sampling">Section 4.3</a>), which exists for both Unigram and BPE, changes the split from call to call, and only while the model trains.
+  </p>
+
+  <h2 id="bpe"><span class="secnum">1</span> Byte Pair Encoding merges the most frequent pair</h2>
+
+  <p>
+    How do you build a vocabulary from the bottom up? Start from single characters, merge the adjacent pair that appears most often into one new token, and repeat a fixed number of times. Sennrich, Haddow and Birch (2016) brought BPE to tokenization, taking the idea from a 1994 compression method by Gage that replaces the most frequent pair of bytes with an unused byte.
+  </p>
+
+  <h3 id="bpe-train"><span class="secnum">1.1</span> Counting pairs and merging</h3>
+
+  <p>BPE first counts how often each word appears, so a corpus becomes a short list of words with their frequencies. The BPE paper also ends each word with a special end-of-word symbol, which this page&rsquo;s toy leaves out.</p>
+
+  <div class="eq-card" id="tokBpeEq">
+    <p class="eq-what">Count every adjacent pair, merge the most frequent one, repeat.</p>
+    <div class="eq-line eq-active"><span class="tk-nw"><span style="color:#1f6aa5">c(a, b)</span> =</span> <span class="tk-nw">&Sigma;<sub>w</sub> <span style="color:#1e8449">f(w)</span> &middot; n<sub>w</sub>(a, b)</span></div>
+    <div class="eq-why eq-active"><var>n</var><sub><var>w</var></sub>(<var>a</var>, <var>b</var>) counts how often symbol <var>a</var> sits right before symbol <var>b</var> inside word <var>w</var>. Multiplying by the word&rsquo;s frequency <var>f</var>(<var>w</var>) and adding over all words, &Sigma;<sub><var>w</var></sub>, gives the pair count <var>c</var>(<var>a</var>, <var>b</var>) in the whole corpus without scanning repeated words again.</div>
+    <div class="eq-line eq-active"><span class="tk-nw"><span style="color:#a85a14">(a*, b*)</span> =</span> <span class="tk-nw">argmax<sub>(a, b)</sub> <span style="color:#1f6aa5">c(a, b)</span></span></div>
+    <div class="eq-why eq-active">argmax returns the pair itself, not its count. The winner becomes one new symbol <var>a</var>*<var>b</var>*, every adjacent <var>a</var>* <var>b</var>* in the corpus is replaced by it, the merge is added to the end of the <strong>merge list</strong>, and the counts are taken again. In this page&rsquo;s toy, a tie goes to the pair found first.</div>
+    <div class="eq-line eq-active"><span style="color:#7d3c98">V</span> = V<sub>0</sub> + M</div>
+    <div class="eq-why eq-active">Each merge adds one entry, so the final size is the starting alphabet <var>V</var><sub>0</sub> plus the number of merges <var>M</var>, plus any <strong>special tokens</strong>, reserved entries such as an end-of-text marker that never come from text. <var>M</var> is the only hyperparameter in the BPE paper. More merges give longer tokens and a shorter <var>T</var>; <var>M</var> = 0 leaves single characters. The original GPT (2018) has 478 base tokens plus 40,000 merges, 40,478 entries (Reference 10).</div>
+  </div>
+
+  <figure class="figure mtd-fig" id="tokFigMerge">
+<svg class="mtd-svg dc-svg" viewBox="0 0 360 372" role="img" aria-label="Toy corpus hug 10 times, pug 5, pun 12, bun 4, hugs 5, split into characters. Pair counts: u g 20, p u 17, u n 16, h u 15, g s 5, b u 4. u g is highest and is merged, so after merge 1 every u g is one token ug."><text class="dc-t dc-b" x="8.0" y="16.0">toy corpus</text><text class="dc-t dc-b" x="196.0" y="16.0">pair counts</text><rect class="tk-cell" x="8.0" y="28" width="22.0" height="24" rx="4"/><text class="tk-tok" x="19.0" y="45.0" text-anchor="middle">h</text><rect class="tk-cell" x="32.0" y="28" width="22.0" height="24" rx="4"/><text class="tk-tok" x="43.0" y="45.0" text-anchor="middle">u</text><rect class="tk-cell" x="56.0" y="28" width="22.0" height="24" rx="4"/><text class="tk-tok" x="67.0" y="45.0" text-anchor="middle">g</text><text class="dc-t dc-s" x="110.0" y="45.0">×10</text><rect class="tk-cell" x="8.0" y="58" width="22.0" height="24" rx="4"/><text class="tk-tok" x="19.0" y="75.0" text-anchor="middle">p</text><rect class="tk-cell" x="32.0" y="58" width="22.0" height="24" rx="4"/><text class="tk-tok" x="43.0" y="75.0" text-anchor="middle">u</text><rect class="tk-cell" x="56.0" y="58" width="22.0" height="24" rx="4"/><text class="tk-tok" x="67.0" y="75.0" text-anchor="middle">g</text><text class="dc-t dc-s" x="110.0" y="75.0">×5</text><rect class="tk-cell" x="8.0" y="88" width="22.0" height="24" rx="4"/><text class="tk-tok" x="19.0" y="105.0" text-anchor="middle">p</text><rect class="tk-cell" x="32.0" y="88" width="22.0" height="24" rx="4"/><text class="tk-tok" x="43.0" y="105.0" text-anchor="middle">u</text><rect class="tk-cell" x="56.0" y="88" width="22.0" height="24" rx="4"/><text class="tk-tok" x="67.0" y="105.0" text-anchor="middle">n</text><text class="dc-t dc-s" x="110.0" y="105.0">×12</text><rect class="tk-cell" x="8.0" y="118" width="22.0" height="24" rx="4"/><text class="tk-tok" x="19.0" y="135.0" text-anchor="middle">b</text><rect class="tk-cell" x="32.0" y="118" width="22.0" height="24" rx="4"/><text class="tk-tok" x="43.0" y="135.0" text-anchor="middle">u</text><rect class="tk-cell" x="56.0" y="118" width="22.0" height="24" rx="4"/><text class="tk-tok" x="67.0" y="135.0" text-anchor="middle">n</text><text class="dc-t dc-s" x="110.0" y="135.0">×4</text><rect class="tk-cell" x="8.0" y="148" width="22.0" height="24" rx="4"/><text class="tk-tok" x="19.0" y="165.0" text-anchor="middle">h</text><rect class="tk-cell" x="32.0" y="148" width="22.0" height="24" rx="4"/><text class="tk-tok" x="43.0" y="165.0" text-anchor="middle">u</text><rect class="tk-cell" x="56.0" y="148" width="22.0" height="24" rx="4"/><text class="tk-tok" x="67.0" y="165.0" text-anchor="middle">g</text><rect class="tk-cell" x="80.0" y="148" width="22.0" height="24" rx="4"/><text class="tk-tok" x="91.0" y="165.0" text-anchor="middle">s</text><text class="dc-t dc-s" x="110.0" y="165.0">×5</text><text class="tk-tok" x="196.0" y="43.0">u g</text><rect class="tk-bar-acc" x="232" y="30" width="90.0" height="16" rx="2"/><text class="dc-t dc-s" x="326.0" y="43.0">20</text><text class="tk-tok" x="196.0" y="67.0">p u</text><rect class="tk-bar-c" x="232" y="54" width="76.5" height="16" rx="2"/><text class="dc-t dc-s" x="312.5" y="67.0">17</text><text class="tk-tok" x="196.0" y="91.0">u n</text><rect class="tk-bar-c" x="232" y="78" width="72.0" height="16" rx="2"/><text class="dc-t dc-s" x="308.0" y="91.0">16</text><text class="tk-tok" x="196.0" y="115.0">h u</text><rect class="tk-bar-c" x="232" y="102" width="67.5" height="16" rx="2"/><text class="dc-t dc-s" x="303.5" y="115.0">15</text><text class="tk-tok" x="196.0" y="139.0">g s</text><rect class="tk-bar-c" x="232" y="126" width="22.5" height="16" rx="2"/><text class="dc-t dc-s" x="258.5" y="139.0">5</text><text class="tk-tok" x="196.0" y="163.0">b u</text><rect class="tk-bar-c" x="232" y="150" width="18.0" height="16" rx="2"/><text class="dc-t dc-s" x="254.0" y="163.0">4</text><circle class="dc-mkc" cx="180.0" cy="43.0" r="10"/><text class="dc-t dc-mkt" x="180.0" y="48.0" text-anchor="middle">1</text><line class="mtd-sep" x1="8" y1="186" x2="352" y2="186"/><text class="dc-t dc-b" x="8.0" y="208.0">after merge 1</text><rect class="tk-cell" x="8.0" y="220" width="22.0" height="24" rx="4"/><text class="tk-tok" x="19.0" y="237.0" text-anchor="middle">h</text><rect class="tk-cell tk-fused" x="32.0" y="220" width="29.1" height="24" rx="4"/><text class="tk-tok" x="46.5" y="237.0" text-anchor="middle">ug</text><text class="dc-t dc-s" x="110.0" y="237.0">×10</text><rect class="tk-cell" x="8.0" y="250" width="22.0" height="24" rx="4"/><text class="tk-tok" x="19.0" y="267.0" text-anchor="middle">p</text><rect class="tk-cell tk-fused" x="32.0" y="250" width="29.1" height="24" rx="4"/><text class="tk-tok" x="46.5" y="267.0" text-anchor="middle">ug</text><text class="dc-t dc-s" x="110.0" y="267.0">×5</text><rect class="tk-cell" x="8.0" y="280" width="22.0" height="24" rx="4"/><text class="tk-tok" x="19.0" y="297.0" text-anchor="middle">p</text><rect class="tk-cell" x="32.0" y="280" width="22.0" height="24" rx="4"/><text class="tk-tok" x="43.0" y="297.0" text-anchor="middle">u</text><rect class="tk-cell" x="56.0" y="280" width="22.0" height="24" rx="4"/><text class="tk-tok" x="67.0" y="297.0" text-anchor="middle">n</text><text class="dc-t dc-s" x="110.0" y="297.0">×12</text><rect class="tk-cell" x="8.0" y="310" width="22.0" height="24" rx="4"/><text class="tk-tok" x="19.0" y="327.0" text-anchor="middle">b</text><rect class="tk-cell" x="32.0" y="310" width="22.0" height="24" rx="4"/><text class="tk-tok" x="43.0" y="327.0" text-anchor="middle">u</text><rect class="tk-cell" x="56.0" y="310" width="22.0" height="24" rx="4"/><text class="tk-tok" x="67.0" y="327.0" text-anchor="middle">n</text><text class="dc-t dc-s" x="110.0" y="327.0">×4</text><rect class="tk-cell" x="8.0" y="340" width="22.0" height="24" rx="4"/><text class="tk-tok" x="19.0" y="357.0" text-anchor="middle">h</text><rect class="tk-cell tk-fused" x="32.0" y="340" width="29.1" height="24" rx="4"/><text class="tk-tok" x="46.5" y="357.0" text-anchor="middle">ug</text><rect class="tk-cell" x="63.1" y="340" width="22.0" height="24" rx="4"/><text class="tk-tok" x="74.1" y="357.0" text-anchor="middle">s</text><text class="dc-t dc-s" x="110.0" y="357.0">×5</text><circle class="dc-mkc" cx="160.0" cy="232.0" r="10"/><text class="dc-t dc-mkt" x="160.0" y="237.0" text-anchor="middle">2</text><text class="dc-t dc-s" x="178.0" y="237.0">ug is one token now</text></svg>
+    <figcaption class="caption"><span class="fignum">Figure 2.</span> Toy corpus. <code>u g</code> is the most frequent pair (1), so <code>ug</code> becomes one token everywhere (2). Data from Reference 10.</figcaption>
+  </figure>
+
+  <div class="demo" id="bpeStep">
+    <div class="bw-ctl">
+      <button class="bw-nav" id="bpePrev" type="button" aria-label="Previous merge">Back</button>
+      <span class="bw-count" id="bpeCount">start</span>
+      <button class="bw-nav" id="bpeNext" type="button" aria-label="Next merge">Next</button>
+    </div>
+    <svg id="bpeSvg" viewBox="0 0 360 334" role="img" aria-label="BPE on the toy corpus. Top, the five words split into their current tokens with their counts. Bottom, the current pair counts as bars; the tallest bar, marked next, is the pair the next step merges."></svg>
+    <p class="demo-stats" id="bpeRead" aria-live="polite"></p>
+    <div class="eq-card" id="bpeStepEq">
+      <p class="eq-what">The line of the card in <a href="#bpe-train">Section 1.1</a> that this step runs.</p>
+      <div class="bp-lines">
+        <div class="eq-line" data-s="0"><span class="tk-nw"><span style="color:#1f6aa5">c(a, b)</span> =</span> <span class="tk-nw">&Sigma;<sub>w</sub> <span style="color:#1e8449">f(w)</span> &middot; n<sub>w</sub>(a, b)</span></div>
+        <div class="eq-line" data-s="1"><span class="tk-nw"><span style="color:#a85a14">(a*, b*)</span> =</span> <span class="tk-nw">argmax<sub>(a, b)</sub> <span style="color:#1f6aa5">c(a, b)</span></span></div>
+      </div>
+      <div class="bp-whys">
+        <div class="eq-why" data-w="0">Every word starts as single characters. Each blue bar is one pair&rsquo;s count <var>c</var>(<var>a</var>, <var>b</var>) over the whole corpus.</div>
+        <div class="eq-why" data-w="1">The orange bar is the pair this line picks. Each merge adds one entry to the vocabulary.</div>
+        <div class="eq-why" data-w="2">The toy&rsquo;s merge count <var>M</var> is 6, so it stops here even though <code>b un</code> could still merge. Each merge added one entry, so the vocabulary has 13.</div>
+      </div>
+    </div>
+    <p class="caption fig-caption"><span class="fignum">Figure 3.</span> Toy corpus. Each step merges the pair with the tallest bar, marked next, into one token.</p>
+  </div>
+
+  <p class="code-lead">Code 1 is the equation card in <a href="#bpe-train">Section 1.1</a> as code. It learns the first three merges of the toy corpus.</p>
+
+<pre class="cs" data-cs="3-12,18-21,22,23-24,27-30"><code class="language-python">from collections import Counter
+
+def merge(symbols, pair):
+    out, i = [], 0
+    while i &lt; len(symbols):
+        if symbols[i:i + 2] == pair:
+            out.append(symbols[i] + symbols[i + 1])
+            i += 2
+        else:
+            out.append(symbols[i])
+            i += 1
+    return tuple(out)
+
+def train_bpe(word_freqs, num_merges):
+    words = {tuple(w): f for w, f in word_freqs.items()}
+    merges = []
+    for _ in range(num_merges):
+        pairs = Counter()
+        for symbols, f in words.items():
+            for pair in zip(symbols, symbols[1:]):
+                pairs[pair] += f
+        best = max(pairs, key=pairs.get)
+        merges.append(best)
+        words = {merge(symbols, best): f for symbols, f in words.items()}
+    return merges, words
+
+corpus = {"hug": 10, "pug": 5, "pun": 12, "bun": 4, "hugs": 5}
+merges, words = train_bpe(corpus, 3)
+print(merges)  # [('u', 'g'), ('u', 'n'), ('h', 'ug')]
+print(words)   # {('hug',): 10, ('p', 'ug'): 5, ('p', 'un'): 12, ('b', 'un'): 4, ('hug', 's'): 5}</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span><code>merge</code> replaces every adjacent copy of the pair with one symbol.</li>
+  <li><span class="cs-n">2</span>Line 1 of the equation card counts each word&rsquo;s pairs once, weighted by its frequency <code>f</code>.</li>
+  <li><span class="cs-n">3</span>Line 2, where <code>max</code> takes the most frequent pair, the first found on a tie.</li>
+  <li><span class="cs-n">4</span>Line 3, one merge per pass, with the corpus rewritten by it.</li>
+  <li><span class="cs-n">5</span>The three merges are steps 1 to 3 of <a href="#bpeStep">Figure 3</a>.</li>
+</ol>
+
+  <h3 id="bpe-encode"><span class="secnum">1.2</span> Splitting new text with the merge list</h3>
+
+  <p>To split a word, start from its characters and replay the merges in the order they were learned. A character never seen in training, such as a rare script or an emoji, has no starting symbol, so character BPE still needs <code>&lt;unk&gt;</code>.</p>
+
+  <p class="code-lead">Code 2 splits two words that are not in the toy corpus, using the merges from Code 1. The second word starts with <code>m</code>, a letter the corpus never had.</p>
+
+<pre class="cs" data-cs="2,3-4,7-8"><code class="language-python">def encode(word, merges, alphabet):
+    symbols = tuple(c if c in alphabet else "&lt;unk&gt;" for c in word)
+    for pair in merges:
+        symbols = merge(symbols, pair)
+    return symbols
+
+alphabet = set("".join(corpus))  # h, u, g, p, n, b, s
+print(encode("bugs", merges, alphabet), encode("mug", merges, alphabet))  # ('b', 'ug', 's') ('&lt;unk&gt;', 'ug')</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>A new word starts as single characters; a character outside the training alphabet becomes <code>&lt;unk&gt;</code>.</li>
+  <li><span class="cs-n">2</span>The merges are replayed in learned order, never counted again.</li>
+  <li><span class="cs-n">3</span><code>bugs</code> splits into known pieces; <code>m</code> was never seen, so <code>mug</code> keeps only <code>ug</code>.</li>
+</ol>
+
+  <h2 id="byte-level-bpe"><span class="secnum">2</span> Byte-level BPE starts from 256 bytes</h2>
+
+  <p>
+    GPT-2 (Radford et al., 2019) runs BPE on UTF-8 bytes instead of characters. The starting alphabet is exactly 256 symbols, against more than 130,000 Unicode characters, so every string can be encoded and no <code>&lt;unk&gt;</code> exists. GPT-2 has 256 bytes plus 50,000 merges plus one end-of-text token, a special token that marks where a document ends, 50,257 entries (Reference 10). The cost is that a rare character can be cut into byte pieces that are not text on their own, the hatched cells of the <a href="tokenizers.html#tokCompare">one string, six tokenizers tool</a>, and scripts other than English need more tokens for the same text (<a href="tokenizers.html#languages">other languages cost more tokens</a>).
+  </p>
+  <p>
+    OpenAI&rsquo;s tiktoken encodings, such as <code>cl100k_base</code> and <code>o200k_base</code>, are byte-level BPE vocabularies; the <a href="tokenizers.html#models">list of what current models use</a> shows which model uses which.
+  </p>
+  <p>
+    Before merging, a regular expression cuts the text into chunks of one character category, such as letters, digits or punctuation, and keeps a single space on the front of the next chunk. Merges never cross a chunk border. Without this, the GPT-2 paper reports, BPE learned many copies of one word with punctuation attached, such as <code>dog.</code>, <code>dog!</code> and <code>dog?</code>.
+  </p>
+
+  <figure class="figure mtd-fig" id="tokFigPattern">
+<svg class="mtd-svg dc-svg" viewBox="0 0 360 190" role="img" aria-label="Pre-tokenization with GPT-2&#x27;s real pattern. dog. dog! dog? becomes dog, period, space dog, exclamation mark, space dog, question mark. I&#x27;ll pay 8302080 now becomes I, apostrophe ll, space pay, space 8302080, space now."><text class="tk-tok tk-raw" x="8.0" y="20.0">dog. dog! dog?</text><rect class="tk-cell" x="8.0" y="30" width="37.6" height="28" rx="4"/><text class="tk-tok" x="26.8" y="49.0" text-anchor="middle">dog</text><rect class="tk-cell" x="49.6" y="30" width="20.5" height="28" rx="4"/><text class="tk-tok" x="59.9" y="49.0" text-anchor="middle">.</text><rect class="tk-cell" x="74.2" y="30" width="46.2" height="28" rx="4"/><text class="tk-tok" x="97.2" y="49.0" text-anchor="middle">␣dog</text><rect class="tk-cell" x="124.3" y="30" width="20.5" height="28" rx="4"/><text class="tk-tok" x="134.6" y="49.0" text-anchor="middle">!</text><rect class="tk-cell" x="148.9" y="30" width="46.2" height="28" rx="4"/><text class="tk-tok" x="171.9" y="49.0" text-anchor="middle">␣dog</text><rect class="tk-cell" x="199.0" y="30" width="20.5" height="28" rx="4"/><text class="tk-tok" x="209.3" y="49.0" text-anchor="middle">?</text><circle class="dc-mkc" cx="97.2" cy="76.0" r="10"/><text class="dc-t dc-mkt" x="97.2" y="81.0" text-anchor="middle">1</text><text class="tk-tok tk-raw" x="8.0" y="116.0">I&#x27;ll pay 8302080 now</text><rect class="tk-cell" x="8.0" y="126" width="20.5" height="28" rx="4"/><text class="tk-tok" x="18.3" y="145.0" text-anchor="middle">I</text><rect class="tk-cell" x="32.5" y="126" width="37.6" height="28" rx="4"/><text class="tk-tok" x="51.3" y="145.0" text-anchor="middle">&#x27;ll</text><rect class="tk-cell" x="74.2" y="126" width="46.2" height="28" rx="4"/><text class="tk-tok" x="97.2" y="145.0" text-anchor="middle">␣pay</text><rect class="tk-cell" x="124.3" y="126" width="80.3" height="28" rx="4"/><text class="tk-tok" x="164.5" y="145.0" text-anchor="middle">␣8302080</text><rect class="tk-cell" x="208.6" y="126" width="46.2" height="28" rx="4"/><text class="tk-tok" x="231.7" y="145.0" text-anchor="middle">␣now</text><text class="dc-t dc-s" x="8.0" y="180.0">␣ is a space</text></svg>
+    <figcaption class="caption"><span class="fignum">Figure 4.</span> GPT-2&rsquo;s real pattern (Reference 11) cuts text into chunks before any merge, and a space stays on the word after it (1).</figcaption>
+  </figure>
+
+  <h2 id="wordpiece"><span class="secnum">3</span> WordPiece divides the pair count by the counts of its parts</h2>
+
+  <p>
+    WordPiece merges bottom up like BPE but picks a different pair. Schuster and Nakajima (2012) introduced it; Google&rsquo;s translation system (Wu et al., 2016) and BERT (Devlin et al., 2019, 30,000 tokens) used it. The idea is to merge pieces that belong together, not just pieces that are common. Pieces inside a word carry the prefix <code>##</code>. Google never published its training code, so the training here is Hugging Face&rsquo;s reconstruction (Reference 12).
+  </p>
+
+  <div class="eq-card" id="tokWpEq">
+    <p class="eq-what">The pair count divided by the counts of both parts.</p>
+    <div class="eq-line eq-active">s(a, b) = <span class="frac"><span class="top"><span style="color:#1f6aa5">c(a, b)</span></span><span class="bot">c(a) &middot; c(b)</span></span></div>
+    <div class="eq-why eq-active"><var>c</var>(<var>a</var>) is how often the single piece <var>a</var> appears. Dividing asks whether the pair shows up together more than its parts&rsquo; own counts would predict. A pair of very common pieces scores low even with a high count, and a pair whose second piece almost never appears elsewhere scores high. WordPiece merges the pair with the highest score <var>s</var>.</div>
+  </div>
+
+  <figure class="figure mtd-fig" id="tokFigWp">
+<svg class="mtd-svg dc-svg" viewBox="0 0 360 324" role="img" aria-label="Two bar charts on the same toy corpus. BPE pair counts: u g 20, p u 17, u n 16, h u 15, g s 5, b u 4; BPE merges u g. WordPiece scores with the ## prefix: ##g ##s 0.050, and ##u ##g, ##u ##n, h ##u, p ##u, b ##u all 0.028; WordPiece merges ##g ##s."><text class="dc-t dc-b" x="8.0" y="16.0">BPE picks the most frequent pair</text><text class="tk-tok" x="8.0" y="40.0">u g</text><rect class="tk-bar-acc" x="80" y="27" width="200.0" height="16" rx="2"/><text class="dc-t dc-s" x="285.0" y="40.0">20</text><text class="tk-tok" x="8.0" y="62.0">p u</text><rect class="tk-bar-c" x="80" y="49" width="170.0" height="16" rx="2"/><text class="dc-t dc-s" x="255.0" y="62.0">17</text><text class="tk-tok" x="8.0" y="84.0">u n</text><rect class="tk-bar-c" x="80" y="71" width="160.0" height="16" rx="2"/><text class="dc-t dc-s" x="245.0" y="84.0">16</text><text class="tk-tok" x="8.0" y="106.0">h u</text><rect class="tk-bar-c" x="80" y="93" width="150.0" height="16" rx="2"/><text class="dc-t dc-s" x="235.0" y="106.0">15</text><text class="tk-tok" x="8.0" y="128.0">g s</text><rect class="tk-bar-c" x="80" y="115" width="50.0" height="16" rx="2"/><text class="dc-t dc-s" x="135.0" y="128.0">5</text><text class="tk-tok" x="8.0" y="150.0">b u</text><rect class="tk-bar-c" x="80" y="137" width="40.0" height="16" rx="2"/><text class="dc-t dc-s" x="125.0" y="150.0">4</text><circle class="dc-mkc" cx="340.0" cy="35.0" r="10"/><text class="dc-t dc-mkt" x="340.0" y="40.0" text-anchor="middle">1</text><text class="dc-t dc-b" x="8.0" y="176.0">WordPiece picks the highest score</text><text class="tk-tok" x="8.0" y="200.0">##g ##s</text><rect class="tk-bar-wp" x="80" y="187" width="200.0" height="16" rx="2"/><text class="dc-t dc-s" x="285.0" y="200.0">0.050</text><text class="tk-tok" x="8.0" y="222.0">##u ##g</text><rect class="tk-bar" x="80" y="209" width="112.0" height="16" rx="2"/><text class="dc-t dc-s" x="197.0" y="222.0">0.028</text><text class="tk-tok" x="8.0" y="244.0">##u ##n</text><rect class="tk-bar" x="80" y="231" width="112.0" height="16" rx="2"/><text class="dc-t dc-s" x="197.0" y="244.0">0.028</text><text class="tk-tok" x="8.0" y="266.0">h ##u</text><rect class="tk-bar" x="80" y="253" width="112.0" height="16" rx="2"/><text class="dc-t dc-s" x="197.0" y="266.0">0.028</text><text class="tk-tok" x="8.0" y="288.0">p ##u</text><rect class="tk-bar" x="80" y="275" width="112.0" height="16" rx="2"/><text class="dc-t dc-s" x="197.0" y="288.0">0.028</text><text class="tk-tok" x="8.0" y="310.0">b ##u</text><rect class="tk-bar" x="80" y="297" width="112.0" height="16" rx="2"/><text class="dc-t dc-s" x="197.0" y="310.0">0.028</text><circle class="dc-mkc" cx="340.0" cy="195.0" r="10"/><text class="dc-t dc-mkt" x="340.0" y="200.0" text-anchor="middle">2</text></svg>
+    <figcaption class="caption"><span class="fignum">Figure 5.</span> Same toy corpus. BPE merges <code>u g</code> (1); WordPiece merges <code>##g ##s</code>, because <code>s</code> only ever appears after <code>g</code> (2). Data from References 10, 12.</figcaption>
+  </figure>
+
+  <p>
+    To split new text, WordPiece does not replay merges. It takes the longest vocabulary entry that matches the start of the word, then the longest <code>##</code> entry for the rest, and so on. If nothing matches, the whole word becomes BERT&rsquo;s unknown token, <code>[UNK]</code>. <code>bert-base-uncased</code> splits <code>antidisestablishmentarianism</code> into <code>anti</code> <code>##dis</code> <code>##est</code> <code>##ab</code> <code>##lish</code> <code>##ment</code> <code>##arian</code> <code>##ism</code>.
+  </p>
+
+  <h2 id="unigram"><span class="secnum">4</span> Unigram starts big and prunes</h2>
+
+  <p>Unigram (Kudo, 2018) works the other way round. It starts from a large list of candidate pieces, every character plus the corpus&rsquo;s most frequent substrings, gives each a probability, and removes the pieces that help least until the target size is left.</p>
+
+  <h3 id="unigram-split"><span class="secnum">4.1</span> Splitting with piece probabilities</h3>
+
+  <p>One word can be split many ways, and each piece has a probability.</p>
+
+  <figure class="figure mtd-fig" id="tokFigUni">
+<svg class="mtd-svg dc-svg" viewBox="0 0 360 306" role="img" aria-label="Toy piece probabilities hug 0.10, ug 0.08, h 0.05, u 0.05, s 0.05, g 0.04; no other piece fits inside hugs. Three splits of hugs: hug s 0.005, the highest and kept; h ug s 0.0002; h u g s 0.000005."><text class="dc-t dc-s tk-toy" x="352.0" y="16.0" text-anchor="end">toy</text><text class="dc-t dc-b" x="8.0" y="16.0">piece probabilities</text><rect class="tk-cell" x="8.0" y="26" width="37.6" height="24" rx="4"/><text class="tk-tok" x="26.8" y="43.0" text-anchor="middle">hug</text><text class="dc-t dc-s" x="49.6" y="43.0">0.10</text><rect class="tk-cell" x="97.6" y="26" width="29.1" height="24" rx="4"/><text class="tk-tok" x="112.2" y="43.0" text-anchor="middle">ug</text><text class="dc-t dc-s" x="130.7" y="43.0">0.08</text><rect class="tk-cell" x="178.7" y="26" width="26.0" height="24" rx="4"/><text class="tk-tok" x="191.7" y="43.0" text-anchor="middle">h</text><text class="dc-t dc-s" x="208.7" y="43.0">0.05</text><rect class="tk-cell" x="8.0" y="56" width="26.0" height="24" rx="4"/><text class="tk-tok" x="21.0" y="73.0" text-anchor="middle">u</text><text class="dc-t dc-s" x="38.0" y="73.0">0.05</text><rect class="tk-cell" x="86.0" y="56" width="26.0" height="24" rx="4"/><text class="tk-tok" x="99.0" y="73.0" text-anchor="middle">s</text><text class="dc-t dc-s" x="116.0" y="73.0">0.05</text><rect class="tk-cell" x="164.0" y="56" width="26.0" height="24" rx="4"/><text class="tk-tok" x="177.0" y="73.0" text-anchor="middle">g</text><text class="dc-t dc-s" x="194.0" y="73.0">0.04</text><text class="dc-t dc-s" x="8.0" y="102.0">no other piece fits inside hugs</text><rect class="tk-cell tk-best" x="8.0" y="118" width="37.6" height="26" rx="4"/><text class="tk-tok" x="26.8" y="136.0" text-anchor="middle">hug</text><rect class="tk-cell tk-best" x="49.6" y="118" width="24.0" height="26" rx="4"/><text class="tk-tok" x="61.6" y="136.0" text-anchor="middle">s</text><text class="dc-t dc-s" x="8.0" y="164.0">0.10 × 0.05 = 0.005</text><rect class="tk-cell" x="8.0" y="180" width="24.0" height="26" rx="4"/><text class="tk-tok" x="20.0" y="198.0" text-anchor="middle">h</text><rect class="tk-cell" x="36.0" y="180" width="29.1" height="26" rx="4"/><text class="tk-tok" x="50.5" y="198.0" text-anchor="middle">ug</text><rect class="tk-cell" x="69.1" y="180" width="24.0" height="26" rx="4"/><text class="tk-tok" x="81.1" y="198.0" text-anchor="middle">s</text><text class="dc-t dc-s" x="8.0" y="226.0">0.05 × 0.08 × 0.05 = 0.0002</text><rect class="tk-cell" x="8.0" y="242" width="24.0" height="26" rx="4"/><text class="tk-tok" x="20.0" y="260.0" text-anchor="middle">h</text><rect class="tk-cell" x="36.0" y="242" width="24.0" height="26" rx="4"/><text class="tk-tok" x="48.0" y="260.0" text-anchor="middle">u</text><rect class="tk-cell" x="64.0" y="242" width="24.0" height="26" rx="4"/><text class="tk-tok" x="76.0" y="260.0" text-anchor="middle">g</text><rect class="tk-cell" x="92.0" y="242" width="24.0" height="26" rx="4"/><text class="tk-tok" x="104.0" y="260.0" text-anchor="middle">s</text><text class="dc-t dc-s" x="8.0" y="288.0">0.05 × 0.05 × 0.04 × 0.05 = 0.000005</text><circle class="dc-mkc" cx="130.0" cy="131.0" r="10"/><text class="dc-t dc-mkt" x="130.0" y="136.0" text-anchor="middle">1</text><text class="dc-t dc-s" x="148.0" y="136.0">highest, kept</text></svg>
+    <figcaption class="caption"><span class="fignum">Figure 6.</span> Toy. A split&rsquo;s probability is the product of its pieces&rsquo; probabilities, and the tokenizer keeps the highest (1).</figcaption>
+  </figure>
+
+  <div class="eq-card" id="tokUniEq">
+    <p class="eq-what">Score a split by multiplying its piece probabilities, then keep the best split.</p>
+    <div class="eq-line eq-active"><span style="color:#1e8449">P(x)</span> = &prod;<sub>i=1</sub><sup>n</sup> p(x<sub>i</sub>)</div>
+    <div class="eq-why eq-active">A split <var>x</var> of a word cuts it into <var>n</var> pieces <var>x</var><sub>1</sub> to <var>x</var><sub><var>n</var></sub>. &prod; multiplies their probabilities <var>p</var>(<var>x</var><sub><var>i</var></sub>). Every extra piece multiplies in a number below 1, so splits into fewer, likelier pieces win.</div>
+    <div class="eq-line eq-active">x* = argmax<sub>x &isin; S(X)</sub> <span style="color:#1e8449">P(x)</span></div>
+    <div class="eq-why eq-active"><var>S</var>(<var>X</var>) is the set of all splits of the word <var>X</var>. The tokenizer outputs the split <var>x</var>* with the highest probability. The Viterbi algorithm finds it without listing every split: it walks the word left to right and keeps only the best way to reach each position.</div>
+  </div>
+
+  <h3 id="unigram-train"><span class="secnum">4.2</span> Training by pruning</h3>
+
+  <p>Training repeats one loop until <var>V</var> pieces are left: fit the piece probabilities to the corpus, then drop the pieces the corpus misses least. The seed list is found with a suffix array, a sorted index of every substring; SentencePiece keeps 1,000,000 of them by default, <code>seed_sentencepiece_size</code> (Reference 13).</p>
+
+  <figure class="figure mtd-fig" id="tokFigPrune">
+<svg class="mtd-svg dc-svg" viewBox="0 0 360 426" role="img" aria-label="Unigram training loop. 1, seed list: every character plus the most frequent substrings. 2, E step: weigh every split by its probability and add up each piece&#x27;s uses. 3, M step: each piece&#x27;s probability is its share of those uses. 4, prune: drop the pieces whose removal costs least likelihood; keep the top 80% and every single character. Repeat steps 2 to 4; stop when V pieces are left."><rect class="mtd-box tk-prbox" x="30" y="6" width="262" height="69" rx="8"/><text class="dc-t dc-b" x="161.0" y="27.0" text-anchor="middle">seed list</text><text class="dc-t tk-sm" x="161.0" y="45.0" text-anchor="middle">every character plus the</text><text class="dc-t tk-sm" x="161.0" y="63.0" text-anchor="middle">most frequent substrings</text><circle class="dc-mkc" cx="14.0" cy="40.5" r="10"/><text class="dc-t dc-mkt" x="14.0" y="45.5" text-anchor="middle">1</text><line class="dc-arrow" x1="161.0" y1="75" x2="161.0" y2="87"/><polygon class="dc-arrow-head" points="161.0,95 166.0,86 156.0,86"/><rect class="mtd-box tk-prbox" x="30" y="95" width="262" height="69" rx="8"/><text class="dc-t dc-b" x="161.0" y="116.0" text-anchor="middle">E step</text><text class="dc-t tk-sm" x="161.0" y="134.0" text-anchor="middle">weigh every split by <tspan class="mvar">P</tspan>(<tspan class="mvar">x</tspan>)</text><text class="dc-t tk-sm" x="161.0" y="152.0" text-anchor="middle">and add up each piece&#8217;s uses</text><circle class="dc-mkc" cx="14.0" cy="129.5" r="10"/><text class="dc-t dc-mkt" x="14.0" y="134.5" text-anchor="middle">2</text><line class="dc-arrow" x1="161.0" y1="164" x2="161.0" y2="176"/><polygon class="dc-arrow-head" points="161.0,184 166.0,175 156.0,175"/><rect class="mtd-box tk-prbox" x="30" y="184" width="262" height="69" rx="8"/><text class="dc-t dc-b" x="161.0" y="205.0" text-anchor="middle">M step</text><text class="dc-t tk-sm" x="161.0" y="223.0" text-anchor="middle">each piece&#8217;s probability is</text><text class="dc-t tk-sm" x="161.0" y="241.0" text-anchor="middle">its share of those uses</text><circle class="dc-mkc" cx="14.0" cy="218.5" r="10"/><text class="dc-t dc-mkt" x="14.0" y="223.5" text-anchor="middle">3</text><line class="dc-arrow" x1="161.0" y1="253" x2="161.0" y2="265"/><polygon class="dc-arrow-head" points="161.0,273 166.0,264 156.0,264"/><rect class="mtd-box tk-prbox" x="30" y="273" width="262" height="105" rx="8"/><text class="dc-t dc-b" x="161.0" y="294.0" text-anchor="middle">prune</text><text class="dc-t tk-sm" x="161.0" y="312.0" text-anchor="middle">drop the pieces whose removal</text><text class="dc-t tk-sm" x="161.0" y="330.0" text-anchor="middle">costs least likelihood; keep</text><text class="dc-t tk-sm" x="161.0" y="348.0" text-anchor="middle">the top 80% and every</text><text class="dc-t tk-sm" x="161.0" y="366.0" text-anchor="middle">single character</text><circle class="dc-mkc" cx="14.0" cy="325.5" r="10"/><text class="dc-t dc-mkt" x="14.0" y="330.5" text-anchor="middle">4</text><polyline class="dc-arrow" points="292,325.5 326,325.5 326,129.5 301,129.5"/><polygon class="dc-arrow-head" points="292,129.5 301,124.5 301,134.5"/><rect class="tk-lab-bg" x="300" y="214.5" width="52" height="20" rx="3"/><text class="dc-t dc-s tk-sm" x="326.0" y="229.5" text-anchor="middle">repeat</text><line class="dc-arrow" x1="161.0" y1="378" x2="161.0" y2="390"/><polygon class="dc-arrow-head" points="161.0,398 166.0,389 156.0,389"/><text class="dc-t dc-b" x="161.0" y="416.0" text-anchor="middle">stop when <tspan class="mvar">V</tspan> pieces are left</text></svg>
+    <figcaption class="caption"><span class="fignum">Figure 7.</span> The seed list (1) is fitted by the E step (2) and M step (3), then pruned (4); steps 2 to 4 repeat.</figcaption>
+  </figure>
+
+  <div class="eq-card" id="tokUniTrainEq">
+    <p class="eq-what">Fit the probabilities to the corpus, then drop the pieces the corpus misses least.</p>
+    <div class="eq-line eq-active">L = &Sigma;<sub>s</sub> log ( &Sigma;<sub>x &isin; S(X<sup>(s)</sup>)</sub> <span style="color:#1e8449">P(x)</span> )</div>
+    <div class="eq-why eq-active"><var>X</var><sup>(<var>s</var>)</sup> is sentence <var>s</var> of the corpus. For each sentence, add up the probability of every way to split it, take the log, and sum over sentences. Training picks the piece probabilities that make <var>L</var> largest, by <strong>expectation maximization (EM)</strong>: the E step weighs every split of each sentence by its probability and adds up how often each piece is expected to be used (2 in <a href="#tokFigPrune">Figure 7</a>), and the M step sets each piece&rsquo;s probability to its share of those expected uses (3).</div>
+    <div class="eq-line eq-active">&Delta;<sub>i</sub> = L &minus; L<sub>&minus;i</sub></div>
+    <div class="eq-why eq-active"><var>L</var><sub>&minus;<var>i</var></sub> is <var>L</var> without piece <var>i</var>, so <var>&Delta;</var><sub><var>i</var></sub> is the likelihood the corpus loses without it. Each round keeps the share <var>&eta;</var> of pieces with the largest <var>&Delta;</var><sub><var>i</var></sub> and always keeps single characters (4 in <a href="#tokFigPrune">Figure 7</a>).</div>
+  </div>
+  <div class="dc-knobrow">The Unigram paper&rsquo;s example keeps <var>&eta;</var> = 80% each round, and SentencePiece&rsquo;s <code>shrinking_factor</code> defaults to 0.75 (References 4, 13). A higher <var>&eta;</var> prunes gently over more rounds; a lower one prunes hard in few rounds.</div>
+
+  <p>The weakness is training cost. Each round runs EM over the whole corpus and then recomputes the likelihood <var>L</var> without each piece to get its loss <var>&Delta;</var><sub><var>i</var></sub>, where BPE only counts adjacent pairs.</p>
+
+  <h3 id="subword-sampling"><span class="secnum">4.3</span> Sampling a different split each time</h3>
+
+  <p>While the model trains, the Unigram paper samples a different split of each word every time instead of always the best. The model sees varied splits and becomes more robust; the paper calls this subword regularization. Sampling is for training only: when the trained model is used, the tokenizer returns the single best split <var>x</var>*.</p>
+
+
+  <div class="eq-card" id="tokAlphaEq">
+    <p class="eq-what">Each split&rsquo;s chance of being drawn, sharpened by &alpha;.</p>
+    <div class="eq-line eq-active">P(x | X) = <span class="frac"><span class="top"><span style="color:#1e8449">P(x)</span><sup><span style="color:#c0392b">&alpha;</span></sup></span><span class="bot">&Sigma;<sub>x&prime; &isin; S(X)</sub> P(x&prime;)<sup><span style="color:#c0392b">&alpha;</span></sup></span></span></div>
+    <div class="eq-why eq-active">Raise each split&rsquo;s probability to the power <var>&alpha;</var> and divide by the total over all splits, so the chances add to 1. At <var>&alpha;</var> = 0 every power is 1 and all splits are equally likely. As <var>&alpha;</var> grows the best split takes over, and a large <var>&alpha;</var> almost always returns the Viterbi split. The paper sets no default and its experiments use 0.1 to 0.5; the SentencePiece README uses 0.1.</div>
+  </div>
+
+  <div class="demo" id="alphaTool">
+    <div class="db-ctl">
+      <label for="alphaR"><var>&alpha;</var> = <span id="alphaV">0.50</span></label>
+      <div class="db-slide">
+        <input type="range" id="alphaR" min="0" max="1" step="0.05" value="0.5" aria-label="alpha">
+        <div class="db-ends"><span>even</span><span>best split</span></div>
+      </div>
+    </div>
+    <div class="db-rows" id="alphaRows"></div>
+    <p class="demo-stats" id="alphaRead" aria-live="polite"></p>
+    <p class="caption fig-caption"><span class="fignum">Figure 8.</span> Toy. The three splits of <code>hugs</code> from <a href="#tokFigUni">Figure 6</a>; bar length is the chance of being drawn.</p>
+  </div>
+
+  <p>BPE can sample too. BPE-dropout (Provilkov, Emelianenko and Voita, 2020) keeps the merge list but skips each possible merge with a probability <var>p</var> while splitting a word, and uses plain BPE once training is done. Raising <var>p</var> gives more and shorter pieces: <var>p</var> = 0 is plain BPE and <var>p</var> = 1 leaves single characters; the paper uses <var>p</var> = 0.1 for most languages, and SentencePiece&rsquo;s <code>alpha</code> sets this <var>p</var> for a BPE model. SentencePiece runs both through the same <code>enable_sampling</code> option (References 15, 16).</p>
+
+  <h2 id="sentencepiece"><span class="secnum">5</span> SentencePiece runs BPE or Unigram on raw text</h2>
+
+  <p>
+    SentencePiece (Kudo and Richardson, 2018) is a toolkit, not a new algorithm: it trains and runs BPE or Unigram, Unigram by default. It does not cut text on spaces first. The space is an ordinary symbol, <code>&#9601;</code>, so decoding the tokens gives back the text exactly, spaces included, after one cleanup step described next. This matters for languages written without spaces.
+  </p>
+  <p>
+    In training and every time it encodes, it rewrites look-alike characters into one standard form. The default rule, <code>nmt_nfkc</code>, builds on Unicode NFKC, the standard rule that turns a full-width <code>&#65313;</code> into <code>A</code> and the ligature <code>&#64257;</code> into <code>fi</code> (Reference 13). This is SentencePiece&rsquo;s weakness: decoding gives back the rewritten text, so <code>&#65313;</code> comes back as <code>A</code>, and without byte fallback a character outside the vocabulary becomes <code>&lt;unk&gt;</code>.
+  </p>
+  <p>
+    Two switches change how text is split. <strong>Byte fallback</strong> writes a character missing from the vocabulary as its UTF-8 bytes instead of <code>&lt;unk&gt;</code>, and digit splitting makes every digit its own token. Llama 2 and Gemma turn both on, and Gemma also keeps runs of spaces instead of collapsing them (References 8, 9).
+  </p>
+  <p>
+    <code>character_coverage</code> is the share of the corpus&rsquo;s characters the vocabulary must cover; rarer characters fall to <code>&lt;unk&gt;</code> or to bytes. The default 0.9995 suits large character sets such as Chinese and Japanese, and 1.0 suits small alphabets such as English (Reference 13).
+  </p>
+
+  <figure class="figure mtd-fig" id="tokFigSp">
+<svg class="mtd-svg dc-svg" viewBox="0 0 360 212" role="img" aria-label="SentencePiece README output. Best split of This is a test: underscore This, underscore is, underscore a, underscore, t, est, with ids 284, 47, 11, 4, 15, 400. A sampled split with alpha 0.1: underscore This, underscore is, underscore a, underscore, te, s, t."><text class="dc-t dc-b" x="8.0" y="16.0">best split</text><rect class="tk-cell" x="8.0" y="26" width="54.7" height="28" rx="4"/><text class="tk-tok" x="35.3" y="45.0" text-anchor="middle">▁This</text><rect class="tk-cell" x="66.7" y="26" width="37.6" height="28" rx="4"/><text class="tk-tok" x="85.5" y="45.0" text-anchor="middle">▁is</text><rect class="tk-cell" x="108.3" y="26" width="29.1" height="28" rx="4"/><text class="tk-tok" x="122.9" y="45.0" text-anchor="middle">▁a</text><rect class="tk-cell" x="141.4" y="26" width="26.0" height="28" rx="4"/><text class="tk-tok" x="154.4" y="45.0" text-anchor="middle">▁</text><rect class="tk-cell" x="171.4" y="26" width="26.0" height="28" rx="4"/><text class="tk-tok" x="184.4" y="45.0" text-anchor="middle">t</text><rect class="tk-cell" x="201.4" y="26" width="37.6" height="28" rx="4"/><text class="tk-tok" x="220.2" y="45.0" text-anchor="middle">est</text><text class="dc-t dc-s" x="35.3" y="74.0" text-anchor="middle">284</text><text class="dc-t dc-s" x="85.5" y="74.0" text-anchor="middle">47</text><text class="dc-t dc-s" x="122.9" y="74.0" text-anchor="middle">11</text><text class="dc-t dc-s" x="154.4" y="74.0" text-anchor="middle">4</text><text class="dc-t dc-s" x="184.4" y="74.0" text-anchor="middle">15</text><text class="dc-t dc-s" x="220.2" y="74.0" text-anchor="middle">400</text><text class="dc-t tk-sm" x="247.0" y="74.0">ids</text><circle class="dc-mkc" cx="154.4" cy="96.0" r="10"/><text class="dc-t dc-mkt" x="154.4" y="101.0" text-anchor="middle">1</text><text class="dc-t dc-b" x="8.0" y="136.0">sampled split, <tspan class="mvar">α</tspan> = 0.1</text><rect class="tk-cell" x="8.0" y="146" width="54.7" height="28" rx="4"/><text class="tk-tok" x="35.3" y="165.0" text-anchor="middle">▁This</text><rect class="tk-cell" x="66.7" y="146" width="37.6" height="28" rx="4"/><text class="tk-tok" x="85.5" y="165.0" text-anchor="middle">▁is</text><rect class="tk-cell" x="108.3" y="146" width="29.1" height="28" rx="4"/><text class="tk-tok" x="122.9" y="165.0" text-anchor="middle">▁a</text><rect class="tk-cell" x="141.4" y="146" width="26.0" height="28" rx="4"/><text class="tk-tok" x="154.4" y="165.0" text-anchor="middle">▁</text><rect class="tk-cell" x="171.4" y="146" width="29.1" height="28" rx="4"/><text class="tk-tok" x="185.9" y="165.0" text-anchor="middle">te</text><rect class="tk-cell" x="204.5" y="146" width="26.0" height="28" rx="4"/><text class="tk-tok" x="217.5" y="165.0" text-anchor="middle">s</text><rect class="tk-cell" x="234.5" y="146" width="26.0" height="28" rx="4"/><text class="tk-tok" x="247.5" y="165.0" text-anchor="middle">t</text><circle class="dc-mkc" cx="185.9" cy="196.0" r="10"/><text class="dc-t dc-mkt" x="185.9" y="201.0" text-anchor="middle">2</text></svg>
+    <figcaption class="caption"><span class="fignum">Figure 9.</span> SentencePiece keeps each space as <code>&#9601;</code> (1), so the spaces can be rebuilt exactly; the numbers under the best split are its ids, and sampling varies the split (2). Data from Reference 14.</figcaption>
+  </figure>
+
+  <h2 id="practice-train"><span class="secnum">6</span> Training your own vocabulary</h2>
+
+  <p>You train a vocabulary once, on text that looks like what the model will read, and every later step depends on it. The official code lives in <a href="https://github.com/huggingface/tokenizers">Hugging Face tokenizers</a> and <a href="https://github.com/google/sentencepiece">SentencePiece</a>.</p>
+
+  <p>Training reads the whole corpus into memory by default; for a large corpus, <code>input_sentence_size</code> trains on a random sample of that many sentences instead (Reference 13). Unigram is the pick when you want each sampled split drawn by its probability (<a href="#subword-sampling">Section 4.3</a>); byte-level BPE is the pick when no text may ever be unknown.</p>
+
+  <p class="code-lead">Code 3 trains a small Unigram vocabulary on <code>corpus.txt</code>, any plain text file with one sentence per line, then splits a string twice.</p>
+
+<pre class="cs" data-cs="3-8,9-10,12-13,14-15"><code class="language-python">import sentencepiece as spm
+
+spm.SentencePieceTrainer.train(
+    input="corpus.txt",
+    model_prefix="tok",
+    vocab_size=8000,
+    model_type="unigram",
+    character_coverage=0.9995,
+    byte_fallback=True,
+    split_digits=True,
+)
+sp = spm.SentencePieceProcessor(model_file="tok.model")
+print(sp.encode("This is a test", return_type=str))
+print(sp.encode("This is a test", return_type=str,
+                enable_sampling=True, alpha=0.1, nbest_size=-1))</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>The final size and the algorithm of <a href="#unigram">Section 4</a>.</li>
+  <li><span class="cs-n">2</span>The Llama 2 and Gemma choices of <a href="#sentencepiece">Section 5</a>.</li>
+  <li><span class="cs-n">3</span>The best split, line 2 of the equation card in <a href="#unigram-split">Section 4.1</a>.</li>
+  <li><span class="cs-n">4</span>A sampled split with <var>&alpha;</var> = 0.1; set <a href="#alphaTool">Figure 8</a> to 0.1 to see its draw shares.</li>
+</ol>
+
+  <figure class="figure mtd-fig" id="tokFigKnobs">
+    <div class="dc-tablewrap dc-stack tk-knobs">
+    <table class="dc-table">
+      <thead><tr><th>Setting</th><th>Raise or on</th><th>Lower or off</th><th>Default</th></tr></thead>
+      <tbody>
+        <tr><td data-h="Setting"><code>vocab_size</code> (<var>V</var>), <a href="tokenizers.html#subwords">vocabulary size</a></td><td data-h="Raise">shorter <var>T</var>, bigger table; very large keeps whole words</td><td data-h="Lower">longer <var>T</var>, smaller table; just above the character count leaves single characters</td><td data-h="Default">8000 [13]; models 30K to about 262K</td></tr>
+        <tr><td data-h="Setting"><code>character_coverage</code>, <a href="#sentencepiece">Section 5</a></td><td data-h="Raise">keeps rarer characters; 1.0 keeps all</td><td data-h="Lower">more characters fall to <code>&lt;unk&gt;</code> or bytes</td><td data-h="Default">0.9995 [13]</td></tr>
+        <tr><td data-h="Setting"><code>byte_fallback</code>, <a href="#sentencepiece">Section 5</a></td><td data-h="On">a missing character becomes UTF-8 bytes</td><td data-h="Off">it becomes <code>&lt;unk&gt;</code></td><td data-h="Default">off [13]; on in Llama 2, Gemma [8, 9]</td></tr>
+        <tr><td data-h="Setting"><code>split_digits</code>, <a href="tokenizers.html#numbers">how numbers split</a></td><td data-h="On">one token per digit</td><td data-h="Off">learned digit runs stay</td><td data-h="Default">off [13]; on in Llama 2, Gemma [8, 9]</td></tr>
+        <tr><td data-h="Setting"><code>shrinking_factor</code> (<var>&eta;</var>), <a href="#unigram-train">Section 4.2</a></td><td data-h="Raise">prunes gently over more rounds; near 1 barely prunes</td><td data-h="Lower">prunes hard in few rounds</td><td data-h="Default">0.75 [13]; paper 0.8 [4]</td></tr>
+        <tr><td data-h="Setting"><code>alpha</code> (<var>&alpha;</var>), <a href="#subword-sampling">Section 4.3</a></td><td data-h="Raise">Unigram: closer to the best split; BPE: alpha is the dropout probability, so more pieces</td><td data-h="Lower">Unigram: closer to even, 0 makes all splits equal; BPE: fewer skipped merges</td><td data-h="Default">none; 0.1 in the README [14]</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <figcaption class="caption"><span class="fignum">Figure 10.</span> The SentencePiece settings this page uses, what raising or lowering each one does, and its default.</figcaption>
+  </figure>
+
+  <p>
+    The model&rsquo;s last layer gives one score for each of the <var>V</var> entries at every step. How does it turn those scores into the next id? <a href="decoding.html">Softmax, Temperature and Decoding</a> answers that; there, decoding means choosing the next token, and the tokenizer then turns the chosen ids back into text.
+  </p>
+
+  <h2 id="references"><span class="secnum">7</span> References</h2>
+  <ol class="brefs">
+    <li>Sennrich, R., Haddow, B., Birch, A. (2016). Neural Machine Translation of Rare Words with Subword Units. ACL 2016. <a href="https://arxiv.org/abs/1508.07909">arXiv:1508.07909</a>.</li>
+    <li>Gage, P. (1994). A New Algorithm for Data Compression. The C Users Journal. Cited via Reference 1.</li>
+    <li>Schuster, M., Nakajima, K. (2012). Japanese and Korean Voice Search. ICASSP 2012. Wu, Y., et al. (2016). Google&rsquo;s Neural Machine Translation System. <a href="https://arxiv.org/abs/1609.08144">arXiv:1609.08144</a>. Schuster and Nakajima cited via Reference 12.</li>
+    <li>Kudo, T. (2018). Subword Regularization. ACL 2018. <a href="https://arxiv.org/abs/1804.10959">arXiv:1804.10959</a>.</li>
+    <li>Kudo, T., Richardson, J. (2018). SentencePiece. EMNLP 2018 demo. <a href="https://arxiv.org/abs/1808.06226">arXiv:1808.06226</a>.</li>
+    <li>Radford, A., et al. (2019). <a href="https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf">Language Models are Unsupervised Multitask Learners</a>. OpenAI.</li>
+    <li>Devlin, J., et al. (2019). BERT. NAACL 2019. <a href="https://arxiv.org/abs/1810.04805">arXiv:1810.04805</a>.</li>
+    <li>Touvron, H., et al. (2023). Llama 2. <a href="https://arxiv.org/abs/2307.09288">arXiv:2307.09288</a>.</li>
+    <li>Gemma Team (2024). Gemma. <a href="https://arxiv.org/abs/2403.08295">arXiv:2403.08295</a>.</li>
+    <li>Hugging Face. <a href="https://huggingface.co/docs/transformers/main/tokenizer_summary">Summary of the tokenizers</a>.</li>
+    <li>OpenAI. tiktoken, <a href="https://github.com/openai/tiktoken/blob/main/tiktoken_ext/openai_public.py">openai_public.py</a> and <a href="https://github.com/openai/tiktoken/blob/main/tiktoken/model.py">model.py</a>.</li>
+    <li>Hugging Face LLM Course 6.6. <a href="https://huggingface.co/learn/llm-course/en/chapter6/6">WordPiece tokenization</a>.</li>
+    <li>SentencePiece. <a href="https://github.com/google/sentencepiece/blob/master/doc/options.md">Training options</a>.</li>
+    <li>SentencePiece. <a href="https://github.com/google/sentencepiece/blob/master/python/README.md">Python README</a>.</li>
+    <li>Provilkov, I., Emelianenko, D., Voita, E. (2020). BPE-Dropout: Simple and Effective Subword Regularization. ACL 2020. <a href="https://arxiv.org/abs/1910.13267">arXiv:1910.13267</a>.</li>
+    <li>SentencePiece. <a href="https://github.com/google/sentencepiece">README</a>, Subword Regularization and BPE-Dropout; <a href="https://github.com/google/sentencepiece/blob/master/src/sentencepiece_processor.h">sentencepiece_processor.h</a>, SampleEncode, where <code>alpha</code> is the dropout probability for BPE.</li>
+  </ol>
+
+  <script>
+  /* bpeStep: BPE on the toy corpus, states 0 to 6; bars are current pair counts, the orange bar is the next merge. */
+  (function () {
+    var root = document.getElementById('bpeStep');
+    if (!root) return;
+    var NS = 'http://www.w3.org/2000/svg', svg = document.getElementById('bpeSvg');
+    var CORPUS = [['hug', 10], ['pug', 5], ['pun', 12], ['bun', 4], ['hugs', 5]];
+    function pairsOf(words) {
+      var order = [], cnt = {};
+      words.forEach(function (w) {
+        for (var i = 0; i + 1 < w.t.length; i++) {
+          var k = w.t[i] + '\u0001' + w.t[i + 1];
+          if (!(k in cnt)) { cnt[k] = 0; order.push(k); }
+          cnt[k] += w.f;
+        }
+      });
+      return order.map(function (k) { var p = k.split('\u0001'); return { a: p[0], b: p[1], c: cnt[k] }; });
+    }
+    function best(ps) { var b = null; ps.forEach(function (p) { if (!b || p.c > b.c) b = p; }); return b; }
+    function apply(words, m) {
+      return words.map(function (w) {
+        var out = [], i = 0;
+        while (i < w.t.length) {
+          if (i + 1 < w.t.length && w.t[i] === m.a && w.t[i + 1] === m.b) { out.push(m.a + m.b); i += 2; }
+          else { out.push(w.t[i]); i += 1; }
+        }
+        return { t: out, f: w.f };
+      });
+    }
+    var S = [], words = CORPUS.map(function (c) { return { t: c[0].split(''), f: c[1] }; }), last = null;
+    for (var k = 0; k <= 6; k++) {
+      var ps = pairsOf(words), nx = k < 6 ? best(ps) : null;
+      var tie = nx && ps.filter(function (p) { return p.c === nx.c; }).length > 1;
+      S.push({ words: words, pairs: ps, next: nx, made: last, tie: tie });
+      if (k < 6) { last = { a: nx.a, b: nx.b, c: nx.c, tie: tie }; words = apply(words, nx); }
+    }
+    function el(tag, attrs, text, parent) {
+      var e = document.createElementNS(NS, tag);
+      for (var a in attrs) e.setAttribute(a, attrs[a]);
+      if (text != null) e.textContent = text;
+      (parent || svg).appendChild(e);
+      return e;
+    }
+    function tw(s) { return s.length * 9.2 + 12; }
+    var read = document.getElementById('bpeRead'), count = document.getElementById('bpeCount');
+    var prev = document.getElementById('bpePrev'), next = document.getElementById('bpeNext');
+    var card = document.getElementById('bpeStepEq');
+    var TEXT = S.map(function (s, i) {
+      if (i === 0) return 'Every word starts as single characters, so the vocabulary has 7 entries.';
+      var m = s.made, t = 'Merge ' + i + ' joined <code>' + m.a + ' ' + m.b + '</code>, seen ' + m.c + ' times, into <code>' + m.a + m.b + '</code>. The vocabulary has ' + (7 + i) + ' entries.';
+      if (m.tie) t += ' Another pair also had ' + m.c + '; in this toy the first one found wins.';
+      return t;
+    });
+    var step = 1;
+    function show(i) {
+      step = i;
+      while (svg.firstChild) svg.removeChild(svg.firstChild);
+      var s = S[i], fused = s.made ? s.made.a + s.made.b : null;
+      el('text', { 'class': 'bp-h', x: 8, y: 16 }, 'corpus');
+      s.words.forEach(function (w, r) {
+        var x = 8, y = 26 + r * 30;
+        w.t.forEach(function (t) {
+          var wd = Math.max(24, tw(t));
+          el('rect', { 'class': 'bp-cell' + (t === fused ? ' bp-fused' : ''), x: x, y: y, width: wd, height: 24, rx: 4 });
+          el('text', { 'class': 'bp-tok', x: x + wd / 2, y: y + 17, 'text-anchor': 'middle' }, t);
+          x += wd + 3;
+        });
+        el('text', { 'class': 'bp-s', x: 150, y: y + 17 }, '\u00d7' + w.f);
+      });
+      el('text', { 'class': 'bp-h', x: 8, y: 196 }, 'pair counts now');
+      var ps = s.pairs.slice().sort(function (p, q) { return q.c - p.c; }).slice(0, 6);
+      ps.forEach(function (p, r) {
+        var y = 206 + r * 21, isN = s.next && p.a === s.next.a && p.b === s.next.b;
+        el('text', { 'class': 'bp-tok', x: 8, y: y + 13 }, p.a + ' ' + p.b);
+        el('rect', { 'class': isN ? 'bp-bar bp-next' : 'bp-bar', x: 96, y: y + 1, width: p.c * 9, height: 15, rx: 2 });
+        el('text', { 'class': 'bp-s', x: 96 + p.c * 9 + 5, y: y + 13 }, String(p.c) + (isN ? '  next' : ''));
+      });
+      if (!s.next) el('text', { 'class': 'bp-s', x: 8, y: 206 + ps.length * 21 + 16 }, 'the toy stops here');
+      read.innerHTML = TEXT[i];
+      var ph = i === 0 ? 0 : 1;
+      Array.prototype.forEach.call(card.querySelectorAll('[data-s]'), function (x) { x.classList.toggle('eq-active', +x.getAttribute('data-s') === ph); });
+      Array.prototype.forEach.call(card.querySelectorAll('[data-w]'), function (x) { x.classList.toggle('eq-active', +x.getAttribute('data-w') === (i === 6 ? 2 : ph)); });
+      count.textContent = i === 0 ? 'start' : 'merge ' + i + ' of 6';
+      prev.disabled = i === 0; next.disabled = i === 6;
+    }
+    prev.addEventListener('click', function () { if (step > 0) show(step - 1); });
+    next.addEventListener('click', function () { if (step < 6) show(step + 1); });
+    function fitRead() {
+      read.style.minHeight = '';
+      var mx = 0;
+      TEXT.forEach(function (t) { read.innerHTML = t; mx = Math.max(mx, read.offsetHeight); });
+      read.style.minHeight = mx + 'px';
+      read.innerHTML = TEXT[step];
+    }
+    window.addEventListener('resize', fitRead);
+    show(1);
+    fitRead();
+  })();
+
+  /* alphaTool: sampling shares of the three toy splits of hugs, P(x)^alpha normalized. */
+  (function () {
+    var root = document.getElementById('alphaTool');
+    if (!root) return;
+    var SPL = [['hug | s', 0.005], ['h | ug | s', 0.0002], ['h | u | g | s', 0.000005]];
+    var rows = document.getElementById('alphaRows'), r = document.getElementById('alphaR');
+    var v = document.getElementById('alphaV'), read = document.getElementById('alphaRead');
+    var fills = [], vals = [];
+    SPL.forEach(function (s) {
+      var row = document.createElement('div'); row.className = 'db-row tk-arow';
+      var w = document.createElement('span'); w.className = 'db-w'; w.textContent = s[0];
+      var tr = document.createElement('span'); tr.className = 'db-track';
+      var f = document.createElement('span'); f.className = 'db-fill'; tr.appendChild(f);
+      var val = document.createElement('span'); val.className = 'db-v';
+      row.appendChild(w); row.appendChild(tr); row.appendChild(val); rows.appendChild(row);
+      fills.push(f); vals.push(val);
+    });
+    function upd() {
+      var a = +r.value, q = SPL.map(function (s) { return Math.pow(s[1], a); }), z = q.reduce(function (x, y) { return x + y; }, 0);
+      q.forEach(function (x, i) { var p = x / z; fills[i].style.width = (100 * p).toFixed(1) + '%'; vals[i].textContent = Math.round(100 * p) + '%'; });
+      v.textContent = a.toFixed(2);
+      read.innerHTML = say(q[0] / z);
+    }
+    var SAY = ['The three splits are drawn close to evenly, so the model sees varied splits.',
+      'The best split, <code>hug | s</code>, wins the most draws, but the other splits still appear.',
+      'Almost every draw is the best split, the one used at inference.'];
+    function say(p) { return p < 0.4 ? SAY[0] : p < 0.95 ? SAY[1] : SAY[2]; }
+    function fitRead() {
+      read.style.minHeight = '';
+      var mx = 0;
+      SAY.forEach(function (t) { read.innerHTML = t; mx = Math.max(mx, read.offsetHeight); });
+      read.style.minHeight = mx + 'px';
+      upd();
+    }
+    r.addEventListener('input', upd);
+    window.addEventListener('resize', fitRead);
+    upd();
+    fitRead();
+  })();
+  </script>
+            <script>
+        (function () {
+            var nav = document.querySelector('.topnav');
+            function onNavScroll() {
+                nav.classList.toggle('scrolled', window.scrollY > 4);
+            }
+            window.addEventListener('scroll', onNavScroll, { passive: true });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            window.addEventListener('resize', function () {
+                if (window.innerWidth > 768) {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            onNavScroll();
+            var toggle = document.getElementById('navToggle');
+            var panel = document.getElementById('navPanel');
+            if (toggle && panel) {
+                toggle.addEventListener('click', function () {
+                    var open = panel.classList.toggle('open');
+                    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                });
+                panel.addEventListener('click', function (e) {
+                    if (e.target && e.target.classList && e.target.classList.contains('panel-link')) {
+                        panel.classList.remove('open');
+                        toggle.setAttribute('aria-expanded', 'false');
+                    }
+                });
+            }
+            var links = Array.prototype.slice.call(document.querySelectorAll('.tab-strip a.tab-chip[href^="#"]'));
+            if (!links.length) return;
+            var tabMap = {};
+            links.forEach(function (a) { tabMap[a.getAttribute('href').slice(1)] = a; });
+            var current = null;
+            function centerTab(tab) {
+                var strip = tab.parentElement;
+                if (!strip || !strip.classList.contains('tab-strip')) return;
+                var sr = strip.getBoundingClientRect();
+                var pr = tab.getBoundingClientRect();
+                strip.scrollLeft += (pr.width >= sr.width) ? (pr.left - sr.left) : (pr.left - sr.left) - (sr.width - pr.width) / 2;
+            }
+            function setActive(id) {
+                if (!tabMap[id] || id === current) return;
+                current = id;
+                links.forEach(function (a) {
+                    a.classList.toggle('active', a.getAttribute('href') === '#' + id);
+                });
+                centerTab(tabMap[id]);
+            }
+            links.forEach(function (a) {
+                a.addEventListener('click', function () {
+                    setActive(a.getAttribute('href').slice(1));
+                });
+            });
+            setActive(links[0].getAttribute('href').slice(1));
+            if ('IntersectionObserver' in window) {
+                var obs = new IntersectionObserver(function (entries) {
+                    entries.forEach(function (en) {
+                        if (en.isIntersecting) setActive(en.target.id);
+                    });
+                }, { rootMargin: '-35% 0px -55% 0px' });
+                Object.keys(tabMap).forEach(function (id) {
+                    var el = document.getElementById(id);
+                    if (el) obs.observe(el);
+                });
+                window.addEventListener('scroll', function () {
+                    if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) {
+                        setActive(links[links.length - 1].getAttribute('href').slice(1));
+                    }
+                }, { passive: true });
+            }
+            window.addEventListener('load', function () {
+                var act = document.querySelector('.tab-strip a.active');
+                if (act) centerTab(act);
+            });
+        })();
+    </script>
+<script>
+/* P80 code sections (CODE-SECTIONS.md) */
+(function(){
+  var C=['121,184,255','255,171,112','133,232,157','210,168,255','255,161,152','118,227,234'];
+  function lay(pre){
+    var code=pre.querySelector('code'); if(!code) return;
+    var lh=parseFloat(getComputedStyle(code).lineHeight);
+    var pt=parseFloat(getComputedStyle(pre).paddingTop);
+    var old=pre.querySelectorAll('.cs-g'); for(var j=0;j<old.length;j++) pre.removeChild(old[j]);
+    var imgs=[],sizes=[],pos=[];
+    (pre.getAttribute('data-cs')||'').split(',').forEach(function(r,i){
+      var m=r.trim().match(/^(\d+)(?:-(\d+))?$/); if(!m) return;
+      var a=+m[1],b=+(m[2]||m[1]),c=C[i%C.length],top=pt+(a-1)*lh,h=(b-a+1)*lh;
+      imgs.push('linear-gradient(rgba('+c+',.55),rgba('+c+',.55))','linear-gradient(rgba('+c+',.13),rgba('+c+',.13))');
+      sizes.push('3px '+h+'px','100% '+h+'px'); pos.push('0 '+top+'px','0 '+top+'px');
+      var g=document.createElement('span'); g.className='cs-g'; g.setAttribute('aria-hidden','true');
+      g.setAttribute('data-n',String(i+1)); g.style.top=(top+(lh-11)/2)+'px'; g.style.color='rgb('+c+')';
+      pre.insertBefore(g,code);
+    });
+    pre.style.backgroundImage=imgs.join(','); pre.style.backgroundSize=sizes.join(',');
+    pre.style.backgroundPosition=pos.join(','); pre.style.backgroundRepeat='no-repeat';
+  }
+  function all(){ var p=document.querySelectorAll('pre.cs'); for(var i=0;i<p.length;i++) lay(p[i]); }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',all); else all();
+  window.addEventListener('load',all);
+  window.addEventListener('resize',all);
+  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(all);
+})();
+</script>
+</body>
+</html>

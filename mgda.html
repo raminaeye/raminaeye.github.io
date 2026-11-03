@@ -637,15 +637,15 @@ dl.mg-set dd { margin: 0 0 .5rem 0; padding-left: .9rem; border-left: 3px solid 
 </nav>
 <p class="crumb"><a href="tutorial.html">&larr; All tutorials</a></p>
     <h1>MGDA (Multiple Gradient Descent Algorithm)</h1>
-    <p class="dek">MGDA picks one weight per task so that the weighted sum of the task gradients is as short as possible, then steps against that sum. For a small step, every task's loss on the batch falls.</p>
+    <p class="dek">MGDA picks one weight per task, each zero or more and all summing to one, so that the weighted sum of the task gradients is as short as possible, then steps against that sum. For a small step, every task's loss on the batch falls, unless that shortest sum is zero.</p>
 
-    <p>A multitask network has one shared encoder, whose weights are the <strong>shared weights</strong>, and one small head per task (<a href="#fig-mg-map">Figure 1</a>). Each task has a gradient on the shared weights, the direction its loss rises fastest. On every batch, MGDA weights these gradients so their sum is shortest and steps the shared weights against that sum. Désidéri (2012) introduced MGDA; Sener and Koltun (2018) made it practical for deep networks.</p>
+    <p>A multitask network has one shared encoder, whose parameters are the <strong>shared weights</strong> <var>θ<sub>sh</sub></var>, and one small head per task (<a href="#fig-mg-map">Figure 1</a>). The encoder turns the input into a <strong>representation</strong> <var>Z</var> that every head reads. Each task has a gradient on the shared weights, the direction its loss rises fastest; a real encoder has millions of shared weights, so each gradient is a vector with millions of entries. On every batch, MGDA weights these gradients so their sum is shortest and steps the shared weights against that sum. Désidéri introduced MGDA in a 2009 report (journal paper 2012); Sener and Koltun (2018) made it practical for deep networks.</p>
 
     <table class="cmp">
         <tbody>
             <tr><td><strong>Problem</strong></td><td>The plain average step can raise one task's loss.</td></tr>
             <tr><td><strong>Fix</strong></td><td>Step against the shortest weighted sum of the task gradients.</td></tr>
-            <tr><td><strong>Guarantee</strong></td><td>For a small plain gradient step, every task's loss on the batch falls, unless no such step exists. Where training starts decides where it ends.</td></tr>
+            <tr><td><strong>Guarantee</strong></td><td>For a small plain gradient step, every task's loss on the batch falls, unless no direction lowers them all to first order. Which of the possible end points training reaches depends on the network's initialization (<a href="#which-one">Section 10</a>).</td></tr>
         </tbody>
     </table>
 
@@ -663,13 +663,14 @@ dl.mg-set dd { margin: 0 0 .5rem 0; padding-left: .9rem; border-left: 3px solid 
         <line x1="188" y1="54" x2="206" y2="54" class="mg-ink" marker-end="url(#mgMapArr)"/>
         <rect x="208" y="38" width="30" height="32" rx="6" class="mg-box"/>
         <text x="223" y="59" text-anchor="middle" class="mg-t"><tspan class="mvar">Z</tspan></text>
+        <text x="215" y="101" text-anchor="middle" class="mg-t mg-s">representation</text>
         <line x1="238" y1="48" x2="262" y2="30" class="mg-ink" marker-end="url(#mgMapArr)"/>
         <line x1="238" y1="60" x2="262" y2="78" class="mg-ink" marker-end="url(#mgMapArr)"/>
         <rect x="264" y="12" width="72" height="34" rx="7" class="mg-box mg-h1"/>
         <text x="300" y="34" text-anchor="middle" class="mg-t mg-p">head 1</text>
         <rect x="264" y="62" width="72" height="34" rx="7" class="mg-box mg-h2"/>
         <text x="300" y="84" text-anchor="middle" class="mg-t mg-g">head 2</text>
-        <text x="132" y="106" text-anchor="middle" class="mg-t mg-gold mg-b">MGDA balances only these weights</text>
+        <text x="132" y="118" text-anchor="middle" class="mg-t mg-gold mg-b">MGDA balances only these weights</text>
         <rect x="4" y="124" width="332" height="34" rx="7" class="mg-box"/>
         <text x="16" y="146" class="mg-t">1 &#183; one gradient per task on <tspan class="mvar">θ</tspan><tspan baseline-shift="sub" font-size="11">sh</tspan></text>
         <rect x="4" y="166" width="332" height="34" rx="7" class="mg-box mg-on"/>
@@ -677,7 +678,7 @@ dl.mg-set dd { margin: 0 0 .5rem 0; padding-left: .9rem; border-left: 3px solid 
         <rect x="4" y="208" width="332" height="34" rx="7" class="mg-box"/>
         <text x="16" y="230" class="mg-t">3 &#183; step <tspan class="mvar">θ</tspan><tspan baseline-shift="sub" font-size="11">sh</tspan> against the weighted sum</text>
         <rect x="4" y="250" width="332" height="34" rx="7" class="mg-box"/>
-        <text x="16" y="272" class="mg-t">4 &#183; each head steps on its own loss</text>
+        <text x="16" y="272" class="mg-t">4 &#183; each head steps on its own loss, scaled by <tspan class="mvar">w</tspan><tspan baseline-shift="sub" font-size="11">i</tspan></text>
       </svg>
       <figcaption class="caption"><span class="fignum">Figure 1.</span> The model MGDA trains. Only box 2 is new; boxes 1, 3 and 4 are an ordinary training step.</figcaption>
     </figure>
@@ -700,19 +701,20 @@ dl.mg-set dd { margin: 0 0 .5rem 0; padding-left: .9rem; border-left: 3px solid 
 
 <h2 id="best-meaning"><span class="secnum">1</span> Dominated and Pareto-optimal models</h2>
 
-    <p>With two losses, one model can win on task 1 and lose on task 2.</p>
+    <p>With two tasks, one model can have the lower task 1 loss and another the lower task 2 loss.</p>
     <ul>
-      <li>A model is <strong>dominated</strong> when another model dominates it, as defined below.</li>
-      <li>A model is <strong>Pareto-optimal</strong> when no model dominates it.</li>
-      <li>The <strong>Pareto front</strong> is the set of loss pairs that Pareto-optimal models reach. Picking a point on it means picking which task matters more.</li>
+      <li>Model <var>B</var> is <strong>dominated</strong> when some model <var>A</var> is at least as good on every task and strictly better on at least one.</li>
+      <li>A model is <strong>Pareto-optimal</strong> when no task can improve without another getting worse.</li>
+      <li>The <strong>Pareto front</strong> is the set of models where no task can improve without another getting worse; plot each model's task losses and they form a curve.</li>
     </ul>
     <div class="eq-card" id="mgEqDom">
-        <div class="eq-what">When model <var>A</var> dominates model <var>B</var>; <var>L<sub>i</sub></var>(<var>A</var>) is task <var>i</var>'s loss for model <var>A</var>.</div>
-        <div class="eq-line eq-active" data-eqline="0">L<sub>i</sub>(A) &#8804; L<sub>i</sub>(B) for every task i</div>
-        <div class="eq-why eq-active" data-eqline="0"><var>A</var> is at least as good on every task.</div>
-        <div class="eq-line eq-active" data-eqline="1">L<sub>j</sub>(A) &lt; L<sub>j</sub>(B) for some task j</div>
-        <div class="eq-why eq-active" data-eqline="1">And strictly better on at least one.</div>
+        <div class="eq-what"><var>A</var> dominates <var>B</var> when both lines hold. <var>L<sub>i</sub></var>(<var>A</var>) is task <var>i</var>'s loss for <var>A</var>.</div>
+        <div class="eq-line eq-active" data-eqline="0">L<sub>i</sub>(A) &#8804; L<sub>i</sub>(B)</div>
+        <div class="eq-why eq-active" data-eqline="0">For every task <var>i</var>: <var>A</var> is at least as good on every task.</div>
+        <div class="eq-line eq-active" data-eqline="1">L<sub>j</sub>(A) &lt; L<sub>j</sub>(B)</div>
+        <div class="eq-why eq-active" data-eqline="1">For some task <var>j</var>: <var>A</var> is strictly better on at least one.</div>
       </div>
+    <p>MGDA looks for steps that make no task worse, so it moves a dominated model toward the front.</p>
 
     <div class="demo" id="frontierDemo">
       <style>@media (max-width:480px){#frontierDemo svg text{font-size:14px!important}}</style>
@@ -732,21 +734,21 @@ dl.mg-set dd { margin: 0 0 .5rem 0; padding-left: .9rem; border-left: 3px solid 
         <text x="241" y="104" font-size="13" style="fill:#e74c3c" font-weight="700">&#9313; dominated</text>
         <line x1="225.5" y1="104.3" x2="172" y2="151.5" style="stroke:#e74c3c;stroke-width:1.5" stroke-dasharray="4 3" marker-end="url(#pfArrR)"/>
         <circle cx="167" cy="156" r="6" style="fill:#e74c3c;fill-opacity:.35;stroke:#e74c3c;stroke-width:1.5"/>
-        <text x="124" y="128" font-size="13" style="fill:#e74c3c" font-weight="700" text-anchor="end">&#9314; better on both</text>
+        <text x="158" y="176" font-size="13" style="fill:#e74c3c" font-weight="700" text-anchor="end">&#9314; on the front</text>
         <text x="46" y="194" font-size="12" style="fill:#7f8c8d" font-weight="700">&#8601; lower is better</text>
       </svg>
-      <p class="fig-caption caption"><span class="fignum">Figure 2.</span> &#9312; The Pareto front. &#9313; A dominated model. &#9314; A model on the front, better on both tasks.</p>
+      <p class="fig-caption caption"><span class="fignum">Figure 2.</span> &#9312; The Pareto front. &#9313; A dominated model. &#9314; A model on the front that dominates &#9313;.</p>
     </div>
 
 <h2 id="two-tasks"><span class="secnum">2</span> The average step can hurt one task</h2>
 
-    <p>With two shared weights, each task's gradient is an arrow: <var>g<sub>1</sub></var> = (2, 0) and <var>g<sub>2</sub></var> = (&#8722;1, 0.5), as in <a href="multitask-intro.html#failure-numbers">the intro's failure example</a>. Training steps against a direction <var>d</var> built from them.</p>
+    <p>With two shared weights, each task's gradient is an arrow in the plane: <var>g<sub>1</sub></var> = (2, 0) and <var>g<sub>2</sub></var> = (&#8722;1, 0.5), the pair in <a href="multitask-intro.html#failure-numbers">Figure 13 of the intro</a>. With millions of shared weights the geometry is the same. Training steps against a direction <var>d</var> built from them.</p>
     <div class="eq-card" id="mgEqTwoTasks">
-        <div class="eq-what">A step against <var>d</var> helps task <var>i</var> when the dot product is positive; plain training uses the average.</div>
-        <div class="eq-line eq-active" data-eqline="0">&#10216;<span class="eqt" data-k="gi" style="color:#2c3e50">g<sub>i</sub></span>, d&#10217; &gt; 0 &#8658; task i improves</div>
-        <div class="eq-why eq-active" data-eqline="0">For a small step against <var>d</var>, task <var>i</var>'s loss drops by about the step size times this dot product. It is negative exactly when the angle between <var>g<sub>i</sub></var> and <var>d</var> is over 90&#176;.</div>
+        <div class="eq-what">A step against <var>d</var> helps task <var>i</var> when the dot product &#10216; , &#10217; is positive; plain training uses the average.</div>
+        <div class="eq-line eq-active" data-eqline="0">&#10216;<span class="eqt" data-k="gi" style="color:#2c3e50">g<sub>i</sub></span>, d&#10217; &gt; 0</div>
+        <div class="eq-why eq-active" data-eqline="0">Then task <var>i</var> improves: for a small step against <var>d</var>, its loss drops by about the step size times this dot product. It is negative exactly when the angle between <var>g<sub>i</sub></var> and <var>d</var> is over 90&#176;.</div>
         <div class="eq-line eq-active" data-eqline="1">d = <span class="frac"><span class="top">1</span><span class="bot">2</span></span>(<span class="eqt" style="color:#8e44ad">g<sub>1</sub></span> + <span class="eqt" style="color:#27ae60">g<sub>2</sub></span>)</div>
-        <div class="eq-why eq-active" data-eqline="1">Each gradient gets weight one half, so the longer one contributes more.</div>
+        <div class="eq-why eq-active" data-eqline="1">Each gradient gets weight one half, so the average leans toward the longer gradient.</div>
       </div>
 
     <div class="demo" id="avgDemo">
@@ -781,32 +783,33 @@ dl.mg-set dd { margin: 0 0 .5rem 0; padding-left: .9rem; border-left: 3px solid 
 
 <h2 id="shortest-blend"><span class="secnum">3</span> The minimum-norm blend of task gradients</h2>
 
-    <p>A <strong>blend</strong> is a weighted sum of the <var>T</var> task gradients with weights <var>w<sub>i</sub></var> that are zero or more and sum to one, a <strong>convex combination</strong>. The allowed weight lists form the <strong>simplex</strong> <var>Δ</var>. The shortest blend is the <strong>minimum-norm point</strong> <var>d*</var>.</p>
+    <p>A <strong>blend</strong> is a weighted sum of the <var>T</var> task gradients. Its weights <var>w<sub>i</sub></var> are zero or more and sum to one, which makes it a <strong>convex combination</strong>. The set of allowed weight lists is the <strong>simplex</strong> <var>Δ</var>. The shortest blend is the <strong>minimum-norm point</strong> <var>d*</var>.</p>
     <div class="eq-card" id="mgEqShortest">
-        <div class="eq-what">MGDA's step direction is the shortest blend.</div>
+        <div class="eq-what">MGDA's step direction is the shortest blend. &#931;<sub>i</sub> sums over the <var>T</var> tasks, &#8214;&#183;&#8214; is length, and <var>w</var> &#8712; <var>Δ</var> means <var>w</var> is an allowed weight list.</div>
         <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="ds" style="color:#b9770e">d*</span> = &#931;<sub>i</sub> <span class="eqt" data-k="w" style="color:#b9770e">w<sub>i</sub>*</span> <span class="eqt" data-k="gi" style="color:#2c3e50">g<sub>i</sub></span></div>
-        <div class="eq-why eq-active" data-eqline="0">The blend with the best weights <var>w<sub>i</sub>*</var>, summed over the <var>T</var> tasks.</div>
+        <div class="eq-why eq-active" data-eqline="0">The blend with the best weights <var>w<sub>i</sub>*</var>.</div>
         <div class="eq-line eq-active" data-eqline="1"><span class="eqt" data-k="w" style="color:#b9770e">w*</span> = argmin<sub>w&#8712;&#916;</sub> &#8214;&#931;<sub>i</sub> w<sub>i</sub> <span class="eqt" data-k="gi" style="color:#2c3e50">g<sub>i</sub></span>&#8214;<sup>2</sup></div>
-        <div class="eq-why eq-active" data-eqline="1"><var>w*</var> is a weight list in <var>Δ</var> that makes the blend shortest. The shortest blend is unique; the weights that give it need not be.</div>
+        <div class="eq-why eq-active" data-eqline="1">argmin returns the weight list <var>w*</var> that makes the squared length smallest. The shortest blend is unique; the weights that give it need not be.</div>
       </div>
 
     <div class="eq-card" id="mgEqEqual">
-        <div class="eq-what">With two tasks, <var>d*</var> has the same dot product with both gradients, and that value is its squared length.</div>
-        <div class="eq-line eq-active" data-eqline="0">&#10216;<span class="eqt" style="color:#8e44ad">g<sub>1</sub></span> &#8722; <span class="eqt" style="color:#27ae60">g<sub>2</sub></span>, <span class="eqt" style="color:#b9770e">d*</span>&#10217; = 0 &#8658; &#10216;<span class="eqt" style="color:#8e44ad">g<sub>1</sub></span>, <span class="eqt" style="color:#b9770e">d*</span>&#10217; = &#10216;<span class="eqt" style="color:#27ae60">g<sub>2</sub></span>, <span class="eqt" style="color:#b9770e">d*</span>&#10217;</div>
-        <div class="eq-why eq-active" data-eqline="0"><var>d*</var> meets the segment between the two tips at a right angle (<a href="#paretoDemo">Figure 4</a>), so both dot products are equal.</div>
-        <div class="eq-line eq-active" data-eqline="1">&#8214;<span class="eqt" style="color:#b9770e">d*</span>&#8214;<sup>2</sup> = w<sub>1</sub>&#10216;<span class="eqt" style="color:#8e44ad">g<sub>1</sub></span>, <span class="eqt" style="color:#b9770e">d*</span>&#10217; + w<sub>2</sub>&#10216;<span class="eqt" style="color:#27ae60">g<sub>2</sub></span>, <span class="eqt" style="color:#b9770e">d*</span>&#10217; &gt; 0</div>
-        <div class="eq-why eq-active" data-eqline="1">The weights sum to one, so the shared dot product equals <var>d*</var>'s squared length, positive unless <var>d*</var> is zero. A small plain gradient step against <var>d*</var> therefore lowers both losses on the batch, each by about the step size times that value. Adam rescales each coordinate, so with Adam this holds only approximately (<a href="multitask-training-loop.html#adam-scale">Adam's per-coordinate scaling</a>).</div>
+        <div class="eq-what">With two tasks and both weights above zero, <var>d*</var> has the same dot product with both gradients, and that value is its squared length.</div>
+        <div class="eq-line eq-active" data-eqline="0">&#10216;<span class="eqt" style="color:#8e44ad">g<sub>1</sub></span> &#8722; <span class="eqt" style="color:#27ae60">g<sub>2</sub></span>, <span class="eqt" style="color:#b9770e">d*</span>&#10217; = 0</div>
+        <div class="eq-why eq-active" data-eqline="0"><var>d*</var> meets the segment between the two tips at a right angle (<a href="#paretoDemo">Figure 4</a>).</div>
+        <div class="eq-line eq-active" data-eqline="1">&#10216;<span class="eqt" style="color:#8e44ad">g<sub>1</sub></span>, <span class="eqt" style="color:#b9770e">d*</span>&#10217; = &#10216;<span class="eqt" style="color:#27ae60">g<sub>2</sub></span>, <span class="eqt" style="color:#b9770e">d*</span>&#10217;</div>
+        <div class="eq-why eq-active" data-eqline="1">So both dot products are equal.</div>
+        <div class="eq-line eq-active" data-eqline="2">&#8214;<span class="eqt" style="color:#b9770e">d*</span>&#8214;<sup>2</sup> = w<sub>1</sub>&#10216;<span class="eqt" style="color:#8e44ad">g<sub>1</sub></span>, <span class="eqt" style="color:#b9770e">d*</span>&#10217; + w<sub>2</sub>&#10216;<span class="eqt" style="color:#27ae60">g<sub>2</sub></span>, <span class="eqt" style="color:#b9770e">d*</span>&#10217;</div>
+        <div class="eq-why eq-active" data-eqline="2">The weights sum to one, so the shared dot product equals <var>d*</var>'s squared length, which is above zero unless <var>d*</var> = 0. A small plain gradient step against <var>d*</var> then lowers both losses on the batch, each by about the step size times that value. Adam rescales each coordinate, so with Adam this holds only approximately (<a href="multitask-training-loop.html#adam-scale">Adam's per-coordinate scaling</a>).</div>
       </div>
+    <p>When a weight is clipped to zero, <var>d*</var> is the other task's gradient, and its dot product with the clipped task's gradient is at least &#8214;<var>d*</var>&#8214;<sup>2</sup>, so both losses still fall.</p>
 
 <h3 id="blend-by-hand"><span class="secnum">3.1</span> The two-task closed form</h3>
 
-    <p>With two tasks the best <var>w<sub>1</sub></var> has a closed form (equation 4 of the 2018 paper), and <var>w<sub>2</sub></var> = 1 &#8722; <var>w<sub>1</sub></var>.</p>
+    <p>With two tasks the best <var>w<sub>1</sub></var> has a closed form, given in the 2018 paper, and <var>w<sub>2</sub></var> = 1 &#8722; <var>w<sub>1</sub></var>.</p>
     <div class="eq-card" id="mgEqClosed">
         <div class="eq-what">The weight on task 1, clipped to the range 0 to 1.</div>
         <div class="eq-line eq-active" data-eqline="0"><span class="eqt" style="color:#b9770e">w<sub>1</sub>*</span> = <span class="frac"><span class="top">&#10216;<span class="eqt" style="color:#27ae60">g<sub>2</sub></span> &#8722; <span class="eqt" style="color:#8e44ad">g<sub>1</sub></span>, <span class="eqt" style="color:#27ae60">g<sub>2</sub></span>&#10217;</span><span class="bot">&#8214;<span class="eqt" style="color:#8e44ad">g<sub>1</sub></span> &#8722; <span class="eqt" style="color:#27ae60">g<sub>2</sub></span>&#8214;<sup>2</sup></span></span></div>
-        <div class="eq-why eq-active" data-eqline="0"><var>w<sub>1</sub>*</var> is how far the right angle falls along the segment from <var>g<sub>2</sub></var>'s tip toward <var>g<sub>1</sub></var>'s tip, as a fraction of the segment's length. Below 0 it is set to 0 and above 1 to 1; <var>d*</var> is then that tip's gradient.</div>
-        <div class="eq-line eq-active" data-eqline="1"><span class="eqt" style="color:#b9770e">w<sub>1</sub>*</span> = <span class="frac"><span class="top">3.25</span><span class="bot">9.25</span></span> &#8776; 0.35</div>
-        <div class="eq-why eq-active" data-eqline="1">With <var>g<sub>1</sub></var> = (2, 0) and <var>g<sub>2</sub></var> = (&#8722;1, 0.5), <var>d*</var> = (0.05, 0.32) and both dot products are 0.11.</div>
+        <div class="eq-why eq-active" data-eqline="0"><var>w<sub>1</sub>*</var> is where the perpendicular from the origin meets the segment, measured from <var>g<sub>2</sub></var>'s tip toward <var>g<sub>1</sub></var>'s tip as a fraction of the segment's length. Below 0 it is set to 0 and above 1 to 1; <var>d*</var> is then that tip's gradient.</div>
       </div>
 
     <div class="demo" id="paretoDemo">
@@ -850,7 +853,7 @@ dl.mg-set dd { margin: 0 0 .5rem 0; padding-left: .9rem; border-left: 3px solid 
         <circle id="pbMgdaRing" cx="173.4" cy="129.9" r="14" style="fill:none;stroke:#b9770e;stroke-width:2.5;opacity:.9"></circle>
       </svg>
 <span id="pbLegendStar" hidden></span>
-      <p class="fig-caption caption"><span class="fignum">Figure 4.</span> At <var>w<sub>1</sub></var> = 0.35 the gold blend <var>d*</var> meets the dashed segment of blends at a right angle.</p>
+      <p class="fig-caption caption"><span class="fignum">Figure 4.</span> At <var>w<sub>1</sub></var> &#8776; 0.35 the gold blend <var>d*</var> meets the dashed segment of blends at a right angle, and both dot products are 0.11.</p>
       <p class="pb-stage-title"><span id="pbStageTitle">The shortest blend has equal dot products</span></p>
       <div class="pb-readouts">
         <div class="pb-box">
@@ -938,37 +941,37 @@ dl.mg-set dd { margin: 0 0 .5rem 0; padding-left: .9rem; border-left: 3px solid 
     }
 </style>
 <div class="ms-dots">
-        <button type="button" class="ms-dot active" data-s="0" aria-label="Training step 1, the two gradients (1 of 5)">1</button>
-        <button type="button" class="ms-dot" data-s="1" aria-label="Training step 1, the shortest blend (2 of 5)">2</button>
-        <button type="button" class="ms-dot" data-s="2" aria-label="Training step 2 (3 of 5)">3</button>
-        <button type="button" class="ms-dot" data-s="3" aria-label="Training step 3 (4 of 5)">4</button>
-        <button type="button" class="ms-dot" data-s="4" aria-label="Training step 4, the blend is nearly zero (5 of 5)">5</button>
+        <button type="button" class="ms-dot active" data-s="0" aria-label="View 1 of 5: training step 1, the two gradients">1</button>
+        <button type="button" class="ms-dot" data-s="1" aria-label="View 2 of 5: training step 1, the shortest blend">2</button>
+        <button type="button" class="ms-dot" data-s="2" aria-label="View 3 of 5: training step 2">3</button>
+        <button type="button" class="ms-dot" data-s="3" aria-label="View 4 of 5: training step 3">4</button>
+        <button type="button" class="ms-dot" data-s="4" aria-label="View 5 of 5: training step 4, the blend is nearly zero">5</button>
       </div>
 <div class="demo-controls">
         <button type="button" class="play-btn" id="msPrev">Prev</button>
         <button type="button" class="play-btn" id="msNext">Next</button>
       </div>
 <svg id="msSvg" viewBox="60 20 280 180" role="img" aria-label="MGDA on two task gradients over four training steps" style="width:100%;max-width:460px;height:auto;display:block;margin:0 auto;"></svg>
-<p class="fig-caption caption"><span class="fignum">Figure 5.</span> Gold is <var>d*</var>, dashed slate the step against it. Later panels are zoomed in.</p>
+<p class="fig-caption caption"><span class="fignum">Figure 5.</span> Five views of four training steps. Gold is <var>d*</var>, dashed slate the step against it; later views are zoomed in.</p>
 <p id="msOutcome" aria-live="polite"></p>
 <div class="eq-card" id="mgdaStepEq">
-        <div class="eq-what">Every training step solves for new weights; a blend near zero means a step near zero.</div>
+        <div class="eq-what">A blend near zero means a step near zero.</div>
         <div class="eq-line" data-eqline="0">min<sub><span class="eqt" data-k="w" style="color:#b9770e">w</span>&#8712;&#916;</sub> &#8214;<span class="eqt" data-k="blend" style="color:#b9770e">&#931;<sub>i</sub> <span class="eqt" data-k="w" style="color:#b9770e">w<sub>i</sub></span> <span class="eqt" data-k="gi" style="color:#2c3e50">g<sub>i</sub></span></span>&#8214;<sup>2</sup></div>
         <div class="eq-why" data-eqline="0">The same problem as in <a href="#shortest-blend">Section 3</a>, solved again with this training step's gradients.</div>
         <div class="eq-line" data-eqline="1">&#8214;<span class="eqt" data-k="ds" style="color:#b9770e">d*</span>&#8214; &#8776; 0 &#8658; step &#8776; 0</div>
-        <div class="eq-why" data-eqline="1">When the shortest blend is nearly zero, the shared weights barely move. Each batch gives slightly different gradients, so in real training its length stays above zero even near a Pareto-stationary point, and it is no clean stop signal (<a href="multitask-training-loop.html#mgda-stop">MGDA's shrinking gradient</a>).</div>
+        <div class="eq-why" data-eqline="1">When the shortest blend is nearly zero, the shared weights barely move. Each batch gives slightly different gradients, so in real training its length stays above zero even where no step could lower every loss, and it is no clean stop signal (<a href="multitask-training-loop.html#mgda-stop">MGDA's shrinking gradient</a>).</div>
         <div class="eq-legend"><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#8e44ad"></span><var>g<sub>1</sub></var> task 1's gradient</span><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#27ae60"></span><var>g<sub>2</sub></var> task 2's gradient</span><span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#b9770e"></span><var>w<sub>i</sub></var> task <var>i</var>'s weight</span><span class="eq-item" data-lines="1"><span class="eq-sw" style="background:#b9770e"></span><var>d*</var> the shortest blend</span><span class="eq-item" data-lines="0"><var>Δ</var> the simplex, every allowed weight list</span><span class="eq-item" data-lines="0,1">‖‖ length</span><span class="eq-item" data-lines="0">min the smallest value of</span><span class="eq-item" data-lines="1">≈ approximately</span></div>
       </div></div>
 
 <h2 id="pareto-curve"><span class="secnum">5</span> Pareto-stationary points</h2>
 
-    <p>A point is <strong>Pareto-stationary</strong> when some blend of the task gradients is zero, so <var>d*</var> = 0.</p>
+    <p>A point is <strong>Pareto-stationary</strong> when some blend of the task gradients is zero, so <var>d*</var> = 0. There, no direction lowers every loss to first order.</p>
         <div class="eq-card" id="mgEqPareto">
         <div class="eq-what">Either the shortest blend is zero, or it helps every task.</div>
         <div class="eq-line eq-active" data-eqline="0">min<sub><span class="eqt" data-k="w" style="color:#b9770e">w</span>&#8712;&#916;</sub> &#8214;<span class="eqt" data-k="blend" style="color:#b9770e">&#931;<sub>i</sub> w<sub>i</sub> <span class="eqt" data-k="gi" style="color:#2c3e50">g<sub>i</sub></span></span>&#8214; = 0</div>
-        <div class="eq-why eq-active" data-eqline="0">Pareto-stationary: the origin lies among the blends (<a href="#fig-mg-cancel">Figure 6</a>), and no small step lowers every loss.</div>
-        <div class="eq-line eq-active" data-eqline="1">otherwise &#10216;<span class="eqt" data-k="gi" style="color:#2c3e50">g<sub>i</sub></span>, <span class="eqt" data-k="ds" style="color:#b9770e">d*</span>&#10217; &#8805; &#8214;<span class="eqt" data-k="ds" style="color:#b9770e">d*</span>&#8214;<sup>2</sup> &gt; 0 for every i</div>
-        <div class="eq-why eq-active" data-eqline="1">For any number of tasks, <var>d*</var> is the blend nearest the origin, so its dot product with every task's gradient is at least its squared length, and a small step against it lowers every loss. With two tasks this is the card in <a href="#shortest-blend">Section 3</a>.</div>
+        <div class="eq-why eq-active" data-eqline="0">Pareto-stationary: the origin lies inside the shaded triangle of blends (<a href="#fig-mg-cancel">Figure 6</a>).</div>
+        <div class="eq-line eq-active" data-eqline="1">&#10216;<span class="eqt" data-k="gi" style="color:#2c3e50">g<sub>i</sub></span>, <span class="eqt" data-k="ds" style="color:#b9770e">d*</span>&#10217; &#8805; &#8214;<span class="eqt" data-k="ds" style="color:#b9770e">d*</span>&#8214;<sup>2</sup></div>
+        <div class="eq-why eq-active" data-eqline="1">Otherwise this holds for every task <var>i</var>. <var>d*</var> is the blend nearest the origin, so its dot product with every task's gradient is at least its squared length, which is above zero, and a small step against it lowers every loss. With two tasks this is the card in <a href="#shortest-blend">Section 3</a>.</div>
       </div>
 
     <figure class="figure mg-fig" id="fig-mg-cancel">
@@ -990,20 +993,20 @@ dl.mg-set dd { margin: 0 0 .5rem 0; padding-left: .9rem; border-left: 3px solid 
         <text x="146" y="132" class="mg-t mg-gold mg-b">&#9312; zero blend</text>
         <text x="190" y="172" class="mg-t mg-gold">&#9313; all blends</text>
       </svg>
-      <figcaption class="caption"><span class="fignum">Figure 6.</span> &#9313; The shaded triangle holds every blend, the convex hull of the tips. &#9312; It contains the origin: weights 0.31, 0.33 and 0.37 give zero.</figcaption>
+      <figcaption class="caption"><span class="fignum">Figure 6.</span> &#9313; The shaded triangle holds every blend. &#9312; It contains the origin: weights of about 0.31, 0.33 and 0.37 give zero.</figcaption>
     </figure>
 
-    <p>Pareto-stationary does not mean Pareto-optimal: the gradients can also cancel at a point that is not optimal, like a saddle point.</p>
+    <p>Pareto-stationary does not mean Pareto-optimal. The gradients can also cancel at a saddle point, where the losses rise in some directions and fall in others.</p>
 
 <h2 id="mgda-loop"><span class="secnum">6</span> The Frank-Wolfe solver for three or more tasks</h2>
 
-    <p>With three or more tasks, the 2018 paper runs Frank-Wolfe on the Gram table <var>G</var>, with <var>G<sub>ij</sub></var> = &#10216;<var>g<sub>i</sub></var>, <var>g<sub>j</sub></var>&#10217;. Each <strong>iteration</strong> moves the blend toward one task's gradient.</p>
+    <p>With three or more tasks, the 2018 paper runs Frank-Wolfe on the Gram matrix <var>G</var>, the table of every pair's dot product, <var>G<sub>ij</sub></var> = &#10216;<var>g<sub>i</sub></var>, <var>g<sub>j</sub></var>&#10217;. Each <strong>iteration</strong> moves the blend toward one task's gradient.</p>
     <div class="eq-card" id="mgEqFW">
         <div class="eq-what">One Frank-Wolfe iteration, starting from equal weights 1/<var>T</var>.</div>
         <div class="eq-line eq-active" data-eqline="0">t = argmin<sub>r</sub> &#931;<sub>j</sub> <span class="eqt" style="color:#b9770e">w<sub>j</sub></span> G<sub>rj</sub></div>
         <div class="eq-why eq-active" data-eqline="0">Pick task <var>t</var>, the task whose gradient has the smallest dot product with the current blend.</div>
         <div class="eq-line eq-active" data-eqline="1"><span class="eqt" style="color:#b9770e">w</span> &#8592; (1 &#8722; &#947;) <span class="eqt" style="color:#b9770e">w</span> + &#947; e<sub>t</sub></div>
-        <div class="eq-why eq-active" data-eqline="1">Move a fraction <var>γ</var> of the way toward task <var>t</var>'s gradient. <var>e<sub>t</sub></var> is the weight list with 1 at task <var>t</var> and 0 elsewhere; <var>γ</var> comes from the two-task formula, the current blend playing <var>g<sub>2</sub></var>.</div>
+        <div class="eq-why eq-active" data-eqline="1">Move a fraction <var>γ</var> of the way toward task <var>t</var>'s gradient. <var>e<sub>t</sub></var> is the weight list with 1 at task <var>t</var> and 0 elsewhere. <var>γ</var> comes from the two-task formula, with the current blend in place of <var>g<sub>2</sub></var> and <var>g<sub>t</sub></var> in place of <var>g<sub>1</sub></var>.</div>
         <div class="eq-line eq-active" data-eqline="2">stop when &#947; &#8776; 0</div>
         <div class="eq-why eq-active" data-eqline="2">The iterations stop when the best move is nearly zero, or at an iteration cap.</div>
       </div>
@@ -1031,8 +1034,8 @@ dl.mg-set dd { margin: 0 0 .5rem 0; padding-left: .9rem; border-left: 3px solid 
         <circle cx="110" cy="215" r="3" style="fill:#2c3e50"/>
         <text x="160" y="124" class="mg-t mg-b">&#9312; start</text>
         <text x="90" y="128" text-anchor="end" class="mg-t mg-b">&#9313;</text>
-        <text x="142" y="152" class="mg-t mg-b">&#9314;</text>
-        <text x="130" y="176" class="mg-t mg-gold mg-b">&#9315; <tspan class="mvar">d*</tspan></text>
+        <text x="143" y="150" class="mg-t mg-b">&#9314;</text>
+        <text x="112" y="173" text-anchor="end" class="mg-t mg-gold mg-b">&#9315; <tspan class="mvar">d*</tspan></text>
         <text x="284" y="198" class="mg-t mg-p mg-b"><tspan class="mvar">g</tspan><tspan baseline-shift="sub" font-size="11">1</tspan></text>
         <text x="20" y="140" text-anchor="end" class="mg-t mg-g mg-b"><tspan class="mvar">g</tspan><tspan baseline-shift="sub" font-size="11">2</tspan></text>
         <text x="158" y="30" class="mg-t mg-bl mg-b"><tspan class="mvar">g</tspan><tspan baseline-shift="sub" font-size="11">3</tspan></text>
@@ -1041,30 +1044,31 @@ dl.mg-set dd { margin: 0 0 .5rem 0; padding-left: .9rem; border-left: 3px solid 
       <figcaption class="caption"><span class="fignum">Figure 7.</span> &#9312; Equal weights. &#9313; and &#9314; Two iterations, toward <var>g<sub>2</sub></var>, then <var>g<sub>1</sub></var>. &#9315; Where the iterations settle, the triangle's point nearest the origin.</figcaption>
     </figure>
 
-    <p>The paper calls the solver's cost negligible. The official code runs projected gradient descent, which stops only when the weights change by less than 1e-5 in total; its cap of 250 is never counted (<a href="https://github.com/isl-org/MultiObjectiveOptimization/blob/master/multi_task/min_norm_solvers.py">min_norm_solvers.py</a>, lines 112 to 135).</p>
+    <p>The 2018 paper calls the solver's cost negligible. Its official code (<a href="https://github.com/isl-org/MultiObjectiveOptimization/blob/master/multi_task/min_norm_solvers.py">min_norm_solvers.py</a>) runs projected gradient descent instead, starting from the best pair of tasks. Its loop counter is never increased, so its cap of 250 never fires; it stops when the weights change by less than 1e-5 in total (the L1 change).</p>
 
 <h2 id="mgda-when"><span class="secnum">7</span> When MGDA runs and what it costs</h2>
 
     <ul>
-      <li>Every batch, after the losses and before the optimizer step; nothing carries over between batches.</li>
-      <li>From batch-mean losses, so the gradients vary a little from batch to batch.</li>
-      <li>Only gradients on the shared weights enter <var>G</var> (for MGDA-UB, the gradients at <var>Z</var>). Each head gets its own gradient times <var>w<sub>i</sub></var> in the official code; the paper's Algorithm 2 leaves it unscaled.<!-- link-pending: multitask-training-loop.html#task-gradients "how each head's gradient is scaled" --></li>
-      <li>At a cost of <var>T</var> copies of the shared gradient and extra backward passes (<a href="#fig-mg-passes">Figure 8</a>).</li>
+      <li>MGDA runs on every batch, after the losses and before the optimizer step, and nothing carries over between batches.</li>
+      <li>It works from batch-mean losses, so the weights vary a little from batch to batch.</li>
+      <li>Only gradients on the shared weights enter <var>G</var> (<a href="#mgda-ub">Section 7.1</a> covers a variant that uses gradients at <var>Z</var>). <var>G</var> is only <var>T</var> by <var>T</var>, so the solve is cheap; the <var>T</var> by <var>P</var> table of gradients, with <var>P</var> often in the millions, is the memory cost.</li>
+      <li>In the official code each head's gradient is multiplied by its task weight; the paper's pseudocode leaves it unscaled.<!-- link-pending: multitask-training-loop.html#task-gradients "how each head's gradient is scaled" --></li>
+      <li>Each step needs extra forward and backward passes, one of each per task (<a href="#fig-mg-passes">Figure 8</a>).</li>
     </ul>
 
-<h3 id="mgda-ub"><span class="secnum">7.1</span> MGDA-UB</h3>
+<h3 id="mgda-ub"><span class="secnum">7.1</span> MGDA-UB, gradients at the representation</h3>
 
-    <p>MGDA-UB (UB for upper bound) takes each task's gradient at the representation <var>Z</var> (<a href="#fig-mg-map">Figure 1</a>) instead of at the shared weights <var>θ<sub>sh</sub></var>.</p>
+    <p>MGDA-UB (UB for upper bound) takes each task's gradient at the representation <var>Z</var> (<a href="#fig-mg-map">Figure 1</a>) instead of at the shared weights <var>θ<sub>sh</sub></var>. &#8711; means gradient, so &#8711;<sub><var>θ</var>sh</sub> <var>L<sub>i</sub></var> is <var>g<sub>i</sub></var>.</p>
     <div class="eq-card" id="mgEqUB">
         <div class="eq-what">MGDA's squared blend length is at most a fixed factor times the same blend taken at <var>Z</var>.</div>
         <div class="eq-line eq-active" data-eqline="0">&#8214;&#931;<sub>i</sub> <span class="eqt" style="color:#b9770e">w<sub>i</sub></span> &#8711;<sub>&#952;sh</sub> L<sub>i</sub>&#8214;<sup>2</sup></div>
         <div class="eq-why eq-active" data-eqline="0">The squared length MGDA makes small, built from gradients on the shared weights.</div>
-        <div class="eq-line eq-active" data-eqline="1">&#8804; &#8214;&#8706;Z / &#8706;&#952;<sub>sh</sub>&#8214;<sup>2</sup></div>
+        <div class="eq-line eq-active" data-eqline="1">&#8804; &#8214;<span class="frac"><span class="top">&#8706;Z</span><span class="bot">&#8706;&#952;<sub>sh</sub></span></span>&#8214;<sup>2</sup></div>
         <div class="eq-why eq-active" data-eqline="1">How strongly <var>Z</var> changes with the shared weights. It does not depend on the weights <var>w<sub>i</sub></var>.</div>
         <div class="eq-line eq-active" data-eqline="2">&#215; &#8214;&#931;<sub>i</sub> <span class="eqt" style="color:#16a085">w<sub>i</sub></span> &#8711;<sub>Z</sub> L<sub>i</sub>&#8214;<sup>2</sup></div>
-        <div class="eq-why eq-active" data-eqline="2">The same blend at <var>Z</var>. MGDA-UB minimizes this factor, which needs only one pass back through each head.</div>
+        <div class="eq-why eq-active" data-eqline="2">The same blend at <var>Z</var>. MGDA-UB minimizes this second factor instead of the left side, which needs only one pass back through each head.</div>
       </div>
-    <p>The 2018 paper claims that when &#8706;<var>Z</var>/&#8706;<var>θ<sub>sh</sub></var> has full rank (every change of <var>Z</var> can come from some change of the shared weights), MGDA-UB still lowers every loss or stops at a Pareto-stationary point. It is an approximation: in a two-dimensional full-rank check it picks 0.5 and 0.5 and raises task 1's loss, where exact MGDA picks 0.7 and 0.3.</p>
+    <p>The 2018 paper claims that when the Jacobian of <var>Z</var> with respect to the shared weights has full rank, MGDA-UB still lowers every loss or stops at a Pareto-stationary point. That claim does not hold in general. In a small example built for this page (two shared weights, a 2 by 2 full-rank Jacobian), MGDA-UB picks 0.5 and 0.5 and raises task 1's loss, while exact MGDA picks 0.7 and 0.3.</p>
 
     <figure class="figure mg-fig" id="fig-mg-passes">
       <svg class="mg-svg" viewBox="0 0 340 196" role="img" aria-label="Passes per training step for three tasks: the plain sum needs one forward and one backward; MGDA needs four of each through the encoder; MGDA-UB needs two encoder forwards, one encoder backward and three short head passes.">
@@ -1086,6 +1090,8 @@ dl.mg-set dd { margin: 0 0 .5rem 0; padding-left: .9rem; border-left: 3px solid 
       <figcaption class="caption"><span class="fignum">Figure 8.</span> Passes per training step for three tasks in the official code. &#9313; repeats the encoder per task; &#9314; repeats only the heads.</figcaption>
     </figure>
 
+    <p>The 2018 paper times both on two benchmarks: Cityscapes scene understanding (semantic segmentation, instance segmentation and depth) and CelebA (200K face images, 40 yes/no attributes, one task each, on a ResNet-18).</p>
+
     <figure class="figure mg-fig" id="fig-mg-cost">
       <svg class="mg-svg" viewBox="0 0 340 168" role="img" aria-label="Bar chart of training time as a share of MGDA's: scene understanding, MGDA-UB about 60 percent; CelebA with 40 tasks, MGDA-UB about 3.7 percent.">
         <text x="4" y="16" class="mg-t mg-b">scene understanding, 3 tasks</text>
@@ -1094,12 +1100,10 @@ dl.mg-set dd { margin: 0 0 .5rem 0; padding-left: .9rem; border-left: 3px solid 
         <text x="4" y="98" class="mg-t mg-b">CelebA, 40 tasks</text>
         <text x="4" y="120" class="mg-t">MGDA</text><rect x="72" y="108" width="220" height="18" rx="3" class="mg-bar-a"/><text x="250" y="121" text-anchor="end" class="mg-t mg-w">429.9 h</text>
         <text x="4" y="144" class="mg-t mg-tl">MGDA-UB</text><rect x="72" y="132" width="8.2" height="18" rx="2" class="mg-bar-b"/><text x="86" y="145" class="mg-t">16.1 h</text>
-        <text x="72" y="164" class="mg-t mg-s">bar lengths are computed shares of MGDA's time</text>
+        <text x="4" y="164" class="mg-t mg-s">each bar's length is its time as a share of MGDA's time</text>
       </svg>
       <figcaption class="caption"><span class="fignum">Figure 9.</span> Training times from the 2018 paper's Table 2 (Titan Xp). Its scene-understanding times carry no unit.</figcaption>
     </figure>
-
-    <p>On CelebA the paper reports an average error of 8.25 for MGDA-UB, 9.62 for equal weights and 8.44 for GradNorm.</p>
 
 <h2 id="mgda-practice"><span class="secnum">8</span> MGDA in a PyTorch training step</h2>
 
@@ -1108,7 +1112,7 @@ dl.mg-set dd { margin: 0 0 .5rem 0; padding-left: .9rem; border-left: 3px solid 
 
 <h3 id="mg-solver-code"><span class="secnum">8.1</span> The minimum-norm weight solver</h3>
 
-    <p><code>min_norm</code> takes the Gram table <var>G</var> and returns the weights, following the Frank-Wolfe iteration of <a href="#mgda-loop">Section 6</a>.</p>
+    <p><code>min_norm</code> takes the Gram matrix <var>G</var> and returns the weights, following the Frank-Wolfe iteration of <a href="#mgda-loop">Section 6</a>.</p>
 <pre class="cs" data-cs="3,7-8,10,11-18,19-22"><code class="language-python">import torch
 
 ITERS, TOL = 250, 1e-5
@@ -1133,17 +1137,17 @@ def min_norm(G):
         w[t] += gam
     return w</code></pre>
     <ol class="cs-notes">
-      <li><span class="cs-n">1</span>The iteration cap and the tolerance (<a href="#mgda-training-loop">Section 9</a>).</li>
+      <li><span class="cs-n">1</span>The iteration cap and the tolerance on <code>gam</code> (<a href="#mgda-training-loop">Section 9</a>).</li>
       <li><span class="cs-n">2</span>Equal weights 1/<var>T</var>, marker &#9312; in <a href="#fig-mg-fw">Figure 7</a>.</li>
-      <li><span class="cs-n">3</span>Picks task <var>t</var>, the task the blend agrees with least, eq card in <a href="#mgda-loop">Section 6</a>, line 1.</li>
-      <li><span class="cs-n">4</span><code>dd</code>, <code>dg</code> and <code>gg</code> are the dot products among the blend and <var>g<sub>t</sub></var>; <code>den</code> is their squared distance and <code>gam</code> the formula of <a href="#blend-by-hand">Section 3.1</a>.</li>
-      <li><span class="cs-n">5</span>Stops when <code>gam</code> is nearly zero, otherwise moves toward task <var>t</var>, eq card in <a href="#mgda-loop">Section 6</a>, lines 2 and 3.</li>
+      <li><span class="cs-n">3</span>Picks task <var>t</var>, the task the blend agrees with least, line 1 of the <a href="#mgda-loop">Section 6</a> card.</li>
+      <li><span class="cs-n">4</span><code>dd</code>, <code>dg</code> and <code>gg</code> are the dot products among the blend and <var>g<sub>t</sub></var>. <code>den</code> is the squared distance between the blend and <var>g<sub>t</sub></var>, and <code>gam</code> is the formula of <a href="#blend-by-hand">Section 3.1</a>.</li>
+      <li><span class="cs-n">5</span>Stops when <code>gam</code> is nearly zero, otherwise moves toward task <var>t</var>, lines 2 and 3 of the <a href="#mgda-loop">Section 6</a> card.</li>
     </ol>
 
 <h3 id="mg-step-code"><span class="secnum">8.2</span> The full training step</h3>
 
     <p><code>mgda_step</code> runs one training step for two regression tasks with one shared forward pass.</p>
-<pre class="cs" data-cs="7-14,17-21,22-26,27-29,30-33"><code class="language-python">import torch
+<pre class="cs" data-cs="7-14,17-22,23-27,28-30,31-34"><code class="language-python">import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import grad
@@ -1159,6 +1163,7 @@ opt = Adam(theta + H, lr=5e-4)
 keep = dict(retain_graph=True)
 
 def mgda_step(x, ys):
+    # x: (B, 16), ys: two (B, 1)
     z = F.relu(trunk(x))
     losses = []
     for h, y in zip(heads, ys):
@@ -1180,35 +1185,35 @@ def mgda_step(x, ys):
     <ol class="cs-notes">
       <li><span class="cs-n">1</span>A trunk, two heads, and <code>theta</code>, the shared weights. <code>keep</code> holds <code>retain_graph=True</code>, because the final backward reuses the graph.</li>
       <li><span class="cs-n">2</span>One forward and each task's batch-mean loss.</li>
-      <li><span class="cs-n">3</span>One gradient per task on <code>theta</code>, flattened to a row of <var>P</var> numbers, box 1 in <a href="#fig-mg-map">Figure 1</a>.</li>
-      <li><span class="cs-n">4</span>The Gram table and the solve of <a href="#mg-solver-code">Section 8.1</a>, box 2 in <a href="#fig-mg-map">Figure 1</a>.</li>
-      <li><span class="cs-n">5</span>One backward of the weighted loss: <code>theta</code> receives exactly <var>d*</var>, and each head its own gradient times <var>w<sub>i</sub></var>, boxes 3 and 4 in <a href="#fig-mg-map">Figure 1</a>.</li>
+      <li><span class="cs-n">3</span>One gradient per task on <code>theta</code>, flattened to a row of <var>P</var> numbers, box 1 in <a href="#fig-mg-map">Figure 1</a>. <var>P</var> is the number of shared weights, often millions.</li>
+      <li><span class="cs-n">4</span>The Gram matrix and the solve of <a href="#mg-solver-code">Section 8.1</a>, box 2 in <a href="#fig-mg-map">Figure 1</a>.</li>
+      <li><span class="cs-n">5</span>One backward of the weighted loss. <code>theta</code> receives exactly <var>d*</var>, and each head its own gradient times <var>w<sub>i</sub></var>, as in the official code, boxes 3 and 4 in <a href="#fig-mg-map">Figure 1</a>.</li>
     </ol>
     <ul>
-      <li>For MGDA-UB, pass <code>[z]</code> instead of <code>theta</code> to <code>grad</code>, so each call goes back only through its head and <code>Gm</code> stays small.</li>
+      <li>For MGDA-UB, pass <code>[z]</code> instead of <code>theta</code> to <code>grad</code>, so each call goes back only through its head. In real networks <code>z</code> holds far fewer numbers than the shared weights.</li>
       <li>The official full-MGDA path runs a separate forward per task, so dropout and batch norm differ from this snippet's one shared forward.</li>
     </ul>
     <p>The <a href="https://github.com/isl-org/MultiObjectiveOptimization">official code</a> is discontinued; <a href="https://arxiv.org/abs/2203.14338">LibMTL</a> also implements MGDA.</p>
 
 <h2 id="mgda-training-loop"><span class="secnum">9</span> MGDA's settings</h2>
 
-    <p>MGDA has no loss weights, but four settings change its step.</p>
+    <p>MGDA has no hand-set loss weights, but four settings change its step. The official repo's <a href="https://github.com/isl-org/MultiObjectiveOptimization/blob/master/sample.json">sample config</a> sets each one.</p>
     <dl class="mg-set">
       <dt>Gradient normalization</dt>
-      <dd>With none, the weights lean away from the longest gradient. The sample config uses loss+; the paper uses none.</dd>
+      <dd>Each gradient is divided by a normalizer <var>n<sub>i</sub></var> before the solve. With none, the weights lean away from the longest gradient. The sample config uses loss+, which divides by the loss times the gradient's length, where loss divides by the loss alone; the paper uses none.</dd>
       <dd><div class="eq-card" id="mgEqNorm">
-        <div class="eq-what">Each gradient is divided by a normalizer <var>n<sub>i</sub></var> before the solve.</div>
-        <div class="eq-line eq-active" data-eqline="0">g<sub>i</sub> &#8592; g<sub>i</sub> / n<sub>i</sub></div>
+        <div class="eq-what">The normalizer options, applied before the solve.</div>
+        <div class="eq-line eq-active" data-eqline="0">g<sub>i</sub> &#8592; <span class="frac"><span class="top">g<sub>i</sub></span><span class="bot">n<sub>i</sub></span></span></div>
         <div class="eq-why eq-active" data-eqline="0">The weights found this way then multiply the raw losses.</div>
         <div class="eq-line eq-active" data-eqline="1">n<sub>i</sub> = 1, &#8214;g<sub>i</sub>&#8214;, L<sub>i</sub>, or L<sub>i</sub>&#8214;g<sub>i</sub>&#8214;</div>
         <div class="eq-why eq-active" data-eqline="1">none, l2, loss and loss+. l2 keeps only directions, so with two tasks it always gives 0.5 and 0.5, the plain average (<a href="#fig-mg-norm">Figure 11</a>). loss and loss+ make a small-loss task's row longer, so it gets less weight.</div>
       </div></dd>
       <dt>Solver stopping</dt>
-      <dd>A higher cap (250) or a lower tolerance on <var>γ</var> (1e-5) gives a blend nearer the true shortest, at more cost. In 100 random four-task cases, 77 hit the cap, leaving the blend a median 0.18% and at most 4.8% too long.</dd>
+      <dd><code>ITERS</code> (250) and <code>TOL</code> (1e-5) in the <a href="#mg-solver-code">Section 8.1</a> snippet cap the iterations and stop them once <code>gam</code> falls below the tolerance. A higher cap or a lower tolerance gives a blend nearer the true shortest, at more cost. In 100 random four-task cases, this page's <code>min_norm</code>, starting from equal weights, hit the cap in 77, leaving the blend a median 0.18% and at most 4.8% too long. The official solver instead starts from the best pair and stops on the weight change (<a href="#mgda-loop">Section 6</a>).</dd>
       <dt>MGDA-UB on or off</dt>
       <dd>On (the sample config) takes gradients at <var>Z</var>: one encoder backward instead of <var>T</var>, but an approximation (<a href="#mgda-ub">Section 7.1</a>). Off solves the exact problem.</dd>
       <dt>Learning rate</dt>
-      <dd>The guarantee holds only for a small step. With plain gradient descent the step shrinks with <var>d*</var>; Adam rescales each coordinate, so its step shrinks later (<a href="multitask-training-loop.html#adam-scale">Adam's per-coordinate scaling</a>). The sample config uses Adam at 5e-4, times 0.85 every 10 epochs.</dd>
+      <dd>The guarantee holds only for a small step. A larger rate trains faster but can overshoot, so one task's loss can rise; a smaller rate keeps every loss falling but trains more slowly. Adam rescales each coordinate (<a href="multitask-training-loop.html#adam-scale">Adam's per-coordinate scaling</a>). The sample config uses Adam at 5e-4, times 0.85 every 10 epochs.</dd>
     </dl>
 
     <figure class="figure mg-fig" id="fig-mg-norm">
@@ -1233,18 +1238,18 @@ def mgda_step(x, ys):
         <text x="276" y="94" class="mg-t mg-b">average</text>
         <text x="180" y="140" class="mg-t"><tspan class="mvar">w</tspan><tspan baseline-shift="sub" font-size="11">1</tspan> = 0.50, task 2 rises</text>
       </svg>
-      <figcaption class="caption"><span class="fignum">Figure 11.</span> The arrows of <a href="#avgDemo">Figure 3</a>. &#9313; l2 normalization ignores length, gives 0.5 and 0.5, and steps with the average.</figcaption>
+      <figcaption class="caption"><span class="fignum">Figure 11.</span> The arrows of <a href="#avgDemo">Figure 3</a>, drawn to scale. &#9313; l2 normalization ignores length, gives 0.5 and 0.5, and steps with the average.</figcaption>
     </figure>
 
-    <p>A loss scaled by 10 has a 10 times longer gradient and, without normalization, less weight (<a href="multitask-training-loop.html#loss-scale">the loss sets the scale</a>).</p>
+    <p>A loss scaled by 10 has a 10 times longer gradient and, without normalization, less weight (<a href="multitask-training-loop.html#loss-scale">see how loss scale enters the gradient</a>).</p>
 
 <h2 id="which-one"><span class="secnum">10</span> Which stationary point MGDA reaches</h2>
 
-    <p>The starting weights decide which one. Pareto MTL (Lin et al., 2019) runs one constrained MGDA per preferred trade-off, giving a spread of points on the front. <a href="cagrad.html">CAGrad</a> raises the smallest per-task improvement while staying near the average gradient.</p>
+    <p>The network's initialization decides which Pareto-stationary point MGDA reaches. Pareto MTL (Lin et al., 2019) gives each run a preference direction that restricts which part of the front the run may end in, so several runs give a spread of points on the front. <a href="cagrad.html">CAGrad</a> raises the smallest per-task improvement while staying near the average gradient.</p>
 
 <h2 id="mgda-close"><span class="secnum">11</span> MGDA among the balancing methods</h2>
 
-    <p>MGDA's weights follow from the gradient lengths. <a href="gradnorm.html">GradNorm</a>, next, learns a loss weight per task so the tasks train at similar rates.</p>
+    <p>MGDA's weights come from the task gradients' lengths and angles, solved fresh each batch. <a href="gradnorm.html">GradNorm</a> instead learns a loss weight per task so the tasks train at similar rates.</p>
 
     <table class="cmp">
         <thead><tr><th>Method</th><th>The question it answers</th></tr></thead>
@@ -1261,8 +1266,9 @@ def mgda_step(x, ys):
 <h2 id="references"><span class="secnum">12</span> References</h2>
 
     <ol class="brefs">
-        <li>D&eacute;sid&eacute;ri, J.-A. (2012). Multiple-gradient descent algorithm (MGDA). Comptes Rendus Math&eacute;matique, 350(5-6), 313-318.</li>
-        <li>Sener, O., et al. (2018). Multi-Task Learning as Multi-Objective Optimization. NeurIPS. arXiv:1810.04650.</li>
+        <li>D&eacute;sid&eacute;ri, J.-A. (2009). Multiple-Gradient Descent Algorithm (MGDA). INRIA Research Report RR-6953.</li>
+        <li>D&eacute;sid&eacute;ri, J.-A. (2012). Multiple-gradient descent algorithm (MGDA) for multiobjective optimization. Comptes Rendus Math&eacute;matique, 350(5-6), 313-318.</li>
+        <li>Sener, O., and Koltun, V. (2018). Multi-Task Learning as Multi-Objective Optimization. NeurIPS. arXiv:1810.04650.</li>
         <li>Lin, X., et al. (2019). Pareto multi-task learning. NeurIPS.</li>
         <li>Official code at <a href="https://github.com/isl-org/MultiObjectiveOptimization">isl-org/MultiObjectiveOptimization</a> (discontinued), and the <a href="https://arxiv.org/abs/2203.14338">LibMTL</a> library.</li>
     </ol>
@@ -1362,7 +1368,7 @@ def mgda_step(x, ys):
     var TSTEPS = [
       { g1: [2, 0],       g2: [-1, 0.5],    tag: 'training step 1', zoom: 1 },
       { g1: [1.2, 0.1],   g2: [-0.5, 0.9],  tag: 'training step 2', zoom: 1 },
-      { g1: [0.5, 0.05],  g2: [-0.35, 0.4], tag: 'training step 3, zoomed in 2\u00d7', zoom: 2 },
+      { g1: [0.5, 0.05],  g2: [-0.35, 0.4], tag: 'training step 3, close-up at 2\u00d7 zoom', zoom: 2 },
       { g1: [0.14, 0.02], g2: [-0.13, 0.05], tag: 'training step 4, zoomed in 8\u00d7', zoom: 8 }
     ];
 
@@ -1374,7 +1380,7 @@ def mgda_step(x, ys):
       { k: 1, blend: true, step: true,
         outcome: 'At training step 2 both gradients are recomputed, and the same rule picks new weights.' },
       { k: 2, blend: true, step: true,
-        outcome: 'At training step 3 the gradients are shorter and point further apart.' },
+        outcome: 'At training step 3 both gradients are shorter, and so is the shortest blend.' },
       { k: 3, blend: true, stop: true,
         outcome: 'At training step 4 the shortest blend is about a tenth as long as at step 1, so the shared weights barely move.' }
     ];
@@ -1697,7 +1703,7 @@ def mgda_step(x, ys):
                 wEl.textContent = (readW !== undefined ? readW : w).toFixed(2);
                 normEl.textContent = norm.toFixed(2);
                 s1El.textContent = mzM(s1.toFixed(2));
-                s1El.style.color = s1 >= 0 ? '#27ae60' : '#e74c3c';
+                s1El.style.color = s1 >= 0 ? '#8e44ad' : '#e74c3c';
                 s2El.textContent = mzM(s2.toFixed(2));
                 s2El.style.color = s2 >= 0 ? '#27ae60' : '#e74c3c';
             }
@@ -1732,7 +1738,7 @@ def mgda_step(x, ys):
             legendStar.style.visibility = found ? 'visible' : 'hidden';
         }
 
-        var ZERO_TITLE = 'All of <var>g<sub>2</sub></var> hurts task 1';
+        var ZERO_TITLE = 'Blend is all <var>g<sub>2</sub></var>, so task 1\'s loss rises';
         var REST_DESC = '';
         var STAGES = [
             { dur: 2600, from: 0, to: WSTAR,
@@ -1745,7 +1751,7 @@ def mgda_step(x, ys):
               title: 'The blend gets longer and task 2\'s dot product falls',
               desc: '' }
         ];
-        var END_TITLE = 'All of <var>g<sub>1</sub></var> hurts task 2';
+        var END_TITLE = 'Blend is all <var>g<sub>1</sub></var>, so task 2\'s loss rises';
         var REST_TITLE = STAGES[1].title;
         var END_DESC = '';
         var totalDur = STAGES.reduce(function (a, s) { return a + s.dur; }, 0);

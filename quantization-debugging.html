@@ -899,18 +899,19 @@ for layer, r in logs.items():
 
         <h3 id="look-for-outliers"><span class="secnum">2.7</span> Outliers and dead activations</h3>
         <p>An outlier is one channel whose values are far larger than the rest; with one scale for the whole tensor, it widens the grid step for every channel. A dead activation is an output stuck at zero whatever comes in, so it carries no signal.</p>
-        <p>Both show up in two numbers, the widest channel range over the median one and the share of exact zeros (<code>outputs</code> comes from the hook listing in <a href="#visualize-activation-ranges">Plot activation ranges</a>).</p>
-        <pre class="cs" data-cs="1-5,6-8"><code class="language-python"># (8, 1, 3, 3)
+        <p>Both show up in two numbers, the widest channel range over the median one and the number of channels that are always zero (<code>outputs</code> comes from the hook listing in <a href="#visualize-activation-ranges">Plot activation ranges</a>).</p>
+        <pre class="cs" data-cs="1-5,6-9"><code class="language-python"># (8, 1, 3, 3)
 w = model_fp32.conv1.weight.detach()
 # (8,): range per channel
 rng = w.abs().amax(dim=(1, 2, 3))
 print(rng.max() / rng.median())
-dead = outputs["relu1"] == 0
-# share of dead outputs
-print(dead.float().mean())</code></pre>
+# (8,): True if a channel is 0 everywhere
+# (ReLU is never negative, so max 0 means all 0)
+dead = outputs["relu1"].amax(dim=(0, 2, 3)) == 0
+print(dead.sum())</code></pre>
 <ol class="cs-notes">
   <li><span class="cs-n">1</span>This line divides the widest channel range by the median one; a large ratio means outlier channels.</li>
-  <li><span class="cs-n">2</span>This line measures the share of <code>relu1</code> outputs that are exactly 0; a high share means dead activations.</li>
+  <li><span class="cs-n">2</span>This line counts the <code>relu1</code> channels that output 0 for every input in the batch; each one is a dead channel. A share of zeros over the whole layer would not show this, since a healthy ReLU already zeros many of its outputs.</li>
 </ol>
         <p>For an outlier channel, use per-channel weights (the default in <code>get_default_qconfig_mapping("x86")</code>) or a histogram observer that clips the tail. For dead activations, check the layer's input range: if everything going into a ReLU (which passes positive values and zeros the rest) is negative, the fix is upstream, not in the grid.</p>
         <p>Once the model quantizes cleanly, the next lever is the architecture itself: <a href="nas.html">Neural Architecture Search</a> looks for a network that is small from the start, and <a href="kd.html">Knowledge Distillation</a> trains it from a larger teacher.</p>

@@ -1,0 +1,1428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Optimizers in Practice: AdamW, SAM, Schedules and Clipping</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem;
+      line-height: 1.6;
+      color: #333;
+    }
+    h1, h2, h3, h4 {
+      color: #2c3e50; /* Darker shade for better contrast */
+      margin-top: 1.5em;
+      margin-bottom: 0.5em;
+    }
+    h1 { font-size: 2.5em; border-bottom: 2px solid #3498db; padding-bottom: 0.3em;}
+    .dek { font-size: 1.15em; color: #555; margin-top: 0.2em; }
+    h2 { font-size: 2em; border-bottom: 1px solid #bdc3c7; padding-bottom: 0.2em;}
+    h3 { font-size: 1.5em; }
+    h4 { font-size: 1.2em; color: #555;}
+
+    /* Keep wide display equations from overflowing on small screens */
+    .mjx-chtml.MJXc-display { overflow-x: auto; max-width: 100%; }
+    /* Contain raw $$...$$ text before MathJax typesets it: one long
+       unbreakable line would otherwise stretch the page on mobile */
+    .math-display { margin: 1.4rem 0; overflow-x: auto; max-width: 100%; font-size: 1.38rem; }
+
+    /* Shared site nav (matches index.html topnav) */
+    body { padding-top: calc(64px + 1.5rem); }
+    h1, h2, h3, .demo[id], figure[id] { scroll-margin-top: 84px; }
+    .topnav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        z-index: 1000;
+        background: rgba(255, 255, 255, 0.65);
+        backdrop-filter: blur(18px) saturate(1.5);
+        -webkit-backdrop-filter: blur(18px) saturate(1.5);
+        border-bottom: 1px solid transparent;
+        transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+    .topnav.scrolled {
+        background: rgba(255, 255, 255, 0.88);
+        border-bottom-color: #dee2e6;
+        box-shadow: 0 6px 24px rgba(33, 37, 41, 0.07);
+    }
+    .nav-inner {
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 0 1.5rem;
+        height: 64px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+    .wordmark {
+        font-weight: 700;
+        color: #212529;
+        text-decoration: none;
+        font-size: 1.05rem;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+    }
+    .nav-links {
+        display: flex;
+        gap: 2px;
+        align-items: center;
+    }
+    .nav-links a {
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        font-size: 0.95rem;
+        padding: 8px 14px;
+        border-radius: 999px;
+        transition: color 0.18s ease, background-color 0.18s ease;
+    }
+    .nav-links a:hover {
+        color: #007bff;
+        background-color: #e7f1ff;
+    }
+    .nav-links a.active {
+        color: #007bff;
+        background-color: #e7f1ff;
+        font-weight: 600;
+    }
+    .nav-links a:focus-visible,
+    .wordmark:focus-visible,
+    .nav-toggle:focus-visible,
+    .panel-link:focus-visible,
+    .panel-social a:focus-visible {
+        outline: 2px solid #007bff;
+        outline-offset: 2px;
+    }
+    @media (hover: hover) {
+        .nav-toggle:hover { background-color: #e7f1ff; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .topnav,
+        .nav-links a,
+        .nav-toggle span,
+        .nav-panel,
+        .nav-panel a.panel-link {
+            transition: none;
+        }
+    }
+    @media (hover: hover) {
+        .nav-toggle:hover { background-color: #e7f1ff; }
+    }
+    .nav-toggle {
+        display: none;
+        width: 42px;
+        height: 42px;
+        padding: 0;
+        background: none;
+        border: 0;
+        border-radius: 10px;
+        cursor: pointer;
+        flex: 0 0 auto;
+    }
+    .nav-panel {
+        display: grid;
+        grid-template-rows: 0fr;
+        visibility: hidden;
+        transition: grid-template-rows 0.32s ease, visibility 0s linear 0.32s;
+    }
+    .nav-panel.open {
+        grid-template-rows: 1fr;
+        visibility: visible;
+        transition: grid-template-rows 0.32s ease, visibility 0s;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner {
+        min-height: 0;
+        overflow: hidden;
+    }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link:hover {
+        background-color: #e7f1ff;
+        color: #007bff;
+    }
+    .nav-panel a.panel-link.active {
+        color: #007bff;
+        font-weight: 600;
+        background-color: #e7f1ff;
+    }
+    .panel-social a:hover {
+        border-color: #007bff;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner {
+        min-height: 0;
+        overflow: hidden;
+    }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link:hover {
+        background-color: #e7f1ff;
+        color: #007bff;
+    }
+    .nav-panel a.panel-link.active {
+        color: #007bff;
+        font-weight: 600;
+        background-color: #e7f1ff;
+    }
+    .panel-social a:hover {
+        border-color: #007bff;
+    }
+        .crumb { margin: 0 0 0.8em; }
+        .crumb a {
+            display: inline-block;
+            padding: 4px 14px;
+            border: 1px solid #dee2e6;
+            border-radius: 999px;
+            background: #f8f9fa;
+            color: #0056b3;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+        .crumb a:hover { border-color: #007bff; color: #007bff; }
+    .nav-panel a.panel-link {
+        display: flex;
+        align-items: center;
+        padding: 0.8rem 0.75rem;
+        margin: 0 0.25rem;
+        border-radius: 10px;
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        min-height: 48px;
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+    .panel-social {
+        display: flex;
+        gap: 0.5rem;
+        padding: 0.9rem 1rem 0.25rem;
+        flex-wrap: wrap;
+    }
+    .panel-social a {
+        color: #007bff;
+        text-decoration: none;
+        font-weight: 500;
+        font-size: 0.9rem;
+        padding: 6px 12px;
+        border: 1px solid #dee2e6;
+        border-radius: 999px;
+        transition: border-color 0.15s ease;
+    }
+    @media (max-width: 768px) {
+        .nav-links { display: none; }
+        .nav-toggle { display: block; }
+    }
+
+    /* Section tab strip: one slim row, scrolls sideways when it overflows. */
+    .tabs-label {
+        float: left;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #6c757d;
+        font-weight: 700;
+        line-height: 1.2;
+        margin: 0;
+        padding: 8px 12px 0 0;
+    }
+    .tab-strip {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 2px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        margin: 0 0 1.25rem;
+        max-width: 100%;
+    }
+    .tab-strip::-webkit-scrollbar { display: none; }
+    .tab-strip a.tab-chip,
+    .tab-strip a.tab-link {
+        display: inline-block;
+        flex: 0 0 auto;
+        padding: 6px 10px;
+        border-radius: 999px;
+        color: #495057;
+        text-decoration: none;
+        font-size: 0.82rem;
+        font-weight: 500;
+        line-height: 1.35;
+        white-space: nowrap;
+    }
+    .tab-strip a.tab-chip:hover,
+    .tab-strip a.tab-link:hover { color: #007bff; }
+    .tab-strip a.tab-chip.active,
+    .tab-strip a.tab-link.active { background: #007bff; color: #ffffff; }
+    @media (max-width: 768px) {
+        .tabs-label { display: none; }
+        .tab-strip {
+            width: 100vw;
+            max-width: 100vw;
+            box-sizing: border-box;
+            margin-left: calc((100% - 100vw) / 2);
+            padding-left: calc((100vw - 100%) / 2);
+        }
+        .tab-strip a.tab-chip,
+        .tab-strip a.tab-link { font-size: 0.75rem; padding: 6px 8px; }
+    }
+
+    pre {
+      background: #0d1117;
+      color: #e6edf3;
+      padding: 14px 16px;
+      overflow-x: auto;
+      border-radius: 8px;
+      font-size: 0.9em;
+      margin: 1em 0;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+    }
+    /* P52 canonical inline items in prose: numbers and variables wear the body
+       font at body size and read as part of the sentence (keeps P50's quiet
+       treatment, no pill; code blocks and eq-cards keep the mono treatment). */
+    code {
+        font-family: inherit;
+        font-size: 1em;
+        color: #1a1a1a;
+        background: none;
+        padding: 0 0.08em;
+        overflow-wrap: break-word;
+    }
+    pre code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 1em; }
+    .eq-card code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 0.92em; }
+    pre code { /* Reset for code inside pre, already handled by pre styling */
+        background: none;
+        padding: 0;
+        font-size: 1em; /* Ensure pre's font size is inherited */
+        color: inherit;
+    }
+    ul, ol {
+        padding-left: 20px;
+    }
+    li {
+        margin-bottom: 0.5em;
+    }
+    strong {
+        color: #2980b9;
+    }
+    /* Labeled teaching diagrams: each teaches exactly one idea */
+    .diagram {
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      padding: 1.2rem;
+      margin: 1.75rem 0;
+      background: #fbfcfd;
+    }
+    .diagram svg {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+    .diagram .caption {
+      font-size: 0.9em;
+      color: #555;
+      margin-top: 1rem;
+      line-height: 1.5;
+    }
+    .diagram .caption strong {
+      color: #2c3e50;
+    }
+    /* Rendered result block, not a print() call */
+    .output {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 1rem 1.2rem;
+      border-radius: 6px;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+      font-size: 0.9em;
+      margin: 1em 0;
+      overflow-x: auto;
+      border-left: 4px solid #22c55e;
+      line-height: 1.7;
+    }
+    .output .dim { color: #94a3b8; }
+    .output .good { color: #4ade80; font-weight: bold; }
+    .output .bad { color: #ef4444; font-weight: bold; }
+    .output .src { color: #fbbf24; }
+    /* Stat cards: clean, scannable reference numbers */
+    .stat-title { font-size: 0.85em; font-weight: 700; color: #2c3e50; margin: 0 0 0.2rem; }
+    .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:1.2em 0}
+    .stat-card{border:1px solid #bdc3c7;border-radius:8px;padding:14px 16px;background:#f7f9fb}
+    .stat-num{font-size:1.9em;font-weight:800;color:#2c3e50;line-height:1.15}
+    .stat-unit{font-size:.55em;font-weight:600;color:#7f8c8d}.stat-vs{font-size:max(12px,.55em);font-weight:600;color:#7f8c8d}
+    .stat-label{font-size:.92em;font-weight:600;margin-top:6px;color:#2c3e50}
+    .stat-note{font-size:.82em;color:#7f8c8d;margin-top:3px}
+    /* Numbered walkthrough steps: one computation per step */
+/* Worked-example card (Round 9 template): a calm sage card that sets
+           math walkthrough steps apart from body text. Body font throughout,
+           all math in MathJax, one computation per line, generous spacing. */
+        .worked-example {
+            background: #f1f6ed;
+            border: 1px solid #d9e4d1;
+            border-left: 3px solid #6f9a63;
+            border-radius: 10px;
+            padding: 14px 20px;
+            margin: 1.1em 0;
+            max-width: 680px;
+            color: #2c3e50;
+            line-height: 1.8;
+            overflow-x: auto;
+        }
+        ol.worked-example {
+            list-style: none;
+            counter-reset: wex-step;
+            padding-left: 20px;
+        }
+        ol.worked-example > li {
+            counter-increment: wex-step;
+            position: relative;
+            margin: 0;
+            padding: 8px 0 8px 44px;
+        }
+        ol.worked-example > li + li { border-top: 1px dashed #cbdabf; }
+        ol.worked-example > li::before {
+            content: counter(wex-step);
+            position: absolute;
+            left: 0;
+            top: 9px;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: #6f9a63;
+            color: #ffffff;
+            font-size: 13px;
+            font-weight: 700;
+            line-height: 28px;
+            text-align: center;
+        }
+        @media (max-width: 480px) {
+            .worked-example { padding: 12px; font-size: 15px; }
+            ol.worked-example { padding-left: 12px; }
+            ol.worked-example > li { padding-left: 38px; }
+        }
+    /* Long inline formulas get their own scrollable line on small screens */
+    .math-scroll{display:block;overflow-x:auto;overflow-y:hidden;max-width:100%;padding:.1em 0}
+    /* Interactive demos */
+    .demo {
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      padding: 1.25rem;
+      margin: 1.75rem 0;
+      background: #fbfcfd;
+    }
+    .demo-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem 1rem;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    .demo-controls label { font-weight: bold; color: #2c3e50; white-space: nowrap; }
+    .demo-controls label var sub, .demo-controls label var sup { font-size: max(11px, .72em); }
+    .demo-controls input[type=range] {
+      flex: 1 1 140px;
+      min-width: 0;
+      max-width: 220px;
+      accent-color: #3498db;
+    }
+    #bvCanvas { display: block; width: 100%; height: 320px; max-width: 100%; }
+    .demo-stats {
+      text-align: center;
+      font-size: 1.02em;
+      color: #2c3e50;
+      margin: 1rem 0 0.4rem;
+    }
+    .chart-legend { display: flex; flex-wrap: wrap; gap: 0.4em 1.2em; font-size: 0.9em; color: #555; margin: 0.2rem 0 0.4rem 0; }
+    .chart-legend .lg-sw { display: inline-block; width: 24px; height: 0; border-top: 3px solid; vertical-align: middle; margin-right: 0.4em; }
+    .chart-legend .lg-blue { border-color: #2980b9; }
+    .chart-legend .lg-red { border-color: #c0392b; border-top-style: dashed; }
+    .demo-stats strong { color: #2980b9; }
+    .demo .caption {
+      font-size: 0.9em; color: #555; margin-top: 1rem;
+      border-left: 3px solid #3498db; padding-left: 0.8em;
+    }
+    .dim-note { font-size: 0.8em; color: #888; margin-top: 0.6rem; }
+    /* Bias-variance Play button (mirrors the race widget buttons) */
+    .demo .bv-btn { font: inherit; font-size: 0.92em; padding: 0.35rem 0.8rem; border: 1px solid #bdc3c7; border-radius: 6px; background: #fff; color: #2c3e50; cursor: pointer; }
+    .demo .bv-btn.active { background: #2980b9; border-color: #2980b9; color: #fff; font-weight: bold; }
+    .demo .bv-btn:disabled { opacity: 0.45; cursor: default; }
+    /* Fixed label width so the slider readouts can never change the controls-row wrap (no-scroll-on-Play) */
+    #bvToy #capVal, #bvToy #dataVal { display: inline-block; min-width: 3ch; }
+    .howto { font-size: 0.92em; color: #2c3e50; margin: 0.8rem 0 0.2rem; }
+    /* Caption card standard: white/lightest tint, 1px #e3e8ee border + 3px #2c3e50 left accent */
+    div.howto {
+      background: #fff;
+      border: 1px solid #e3e8ee;
+      border-left: 3px solid #2c3e50;
+      border-radius: 10px;
+      padding: 18px;
+      margin: 14px 0 0;
+      font-size: 15px;
+      line-height: 1.65;
+      color: #2c3e50;
+    }
+    div.howto .howto-head { font-weight: bold; font-size: 15px; margin: 0 0 0.4em; }
+    div.howto ul { list-style: none; margin: 0; padding: 0; }
+    div.howto ul li { position: relative; padding-left: 16px; margin: 7px 0; }
+    div.howto ul li::before {
+      content: ''; position: absolute; left: 0; top: 0.62em;
+      width: 6px; height: 6px; border-radius: 50%; background: #2c3e50;
+    }
+    div.howto ul li.tryit {
+      background: rgba(44,62,80,0.08);
+      padding: 7px 7px 7px 23px;
+      border-radius: 6px;
+    }
+    div.howto ul li.tryit::before { left: 7px; top: calc(0.62em + 7px); }
+    .canvas-wrap { position: relative; }
+    
+    /* Optimizer race widget */
+    #optRace { position: relative; }
+    #optRace .opt-btn { font: inherit; font-size: 0.92em; padding: 0.35rem 0.8rem; border: 1px solid #bdc3c7; border-radius: 6px; background: #fff; color: #2c3e50; cursor: pointer; }
+    #optRace .opt-btn.active { background: #2980b9; border-color: #2980b9; color: #fff; font-weight: bold; }
+    #optRace .gloss { margin: 0 0 0.6rem; padding-left: 1.2rem; color: #2c3e50; }
+    #optRace .gloss li { margin: 0.35rem 0; }
+    #optRace .race-wrap { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-start; }
+    #optRace .race-main { flex: 1 1 330px; min-width: 0; }
+    #optRace .race-side { flex: 1 1 230px; min-width: 0; }
+    #optRace canvas { display: block; width: 100%; height: auto; }
+    #optRace .side-title { text-align: center; font-weight: bold; color: #2c3e50; font-size: 0.92em; margin: 0 0 0.4rem; }
+    #optRace .bad { color: #c0392b; font-weight: bold; }
+    /* Shared walkthrough equation-card contract (verbatim, all pages) */
+    
+    .eq-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+
+      padding:1rem 1.2rem;margin:1.75rem auto;max-width:640px;overflow-x:auto}
+
+    .eq-what{font-size:.95rem;color:#334155;margin:0 0 .6rem;line-height:1.55}
+
+    .eq-line{font-size:1.38rem;line-height:2.0;letter-spacing:.015em;padding:.5rem .6rem;white-space:normal;font-weight:500;opacity:.38;border-left:3px solid transparent}
+
+    .eq-line.eq-active{opacity:1;border-left-color:#2c3e50}
+.eq-line sub,.eq-line sup{font-size:.68em}
+.frac{display:inline-flex;flex-direction:column;text-align:center;vertical-align:middle;margin:0 .18em;font-size:.8em;line-height:1.3}
+.frac .top{padding:0 .3em .1em}
+.frac .bot{border-top:2px solid currentColor;padding:.1em .3em 0}
+.rad{display:inline-flex;align-items:flex-start;vertical-align:middle;white-space:nowrap}
+.rad .rad-sym{font-size:1.12em;line-height:1}
+.rad .rad-body{border-top:.09em solid currentColor;line-height:1.18;padding:0 .12em 0 .04em}
+      .eq-why{display:none;visibility:hidden;font-size:1rem;color:#475569;padding:.15rem .35rem .4rem;line-height:1.65}
+      .eq-why.eq-active{display:block;visibility:visible}
+      .eq-card.eq-stepped .eq-line{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-line.eq-active{display:block;opacity:1;visibility:visible}
+      .eq-card.eq-stepped .eq-legend .eq-item{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-legend .eq-item.eq-active{display:block;visibility:visible}
+
+    .eqt{font-weight:600;padding:0 .1em;border-radius:3px}
+
+    .eqt.eqt-active{text-decoration:underline;text-underline-offset:2px}
+
+    .eq-legend{font-size:.85rem;color:#475569;margin-top:.6rem;line-height:1.75}
+
+    .eq-legend .eq-item{display:block}
+
+    .eq-legend .eq-item code{white-space:nowrap}
+
+    .eq-sw{display:inline-block;width:.7em;height:.7em;border-radius:2px;
+
+      margin:0 .25em 0 .6em;vertical-align:baseline}
+
+    @media (max-width:480px){.eq-card{padding:.85rem .9rem}.eq-line{font-size:1.24rem;line-height:1.95}}
+/* P70 inline variables and inline code, one style site-wide (VAR-STYLE.md v2) */
+var,.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic;font-weight:400;font-size:1em;color:#1d4e89;background:#edf3fa;border-radius:3px;padding:0 .18em;white-space:nowrap;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+var sub,var sup,.mvar sub,.mvar sup{font-size:.72em;font-style:normal}
+pre var,code var,.eq-line var{font:inherit;color:inherit;background:none;padding:0}
+svg text.mvar,svg tspan.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic}
+:not(pre)>code:not(.eq-line code){font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,Courier,monospace;font-size:.86em;color:#24292f;background:#f1f3f5;border:1px solid #dfe3e8;border-radius:4px;padding:.06em .32em;white-space:normal;overflow-wrap:anywhere}
+/* P79 numbering (NUMBERING.md) */
+.secnum{font-variant-numeric:tabular-nums;margin-right:.4em;color:inherit;font-weight:inherit}
+.tab-strip .secnum{margin-right:.3em;opacity:.75}
+.fignum{font-weight:600;margin-right:.3em;font-variant-numeric:tabular-nums}
+/* P80 code sections (CODE-SECTIONS.md) */
+pre.cs{position:relative;background-attachment:local;padding-left:20px}
+pre.cs code{display:block;line-height:1.55}
+pre.cs .cs-g{position:absolute;left:3px;width:11px;text-align:center;font:700 11px/1 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;-webkit-user-select:none;user-select:none;pointer-events:none}
+pre.cs .cs-g::before{content:attr(data-n)}
+ol.cs-notes{list-style:none;padding-left:0;margin:-.4em 0 1em}
+ol.cs-notes li{margin:0 0 .3em;padding-left:1.9em;position:relative}
+ol.cs-notes .cs-n{position:absolute;left:0;top:.1em;min-width:1.35em;padding:0 .25em;border-radius:4px;font:700 .8em/1.45 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;text-align:center;color:#0d1117}
+ol.cs-notes li:nth-child(6n+1) .cs-n{background:#79b8ff}
+ol.cs-notes li:nth-child(6n+2) .cs-n{background:#ffab70}
+ol.cs-notes li:nth-child(6n+3) .cs-n{background:#85e89d}
+ol.cs-notes li:nth-child(6n+4) .cs-n{background:#d2a8ff}
+ol.cs-notes li:nth-child(6n+5) .cs-n{background:#ffa198}
+ol.cs-notes li:nth-child(6n+6) .cs-n{background:#76e3ea}
+    /* diagram-side dim/highlight (SVG/DOM). Do NOT use .hl/.dim: taken. */
+    .eq-dim{opacity:.32}
+    .eq-hl{filter:drop-shadow(0 0 3px currentColor)}
+    hr {
+      border: 0;
+      height: 1px;
+      background: #bdc3c7;
+      margin-top: 2em;
+      margin-bottom: 2em;
+    }
+  
+/* canonical spacing: display math */
+.MathJax_Display, mjx-container[display="true"] { margin: 1.4rem 0 !important; }
+    /* Compact phone walkthrough layout (canonical block, every tutorial page):
+       two-column eq legends, tightened demo spacing, and diagrams capped so
+       controls and diagram share the first phone screen. Phone widths only;
+       desktop rendering and equation typography are unchanged. */
+    @media (max-width:480px){
+      .demo{padding:.75rem}
+      .demo>*{margin-top:.6rem;margin-bottom:.6rem}
+      .demo>*:first-child{margin-top:0}
+      .demo .eq-card{margin:1rem auto;padding:.7rem .8rem}
+      .demo .cap-card,.demo .capcard{padding:.85rem .95rem}
+      .eq-legend{display:grid;grid-template-columns:1fr 1fr;column-gap:.9rem;row-gap:.1rem;line-height:1.5}
+      .eq-legend .eq-item:has(> code ~ code){grid-column:1/-1}
+      .demo svg,.demo canvas{max-height:55vh}
+    }
+    /* batch Da shared: tips and data tables, linked-card map (2026-11-02) */
+    .datatable{border-collapse:collapse;margin:1.2em 0;width:100%;max-width:640px;font-size:.95em} .datatable th,.datatable td{border:1px solid #bdc3c7;padding:.45em .6em;text-align:left;vertical-align:top} .datatable th{background:#2c3e50;color:#fff;font-weight:600} .datatable tr:nth-child(even) td{background:#f7f9fb} .datatable caption{text-align:left;padding:.5em 0 0;font-size:.92em;color:#555;caption-side:bottom}
+    @media (max-width:480px){.datatable{font-size:.88em}.datatable th,.datatable td{padding:.35em .4em}}
+    .pmap{margin:1.75rem auto;max-width:640px;display:flex;flex-direction:column;align-items:stretch;gap:0}
+    .pmap-row{display:flex;gap:.6rem;justify-content:center;flex-wrap:wrap}
+    .pmap-link{width:2px;height:14px;background:#95a5a6;margin:0 auto}
+    .pmap a.pmap-card{flex:1 1 0;min-width:0;display:block;border:1.5px solid #bdc3c7;border-radius:8px;padding:.45rem .6rem;text-decoration:none;color:#2c3e50;background:#fbfcfd;text-align:center;line-height:1.3}
+    .pmap a.pmap-card:hover{border-color:#2980b9}
+    .pmap .pmap-name{display:block;font-weight:700;font-size:.98rem}
+    .pmap .pmap-fix{display:block;font-size:.85rem;color:#555}
+    .pmap-caption{text-align:center}
+    @media (max-width:480px){.pmap a.pmap-card{padding:.35rem .4rem}.pmap .pmap-name{font-size:.92rem}.pmap .pmap-fix{font-size:.8rem}}
+    #samBall .sam-legend{display:flex;flex-wrap:wrap;gap:.3rem 1rem;justify-content:center;font-size:.9rem;margin:.4rem 0}
+    #samBall .sam-legend .ln{display:inline-block;width:24px;height:0;margin-right:6px;vertical-align:middle}
+    #samBall .sw{display:inline-block;width:12px;height:12px;border-radius:2px;margin-right:5px;vertical-align:middle;opacity:.6}
+    #samBall .sam-legend[hidden]{display:none}
+</style>
+
+  <script type="text/javascript" async
+    src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML">
+  </script>
+  <script type="text/x-mathjax-config">
+    MathJax.Hub.Config({
+      tex2jax: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        displayMath: [['$$','$$'], ['\\[','\\]']],
+        processEscapes: true
+      },
+      showProcessingMessages: false,
+      messageStyle: "none"
+    });
+  </script>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+
+    <style>
+      .sl-canvas { display: block; width: 100%; height: 340px; max-width: 680px; }
+      .sl-btn { font: inherit; font-size: 0.92em; padding: 0.35rem 0.8rem; border: 1px solid #bdc3c7; border-radius: 6px; background: #fff; color: #2c3e50; cursor: pointer; }
+      .sl-btn.active { background: #2980b9; border-color: #2980b9; color: #fff; font-weight: bold; }
+      .sl-worked { background: #f4f6f7; border-radius: 6px; padding: 0.5rem 0.8rem; font-size: 0.92em; color: #2c3e50; overflow-x: auto; white-space: nowrap; }
+      .sl-worked strong { color: #2980b9; }
+      .sl-meter-row { display: flex; align-items: center; gap: 0.6rem; margin: 0.4rem 0 0.8rem; font-size: 0.92em; color: #2c3e50; flex-wrap: wrap; }
+      .sl-meter { height: 14px; background: #e8eaed; border-radius: 7px; overflow: hidden; width: 220px; max-width: 60%; }
+      .sl-meter > div { height: 100%; background: #2980b9; width: 0%; }
+      .sl-badge { display: inline-block; padding: 0.25rem 0.7rem; border-radius: 999px; font-weight: bold; font-size: 0.85em; }
+      .sl-badge.data { background: #d6eaf8; color: #1a5276; }
+      .sl-badge.model { background: #fdebd0; color: #7e5109; }
+      .sl-badge.bal { background: #d5f5e3; color: #0e6655; }
+      .sl-bars { max-width: 560px; margin: 0.6rem 0; }
+      .sl-bar-row { display: flex; align-items: center; gap: 0.6rem; margin: 0.35rem 0; font-size: 0.92em; }
+      .sl-bar-row .sl-bar-label { flex: 0 0 160px; text-align: right; color: #2c3e50; }
+      .sl-bar-row .sl-bar-num { flex: 0 0 64px; color: #2c3e50; font-variant-numeric: tabular-nums; }
+      .sl-bar-track { flex: 1 1 auto; height: 16px; background: #eef1f4; border-radius: 8px; overflow: hidden; }
+      .sl-bar-fill { height: 100%; width: 0%; }
+      .chart-legend .lg-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: middle; margin-right: 0.4em; }
+      @media (max-width: 520px) {
+        .sl-canvas { height: 300px; }
+        .sl-bar-row .sl-bar-label { flex-basis: 118px; font-size: 0.9em; }
+      }
+    /* Split 2026-10-11: styles for new tools and diagrams */
+    #doCanvas { display: block; width: 100%; height: 320px; max-width: 680px; }
+    #adamCanvas { display: block; width: 100%; height: 410px; max-width: 680px; }
+    .adam-stages { display: flex; flex-wrap: wrap; gap: 6px; margin: 0.7rem 0 0.2rem; }
+    .adam-stage { font-size: 0.85em; padding: 4px 10px; border: 1px solid #bdc3c7; border-radius: 999px; color: #7f8c8d; background: #fff; }
+    .adam-stage.on { border-color: #2980b9; color: #2980b9; font-weight: bold; }
+    .adam-stage.done { color: #2c3e50; border-color: #95a5a6; }
+    .adam-step-line { font-size: 0.92em; color: #2c3e50; margin: 0.2rem 0 0.6rem; }
+    #adamStats { min-height: 2.8em; }
+    .diagram .diag-list { font-size: 0.92em; color: #2c3e50; margin: 0.6em 0 0; padding-left: 1.4rem; }
+    .diagram .diag-list li { margin: 0.35em 0; }
+    ol.brefs { line-height: 1.7; margin: 1em 0 2em; padding-left: 22px; }
+    ol.brefs li { margin-bottom: 0.5em; }
+    @media (max-width: 520px) {
+      #doCanvas { height: 280px; }
+      #adamCanvas { height: 328px; }
+    }
+    /* Tall tools on phone (2026-11-01): compact rows so each tool fits one 390 px screen. */
+    #adamSteps .eq-legend code sub { font-size: max(11px, 0.75em); line-height: 0; }
+    @media (max-width: 480px) {
+      #adamSteps .demo-controls { gap: 0.4rem 0.5rem; }
+      #adamSteps .demo-controls .bv-btn { padding: 0.35rem 0.65rem; }
+      #adamSteps .adam-stages { gap: 4px; margin: 0.4rem 0 0.1rem; }
+      #adamSteps .adam-stage { padding: 3px 7px; font-size: 0.8em; }
+      #optRace .demo-controls { gap: 0.4rem 0.6rem; flex-wrap: wrap; }
+      #optRace .demo-controls label { flex: 0 0 auto; }
+      #optRace .demo-controls input[type=range] { flex: 1 1 90px; width: auto; min-width: 0; }
+      #optRace .race-wrap { gap: 0.4rem; }
+      #optRace .side-title { margin: 0 0 0.2rem; }
+    }
+</style>
+  <style>
+/* Static teaching diagrams (mtd), shared across tutorials, 2026-11-01 */
+.figure.mtd-fig { margin: 1.75rem 0; }
+.mtd-fig > svg.mtd-svg { display: block; width: 100%; height: auto; margin: 0 auto; }
+.mtd-fig .caption { margin-top: 1rem; }
+.mtd-svg text { fill: #2c3e50; font-family: sans-serif; }
+.mtd-svg .mtd-sub { fill: #555; }
+.mtd-svg .mtd-t1 { fill: #1f618d; }
+.mtd-svg .mtd-t2 { fill: #ca6f1e; }
+.mtd-svg .mtd-pu { fill: #7d3c98; }
+.mtd-svg .mtd-red { fill: #c0392b; }
+.mtd-svg .mtd-grn { fill: #148f77; }
+.mtd-svg line, .mtd-svg path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.mtd-svg .mtd-s.mtd-c1 { stroke: #1f618d; } .mtd-svg .mtd-f.mtd-c1 { fill: #1f618d; }
+.mtd-svg .mtd-s.mtd-c2 { stroke: #ca6f1e; } .mtd-svg .mtd-f.mtd-c2 { fill: #ca6f1e; }
+.mtd-svg .mtd-s.mtd-cp { stroke: #7d3c98; } .mtd-svg .mtd-f.mtd-cp { fill: #7d3c98; }
+.mtd-svg .mtd-s.mtd-cr { stroke: #c0392b; } .mtd-svg .mtd-f.mtd-cr { fill: #c0392b; }
+.mtd-svg .mtd-s.mtd-cg { stroke: #2c3e50; } .mtd-svg .mtd-f.mtd-cg { fill: #2c3e50; }
+.mtd-svg .mtd-sep { stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-pic { fill: #fbfcfd; stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-axis { stroke: #7f8c8d; stroke-width: 1.5px; }
+.mtd-svg .mtd-arc { stroke: #2c3e50; stroke-width: 2px; }
+.mtd-svg .mtd-dot { fill: #2c3e50; }
+.mtd-svg .mtd-guide { stroke: #7f8c8d; stroke-width: 1.4px; stroke-dasharray: 4 4; }
+.mtd-svg .mtd-ring { fill: #fbfcfd; stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-pt { fill: #1f618d; opacity: .55; }
+.mtd-svg .mtd-cross { stroke: #2c3e50; stroke-width: 2.2px; }
+.mtd-svg .mtd-barbg { fill: #eef1f4; }
+.mtd-svg .mtd-bar { fill: #7d3c98; }
+.mtd-svg .mtd-cart { fill: #ffffff; stroke: #2c3e50; stroke-width: 2px; }
+.mtd-svg .mtd-zero { stroke: #95a5a6; stroke-width: 1.2px; stroke-dasharray: 4 4; }
+.mtd-svg .mtd-axisl { stroke: #7f8c8d; stroke-width: 2px; }
+.mtd-svg .mtd-norm { stroke: #148f77; stroke-width: 4px; }
+.mtd-svg .mtd-read { fill: #ffffff; stroke: #2c3e50; stroke-width: 2.5px; }
+.mtd-svg .mtd-ball { fill: #7d3c98; fill-opacity: .08; stroke: #7d3c98; stroke-width: 1.6px; stroke-dasharray: 5 4; }
+.mtd-svg .mtd-box { fill: #fbfcfd; stroke: #bdc3c7; stroke-width: 1.4px; }
+.mtd-svg .mtd-crossbg { fill: #ffffff; }
+.mtd-svg .mtd-halo { stroke: #ffffff; stroke-width: 5px; stroke-linejoin: round; paint-order: stroke; }
+.mtd-svg .mtd-box.mtd-note { stroke-dasharray: 5 4; }
+</style>
+<style>
+/* Series and page map (B-TF, 2026-11-02) */
+.sermap { margin: .5rem 0 1.1rem; font-size: .8rem; line-height: 1.3; }
+.sermap ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; row-gap: 5px; }
+.sermap li { display: flex; align-items: center; margin: 0; padding: 0; line-height: 1.25; }
+.sermap li + li::before { content: "\2192"; color: #95a5a6; margin: 0 5px; }
+.sermap a, .sermap .sm-here { display: inline-block; padding: 2px 7px; line-height: 1.25; border-radius: 6px; text-decoration: none; }
+.sermap .sm-series a { padding: 1px 2px; color: #1f618d; text-decoration: underline; text-decoration-color: #a9cce3; text-underline-offset: 2px; }
+.sermap .sm-series .sm-here { padding: 1px 6px; background: #117a65; color: #fff; font-weight: 600; }
+.sermap .sm-series { row-gap: 0; }
+.sermap .sm-series a, .sermap .sm-series .sm-here, .sermap .sm-also a { display: inline-flex; align-items: center; min-height: 44px; box-sizing: border-box; }
+.sermap .sm-flow { margin-top: 6px; padding-left: 8px; border-left: 3px solid #117a65; }
+</style>
+</head>
+<body>
+        <nav class="topnav" aria-label="Site">
+    <div class="nav-inner">
+        <a class="wordmark" href="index.html">Ramin Anushiravani</a>
+        <div class="nav-links">
+            <a href="tutorial.html" class="active">Tutorials</a>
+            <a href="pubs.html">Publications</a>
+            <a href="index.html">About</a>
+            <a href="work.html">Projects</a>
+        </div>
+        <button class="nav-toggle" id="navToggle" aria-expanded="false" aria-controls="navPanel" aria-label="Menu"><span></span><span></span><span></span></button>
+    </div>
+    <div class="nav-panel" id="navPanel">
+        <div class="nav-panel-inner">
+            <div class="nav-panel-body">
+                <a class="panel-link active" href="tutorial.html">Tutorials</a>
+                <a class="panel-link" href="pubs.html">Publications</a>
+                <a class="panel-link" href="index.html">About</a>
+                <a class="panel-link" href="work.html">Projects</a>
+                <div class="panel-social">
+                    <a href="https://linkedin.com/in/raminanushiravani" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+                    <a href="https://github.com/raminaeye/" target="_blank" rel="noopener noreferrer">GitHub</a>
+                    <a href="https://scholar.google.com/citations?user=kouXx8gAAAAJ&hl=en" target="_blank" rel="noopener noreferrer">Google Scholar</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</nav>
+    <p class="crumb"><a href="tutorial.html">&larr; All tutorials</a></p>
+    <p class="tabs-label">On this page</p>
+    <div class="tab-strip">
+        <a class="tab-chip" href="#adamw"><span class="secnum">1</span> Decoupled weight decay (AdamW)</a>
+        <a class="tab-chip" href="#sam"><span class="secnum">2</span> Sharpness-aware minimization (SAM)</a>
+        <a class="tab-chip" href="#schedulers"><span class="secnum">3</span> Learning rate schedules</a>
+        <a class="tab-chip" href="#clipping"><span class="secnum">4</span> Gradient clipping</a>
+        <a class="tab-chip" href="#in-practice"><span class="secnum">5</span> AdamW, a schedule and clipping in one PyTorch loop</a>
+        <a class="tab-chip" href="#tips"><span class="secnum">6</span> Failures in the training loop</a>
+        <a class="tab-chip" href="#references"><span class="secnum">7</span> References</a>
+    </div>
+    <h1 id="optimizers-in-practice">Optimizers in Practice: AdamW, SAM, Schedules and Clipping</h1>
+    <nav class="sermap" aria-label="The optimizers series">
+      <ol class="sm-series">
+        <li><a href="optimizers.html">Optimizers from SGD to Adam</a></li>
+        <li><span class="sm-here" aria-current="page">Optimizers in Practice: AdamW, SAM, Schedules and Clipping</span></li>
+      </ol>
+    </nav>
+    <p class="dek">AdamW, SAM, schedules and clipping, the four things a real training loop adds to the update rule.</p>
+    <p>The optimizer turns each gradient into a step. Around it, AdamW changes how weight decay enters Adam's step, SAM spends a second forward and backward pass to prefer flat minima, a schedule changes the learning rate <var>α</var> between steps, and clipping caps a rare huge gradient at a length <var>τ</var> between <code>backward()</code> and the step.</p>
+    <p>This page builds on <a href="optimizers.html">Optimizers from SGD to Adam</a>, which teaches the update rules that these controls wrap.</p>
+    <figure class="figure mtd-fig" id="optPracticeMap"><svg class="mtd-svg" viewBox="0 0 400 300" style="max-width:480px" role="img" aria-label="One training step with four controls: SAM's second pass wraps forward and backward, clipping caps the gradient between backward and the optimizer step, AdamW changes the weight decay inside the optimizer step, and the scheduler sets the learning rate between steps">
+<rect class="mtd-box" x="34" y="8" width="180" height="46" rx="6"/><text x="124" y="27" text-anchor="middle" style="font-size:16px;font-weight:700">forward</text><text class="mtd-sub" x="124" y="46" text-anchor="middle" style="font-size:14px">loss on one batch</text>
+<rect class="mtd-box" x="34" y="70" width="180" height="46" rx="6"/><text x="124" y="89" text-anchor="middle" style="font-size:16px;font-weight:700">backward()</text><text class="mtd-sub" x="124" y="108" text-anchor="middle" style="font-size:14px">fills .grad</text>
+<rect class="mtd-box" x="34" y="132" width="180" height="46" rx="6"/><text class="mtd-grn" x="124" y="151" text-anchor="middle" style="font-size:16px;font-weight:700">clip</text><text class="mtd-sub" x="124" y="170" text-anchor="middle" style="font-size:14px">length ≤ <tspan class="mvar">τ</tspan></text>
+<rect class="mtd-box" x="34" y="194" width="180" height="46" rx="6"/><text class="mtd-pu" x="124" y="213" text-anchor="middle" style="font-size:16px;font-weight:700">opt.step()</text><text class="mtd-sub" x="124" y="232" text-anchor="middle" style="font-size:14px">moves the weights</text>
+<line class="mtd-s mtd-cg" x1="124" y1="55" x2="124" y2="64" style="stroke-width:2px"/><path class="mtd-f mtd-cg" d="M124,69 L120,63 L128,63 Z"/>
+<line class="mtd-s mtd-cg" x1="124" y1="117" x2="124" y2="126" style="stroke-width:2px"/><path class="mtd-f mtd-cg" d="M124,131 L120,125 L128,125 Z"/>
+<line class="mtd-s mtd-cg" x1="124" y1="179" x2="124" y2="188" style="stroke-width:2px"/><path class="mtd-f mtd-cg" d="M124,193 L120,187 L128,187 Z"/>
+<path class="mtd-s mtd-cg" d="M34,217 L14,217 L14,31 L28,31" style="stroke-width:2px"/><path class="mtd-f mtd-cg" d="M33,31 L27,27 L27,35 Z"/>
+<text class="mtd-sub" x="10" y="114" transform="rotate(-90 10 114)" text-anchor="middle" style="font-size:13px">next batch</text>
+<rect class="mtd-box" x="34" y="250" width="180" height="46" rx="6"/><text class="mtd-t2" x="124" y="269" text-anchor="middle" style="font-size:16px;font-weight:700">scheduler.step()</text><text class="mtd-sub" x="124" y="288" text-anchor="middle" style="font-size:14px">sets <tspan class="mvar">α</tspan>: per epoch or batch</text>
+<line class="mtd-s mtd-c2" x1="124" y1="249" x2="124" y2="246" style="stroke-width:2px;stroke-dasharray:4 3"/><path class="mtd-f mtd-c2" d="M124,241 L120,247 L128,247 Z"/>
+<path class="mtd-s mtd-c1" d="M220,10 L226,10 L226,114 L220,114" style="stroke-width:2px"/>
+<a href="#sam"><circle class="mtd-f mtd-c1" cx="246" cy="62" r="11"/><text x="246" y="67" text-anchor="middle" style="font-size:14px;font-weight:700;fill:#ffffff">2</text><text class="mtd-t1" x="264" y="58" style="font-size:16px;font-weight:700">SAM</text><text class="mtd-sub" x="264" y="76" style="font-size:14px">a second pass</text></a>
+<a href="#clipping"><circle class="mtd-f mtd-cg" cx="246" cy="155" r="11"/><text x="246" y="160" text-anchor="middle" style="font-size:14px;font-weight:700;fill:#ffffff">4</text><text class="mtd-grn" x="264" y="151" style="font-size:16px;font-weight:700">Clipping</text><text class="mtd-sub" x="264" y="169" style="font-size:14px">caps the length</text></a>
+<a href="#adamw"><circle class="mtd-f mtd-cp" cx="246" cy="217" r="11"/><text x="246" y="222" text-anchor="middle" style="font-size:14px;font-weight:700;fill:#ffffff">1</text><text class="mtd-pu" x="264" y="213" style="font-size:16px;font-weight:700">AdamW</text><text class="mtd-sub" x="264" y="231" style="font-size:14px">decay in the step</text></a>
+<a href="#schedulers"><circle class="mtd-f mtd-c2" cx="246" cy="273" r="11"/><text x="246" y="278" text-anchor="middle" style="font-size:14px;font-weight:700;fill:#ffffff">3</text><text class="mtd-t2" x="264" y="269" style="font-size:16px;font-weight:700">Schedule</text><text class="mtd-sub" x="264" y="287" style="font-size:14px">sets <tspan class="mvar">α</tspan> between steps</text></a>
+</svg><figcaption class="caption"><span class="fignum">Figure 1.</span> One training step and the four controls this page adds, by section number.</figcaption></figure>
+    <h2 id="adamw"><span class="secnum">1</span> Decoupled weight decay (AdamW)</h2>
+    <p>Weight decay shrinks the weights toward zero each step. Here it is added to Adam, whose update, from the Adam section of <a href="optimizers.html#adam">Optimizers from SGD to Adam</a>, keeps two running averages and scales each weight's step:</p>
+    <div class="eq-card" id="adamRecap">
+        <div class="eq-what">Adam smooths the slope and divides each weight's step by its own recent scale.</div>
+        <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="m" style="color:#2980b9">m<sub>t</sub></span> = <span class="eqt" data-k="b1" style="color:#2c3e50">&#946;<sub>1</sub></span><span class="eqt" data-k="m" style="color:#2980b9">m<sub>t&#8722;1</sub></span>+(1&#8722;<span class="eqt" data-k="b1" style="color:#2c3e50">&#946;<sub>1</sub></span>)<span class="eqt" data-k="g" style="color:#c0392b">g<sub>t</sub></span></div>
+        <div class="eq-why eq-active" data-eqline="0">The momentum <var>m<sub>t</sub></var> is a running average of the gradients <var>g<sub>t</sub></var>; <var>β<sub>1</sub></var>, about 0.9, is the share of the old average it keeps each step.</div>
+        <div class="eq-line eq-active" data-eqline="1"><span class="eqt" data-k="v" style="color:#16a085">v<sub>t</sub></span> = <span class="eqt" data-k="b2" style="color:#2c3e50">&#946;<sub>2</sub></span><span class="eqt" data-k="v" style="color:#16a085">v<sub>t&#8722;1</sub></span>+(1&#8722;<span class="eqt" data-k="b2" style="color:#2c3e50">&#946;<sub>2</sub></span>)<span class="eqt" data-k="g" style="color:#c0392b">g<sub>t</sub></span><sup>2</sup></div>
+        <div class="eq-why eq-active" data-eqline="1"><var>v<sub>t</sub></var> is a running average of the squared gradients, each weight's own scale; <var>β<sub>2</sub></var>, about 0.999, plays the same role for it.</div>
+        <div class="eq-line eq-active" data-eqline="2"><span class="eqt" data-k="theta" style="color:#2c3e50">&#952;</span> &#8592; <span class="eqt" data-k="theta" style="color:#2c3e50">&#952;</span> &#8722; <span class="eqt" data-k="alpha" style="color:#2c3e50">&#945;</span>&#183;<span class="frac"><span class="top"><span class="eqt" data-k="mh" style="color:#2980b9">m&#770;<sub>t</sub></span></span><span class="bot"><span class="rad"><span class="rad-sym">&#8730;</span><span class="rad-body"><span class="eqt" data-k="vh" style="color:#16a085">v&#770;<sub>t</sub></span></span></span>+<span class="eqt" data-k="eps" style="color:#2c3e50">&#949;</span></span></span></div>
+        <div class="eq-why eq-active" data-eqline="2">The weights <var>θ</var> move by the learning rate <var>α</var> times the smoothed slope divided by the root of that scale; <var>m&#770;<sub>t</sub></var> and <var>v&#770;<sub>t</sub></var> are the two averages corrected for their start at zero, and <var>ε</var> guards the division.</div>
+      </div>
+    <p>Adam applies weight decay as L2 inside the gradient, where <em>it is divided by each weight's gradient scale</em>; <strong>AdamW</strong> decouples it, with the same state as Adam (Loshchilov and Hutter 2019):</p>
+    <div class="eq-card">
+        <div class="eq-what">Adam with L2 and AdamW differ only in where the weight decay term goes.</div>
+        <div class="eq-line eq-active" data-eqline="0"><span class="eqt" data-k="g" style="color:#c0392b">g<sub>t</sub></span> = &#8711;L(<span class="eqt" data-k="theta" style="color:#2c3e50">&#952;</span>) + &#955;<span class="eqt" data-k="theta" style="color:#2c3e50">&#952;</span></div>
+        <div class="eq-why eq-active" data-eqline="0">Adam with L2 adds <var>λ</var><var>θ</var>, the slope of the <a href="regularization.html#l1-l2">L2 penalty</a>, to &#8711;<var>L</var>(<var>θ</var>), the slope of the loss <var>L</var>; <var>λ</var> (lambda) is the decay strength. Added here, the decay flows into both moments and gets divided by the root of <var>v&#770;<sub>t</sub></var>, so weights with large gradients get almost no decay. The penalty is <var>λ</var>/2 times the sum of squared weights; the Regularization page drops the one-half, which only rescales <var>λ</var>.</div>
+        <div class="eq-line eq-active" data-eqline="1"><span class="eqt" data-k="theta" style="color:#2c3e50">&#952;</span> &#8592; <span class="eqt" data-k="theta" style="color:#2c3e50">&#952;</span> &#8722; &#945;&#183;(<span class="frac"><span class="top"><span class="eqt" data-k="mh" style="color:#2980b9">m&#770;<sub>t</sub></span></span><span class="bot"><span class="rad"><span class="rad-sym">&#8730;</span><span class="rad-body"><span class="eqt" data-k="vh" style="color:#16a085">v&#770;<sub>t</sub></span></span></span>+<span class="eqt" data-k="eps" style="color:#2c3e50">&#949;</span></span></span> + &#955;<span class="eqt" data-k="theta" style="color:#2c3e50">&#952;</span>)</div>
+        <div class="eq-why eq-active" data-eqline="1">AdamW moves the decay outside the fraction. The moments see only &#8711;<var>L</var>(<var>θ</var>), and every weight shrinks by the same <var>α</var>·<var>λ</var> share of itself each step, which is the decay the penalty intended. A larger <var>λ</var> keeps the weights smaller and the model simpler, too large underfits, and <var>λ</var> = 0 is plain Adam; PyTorch's AdamW defaults to 0.01.</div>
+      </div>
+    <figure class="figure mtd-fig" id="optDecayBars"><svg class="mtd-svg" viewBox="0 0 400 190" style="max-width:480px" role="img" aria-label="Weight decay per step for two weights of the same size. Under Adam with L2 the weight with large gradients gets a very short bar and the weight with small gradients a tall one; under AdamW both bars are the same height">
+<text x="105" y="20" text-anchor="middle" style="font-size:16px;font-weight:700">Adam + L2</text>
+<text class="mtd-pu" x="295" y="20" text-anchor="middle" style="font-size:16px;font-weight:700">AdamW</text>
+<line class="mtd-axis" x1="20" y1="150" x2="190" y2="150"/><line class="mtd-axis" x1="210" y1="150" x2="380" y2="150"/>
+<rect class="mtd-barbg" x="40" y="34" width="50" height="116"/><rect class="mtd-bar" x="40" y="142" width="50" height="8"/>
+<rect class="mtd-barbg" x="120" y="34" width="50" height="116"/><rect class="mtd-bar" x="120" y="56" width="50" height="94"/>
+<rect class="mtd-barbg" x="230" y="34" width="50" height="116"/><rect class="mtd-bar" x="230" y="96" width="50" height="54"/>
+<rect class="mtd-barbg" x="310" y="34" width="50" height="116"/><rect class="mtd-bar" x="310" y="96" width="50" height="54"/>
+<text class="mtd-sub" x="65" y="168" text-anchor="middle" style="font-size:13px">large</text><text class="mtd-sub" x="65" y="184" text-anchor="middle" style="font-size:13px">gradients</text>
+<text class="mtd-sub" x="145" y="168" text-anchor="middle" style="font-size:13px">small</text><text class="mtd-sub" x="145" y="184" text-anchor="middle" style="font-size:13px">gradients</text>
+<text class="mtd-sub" x="255" y="168" text-anchor="middle" style="font-size:13px">large</text><text class="mtd-sub" x="255" y="184" text-anchor="middle" style="font-size:13px">gradients</text>
+<text class="mtd-sub" x="335" y="168" text-anchor="middle" style="font-size:13px">small</text><text class="mtd-sub" x="335" y="184" text-anchor="middle" style="font-size:13px">gradients</text>
+</svg><figcaption class="caption"><span class="fignum">Figure 2.</span> Adam plus L2 divides decay by each weight's gradient scale, so equal weights decay unevenly; AdamW evenly.</figcaption></figure>
+    <p>PyTorch has both, so pick one.</p>
+<pre class="cs" data-cs="4-7,8-9,10-11"><code class="language-python">import torch
+from torch.optim import Adam
+from torch.optim import AdamW
+model = torch.nn.Linear(10, 1)
+p = list(model.parameters())
+lr, lam = 1e-3, 1e-2  # α, λ
+decay = dict(weight_decay=lam)
+# Adam: λθ joins the grad
+adam = Adam(p, lr, **decay)
+# AdamW: decay outside it
+adamw = AdamW(p, lr, **decay)</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>A small model, <var>α</var> and <var>λ</var>.</li>
+  <li><span class="cs-n">2</span>Adam with <var>λ</var> inside the gradient, the L2 line.</li>
+  <li><span class="cs-n">3</span>AdamW with the decay outside the rescaling, the AdamW line.</li>
+</ol>
+    <p>So for adaptive methods, <strong>weight decay is not L2 regularization</strong>.</p>
+    <h2 id="sam"><span class="secnum">2</span> Sharpness-aware minimization (SAM)</h2>
+    <p><em>SAM wraps another optimizer instead of replacing it.</em> Plain optimizers can land in a sharp minimum; SAM looks for <strong>flat minima</strong>, where the loss stays low when the weights change a little. Both of its passes use the same minibatch. It keeps no state between steps but holds <var>δ</var>, one copy of the weights, during each step, and each step costs two forward and backward passes, about twice plain training (Foret et al. 2021).</p>
+    <div class="eq-card">
+        <div class="eq-what">SAM finds the worst small change to the weights, then descends from there.</div>
+        <div class="eq-line eq-active" data-eqline="0">&#948; = &#961;&#183;<span class="frac"><span class="top">&#8711;L(<span class="eqt" data-k="theta" style="color:#2c3e50">&#952;</span>)</span><span class="bot">&#8214;&#8711;L(<span class="eqt" data-k="theta" style="color:#2c3e50">&#952;</span>)&#8214;</span></span></div>
+        <div class="eq-why eq-active" data-eqline="0"><var>δ</var> (delta) is a <strong>perturbation</strong>, a small change to the weights, of length <var>ρ</var> (rho) pointing straight uphill: the gradient divided by its own length &#8214;&#8711;<var>L</var>(<var>θ</var>)&#8214; is an arrow of length one, and <var>ρ</var> sets how far it reaches. For a small radius uphill is where the loss rises fastest, so the perturbed point is roughly the worst point within <var>ρ</var>. A larger <var>ρ</var> judges flatness over a wider neighborhood, and too large a <var>ρ</var> lands on points that say little about the minimum; <var>ρ</var> = 0 is the base optimizer. SAM's CIFAR examples use 0.05.</div>
+        <div class="eq-line eq-active" data-eqline="1">g<sub>SAM</sub> = &#8711;L(<span class="eqt" data-k="theta" style="color:#2c3e50">&#952;</span> + &#948;)</div>
+        <div class="eq-why eq-active" data-eqline="1"><var>g<sub>SAM</sub></var> is the slope at that worst point, and the optimizer applies it at <var>θ</var> itself. In a sharp minimum the worst point sits high on its side and its slope is large, so SAM is pushed out of sharp minima and settles in flat ones.</div>
+      </div>
+    <p><code>perturb</code> is SAM's first pass; <code>ps</code> holds the weight tensors with zeroed gradients and <code>closure</code> returns the minibatch loss.</p>
+<pre class="cs" data-cs="4-5,6-8,9-12"><code class="language-python">import torch
+from torch import stack
+def perturb(ps, closure, rho):
+    closure().backward()
+    gs = [p.grad for p in ps]
+    ns = [g.norm() for g in gs]
+    k = rho / stack(ns).norm()
+    ds = [k * g for g in gs]
+    with torch.no_grad():
+        for p, d in zip(ps, ds):
+            p.add_(d)  # θ + δ
+    return ds</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>Reads the gradient at <var>θ</var>.</li>
+  <li><span class="cs-n">2</span>Scales it to length <var>ρ</var>, which is <var>δ</var>, the first SAM line.</li>
+  <li><span class="cs-n">3</span>Moves every weight to <var>θ</var> + <var>δ</var> and returns <var>δ</var>.</li>
+</ol>
+    <p>One SAM step calls <code>perturb</code>, reads the gradient at <var>θ</var> + <var>δ</var>, moves back to <var>θ</var>, and lets the base optimizer, <code>opt</code>, take its step with that gradient, <var>g<sub>SAM</sub></var>.</p>
+<pre class="cs" data-cs="1,2-3,4-6,7"><code class="language-python">ds = perturb(ps, closure, rho)
+opt.zero_grad()
+closure().backward()  # θ + δ
+with torch.no_grad():
+    for p, d in zip(ps, ds):
+        p.sub_(d)  # back to θ
+opt.step()  # steps with g_SAM</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>Moves to <var>θ</var> + <var>δ</var> with <code>perturb</code>.</li>
+  <li><span class="cs-n">2</span>Reads the gradient there, <var>g<sub>SAM</sub></var>, the second SAM line.</li>
+  <li><span class="cs-n">3</span>Moves the weights back to <var>θ</var>.</li>
+  <li><span class="cs-n">4</span>Lets the base optimizer step with <var>g<sub>SAM</sub></var>.</li>
+</ol>
+    <p>SAM's one uphill step approximates the worst loss within <var>ρ</var> of the weights.</p>
+    <div class="demo" id="samBall">
+      <div class="demo-controls">
+        <label for="samRho">Neighborhood radius <var>ρ</var>: <span id="samRhoVal">0.05</span></label>
+        <input type="range" id="samRho" min="0" max="0.16" step="0.01" value="0.05" aria-label="Neighborhood radius rho">
+        <button type="button" class="bv-btn" id="samPrev">Prev</button>
+        <button type="button" class="bv-btn" id="samNext">Next</button>
+        <button type="button" class="bv-btn" id="samReset">Reset</button>
+      </div>
+      <div class="canvas-wrap">
+        <canvas id="samCanvas" role="img" aria-label="A loss curve with a sharp minimum and a flat minimum; the dashed worst-nearby loss and a band of width rho around each minimum; Next zooms into the sharp minimum and traces one SAM update from a point near its bottom: the slope there, the climb to the worst nearby point, and the SAM step against the plain step"></canvas>
+      </div>
+      <div id="samLegends"><div class="sam-legend" id="samLegRest"><span><span class="ln" style="border-top:3px solid #2c3e50"></span>loss</span><span><span class="ln" style="border-top:3px dashed #8e44ad"></span>worst loss within <var>ρ</var></span><span><span class="sw" style="background:#16a085"></span>the minimum SAM prefers</span></div><div class="sam-legend" id="samLegSteps" hidden><span><span class="ln" style="border-top:3px solid #2c3e50"></span>loss</span><span><span class="ln" style="border-top:3px dashed #8e44ad"></span>slope at <var>θ</var> + <var>δ</var></span><span><span class="ln" style="border-top:3px dashed #7f8c8d"></span>plain step</span><span><span class="ln" style="border-top:3px solid #8e44ad"></span>SAM step</span></div></div>
+      <p class="caption"><span class="fignum">Figure 3.</span> Dashed, the worst loss within <var>&#961;</var>. Next zooms in on one SAM update.</p>
+      <p class="demo-stats" id="samStats" aria-live="polite"></p>
+      <div class="eq-card eq-stepped" id="samStepEq">
+        <div class="eq-what">The SAM line for the current step.</div>
+        <div class="eq-line eq-active" data-eqline="0">&#948; = &#961;&#183;<span class="frac"><span class="top">&#8711;L(<span class="eqt" data-k="theta" style="color:#2c3e50">&#952;</span>)</span><span class="bot">&#8214;&#8711;L(<span class="eqt" data-k="theta" style="color:#2c3e50">&#952;</span>)&#8214;</span></span></div>
+        <div class="eq-line eq-active" data-eqline="1">g<sub>SAM</sub> = &#8711;L(<span class="eqt" data-k="theta" style="color:#2c3e50">&#952;</span> + &#948;)</div>
+      </div>
+    </div>
+    <script>
+    (function () {
+      var cv = document.getElementById('samCanvas'); if (!cv) return;
+      var slider = document.getElementById('samRho'), val = document.getElementById('samRhoVal'), stats = document.getElementById('samStats');
+      var prevB = document.getElementById('samPrev'), nextB = document.getElementById('samNext'), resetB = document.getElementById('samReset');
+      var legRest = document.getElementById('samLegRest'), legSteps = document.getElementById('samLegSteps'), legWrap = document.getElementById('samLegends');
+      var eqLines = document.querySelectorAll('#samStepEq .eq-line');
+      /* toy scale (fix wave 2): sharp well width 0.09, flat well depth 0.95, step 0.0875 and rho up to 0.16, chosen so the
+         rest verdict and the step 3 verdict agree for every slider value (table in fixwave2/RESOLUTION.md) */
+      var st = 0, TH = -1.005, ETA = 0.0875, SW = 0.09, RMAX = parseFloat(slider.max);
+      function L(x) { return 0.05 * x * x - Math.exp(-(x + 1) * (x + 1) / (2 * SW * SW)) - 0.95 * Math.exp(-(x - 1) * (x - 1) / (2 * 0.6 * 0.6)); }
+      function dL(x) { return (L(x + 1e-4) - L(x - 1e-4)) / 2e-4; }
+      function W(x, r) { if (r <= 0) return L(x); var m = -1e9, i; for (i = 0; i <= 80; i++) { m = Math.max(m, L(x - r + 2 * r * i / 80)); } return m; }
+      function basinMin(r, a, b) { var bx = a, bv = 1e9, i, x, v; for (i = 0; i <= 120; i++) { x = a + (b - a) * i / 120; v = W(x, r); if (v < bv) { bv = v; bx = x; } } return [bx, bv]; }
+      /* the ridge between the two minima: past it, a step has left the sharp minimum */
+      var RIDGE = (function () { var bx = -0.9, bv = -1e9, i, x; for (i = 0; i <= 700; i++) { x = -0.9 + 1.4 * i / 700; if (L(x) > bv) { bv = L(x); bx = x; } } return bx; })();
+      var X0 = -2.2, X1 = 2.4, Y0 = -1.05, Y1 = 0.45;
+      var ZX0 = -1.5, ZX1 = -0.15, ZY0 = -0.98, ZY1 = 0.16;
+      function model(r) {
+        var sh = basinMin(r, -1.4, -0.6), fl = basinMin(r, 0.4, 1.6), win = sh[1] < fl[1] ? sh : fl;
+        var g0 = dL(TH), dir = g0 >= 0 ? 1 : -1, xd = TH + dir * r, gs = dL(xd);
+        var xP = TH - ETA * g0, xS = TH - ETA * gs;
+        return { sh: sh, fl: fl, win: win, g0: g0, dir: dir, xd: xd, gs: gs, xP: xP, xS: xS, out: xS > RIDGE };
+      }
+      function head(ctx, x0, y0, x1, y1, col) {
+        var a = Math.atan2(y1 - y0, x1 - x0), k = 10;
+        ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(x1, y1);
+        ctx.lineTo(x1 - k * Math.cos(a - 0.45), y1 - k * Math.sin(a - 0.45));
+        ctx.lineTo(x1 - k * Math.cos(a + 0.45), y1 - k * Math.sin(a + 0.45)); ctx.closePath(); ctx.fill();
+      }
+      function label(ctx, t, x, y, align, col) {
+        ctx.font = '700 14px sans-serif'; ctx.textAlign = align; ctx.lineJoin = 'round';
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 4; ctx.setLineDash([]); ctx.strokeText(t, x, y);
+        ctx.fillStyle = col; ctx.fillText(t, x, y);
+      }
+      function marker(ctx, n, x, y, col) {
+        ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x, y, 9, 0, 6.2832); ctx.fill();
+        ctx.font = '700 12px sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#fff'; ctx.fillText(String(n), x, y + 4);
+      }
+      var SMALL = ' A <var>&#961;</var> this small does not reach the steep walls.';
+      function readout(s, r, m) {
+        if (s === 0) {
+          if (r === 0) return 'SAM is plain descent here: the <strong>sharp</strong> minimum has the lower loss.';
+          return 'Worst nearby loss is lower in the <strong>' + (m.win === m.sh ? 'sharp' : 'flat') + '</strong> minimum, so SAM prefers it.' + (m.win === m.sh ? SMALL :
+            (r >= 0.12 ? ' Past ' + RMAX.toFixed(2) + ' one uphill step would overshoot the steepest part of the wall, so the slider ends there.' : ''));
+        }
+        if (s === 1) return '&#9312; Zoomed into the sharp minimum, <var>&#952;</var> sits near its bottom, where the <span style="color:#c0392b;font-weight:600">slope</span> is gentle and points uphill to the left.';
+        if (s === 2) {
+          if (r === 0) return '&#9313; With <var>&#961;</var> = 0 there is no climb: <var>&#952;</var> + <var>&#948;</var> is <var>&#952;</var> itself.';
+          return '&#9313; SAM climbs <var>&#961;</var> uphill to <var>&#952;</var> + <var>&#948;</var>, about the worst point within <var>&#961;</var>, where the wall is ' + (Math.abs(m.gs) > Math.abs(m.g0) ? 'steeper' : 'gentler') + '.';
+        }
+        if (r === 0) return '&#9314; The slope is read at <var>&#952;</var> itself, so SAM takes the plain step.';
+        if (m.out) return '&#9314; SAM applies the steeper slope from <var>&#952;</var> + <var>&#948;</var> at <var>&#952;</var>: its <span style="color:#8e44ad;font-weight:600">step</span> leaves the sharp minimum, while the <span style="color:#566573;font-weight:600">plain step</span> stays in it.';
+        return '&#9314; SAM\'s <span style="color:#8e44ad;font-weight:600">step</span> is ' + (Math.abs(m.gs) > Math.abs(m.g0) ? 'longer than' : 'no longer than') + ' the <span style="color:#566573;font-weight:600">plain step</span> but stays in the sharp minimum: a <var>&#961;</var> this small does not reach the steep walls.';
+      }
+      /* hold the tallest readout and legend at the current width, so the tool never changes height between states */
+      var resW = -1;
+      function reserve() {
+        var w = stats.clientWidth; if (w === resW || !w) return; resW = w;
+        var prev = stats.innerHTML, mx = 0, k, s, r;
+        stats.style.minHeight = '0px';
+        for (k = 0; k <= Math.round(RMAX * 100); k++) {
+          r = k / 100; var m = model(r);
+          for (s = 0; s <= 3; s++) { stats.innerHTML = readout(s, r, m); mx = Math.max(mx, stats.getBoundingClientRect().height); }
+        }
+        stats.innerHTML = prev; stats.style.minHeight = Math.ceil(mx) + 'px';
+        var hr = legRest.hidden, hs = legSteps.hidden, lm = 0;
+        legWrap.style.minHeight = '0px';
+        legRest.hidden = false; legSteps.hidden = true; lm = Math.max(lm, legWrap.getBoundingClientRect().height);
+        legRest.hidden = true; legSteps.hidden = false; lm = Math.max(lm, legWrap.getBoundingClientRect().height);
+        legRest.hidden = hr; legSteps.hidden = hs; legWrap.style.minHeight = Math.ceil(lm) + 'px';
+      }
+      function draw() {
+        var r = parseFloat(slider.value);
+        val.textContent = r.toFixed(2);
+        var w = cv.parentNode.clientWidth || 340, h = Math.round(Math.min(w, 520) * 0.62), dpr = window.devicePixelRatio || 1;
+        cv.style.width = w + 'px'; cv.style.height = h + 'px'; cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+        var ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
+        var zoom = st > 0, pl = 8, pr = 8, pt = 26, pb = zoom ? 62 : 10;
+        var a0 = zoom ? ZX0 : X0, a1 = zoom ? ZX1 : X1, b0 = zoom ? ZY0 : Y0, b1 = zoom ? ZY1 : Y1;
+        var kx = (w - pl - pr) / (a1 - a0), ky = (h - pt - pb) / (b1 - b0);
+        function sx(x) { return pl + (x - a0) * kx; }
+        function sy(y) { return pt + (b1 - y) * ky; }
+        /* a short screen-length segment along the slope at x, pointing uphill */
+        function uphill(x, g, len) { var ux = g >= 0 ? 1 : -1, vx = ux * kx, vy = -ux * g * ky, n = Math.sqrt(vx * vx + vy * vy) || 1; return [vx / n * len, vy / n * len]; }
+        var m = model(r), sh = m.sh, fl = m.fl, win = m.win;
+        var i, x;
+        var g0 = m.g0, xd = m.xd, gs = m.gs, xP = m.xP, xS = m.xS;
+        legRest.hidden = zoom; legSteps.hidden = !zoom;
+        if (!zoom) {
+          /* rest: the whole loss, which minimum SAM prefers */
+          ctx.fillStyle = 'rgba(22,160,133,0.16)';
+          var bl = sx(win[0] - r), br = sx(win[0] + r);
+          ctx.fillRect(bl, pt, Math.max(2, br - bl), h - pt - pb);
+          ctx.strokeStyle = '#2c3e50'; ctx.lineWidth = 2.5; ctx.beginPath();
+          for (i = 0; i <= 600; i++) { x = X0 + (X1 - X0) * i / 600; if (i === 0) ctx.moveTo(sx(x), sy(L(x))); else ctx.lineTo(sx(x), sy(L(x))); }
+          ctx.stroke();
+          if (r > 0) {
+            ctx.save(); ctx.beginPath(); ctx.rect(pl, pt, w - pl - pr, h - pt - pb); ctx.clip();
+            ctx.strokeStyle = '#8e44ad'; ctx.lineWidth = 2.5; ctx.setLineDash([7, 5]); ctx.beginPath();
+            for (i = 0; i <= 400; i++) { x = X0 + r + (X1 - X0 - 2 * r) * i / 400; if (i === 0) ctx.moveTo(sx(x), sy(W(x, r))); else ctx.lineTo(sx(x), sy(W(x, r))); }
+            ctx.stroke(); ctx.restore(); ctx.setLineDash([]);
+          }
+          [[sh, 'sharp'], [fl, 'flat']].forEach(function (q) {
+            var px = sx(q[0][0]), py = sy(q[0][1]), on = q[0] === win;
+            ctx.fillStyle = on ? '#16a085' : '#95a5a6';
+            ctx.beginPath(); ctx.arc(px, py, 7, 0, 6.2832); ctx.fill();
+            ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+            ctx.font = (on ? '700 ' : '') + '15px sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = on ? '#117a65' : '#555';
+            ctx.fillText(q[1], px, 18);
+          });
+        } else {
+          /* steps: zoomed into the sharp minimum */
+          ctx.save(); ctx.beginPath(); ctx.rect(0, 0, w, h); ctx.clip();
+          ctx.strokeStyle = '#2c3e50'; ctx.lineWidth = 2.5; ctx.beginPath();
+          for (i = 0; i <= 400; i++) { x = ZX0 + (ZX1 - ZX0) * i / 400; if (i === 0) ctx.moveTo(sx(x), sy(L(x))); else ctx.lineTo(sx(x), sy(L(x))); }
+          ctx.stroke();
+          ctx.font = '15px sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#555';
+          ctx.fillText('sharp minimum', sx(-1.0), 18);
+          ctx.textAlign = 'right'; ctx.fillText('toward flat \u2192', w - pr - 2, 18);
+          var px0 = sx(TH), py0 = sy(L(TH));
+          if (st === 1) {
+            /* the slope at theta, arrow pointing uphill */
+            var u = uphill(TH, g0, 34), u0x = px0 - u[0], u0y = py0 - u[1], u1x = px0 + u[0], u1y = py0 + u[1];
+            ctx.strokeStyle = '#c0392b'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(u0x, u0y); ctx.lineTo(u1x, u1y); ctx.stroke();
+            head(ctx, u0x, u0y, u1x, u1y, '#c0392b');
+            label(ctx, 'slope', u1x - 4, u1y - 10, 'right', '#c0392b');
+            marker(ctx, 1, u1x - 14, u1y + 16, '#c0392b');
+          }
+          if (st >= 2 && r > 0) {
+            ctx.strokeStyle = '#8e44ad'; ctx.lineWidth = st === 2 ? 4 : 2.5; ctx.globalAlpha = st === 2 ? 1 : 0.5; ctx.beginPath();
+            for (i = 0; i <= 30; i++) { x = TH + (xd - TH) * i / 30; if (i === 0) ctx.moveTo(sx(x), sy(L(x))); else ctx.lineTo(sx(x), sy(L(x))); }
+            ctx.stroke();
+            if (st === 2) head(ctx, sx(TH + (xd - TH) * 0.85), sy(L(TH + (xd - TH) * 0.85)), sx(xd), sy(L(xd)), '#8e44ad');
+            ctx.globalAlpha = 1;
+            if (st === 3) {
+              /* the slope at theta + delta, drawn on its uphill side only, clear of the step arrows below */
+              var d = uphill(xd, gs, 32);
+              ctx.strokeStyle = '#8e44ad'; ctx.lineWidth = 2.5; ctx.setLineDash([6, 4]); ctx.beginPath(); ctx.moveTo(sx(xd), sy(L(xd))); ctx.lineTo(sx(xd) + d[0], sy(L(xd)) + d[1]); ctx.stroke(); ctx.setLineDash([]);
+            }
+            ctx.fillStyle = '#fff'; ctx.strokeStyle = '#8e44ad'; ctx.lineWidth = 2.5;
+            ctx.beginPath(); ctx.arc(sx(xd), sy(L(xd)), 6, 0, 6.2832); ctx.fill(); ctx.stroke();
+            /* the theta + delta label sits on the side away from theta */
+            ctx.font = '700 14px sans-serif';
+            var tw = ctx.measureText('\u03b8 + \u03b4').width, lft = xd < TH, lx = sx(xd) + (lft ? -12 : 12), ly = sy(L(xd)) + 5, al = lft ? 'right' : 'left';
+            var need = tw + (st === 2 ? 28 : 0);
+            if (lft ? lx - need < 4 : lx + need > w - 4) { lx = sx(xd); ly = sy(L(xd)) - 14; al = 'center'; }
+            label(ctx, '\u03b8 + \u03b4', lx, ly, al, '#6c3483');
+            if (st === 2) marker(ctx, 2, al === 'center' ? lx + tw / 2 + 14 : (lft ? lx - tw - 14 : lx + tw + 14), ly - 5, '#8e44ad');
+          }
+          if (st === 3) {
+            var yP = py0 + 32, yS = py0 + 52, tP = sx(xP), tS = sx(xS);
+            ctx.lineWidth = 3; ctx.strokeStyle = '#7f8c8d'; ctx.setLineDash([5, 4]);
+            ctx.beginPath(); ctx.moveTo(px0, yP); ctx.lineTo(tP, yP); ctx.stroke(); ctx.setLineDash([]);
+            head(ctx, px0, yP, tP, yP, '#7f8c8d');
+            ctx.strokeStyle = '#8e44ad'; ctx.beginPath(); ctx.moveTo(px0, yS); ctx.lineTo(tS, yS); ctx.stroke();
+            head(ctx, px0, yS, tS, yS, '#8e44ad');
+            /* where each step lands on the loss */
+            [[xP, '#7f8c8d'], [xS, '#8e44ad']].forEach(function (p) {
+              ctx.fillStyle = '#fff'; ctx.strokeStyle = p[1]; ctx.lineWidth = 2.5;
+              ctx.beginPath(); ctx.arc(sx(p[0]), sy(L(p[0])), 5, 0, 6.2832); ctx.fill(); ctx.stroke();
+            });
+            label(ctx, 'plain', tP + 8, yP + 5, 'left', '#566573');
+            /* the SAM label and marker go past the arrow tip; with no room there they drop below the tip */
+            if (tS + 64 <= w) { label(ctx, 'SAM', tS + 8, yS + 5, 'left', '#6c3483'); marker(ctx, 3, tS + 52, yS, '#8e44ad'); }
+            else { label(ctx, 'SAM', tS - 22, yS + 22, 'right', '#6c3483'); marker(ctx, 3, tS - 8, yS + 17, '#8e44ad'); }
+          }
+          ctx.fillStyle = '#2c3e50'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(px0, py0, 6, 0, 6.2832); ctx.fill(); ctx.stroke();
+          /* theta's label sits below it, clear of the climb and the curve */
+          label(ctx, '\u03b8', px0, py0 + 21, 'center', '#2c3e50');
+          ctx.restore();
+        }
+        stats.innerHTML = readout(st, r, m);
+        prevB.disabled = st === 0; nextB.disabled = st === 3;
+        var act = st === 0 ? [0, 1] : (st === 3 ? [1] : [0]);
+        for (i = 0; i < eqLines.length; i++) eqLines[i].classList.toggle('eq-active', act.indexOf(i) >= 0);
+        reserve();
+      }
+      prevB.addEventListener('click', function () { if (st > 0) { st--; draw(); } });
+      nextB.addEventListener('click', function () { if (st < 3) { st++; draw(); } });
+      resetB.addEventListener('click', function () { st = 0; draw(); });
+      slider.addEventListener('input', draw);
+      window.addEventListener('resize', function () { resW = -1; draw(); });
+      draw();
+    })();
+    </script>
+    <p>Different weights can compute the same function yet look sharper or flatter, so flatness is a rule of thumb, not a guarantee.</p>
+    <h2 id="schedulers"><span class="secnum">3</span> Learning rate schedules</h2>
+    <p>A large rate moves fast early, but near a minimum a constant rate keeps bouncing, so schedulers bring <var>α</var> down as training goes.</p>
+        
+    <figure class="figure mtd-fig" id="optFig8"><svg class="mtd-svg" viewBox="0 0 400 356" style="max-width:480px" role="img" aria-label="Five learning rate schedules over a training run: step decay drops in stairs, exponential decay shrinks smoothly, cosine annealing falls along a cosine curve, warm restarts repeat the cosine fall and jump back up, one-cycle rises first and then falls"><rect class="mtd-pic" x="8.0" y="4" width="188" height="112" rx="6"/><text class="" x="102.0" y="26.0" text-anchor="middle" style="font-size:16px;font-weight:700">Step decay</text><line class="mtd-axis" x1="20.0" y1="106" x2="184.0" y2="106"/><line class="mtd-axis" x1="20.0" y1="106" x2="20.0" y2="36"/><path class="mtd-s mtd-cp" d="M23.0,42.2 L24.6,42.2 L26.2,42.2 L27.8,42.2 L29.4,42.2 L31.0,42.2 L32.6,42.2 L34.2,42.2 L35.8,42.2 L37.4,42.2 L39.0,42.2 L40.6,42.2 L42.2,42.2 L43.7,42.2 L45.3,42.2 L46.9,42.2 L48.5,42.2 L50.1,42.2 L51.7,42.2 L53.3,42.2 L54.9,42.2 L56.5,42.2 L58.1,42.2 L59.7,42.2 L61.3,42.2 L62.9,42.2 L62.9,71.7 L64.5,71.7 L66.1,71.7 L67.7,71.7 L69.3,71.7 L70.9,71.7 L72.5,71.7 L74.1,71.7 L75.7,71.7 L77.3,71.7 L78.9,71.7 L80.5,71.7 L82.1,71.7 L83.6,71.7 L85.2,71.7 L86.8,71.7 L88.4,71.7 L90.0,71.7 L91.6,71.7 L93.2,71.7 L94.8,71.7 L96.4,71.7 L98.0,71.7 L99.6,71.7 L101.2,71.7 L102.8,71.7 L102.8,86.4 L104.4,86.4 L106.0,86.4 L107.6,86.4 L109.2,86.4 L110.8,86.4 L112.4,86.4 L114.0,86.4 L115.6,86.4 L117.2,86.4 L118.8,86.4 L120.4,86.4 L121.9,86.4 L123.5,86.4 L125.1,86.4 L126.7,86.4 L128.3,86.4 L129.9,86.4 L131.5,86.4 L133.1,86.4 L134.7,86.4 L136.3,86.4 L137.9,86.4 L139.5,86.4 L141.1,86.4 L142.7,86.4 L142.7,93.8 L144.3,93.8 L145.9,93.8 L147.5,93.8 L149.1,93.8 L150.7,93.8 L152.3,93.8 L153.9,93.8 L155.5,93.8 L157.1,93.8 L158.7,93.8 L160.3,93.8 L161.8,93.8 L163.4,93.8 L165.0,93.8 L166.6,93.8 L168.2,93.8 L169.8,93.8 L171.4,93.8 L173.0,93.8 L174.6,93.8 L176.2,93.8 L177.8,93.8 L179.4,93.8 L181.0,93.8" style="stroke-width:3px"/><rect class="mtd-pic" x="204.0" y="4" width="188" height="112" rx="6"/><text class="" x="298.0" y="26.0" text-anchor="middle" style="font-size:16px;font-weight:700">Exponential decay</text><line class="mtd-axis" x1="216.0" y1="106" x2="380.0" y2="106"/><line class="mtd-axis" x1="216.0" y1="106" x2="216.0" y2="36"/><path class="mtd-s mtd-cp" d="M219.0,42.2 L220.6,44.5 L222.2,46.8 L223.8,48.9 L225.4,50.9 L227.0,52.9 L228.6,54.8 L230.2,56.6 L231.8,58.4 L233.4,60.0 L235.0,61.7 L236.6,63.2 L238.2,64.7 L239.7,66.1 L241.3,67.5 L242.9,68.8 L244.5,70.1 L246.1,71.3 L247.7,72.5 L249.3,73.6 L250.9,74.7 L252.5,75.7 L254.1,76.7 L255.7,77.7 L257.3,78.6 L258.9,79.5 L260.5,80.3 L262.1,81.1 L263.7,81.9 L265.3,82.7 L266.9,83.4 L268.5,84.1 L270.1,84.8 L271.7,85.4 L273.3,86.0 L274.9,86.6 L276.5,87.2 L278.1,87.7 L279.6,88.3 L281.2,88.8 L282.8,89.2 L284.4,89.7 L286.0,90.2 L287.6,90.6 L289.2,91.0 L290.8,91.4 L292.4,91.8 L294.0,92.2 L295.6,92.5 L297.2,92.8 L298.8,93.2 L300.4,93.5 L302.0,93.8 L303.6,94.1 L305.2,94.3 L306.8,94.6 L308.4,94.9 L310.0,95.1 L311.6,95.4 L313.2,95.6 L314.8,95.8 L316.4,96.0 L317.9,96.2 L319.5,96.4 L321.1,96.6 L322.7,96.8 L324.3,96.9 L325.9,97.1 L327.5,97.3 L329.1,97.4 L330.7,97.6 L332.3,97.7 L333.9,97.8 L335.5,98.0 L337.1,98.1 L338.7,98.2 L340.3,98.3 L341.9,98.4 L343.5,98.5 L345.1,98.6 L346.7,98.7 L348.3,98.8 L349.9,98.9 L351.5,99.0 L353.1,99.1 L354.7,99.2 L356.3,99.3 L357.8,99.3 L359.4,99.4 L361.0,99.5 L362.6,99.5 L364.2,99.6 L365.8,99.7 L367.4,99.7 L369.0,99.8 L370.6,99.8 L372.2,99.9 L373.8,99.9 L375.4,100.0 L377.0,100.0" style="stroke-width:3px"/><rect class="mtd-pic" x="8.0" y="124" width="188" height="112" rx="6"/><text class="" x="102.0" y="146.0" text-anchor="middle" style="font-size:16px;font-weight:700">Cosine annealing</text><line class="mtd-axis" x1="20.0" y1="226" x2="184.0" y2="226"/><line class="mtd-axis" x1="20.0" y1="226" x2="20.0" y2="156"/><path class="mtd-s mtd-cp" d="M23.0,161.0 L24.6,161.0 L26.2,161.1 L27.8,161.1 L29.4,161.2 L31.0,161.4 L32.6,161.5 L34.2,161.7 L35.8,161.9 L37.4,162.2 L39.0,162.4 L40.6,162.7 L42.2,163.0 L43.7,163.4 L45.3,163.8 L46.9,164.2 L48.5,164.6 L50.1,165.1 L51.7,165.5 L53.3,166.0 L54.9,166.6 L56.5,167.1 L58.1,167.7 L59.7,168.3 L61.3,168.9 L62.9,169.5 L64.5,170.2 L66.1,170.8 L67.7,171.5 L69.3,172.2 L70.9,173.0 L72.5,173.7 L74.1,174.5 L75.7,175.3 L77.3,176.1 L78.9,176.9 L80.5,177.7 L82.1,178.5 L83.6,179.3 L85.2,180.2 L86.8,181.1 L88.4,181.9 L90.0,182.8 L91.6,183.7 L93.2,184.6 L94.8,185.5 L96.4,186.4 L98.0,187.3 L99.6,188.2 L101.2,189.1 L102.8,190.0 L104.4,190.9 L106.0,191.8 L107.6,192.7 L109.2,193.6 L110.8,194.5 L112.4,195.4 L114.0,196.2 L115.6,197.1 L117.2,198.0 L118.8,198.8 L120.4,199.7 L121.9,200.5 L123.5,201.4 L125.1,202.2 L126.7,203.0 L128.3,203.8 L129.9,204.6 L131.5,205.3 L133.1,206.1 L134.7,206.8 L136.3,207.5 L137.9,208.2 L139.5,208.9 L141.1,209.5 L142.7,210.2 L144.3,210.8 L145.9,211.4 L147.5,211.9 L149.1,212.5 L150.7,213.0 L152.3,213.5 L153.9,214.0 L155.5,214.4 L157.1,214.9 L158.7,215.3 L160.3,215.6 L161.8,216.0 L163.4,216.3 L165.0,216.6 L166.6,216.9 L168.2,217.1 L169.8,217.3 L171.4,217.5 L173.0,217.7 L174.6,217.8 L176.2,217.9 L177.8,218.0 L179.4,218.0 L181.0,218.0" style="stroke-width:3px"/><rect class="mtd-pic" x="204.0" y="124" width="188" height="112" rx="6"/><text class="" x="298.0" y="146.0" text-anchor="middle" style="font-size:16px;font-weight:700">Warm restarts</text><line class="mtd-axis" x1="216.0" y1="226" x2="380.0" y2="226"/><line class="mtd-axis" x1="216.0" y1="226" x2="216.0" y2="156"/><path class="mtd-s mtd-cp" d="M219.0,161.0 L220.6,161.1 L222.2,161.5 L223.8,162.2 L225.4,163.0 L227.0,164.2 L228.6,165.5 L230.2,167.1 L231.8,168.9 L233.4,170.8 L235.0,173.0 L236.6,175.3 L238.2,177.7 L239.7,180.2 L241.3,182.8 L242.9,185.5 L244.5,188.2 L246.1,190.9 L247.7,193.6 L249.3,196.2 L250.9,198.8 L252.5,201.4 L254.1,203.8 L255.7,206.1 L257.3,208.2 L258.9,210.2 L260.5,211.9 L262.1,213.5 L263.7,214.9 L265.3,216.0 L266.9,216.9 L268.5,217.5 L270.1,217.9 L271.7,218.0 L273.3,161.0 L274.9,161.1 L276.5,161.5 L278.1,162.2 L279.6,163.0 L281.2,164.2 L282.8,165.5 L284.4,167.1 L286.0,168.9 L287.6,170.8 L289.2,173.0 L290.8,175.3 L292.4,177.7 L294.0,180.2 L295.6,182.8 L297.2,185.5 L298.8,188.2 L300.4,190.9 L302.0,193.6 L303.6,196.2 L305.2,198.8 L306.8,201.4 L308.4,203.8 L310.0,206.1 L311.6,208.2 L313.2,210.2 L314.8,211.9 L316.4,213.5 L317.9,214.9 L319.5,216.0 L321.1,216.9 L322.7,217.5 L324.3,217.9 L325.9,218.0 L327.5,161.0 L329.1,161.1 L330.7,161.5 L332.3,162.2 L333.9,163.0 L335.5,164.2 L337.1,165.5 L338.7,167.1 L340.3,168.9 L341.9,170.8 L343.5,173.0 L345.1,175.3 L346.7,177.7 L348.3,180.2 L349.9,182.8 L351.5,185.5 L353.1,188.2 L354.7,190.9 L356.3,193.6 L357.8,196.2 L359.4,198.8 L361.0,201.4 L362.6,203.8 L364.2,206.1 L365.8,208.2 L367.4,210.2 L369.0,211.9 L370.6,213.5 L372.2,214.9 L373.8,216.0 L375.4,216.9 L377.0,217.5" style="stroke-width:3px"/><rect class="mtd-pic" x="106.0" y="244" width="188" height="112" rx="6"/><text class="" x="200.0" y="266.0" text-anchor="middle" style="font-size:16px;font-weight:700">One-cycle</text><line class="mtd-axis" x1="118.0" y1="346" x2="282.0" y2="346"/><line class="mtd-axis" x1="118.0" y1="346" x2="118.0" y2="276"/><path class="mtd-s mtd-cp" d="M121.0,335.6 L122.6,333.8 L124.2,332.0 L125.8,330.2 L127.4,328.5 L129.0,326.7 L130.6,324.9 L132.2,323.1 L133.8,321.3 L135.4,319.6 L137.0,317.8 L138.6,316.0 L140.2,314.2 L141.7,312.5 L143.3,310.7 L144.9,308.9 L146.5,307.1 L148.1,305.3 L149.7,303.6 L151.3,301.8 L152.9,300.0 L154.5,298.2 L156.1,296.5 L157.7,294.7 L159.3,292.9 L160.9,291.1 L162.5,289.3 L164.1,287.6 L165.7,285.8 L167.3,284.0 L168.9,282.2 L170.5,283.1 L172.1,283.9 L173.7,284.8 L175.3,285.6 L176.9,286.5 L178.5,287.3 L180.1,288.2 L181.6,289.0 L183.2,289.8 L184.8,290.7 L186.4,291.5 L188.0,292.4 L189.6,293.2 L191.2,294.1 L192.8,294.9 L194.4,295.8 L196.0,296.6 L197.6,297.4 L199.2,298.3 L200.8,299.1 L202.4,300.0 L204.0,300.8 L205.6,301.7 L207.2,302.5 L208.8,303.4 L210.4,304.2 L212.0,305.0 L213.6,305.9 L215.2,306.7 L216.8,307.6 L218.4,308.4 L219.9,309.3 L221.5,310.1 L223.1,311.0 L224.7,311.8 L226.3,312.6 L227.9,313.5 L229.5,314.3 L231.1,315.2 L232.7,316.0 L234.3,316.9 L235.9,317.7 L237.5,318.6 L239.1,319.4 L240.7,320.2 L242.3,321.1 L243.9,321.9 L245.5,322.8 L247.1,323.6 L248.7,324.5 L250.3,325.3 L251.9,326.2 L253.5,327.0 L255.1,327.9 L256.7,328.7 L258.3,329.5 L259.8,330.4 L261.4,331.2 L263.0,332.1 L264.6,332.9 L266.2,333.8 L267.8,334.6 L269.4,335.5 L271.0,336.3 L272.6,337.1 L274.2,338.0 L275.8,338.8 L277.4,339.7 L279.0,340.5" style="stroke-width:3px"/></svg><figcaption class="caption"><span class="fignum">Figure 4.</span> Five schedules for one run: the learning rate (vertical) over training (across).</figcaption></figure>
+    <ul>
+        <li><strong>Step decay</strong> drops it by a factor every few epochs (passes over the data).</li>
+        <li><strong>Exponential decay</strong> shrinks it by a fixed fraction each step or epoch.</li>
+        <li><strong>Cosine annealing</strong> stays near the maximum rate early and eases into the minimum late.</li>
+        <li><strong>Warm restarts</strong> jump back to the maximum after each cosine cycle, so training can leave its minimum for others (Loshchilov and Hutter 2017).</li>
+        <li><strong>Warmup</strong> raises the rate from a small value to its target over the first steps or epochs, so the large early gradients do not throw the weights far; Goyal et al. 2017 ramped it linearly over 5 epochs.</li>
+        <li><strong>One-cycle</strong> rises first, then falls, pairing the large rate with low momentum (Smith 2018); momentum is a decaying sum of past gradients that the step follows, from the momentum section of <a href="optimizers.html#momentum">Optimizers from SGD to Adam</a>.</li>
+    </ul>
+    <div class="eq-card">
+        <div class="eq-what">Cosine annealing lowers the rate from its maximum to its minimum along a cosine.</div>
+        <div class="eq-line eq-active" data-eqline="0"><span style="white-space:nowrap">&#945;<sub>t</sub> = &#945;<sub>min</sub> +</span> <span style="white-space:nowrap"><span class="frac"><span class="top">1</span><span class="bot">2</span></span>(&#945;<sub>max</sub> &#8722; &#945;<sub>min</sub>)&#183;s<sub>t</sub></span></div>
+        <div class="eq-why eq-active" data-eqline="0"><var>α<sub>t</sub></var> is the learning rate at step <var>t</var> of a <var>T</var>-step schedule. It is <var>α<sub>min</sub></var> plus a share of the range up to <var>α<sub>max</sub></var>, and the share is half of <var>s<sub>t</sub></var>, so the rate always stays between the two.</div>
+        <div class="eq-line eq-active" data-eqline="1">s<sub>t</sub> = 1 + cos(&#960;&#183;<span class="frac"><span class="top">t</span><span class="bot">T</span></span>)</div>
+        <div class="eq-why eq-active" data-eqline="1"><var>s<sub>t</sub></var> is 1 plus a cosine that sweeps half a turn as <var>t</var> runs from 0 to <var>T</var>, so it falls from 2 to 0. A cosine is flat at both ends, so the rate lingers near <var>α<sub>max</sub></var> early, drops fastest mid-training and eases gently into <var>α<sub>min</sub></var> at the end.</div>
+      </div>
+    <p>A scheduler keeps one counter, the steps or epochs so far, and sets <var>α</var> from it at almost no cost. Step decay, exponential decay and cosine annealing usually step once per epoch; one-cycle steps once per batch (the one-cycle paper counts its cycle in iterations), and warm restarts can too, as in the SGDR paper.</p>
+    <p>Each schedule is a PyTorch class wrapping the optimizer: <code>StepLR</code> multiplies the rate by <code>gamma</code>, 0.1 here, every 30 epochs, <code>ExponentialLR</code> by 0.95 every epoch, and <code>CosineAnnealingLR</code> follows a cosine over <code>T_max</code> epochs.</p>
+<pre class="cs" data-cs="3-6,8,9,10-11"><code class="language-python">import torch
+import torch.optim as optim
+S = optim.lr_scheduler
+net = torch.nn.Linear(4, 1)
+ps = net.parameters()
+opt = optim.SGD(ps, lr=0.1)
+# pick one, stepped per epoch
+s = S.StepLR(opt, 30, 0.1)
+s = S.ExponentialLR(opt, 0.95)
+Cos = S.CosineAnnealingLR
+s = Cos(opt, T_max=100)</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>Builds a model and an SGD optimizer to schedule.</li>
+  <li><span class="cs-n">2</span>Step decay, the rate times 0.1 every 30 epochs.</li>
+  <li><span class="cs-n">3</span>Exponential decay, the rate times 0.95 every epoch.</li>
+  <li><span class="cs-n">4</span>Cosine annealing over 100 epochs, the cosine schedule equation.</li>
+</ol>
+    <p>Warm restarts repeat every <code>T_0</code> epochs; one-cycle rises to a peak rate of 0.1 and back over 1000 steps, stepped per batch. A smaller <code>gamma</code> or a shorter interval cuts the rate sooner and harder, which can freeze training before the loss flattens; a longer <code>T_max</code> or <code>T_0</code> stretches each cycle; a higher one-cycle peak explores more but can diverge. PyTorch's defaults are a <code>gamma</code> of 0.1 for <code>StepLR</code>, a minimum rate <code>eta_min</code> of 0 for the cosine schedules, and 30 percent of the one-cycle spent warming up.</p>
+<pre class="cs" data-cs="1-2,3-4,5-7"><code class="language-python">WR = S.CosineAnnealingWarmRestarts
+s = WR(opt, T_0=10)
+OneCycle = S.OneCycleLR
+s = OneCycle(opt, 0.1, 1000)
+for step in range(1000):
+    opt.step()
+    s.step()  # per batch</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>Warm restarts every 10 epochs.</li>
+  <li><span class="cs-n">2</span>One-cycle up to 0.1 and back over 1000 steps.</li>
+  <li><span class="cs-n">3</span>Steps the optimizer, then the one-cycle schedule, once per batch.</li>
+</ol>
+
+    <h2 id="clipping"><span class="secnum">4</span> Gradient clipping</h2>
+    <p><strong>Gradient clipping</strong> guards against <strong>exploding gradients</strong>, gradients that suddenly become very large: a gradient longer than a threshold <var>τ</var> is shrunk to length <var>τ</var>. It keeps no state and costs one length over all the gradients (Pascanu et al. 2013).</p>
+    <div class="eq-card">
+        <div class="eq-what">Clipping by norm keeps the direction and caps the length at <var>τ</var>.</div>
+        <div class="eq-line eq-active" data-eqline="0">g &#8592; g&#183;min(1, <span class="frac"><span class="top">&#964;</span><span class="bot">&#8214;g&#8214;</span></span>)</div>
+        <div class="eq-why eq-active" data-eqline="0"><var>g</var> is the gradient over all weights together and &#8214;<var>g</var>&#8214; its length. Under the threshold <var>τ</var> (tau), <var>τ</var> divided by the length is above 1, the min picks 1 and nothing changes. Above it, the factor rescales the whole gradient to length exactly <var>τ</var>. Every weight is scaled by the same factor, so the direction is kept and only a rare very large gradient is scaled down. A smaller <var>τ</var> clips more steps, steadier but slower when large gradients are real; a very large <var>τ</var> never clips. PyTorch sets no default.</div>
+      </div>
+    <figure class="figure mtd-fig" id="optClipFig"><svg class="mtd-svg" viewBox="0 0 400 170" style="max-width:480px" role="img" aria-label="A gradient arrow g longer than a circle of radius tau, and its clipped copy on the same line, ending at the circle">
+<circle class="mtd-ball" cx="110" cy="96" r="62"/>
+<line class="mtd-guide" x1="110" y1="96" x2="110" y2="158"/><text class="mtd-sub mvar" x="118" y="140" style="font-size:15px">τ</text>
+<line class="mtd-s mtd-c2" x1="110" y1="96" x2="352" y2="40" style="stroke-width:2.5px;stroke-dasharray:7 5"/><path class="mtd-f mtd-c2" d="M362,37.7 L349.4,47.2 L346.7,35.5 Z"/>
+<text class="mtd-t2 mvar" x="352" y="66" text-anchor="middle" style="font-size:16px;font-weight:700">g</text>
+<line class="mtd-norm" x1="110" y1="96" x2="160" y2="84.4"/><path class="mtd-grn" d="M170.4,82 L157.8,91.5 L155.1,79.8 Z"/>
+<text class="mtd-grn" x="196" y="112" style="font-size:15px;font-weight:700">clipped, length <tspan class="mvar">τ</tspan></text>
+<circle class="mtd-dot" cx="110" cy="96" r="4"/>
+</svg><figcaption class="caption"><span class="fignum">Figure 5.</span> A gradient <var>g</var> longer than <var>τ</var> and its clipped copy: same direction, length <var>τ</var>.</figcaption></figure>
+    <p>Clipping sits between <code>backward()</code> and <code>opt.step()</code>: <code>clip_grad_norm_</code> rescales all gradients by one factor so their joint length is at most <code>max_norm</code> (<var>τ</var>); 1.0 is a common starting value, not a rule. To pick <var>τ</var>, the clipping paper suggests looking at "statistics on the average norm over a sufficiently large number of updates".</p>
+<pre class="cs" data-cs="3-7,8-10,11,12"><code class="language-python">import torch
+import torch.nn.utils as U
+net = torch.nn.Linear(4, 1)
+ps = list(net.parameters())
+opt = torch.optim.SGD(ps, 0.1)
+x = torch.randn(8, 4)
+y = torch.randn(8, 1)
+err = net(x) - y
+loss = (err ** 2).mean()
+loss.backward()
+U.clip_grad_norm_(ps, 1.0)
+opt.step()  # after the clip</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>Builds a model, an optimizer and one batch.</li>
+  <li><span class="cs-n">2</span>Computes the loss and fills the gradients.</li>
+  <li><span class="cs-n">3</span>Gradient length capped at <var>τ</var>, the clipping equation.</li>
+  <li><span class="cs-n">4</span>Steps with the clipped gradient.</li>
+</ol>
+    <p>Exploding gradients are most common in recurrent networks, where backpropagation through time multiplies the gradient by the same recurrent weights at every step (see <a href="rnn.html#vanishing-gradients">Why gradients vanish or explode</a>).</p>
+
+<h2 id="in-practice"><span class="secnum">5</span> AdamW, a schedule and clipping in one PyTorch loop</h2>
+    <p>The optimizer is built once, before the loop, and owns the parameters' buffers from then on; each batch runs forward, backward, the optional clip and <code>opt.step()</code>, and the scheduler changes <var>α</var> per batch or per epoch.</p>
+    <p>The setup builds a linear model <code>net</code>, AdamW, and a cosine schedule with <code>T_max</code> of 80 steps.</p>
+<pre class="cs" data-cs="5-7,8-9"><code class="language-python">import torch
+import torch.nn.utils as U
+import torch.optim as optim
+S = optim.lr_scheduler
+net = torch.nn.Linear(8, 1)
+ps = list(net.parameters())
+opt = optim.AdamW(ps)  # once
+Cos = S.CosineAnnealingLR
+sched = Cos(opt, T_max=80)</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>Builds the model and AdamW once, before the loop.</li>
+  <li><span class="cs-n">2</span>Wraps the optimizer in a cosine schedule over 80 steps.</li>
+</ol>
+    <p>One update per batch, over 80 batches of 32 rows with 8 inputs and 1 target.</p>
+<pre class="cs" data-cs="3-5,6-7,8,9,10"><code class="language-python">data = torch.randn(80, 32, 9)
+for b in data:
+    x, y = b[:, :8], b[:, 8:]
+    err = net(x) - y
+    loss = (err ** 2).mean()
+    opt.zero_grad()
+    loss.backward()
+    U.clip_grad_norm_(ps, 1.0)
+    opt.step()  # every batch
+    sched.step()  # per batch</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>Splits each batch into inputs and targets and computes the loss.</li>
+  <li><span class="cs-n">2</span>Clears old gradients and fills new ones.</li>
+  <li><span class="cs-n">3</span>Caps the gradient's total length at 1.0 before the step; <a href="#clipping">Section 4</a>.</li>
+  <li><span class="cs-n">4</span>One optimizer update per batch.</li>
+  <li><span class="cs-n">5</span>One schedule tick per batch.</li>
+</ol>
+    <p>SAM replaces the single <code>opt.step()</code> with its two-pass step from <a href="#sam">Section 2</a>.</p>
+    <p>Here <code>T_max</code> counts batches, so the scheduler steps every batch; with <code>T_max</code> in epochs it steps once per epoch, after the inner loop, as in the PyTorch docs example.</p>
+    <p>PyTorch's AdamW uses a rate of 1e-3, betas of 0.9 and 0.999 and eps of 1e-8 by default (<a href="https://docs.pytorch.org/docs/2.3/generated/torch.optim.AdamW.html" target="_blank" rel="noopener noreferrer">AdamW documentation</a>), as the Adam paper suggests. SAM's official code is in JAX (<a href="https://github.com/google-research/sam" target="_blank" rel="noopener noreferrer">google-research/sam</a>).</p>
+    <ul>
+      <li>Calling <code>sched.step()</code> before <code>opt.step()</code> skips the schedule's first value; PyTorch requires this order since version 1.1 (<a href="https://docs.pytorch.org/docs/2.1/optim.html" target="_blank" rel="noopener noreferrer">torch.optim documentation</a>).</li>
+      <li>Saving only the model loses Adam's moments, so a resumed run restarts them at zero; save <code>opt.state_dict()</code> too.</li>
+    </ul>
+
+    <h2 id="tips"><span class="secnum">6</span> Failures in the training loop</h2>
+    <table class="datatable">
+      <thead><tr><th>Symptom</th><th>Likely cause</th><th>Fix</th></tr></thead>
+      <tbody>
+        <tr><td>Loss rises or turns NaN in the first steps</td><td>learning rate too high for the start</td><td>lower <var>α</var>, warm it up (<a href="#schedulers">Section 3</a>; Goyal et al. 2017 used 5 epochs for large-batch ImageNet training), clip the gradient norm</td></tr>
+        <tr><td>Weight decay seems weak with Adam</td><td>Adam rescales L2 inside the gradient</td><td>AdamW</td></tr>
+        <tr><td>Loss jumps when the schedule moves</td><td>scheduler stepped per batch when built per epoch, or the reverse</td><td>step it as its docs say (OneCycleLR: per batch)</td></tr>
+        <tr><td>Rare, very large gradients</td><td>exploding gradients, common in <a href="rnn.html">RNNs</a></td><td>clip by norm</td></tr>
+      </tbody>
+    </table>
+
+    <p>How test loss falls with more data, parameters or compute is on <a href="scaling-laws.html">Scaling Laws</a>.</p>
+    <h2 id="references"><span class="secnum">7</span> References</h2>
+    <ol class="brefs">
+      <li>Pascanu, R., et al. (2013). On the difficulty of training recurrent neural networks. ICML.</li>
+      <li>Kingma, D. P., and Ba, J. (2015). Adam: a method for stochastic optimization. ICLR.</li>
+      <li>Goyal, P., et al. (2017). Accurate, large minibatch SGD: training ImageNet in 1 hour. arXiv:1706.02677.</li>
+      <li>Loshchilov, I., and Hutter, F. (2017). SGDR: stochastic gradient descent with warm restarts. ICLR.</li>
+      <li>Smith, L. N. (2018). A disciplined approach to neural network hyper-parameters: part 1, learning rate, batch size, momentum, and weight decay. arXiv:1803.09820.</li>
+      <li>Loshchilov, I., and Hutter, F. (2019). Decoupled weight decay regularization. ICLR.</li>
+      <li>Foret, P., et al. (2021). Sharpness-aware minimization for efficiently improving generalization. ICLR.</li>
+      <li>PyTorch documentation, torch.optim.lr_scheduler (when schedulers step).</li>
+      <li>PyTorch documentation, torch.optim.AdamW (default settings).</li>
+    </ol>
+            <script>
+        (function () {
+            var nav = document.querySelector('.topnav');
+            function onNavScroll() {
+                nav.classList.toggle('scrolled', window.scrollY > 4);
+            }
+            window.addEventListener('scroll', onNavScroll, { passive: true });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            window.addEventListener('resize', function () {
+                if (window.innerWidth > 768) {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            onNavScroll();
+            var toggle = document.getElementById('navToggle');
+            var panel = document.getElementById('navPanel');
+            if (toggle && panel) {
+                toggle.addEventListener('click', function () {
+                    var open = panel.classList.toggle('open');
+                    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                });
+                panel.addEventListener('click', function (e) {
+                    if (e.target && e.target.classList && e.target.classList.contains('panel-link')) {
+                        panel.classList.remove('open');
+                        toggle.setAttribute('aria-expanded', 'false');
+                    }
+                });
+            }
+            var links = Array.prototype.slice.call(document.querySelectorAll('.tab-strip a.tab-chip[href^="#"]'));
+            if (!links.length) return;
+            var tabMap = {};
+            links.forEach(function (a) { tabMap[a.getAttribute('href').slice(1)] = a; });
+            var current = null;
+            function centerTab(tab) {
+                var strip = tab.parentElement;
+                if (!strip || !strip.classList.contains('tab-strip')) return;
+                var sr = strip.getBoundingClientRect();
+                var pr = tab.getBoundingClientRect();
+                strip.scrollLeft += (pr.width >= sr.width) ? (pr.left - sr.left) : (pr.left - sr.left) - (sr.width - pr.width) / 2;
+            }
+            function setActive(id) {
+                if (!tabMap[id] || id === current) return;
+                current = id;
+                links.forEach(function (a) {
+                    a.classList.toggle('active', a.getAttribute('href') === '#' + id);
+                });
+                centerTab(tabMap[id]);
+            }
+            links.forEach(function (a) {
+                a.addEventListener('click', function () {
+                    setActive(a.getAttribute('href').slice(1));
+                });
+            });
+            setActive(links[0].getAttribute('href').slice(1));
+            if ('IntersectionObserver' in window) {
+                var obs = new IntersectionObserver(function (entries) {
+                    entries.forEach(function (en) {
+                        if (en.isIntersecting) setActive(en.target.id);
+                    });
+                }, { rootMargin: '-35% 0px -55% 0px' });
+                Object.keys(tabMap).forEach(function (id) {
+                    var el = document.getElementById(id);
+                    if (el) obs.observe(el);
+                });
+                window.addEventListener('scroll', function () {
+                    if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) {
+                        setActive(links[links.length - 1].getAttribute('href').slice(1));
+                    }
+                }, { passive: true });
+            }
+            window.addEventListener('load', function () {
+                var act = document.querySelector('.tab-strip a.active');
+                if (act) centerTab(act);
+            });
+        })();
+    </script>
+  <script>
+  /* Shared Play helper: no-yank scrolling. */
+  function playScrollEnsure(el) {
+    /* Disabled 2026-10-06: user hates scroll-on-Play. No scrolling. */
+    return;
+  }
+  </script>
+  <script> /* r7reflow-reserve */
+  (function () {
+    var sets = {
+      'adamPlay': ['Play', 'Pause', 'Stop'],
+      'racePlay': ['Play', 'Pause', 'Stop']
+    };
+    Object.keys(sets).forEach(function (id) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      var prev = btn.textContent, max = 0;
+      sets[id].forEach(function (t) {
+        btn.textContent = t;
+        var w = btn.getBoundingClientRect().width;
+        if (w > max) max = w;
+      });
+      btn.textContent = prev;
+      btn.style.minWidth = Math.ceil(max) + 'px';
+    });
+  })();
+  </script>
+<script>
+/* P80 code sections (CODE-SECTIONS.md) */
+(function(){
+  var C=['121,184,255','255,171,112','133,232,157','210,168,255','255,161,152','118,227,234'];
+  function lay(pre){
+    var code=pre.querySelector('code'); if(!code) return;
+    var lh=parseFloat(getComputedStyle(code).lineHeight);
+    var pt=parseFloat(getComputedStyle(pre).paddingTop);
+    var old=pre.querySelectorAll('.cs-g'); for(var j=0;j<old.length;j++) pre.removeChild(old[j]);
+    var imgs=[],sizes=[],pos=[];
+    (pre.getAttribute('data-cs')||'').split(',').forEach(function(r,i){
+      var m=r.trim().match(/^(\d+)(?:-(\d+))?$/); if(!m) return;
+      var a=+m[1],b=+(m[2]||m[1]),c=C[i%C.length],top=pt+(a-1)*lh,h=(b-a+1)*lh;
+      imgs.push('linear-gradient(rgba('+c+',.55),rgba('+c+',.55))','linear-gradient(rgba('+c+',.13),rgba('+c+',.13))');
+      sizes.push('3px '+h+'px','100% '+h+'px'); pos.push('0 '+top+'px','0 '+top+'px');
+      var g=document.createElement('span'); g.className='cs-g'; g.setAttribute('aria-hidden','true');
+      g.setAttribute('data-n',String(i+1)); g.style.top=(top+(lh-11)/2)+'px'; g.style.color='rgb('+c+')';
+      pre.insertBefore(g,code);
+    });
+    pre.style.backgroundImage=imgs.join(','); pre.style.backgroundSize=sizes.join(',');
+    pre.style.backgroundPosition=pos.join(','); pre.style.backgroundRepeat='no-repeat';
+  }
+  function all(){ var p=document.querySelectorAll('pre.cs'); for(var i=0;i<p.length;i++) lay(p[i]); }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',all); else all();
+  window.addEventListener('load',all);
+  window.addEventListener('resize',all);
+  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(all);
+})();
+</script>
+</body>
+</html>

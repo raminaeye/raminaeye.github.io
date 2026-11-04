@@ -2035,7 +2035,7 @@ print(butter_db(600, 400, 12))</code></pre>
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
             ctx.clearRect(0, 0, cssW, cssH);
             ctx.font = '12px -apple-system, "Segoe UI", Roboto, Arial, sans-serif';
-            var padL = 48, padR = 12, padT = 12, padB = 26;
+            var padL = 48, padR = 12, padT = 12, padB = 29;   /* fix wave 13: 29 (was 26), so a dot on the chart floor keeps 6 px to the tick labels */
             var pw = cssW - padL - padR, ph = cssH - padT - padB;
             var fMax = 1000, dbTop = 3, dbBot = -60;
             function xPix(f) { return padL + (f / fMax) * pw; }
@@ -2095,15 +2095,8 @@ print(butter_db(600, 400, 12))</code></pre>
             }
             ctx.stroke();
             ctx.lineWidth = 1;
-            /* wanted + interferer markers.
-               Label placement: the blue response curve falls monotonically, so a
-               label anchored above-LEFT of its dot gets crossed by the rising
-               curve on narrow screens where the pixel slope is steep. The safe
-               home is above-RIGHT of the dot, where the curve only falls away.
-               Every candidate is checked against samples of the real curve plus
-               every label already placed, so a label never sits on the curve,
-               a dot, the fc tag, or another label at any cutoff, order, or
-               canvas width. */
+            /* wanted + interferer markers: placement rule at fix wave 13 below.
+               placedRects holds what the curve name label must keep clear of. */
             var placedRects = [];
             /* the x-axis tick row is off limits for labels */
             placedRects.push({ x0: padL, x1: cssW - padR, y0: padT + ph + 4, y1: cssH });
@@ -2138,100 +2131,129 @@ print(butter_db(600, 400, 12))</code></pre>
                 }
                 return true;
             }
-            function marker(f, color, label) {
-                var db = markerDb(f);
-                var mx = xPix(f), my = yPix(Math.max(db, dbBot));
-                ctx.fillStyle = color;
-                ctx.beginPath();
-                ctx.arc(mx, my, 6, 0, Math.PI * 2);
-                ctx.fill();
-                if (db < dbBot) {
-                    /* below the chart floor: the dot rests on the floor with a
-                       down arrow, and the label keeps the true value */
-                    ctx.beginPath();
-                    ctx.moveTo(mx - 5, my + 9); ctx.lineTo(mx + 5, my + 9); ctx.lineTo(mx, my + 15);
-                    ctx.closePath(); ctx.fill();
+            /* fix wave 13: one unit per signal, its dot plus a numbered badge with the dB value
+               beside it in the dot's own colour (the names live in the caption and the bars).
+               One hard rule for every cutoff, order and canvas width: the unit sits 6 to 30 px
+               from its own dot, at least 10 px nearer its own dot than the other dot, never
+               nearer the other unit than its own dot, and 6 px clear of the curve, the dashed
+               cutoff line, the fc tag, the tick labels, the other dot and the plot edges. Both
+               units are searched together, badge and value on one row first, then the badge over
+               its value; a value with no room under the rule is left to the bars under the plot
+               and its badge alone sits by the dot; a short leader line in the
+               dot colour is the last resort (the fix wave 13 sweep never reaches it). */
+            var floor13 = padT + ph, tickTop13 = cssH - 8 - 10, xfc13 = xPix(fc);
+            var crv13 = [];
+            for (var i13 = 0; i13 <= 200; i13++) { var f13 = 5 + (i13 / 200) * (fMax - 5); crv13.push([xPix(f13), yPix(Math.max(-attenDB(f13, fc, n), dbBot))]); }
+            function pb13(x, y, B) { var u = Math.max(B.x0 - x, 0, x - B.x1), v = Math.max(B.y0 - y, 0, y - B.y1); return Math.sqrt(u * u + v * v); }
+            function ps13(px, py, ax, ay, bx, by) { var dx = bx - ax, dy = by - ay, L = dx * dx + dy * dy, t = L ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / L)) : 0; var u = ax + t * dx - px, v = ay + t * dy - py; return Math.sqrt(u * u + v * v); }
+            function sb13(ax, ay, bx, by, B) {
+                /* segment to box distance; 0 when the segment enters the box (Liang-Barsky clip) */
+                var dx = bx - ax, dy = by - ay, t0 = 0, t1 = 1, hit = true, k, p, q, t;
+                for (k = 0; k < 4 && hit; k++) {
+                    p = k === 0 ? -dx : k === 1 ? dx : k === 2 ? -dy : dy;
+                    q = k === 0 ? ax - B.x0 : k === 1 ? B.x1 - ax : k === 2 ? ay - B.y0 : B.y1 - ay;
+                    if (p === 0) { if (q < 0) hit = false; } else { t = q / p; if (p < 0) { if (t > t0) t0 = t; } else if (t < t1) t1 = t; if (t0 > t1) hit = false; }
                 }
-                var text = label + ' ' + db.toFixed(1).replace('-', '\u2212') + '\u00a0dB';
-                var w = ctx.measureText(text).width;
-                var cands = [
-                    [mx + 12, my - 12],      /* above right: the curve falls away here */
-                    [mx + 12, my + 26],      /* below right */
-                    [mx - 12 - w, my - 12],  /* above left */
-                    [mx - 12 - w, my + 26]   /* below left */
-                ];
-                /* fix wave 12: then the same four sides and the two sides of the dashed cutoff line (6 px off it),
-                   on rows stepping away from the dot, so a label never has to sit on the dashed line */
-                var rows12 = []; for (var y12 = padT + 15; y12 <= padT + ph; y12 += 7) rows12.push(y12);
-                rows12 = rows12.filter(function (y12) { return Math.abs(y12 - my) <= 45; });   /* the label stays near its dot */
-                rows12.sort(function (a, b) { return Math.abs(a - my) - Math.abs(b - my); });
-                rows12.forEach(function (y12) { [mx + 12, mx - 12 - w, xPix(fc) + 6, xPix(fc) - 6 - w].forEach(function (x12) { cands.push([x12, y12]); }); });
-                var lx = cands[0][0], ly = cands[0][1];
-                var settled = false;
-                for (var i = 0; i < cands.length && !settled; i++) {
-                    var cx = Math.max(padL + 2, Math.min(cands[i][0], cssW - padR - w - 2));
-                    var cyy = Math.max(15, Math.min(cands[i][1], padT + ph));
-                    if (curveClear(cx, cyy, w) && spotClear(cx, cyy, w)) {
-                        lx = cx; ly = cyy; settled = true;
-                    }
-                }
-                /* fix wave 12: next, the label on two lines (name over value), narrower, beside the dot or the dashed line */
-                var two12 = false, t1_12 = label, t2_12 = text.slice(label.length + 1), w2 = Math.max(ctx.measureText(t1_12).width, ctx.measureText(t2_12).width);
-                for (var r12 = 0; r12 < rows12.length && !settled; r12++) [mx + 12, mx - 12 - w2, xPix(fc) + 6, xPix(fc) - 6 - w2].forEach(function (x12) {
-                    if (settled) return; var cx2 = Math.max(padL + 2, Math.min(x12, cssW - padR - w2 - 2)), cy2 = Math.max(15, Math.min(rows12[r12], padT + ph - 14));
-                    if (curveClear(cx2, cy2, w2) && curveClear(cx2, cy2 + 14, w2) && spotClear(cx2, cy2, w2) && spotClear(cx2, cy2 + 14, w2)) { lx = cx2; ly = cy2; settled = true; two12 = true; }
-                });
-                /* last, a label too wide for every clear spot may come within 3 px of the dashed line, never across it */
-                relax12 = true;
-                for (var i12 = 0; i12 < cands.length && !settled; i12++) {
-                    var cx12 = Math.max(padL + 2, Math.min(cands[i12][0], cssW - padR - w - 2)), cy12 = Math.max(15, Math.min(cands[i12][1], padT + ph));
-                    if (curveClear(cx12, cy12, w) && spotClear(cx12, cy12, w)) { lx = cx12; ly = cy12; settled = true; }
-                }
-                relax12 = false;
-                if (!settled) {
-                    /* pathological corner: nudge upward until the curve samples clear */
-                    lx = Math.max(padL + 2, Math.min(mx + 12, cssW - padR - w - 2));
-                    if (lx - 3 < xPix(fc) && xPix(fc) < lx + w + 3 && xPix(fc) + 4 + w <= cssW - padR - 2) lx = xPix(fc) + 4;   /* fix wave 12: never across or against the dashed line */
-                    ly = my - 12;
-                    while (!curveClear(lx, ly, w) && ly > 20) ly -= 14;
-                    ly = Math.max(15, ly);
-                }
-                ctx.save(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 4; ctx.lineJoin = 'round'; if (two12) { ctx.strokeText(t1_12, lx, ly); ctx.strokeText(t2_12, lx, ly + 14); } else ctx.strokeText(text, lx, ly); ctx.restore();   /* fix wave 12: halo, so a crossing dashed line stops at the label */
-                if (two12) {   /* fix wave 12: two-line form, name over value */
-                    ctx.fillStyle = '#333'; ctx.fillText(t1_12, lx, ly); ctx.fillText(t2_12, lx, ly + 14);
-                    placedRects.push({ x0: lx - 2, x1: lx + w2 + 2, y0: ly - 14, y1: ly + 19 });
-                } else {
-                ctx.fillStyle = '#333';
-                ctx.fillText(text, lx, ly);
-                placedRects.push({ x0: lx - 2, x1: lx + w + 2, y0: ly - 14, y1: ly + 5 });
-                }
-                /* the dot itself blocks the next marker's label */
-                placedRects.push({ x0: mx - 8, x1: mx + 8, y0: my - 8, y1: my + 8 });
+                if (hit) return 0;
+                return Math.min(pb13(ax, ay, B), pb13(bx, by, B), ps13(B.x0, B.y0, ax, ay, bx, by), ps13(B.x1, B.y0, ax, ay, bx, by), ps13(B.x0, B.y1, ax, ay, bx, by), ps13(B.x1, B.y1, ax, ay, bx, by));
             }
-            marker(150, '#27ae60', 'wanted');
-            marker(jf, '#e74c3c', 'interferer');
-            /* markers: the first spot around each dot that is clear of the labels and dots placed so far */
-            /* fix wave 12: markers search rings around their dot for the nearest spot 4 px clear of the curve, the dashed line, labels, dots and the tick row */
-            var cX12 = [], cY12 = [];
-            for (var q12 = 0; q12 <= 400; q12++) { var f12 = 5 + q12 / 400 * (fMax - 5); cX12.push(xPix(f12)); cY12.push(yPix(Math.max(-attenDB(f12, fc, n), dbBot))); }
-            [[1, 150], [2, jf]].forEach(function (m) {
-                var mx = xPix(m[1]), my = yPix(Math.max(markerDb(m[1]), dbBot)), p = null, best = null, bestG = -1e9;
-                for (var r = 20; r <= 60 && !p; r += 4) for (var a = 0; a < 360 && !p; a += 15) {
-                    var x = mx + r * Math.cos(a * Math.PI / 180), y = my + r * Math.sin(a * Math.PI / 180);
-                    if (x - 9 < padL + 2 || x + 9 > cssW - 2 || y - 9 < 2 || y + 9 > padT + ph) continue;
-                    var g = 1e9, j;
-                    for (j = 0; j < placedRects.length; j++) { var o = placedRects[j]; g = Math.min(g, Math.hypot(Math.max(o.x0 - x, 0, x - o.x1), Math.max(o.y0 - y, 0, y - o.y1)) - 9); }
-                    for (j = 0; j < cX12.length; j++) if (Math.abs(cX12[j] - x) < 20) g = Math.min(g, Math.hypot(cX12[j] - x, cY12[j] - y) - 9 - 1.25);
-                    if (g >= 5) p = [x, y]; else if (g > bestG) { bestG = g; best = [x, y]; }
+            function rg13(A, B) { return Math.hypot(Math.max(A.x0 - B.x1, 0, B.x0 - A.x1), Math.max(A.y0 - B.y1, 0, B.y0 - A.y1)); }
+            var dxc13 = (crv13[200][0] - crv13[0][0]) / 200;
+            function curveClear13(B, need) {
+                /* true when the curve (half its 2.5 px stroke added) stays need px from box B; only the segments under the box are measured */
+                var lo = Math.max(1, Math.floor((B.x0 - need - 2 - crv13[0][0]) / dxc13)), hi = Math.min(200, Math.ceil((B.x1 + need + 2 - crv13[0][0]) / dxc13) + 1);
+                for (var j = lo; j <= hi; j++) {
+                    var a = crv13[j - 1], b = crv13[j];
+                    if (Math.min(a[1], b[1]) > B.y1 + need + 1.25 || Math.max(a[1], b[1]) < B.y0 - need - 1.25) continue;
+                    if (sb13(a[0], a[1], b[0], b[1], B) - 1.25 < need) return false;
                 }
-                if (!p) p = best || [mx + 20, my];
-                fw3Mark(ctx, m[0], p[0], p[1]); placedRects.push({ x0: p[0] - 11, x1: p[0] + 11, y0: p[1] - 11, y1: p[1] + 11 });
+                return true;
+            }
+            var fcBox13 = fcCollides ? { x0: xfc13 + 4, x1: xfc13 + 6 + ctx.measureText('fc').width + 6, y0: padT, y1: padT + 20 } : { x0: fcX0 - 1, x1: fcX0 + fcLW + 4, y0: padT + ph - 14, y1: padT + ph + 3 };   /* the fc tag with its drawn subscript */
+            ctx.font = 'bold 12px -apple-system, "Segoe UI", Roboto, Arial, sans-serif';
+            var sig13 = [{ n: 1, f: 150, col: '#27ae60', ink: '#1a7a43' }, { n: 2, f: jf, col: '#e74c3c', ink: '#c0392b' }];
+            sig13.forEach(function (s) {
+                s.db = markerDb(s.f); s.low = s.db < dbBot; s.x = xPix(s.f);
+                /* below the chart floor the dot sits just above the floor with a down arrow onto it, clear of the tick labels */
+                s.y = s.low ? floor13 - 13 : yPix(s.db);
+                s.tri = s.low ? { x0: s.x - 5, x1: s.x + 5, y0: s.y + 8, y1: s.y + 14 } : null;
+                s.text = s.db.toFixed(1).replace('-', '\u2212') + '\u00a0dB';
+                s.tw = ctx.measureText(s.text).width;
+                /* three forms: badge then value on one row, badge over value, badge alone */
+                s.form = { full: [22 + s.tw, 18], stack: [Math.max(18, s.tw), 34], badge: [18, 18] };
             });
+            /* the y-axis labels on the left are off limits too */
+            var yLab13 = 6 + Math.max.apply(null, [0, -10, -20, -30, -40, -50, -60].map(function (d) { return ctx.measureText((d < 0 ? '\u2212' + (-d) : d) + '\u00a0dB').width; }));
+            function fixedOk13(B, s, o) {
+                /* unit B (for signal s) keeps 6 px from everything but the other unit, cheapest tests first */
+                if (B.x0 < Math.max(padL + 2, yLab13 + 6) || B.x1 > cssW - padR || B.y0 < 2 || B.y1 > tickTop13 - 6) return false;
+                if (pb13(o.x, o.y, B) - 6 < 6) return false;
+                if (s.tri && rg13(B, s.tri) < 6) return false;
+                if (o.tri && rg13(B, o.tri) < 6) return false;
+                if (rg13(B, fcBox13) < 6) return false;
+                if (sb13(xfc13, padT, xfc13, floor13, B) < 6) return false;
+                return curveClear13(B, 6);
+            }
+            var memo13 = {};
+            function cands13(s, o, maxOwn, full) {
+                var key = s.n + '_' + maxOwn + '_' + full; if (memo13[key]) return memo13[key];
+                var ring = [], out = [];
+                s.uw = s.form[full][0]; s.uh = s.form[full][1];
+                for (var y0 = s.y - maxOwn - 6 - s.uh; y0 <= s.y + maxOwn + 6; y0 += 3) for (var x0 = s.x - maxOwn - 6 - s.uw; x0 <= s.x + maxOwn + 6; x0 += 3) {
+                    var B = { x0: x0, y0: y0, x1: x0 + s.uw, y1: y0 + s.uh };
+                    var own = pb13(s.x, s.y, B) - 6;
+                    if (own < 6 || own > maxOwn) continue;
+                    if (pb13(o.x, o.y, B) - 6 < own + 10) continue;   /* nearer its own dot, by 10 px */
+                    /* nearest first; then prefer the right of the dot, the side the falling curve leaves open */
+                    ring.push({ B: B, own: own, full: full, sc: own + ((B.x0 + B.x1) / 2 < s.x ? 3 : 0) });
+                }
+                ring.sort(function (a, b) { return a.sc - b.sc; });
+                /* the clearance tests run in that order and stop at 80 spots that pass */
+                for (var r = 0; r < ring.length && out.length < 80; r++) if (fixedOk13(ring[r].B, s, o)) out.push(ring[r]);
+                return (memo13[key] = out);
+            }
+            function pairOk13(a, b) { var g = rg13(a.B, b.B); return g >= 8 && g >= a.own + 2 && g >= b.own + 2; }   /* each unit nearer its own dot than the other unit, by 2 px */
+            function solve13(maxOwn, f1, f2) {
+                var A = cands13(sig13[0], sig13[1], maxOwn, f1), Bc = cands13(sig13[1], sig13[0], maxOwn, f2), best = null;
+                for (var a = 0; a < A.length; a++) for (var b = 0; b < Bc.length; b++) {
+                    if (best && A[a].sc + Bc[b].sc >= best.sc) break;
+                    if (pairOk13(A[a], Bc[b])) { best = { sc: A[a].sc + Bc[b].sc, u: [A[a], Bc[b]] }; break; }
+                }
+                return best;
+            }
+            /* both values beside their badges when the rule allows; else the value that does not fit is left to the
+               bars under the plot and only its badge sits by the dot; a leader line is the last resort */
+            var sol13 = null, lead13 = false, F13 = [['full', 'full'], ['full', 'stack'], ['stack', 'full'], ['stack', 'stack'], ['full', 'badge'], ['badge', 'full'], ['stack', 'badge'], ['badge', 'stack'], ['badge', 'badge']];
+            for (var q13 = 0; q13 < F13.length && !sol13; q13++) sol13 = solve13(30, F13[q13][0], F13[q13][1]);
+            if (!sol13) { sol13 = solve13(60, 'badge', 'badge'); lead13 = true; }
+            sig13.forEach(function (s, k) {
+                ctx.fillStyle = s.col;
+                ctx.beginPath(); ctx.arc(s.x, s.y, 6, 0, Math.PI * 2); ctx.fill();
+                if (s.tri) { ctx.beginPath(); ctx.moveTo(s.tri.x0, s.tri.y0); ctx.lineTo(s.tri.x1, s.tri.y0); ctx.lineTo(s.x, s.tri.y1); ctx.closePath(); ctx.fill(); }
+                placedRects.push({ x0: s.x - 10, x1: s.x + 10, y0: s.y - 10, y1: (s.tri ? s.tri.y1 : s.y + 6) + 4 });
+                var form = sol13 ? sol13.u[k].full : 'badge', uw = s.form[form][0], uh = s.form[form][1];
+                var B = sol13 ? sol13.u[k].B : { x0: Math.min(s.x + 12, cssW - padR - uw), y0: s.y - 9, x1: 0, y1: 0 };
+                var bx = B.x0 + 9, by = B.y0 + 9;
+                if (lead13 && sol13 && sol13.u[k].own > 12) {
+                    /* leader in the dot colour, from the dot's edge to the badge's edge */
+                    var dx = bx - s.x, dy = by - s.y, d = Math.hypot(dx, dy) || 1;
+                    ctx.strokeStyle = s.col; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(s.x + dx / d * 7, s.y + dy / d * 7); ctx.lineTo(bx - dx / d * 10, by - dy / d * 10); ctx.stroke(); ctx.lineWidth = 1;
+                }
+                fw3Mark(ctx, s.n, bx, by);
+                if (form !== 'badge') {
+                    var tx = form === 'full' ? bx + 13 : B.x0, ty = form === 'full' ? by + 4 : B.y0 + 31;
+                    ctx.font = 'bold 12px -apple-system, "Segoe UI", Roboto, Arial, sans-serif'; ctx.textAlign = 'left';
+                    ctx.save(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 4; ctx.lineJoin = 'round'; ctx.strokeText(s.text, tx, ty); ctx.restore();
+                    ctx.fillStyle = s.ink; ctx.fillText(s.text, tx, ty);
+                }
+                placedRects.push({ x0: B.x0 - 6, x1: B.x0 + uw + 6, y0: B.y0 - 6, y1: B.y0 + uh + 6 });   /* the curve name keeps 6 px or more */
+            });
+            ctx.font = '12px -apple-system, "Segoe UI", Roboto, Arial, sans-serif';
             /* name the curve in place: first clear spot near the curve, right side first */
             (function () {
                 var t = 'filter <var>|H(f)|</var>';
                 ctx.font = 'bold 12px -apple-system, "Segoe UI", Roboto, Arial, sans-serif';
-                var w = ctx.measureText(t.replace(/<\/?(var|sub|sup)>/g, '')).width;
+                var w = ctx.measureText(t.replace(/<\/?(var|sub|sup)>/g, '')).width + 4;   /* fix wave 13: + 4, the variable is drawn in its own wider style */
                 var spots = [[padL + 6, yPix(0) + 24], [padL + 6, yPix(0) + 40]];
                 [900, 800, 700].forEach(function (f) {
                     var cyv = yPix(Math.max(-attenDB(f, fc, n), dbBot));
@@ -2644,7 +2666,7 @@ print(butter_db(600, 400, 12))</code></pre>
     <div class="aud-cv"><canvas class="aud-plot" id="t3-cv" aria-label="Spectrogram after downsampling a rising tone from 8 kHz to 2 kHz"></canvas></div>
     <canvas class="aud-key" id="t3-key" aria-hidden="true"></canvas>
 
-<p class="caption fig-caption"><span class="fignum">Figure 11.</span> A rising tone downsampled from 8&nbsp;kHz to 2&nbsp;kHz. <span class="mk" aria-label="marker 1">1</span>The true tone, dashed. <span class="mk" aria-label="marker 2">2</span>The tone after downsampling.</p>
+<p class="caption fig-caption"><span class="fignum">Figure 11.</span> A rising tone downsampled from 8&nbsp;kHz to 2&nbsp;kHz. <span class="mk" aria-label="marker 1">1</span>The true tone, dashed. <span class="mk" aria-label="marker 2">2</span>Where the folded tone lands after downsampling.</p>
     <p class="aud-read" id="t3-read" aria-live="polite"></p>
   </figure>
 <script>
@@ -2657,7 +2679,7 @@ print(butter_db(600, 400, 12))</code></pre>
   var L = 128, R = 32, NF = 128;
   var specs = [DSP.spectrogram(down(x), L, R, NF), DSP.spectrogram(down(xf), L, R, NF)];
   var mode = 0, cv = document.getElementById('t3-cv'), read = document.getElementById('t3-read'), btns = document.querySelectorAll('#t3 .aud-btn');
-  var READ = ['From <var>f<sub>s</sub></var>\u00a0=\u00a08\u00a0kHz down to 2\u00a0kHz with no filter, <span class="mk" aria-label="marker 2">2</span>the tone folds back at 1\u00a0kHz. <span class="mk" aria-label="marker 1">1</span>The dashed line is the true tone.', 'From <var>f<sub>s</sub></var>\u00a0=\u00a08\u00a0kHz down to 2\u00a0kHz with a low-pass first, the tone fades out above about 0.8\u00a0kHz. <span class="mk" aria-label="marker 1">1</span>The dashed line is the true tone.'];
+  var READ = ['From <var>f<sub>s</sub></var>\u00a0=\u00a08\u00a0kHz down to 2\u00a0kHz with no filter, <span class="mk" aria-label="marker 2">2</span>the tone folds back at 1\u00a0kHz. <span class="mk" aria-label="marker 1">1</span>The dashed line is the true tone.', 'From <var>f<sub>s</sub></var>\u00a0=\u00a08\u00a0kHz down to 2\u00a0kHz with a low-pass first, the tone fades out above about 0.8\u00a0kHz and <span class="mk" aria-label="marker 2">2</span>no folded tone is left. <span class="mk" aria-label="marker 1">1</span>The dashed line is the true tone.'];
   function draw() {
     var g = AUI.setup(cv, 230), F = AUI.frame(g, { l: 40, r: 10, t: 10, b: 26 }, [0, 2], [0, 1000]), c = g.ctx;
     var fr = specs[mode]; AUI.spec(g, F, fr, NF / 2, -60);
@@ -2668,7 +2690,7 @@ print(butter_db(600, 400, 12))</code></pre>
     c.save(); c.setLineDash([6, 4]); c.lineWidth = 3; c.strokeStyle = 'rgba(0,0,0,.55)';
     c.beginPath(); c.moveTo(F.X(0), F.Y(0)); c.lineTo(F.X(1000 / 1900), F.Y(1000)); c.stroke();
     c.lineWidth = 1.5; c.strokeStyle = '#ffffff'; c.beginPath(); c.moveTo(F.X(0), F.Y(0)); c.lineTo(F.X(1000 / 1900), F.Y(1000)); c.stroke(); c.restore();
-    fw3Mark(c, 1, F.X(0.25) + 16, F.Y(475) + 6); if (mode === 0) fw3Mark(c, 2, F.X(0.8) + 18, F.Y(480));
+    fw3Mark(c, 1, F.X(0.25) + 16, F.Y(475) + 6); fw3Mark(c, 2, F.X(0.8) + 18, F.Y(480));   /* fix wave 13: marker 2 in both states, where the fold lands (dark once low-passed) */
     btns.forEach(function (b, j) { b.classList.toggle('on', j === mode); b.setAttribute('aria-pressed', j === mode ? 'true' : 'false'); });
     read.innerHTML = READ[mode];
     AUI.key(document.getElementById('t3-key'));

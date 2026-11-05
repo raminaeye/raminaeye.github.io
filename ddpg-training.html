@@ -850,7 +850,7 @@ batch = random.sample(buf, BATCH)</code></pre>
         <div class="eq-line eq-active" data-eqline="0">x &#8592; x &#8722; &#954;&#183;x + &#963;&#183;&#958;</div>
         <div class="eq-why eq-active" data-eqline="0"><var>x</var> is the noise, one value per torque, and it carries over from step to step. The term <var>&#954;</var>&#183;<var>x</var> pulls it back toward zero, harder the further it has wandered. <var>&#963;</var> sets the size of each fresh kick, and <var>&#958;</var> is a new standard normal random number every step. Because <var>x</var> keeps most of its last value, consecutive steps drift together instead of twitching; a larger <var>&#954;</var> makes the wander shorter, a larger <var>&#963;</var> makes it wider. The DDPG paper and the repo use <var>&#954;</var> = 0.15 (the paper calls it <var>&#952;</var>) and <var>&#963;</var> = 0.2.</div>
         <div class="eq-line eq-active" data-eqline="1">a = <span class="eqt" style="color:#b3541e">&#956;(s)</span> + x</div>
-        <div class="eq-why eq-active" data-eqline="1">The torques sent to the arm are the actor's output <span class="eqt" style="color:#b3541e"><var>&#956;</var>(<var>s</var>)</span> plus the noise <var>x</var>. Noise is on during training, so the arm tries nearby torques the actor would not choose, and typically off at test time, so the arm can hold still.</div>
+        <div class="eq-why eq-active" data-eqline="1">The torques sent to the arm are the actor's output <span class="eqt" style="color:#b3541e"><var>&#956;</var>(<var>s</var>)</span> plus the noise <var>x</var>. Noise is on during training, so the arm tries nearby torques the actor would not choose, and typically off at test time, so the arm gives the same torque every time for the same state.</div>
       </div>
 
     <p>For an arm with inertia (a moving part keeps moving), smooth noise tries coherent strategies (<em>"push left for a while, see what happens"</em>) instead of vibrating in place. The DDPG paper chose OU noise for this reason, and the repo keeps it.</p>
@@ -1099,7 +1099,7 @@ def ddpg_update(batch):
     <h2 id="ddpg-gotchas"><span class="secnum">5</span> DDPG failure modes</h2>
 
     <ul>
-      <li><strong>Critic overestimation.</strong> The actor climbs toward torques the critic overrates. The critic's <var>Q</var> estimates keep rising while the score stays flat; TD3's twin critics (<a href="#ddpg-variants">Section 6</a>) fix it.</li>
+      <li><strong>Critic overestimation.</strong> The actor climbs toward torques the critic overrates. The critic's <var>Q</var> estimates keep rising while the score stays flat. TD3 curbs this by trusting the lower of two critics (see <a href="rl-continuous-actions.html#td3">Continuous-Action Actor-Critic: TD3 and SAC</a>).</li>
       <li><strong>Targets that move too fast.</strong> A large <var>&#964;</var>, or a hard copy every update, makes the critic loss swing and the score fall back after rising. Keep <var>&#964;</var> near the paper's 1e-3.</li>
       <li><strong>Too little exploration.</strong> With <var>&#963;</var> near 0 the arm repeats one motion and the score stays near 0. Train with OU noise of <var>&#963;</var> around 0.2.</li>
       <li><strong>Noise left on at evaluation.</strong> The trained arm jitters around the target and scores below its real policy. Turn the noise off when you evaluate.</li>
@@ -1107,22 +1107,17 @@ def ddpg_update(batch):
 
     <h2 id="ddpg-variants"><span class="secnum">6</span> TD3, SAC and multi-agent DDPG</h2>
 
-    <p><strong>TD3 (Twin Delayed DDPG)</strong> trains two critics and builds the target from the lower score, so one critic's inflated score stays out of the target. It also updates the actor less often than the critics and adds a little noise to the target action (Fujimoto et al., 2018).</p>
-    <div class="eq-card">
-        <div class="eq-what">TD3 evaluates the next move with two critics and keeps the lower value, after nudging that move with a little noise.</div>
-        <div class="eq-line eq-active" data-eqline="0">&#227; = <span class="eqt" style="color:#5d6d7e">&#956;&#8242;</span>(s&#8242;) + &#949;</div>
-        <div class="eq-why eq-active" data-eqline="0"><var>&#227;</var> is the target actor's next move <span class="eqt" style="color:#5d6d7e"><var>&#956;&#8242;</var></span>(<var>s&#8242;</var>) plus <var>&#949;</var>, a small clipped noise (in the paper drawn from a normal distribution with mean 0 and standard deviation 0.2, then clipped to between &#8722;0.5 and 0.5), so the target averages over nearby moves and a sharp, spurious peak in the critic cannot be exploited.</div>
-        <div class="eq-line eq-active" data-eqline="1">y = <span class="eqt" style="color:#a67c00">r</span> + <span style="white-space:nowrap">&#947;&#183;min<sub>i=1,2</sub> <span class="eqt" style="color:#5d6d7e">Q&#8242;<sub>i</sub></span>(s&#8242;, &#227;)</span></div>
-        <div class="eq-why eq-active" data-eqline="1"><span class="eqt" style="color:#5d6d7e"><var>Q&#8242;<sub>1</sub></var></span> and <span class="eqt" style="color:#5d6d7e"><var>Q&#8242;<sub>2</sub></var></span> are the two slow target critics, and min keeps the lower of their values at <var>&#227;</var>. One critic's overestimate is then dropped unless the other critic makes the same mistake, so inflated scores stop feeding into the target. The rest is DDPG's target.</div>
-      </div>
+    <p>TD3 and SAC each change the target from <a href="#ddpg-training-step">One DDPG training update (Section 2)</a>.</p>
 
-    <p><strong>SAC (Soft Actor-Critic)</strong> drops determinism. The policy stays stochastic and earns an entropy bonus (entropy measures how spread out its choices are), so exploration lives in the objective instead of being bolted on as OU noise. Haarnoja et al. (2018) report better sample efficiency and stability than DDPG on simulated locomotion tasks.</p>
+    <p><strong>TD3 (Twin Delayed DDPG, Fujimoto et al., 2018)</strong> changes DDPG's target in two ways and its schedule in one. It adds a little noise, kept within a small range, to the next torques, and it scores them with two slow target critics and keeps the lower score, so one critic's lucky high guess cannot lift the target. It also updates the actor and the slow copies less often than the critics, so the actor climbs a critic that has had time to settle.</p>
 
-    <p><a href="rl-policy-gradients.html#continuous">Policy-Based and Actor-Critic Methods: REINFORCE, PPO and SAC</a> teaches SAC as a policy method, with its entropy goal and settings beside DDPG's and TD3's.</p>
+    <p>The full TD3 update, worked on one Reacher step, is on <a href="rl-continuous-actions.html#td3">Continuous-Action Actor-Critic: TD3 and SAC</a>.</p>
+
+    <p><strong>SAC (Soft Actor-Critic, Haarnoja et al., 2018)</strong> keeps the policy random and rewards it for spreading its choices (high entropy), so exploration lives in the objective instead of in added OU noise, and the critic's target carries that payment. The same page teaches it in <a href="rl-continuous-actions.html#sac">SAC pays for spread</a>.</p>
 
     <p><strong>Multi-agent DDPG</strong> is taught on <a href="multi-agent-rl.html">Multi-Agent Reinforcement Learning</a>, where one shared actor and critic drive both rackets of a tennis game (self-play). The MADDPG paper (Lowe et al., 2017) instead gives each agent its own actor and its own centralized critic, which sees every agent's observations and actions.</p>
 
-    <p>DDPG fits continuous actions, a cheap simulator, and a controller that should hold still at test time; for a short list of discrete actions, DQN fits better.</p>
+    <p>DDPG fits continuous actions, a cheap simulator, and a controller that should act with no noise at test time, the same torque every time for the same state; for a short list of discrete actions, DQN fits better.</p>
 
     <h2 id="references"><span class="secnum">7</span> References</h2>
     <ol class="brefs">

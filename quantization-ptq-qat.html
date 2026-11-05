@@ -1,0 +1,1524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Post-Training Quantization and Quantization-Aware Training</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem;
+      line-height: 1.6;
+      color: #333;
+    }
+    h1, h2, h3, h4 {
+      color: #2c3e50; /* Darker shade for better contrast */
+      margin-top: 1.5em;
+      margin-bottom: 0.5em;
+    }
+    h1 { font-size: 2.5em; border-bottom: 2px solid #3498db; padding-bottom: 0.3em;}
+    h2 { font-size: 2em; border-bottom: 1px solid #bdc3c7; padding-bottom: 0.2em;}
+    h3 { font-size: 1.5em; }
+    h4 { font-size: 1.2em; color: #555;}
+    h3.subhead-sm { font-size: 1.2em; color: #555; }
+
+    /* Shared site nav (matches index.html topnav) */
+    body { padding-top: calc(64px + 1.5rem); }
+    h1, h2, h3 { scroll-margin-top: 84px; }
+    .topnav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        z-index: 1000;
+        background: rgba(255, 255, 255, 0.65);
+        backdrop-filter: blur(18px) saturate(1.5);
+        -webkit-backdrop-filter: blur(18px) saturate(1.5);
+        border-bottom: 1px solid transparent;
+        transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+    .topnav.scrolled {
+        background: rgba(255, 255, 255, 0.88);
+        border-bottom-color: #dee2e6;
+        box-shadow: 0 6px 24px rgba(33, 37, 41, 0.07);
+    }
+    .nav-inner {
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 0 1.5rem;
+        height: 64px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+    .wordmark {
+        font-weight: 700;
+        color: #212529;
+        text-decoration: none;
+        font-size: 1.05rem;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+    }
+    .nav-links {
+        display: flex;
+        gap: 2px;
+        align-items: center;
+    }
+    .nav-links a {
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        font-size: 0.95rem;
+        padding: 8px 14px;
+        border-radius: 999px;
+        transition: color 0.18s ease, background-color 0.18s ease;
+    }
+    .nav-links a:hover {
+        color: #007bff;
+        background-color: #e7f1ff;
+    }
+    .nav-links a.active {
+        color: #007bff;
+        background-color: #e7f1ff;
+        font-weight: 600;
+    }
+    .nav-links a:focus-visible,
+    .wordmark:focus-visible,
+    .nav-toggle:focus-visible,
+    .panel-link:focus-visible,
+    .panel-social a:focus-visible {
+        outline: 2px solid #007bff;
+        outline-offset: 2px;
+    }
+    @media (hover: hover) {
+        .nav-toggle:hover { background-color: #e7f1ff; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .topnav,
+        .nav-links a,
+        .nav-toggle span,
+        .nav-panel,
+        .nav-panel a.panel-link {
+            transition: none;
+        }
+    }
+    @media (hover: hover) {
+        .nav-toggle:hover { background-color: #e7f1ff; }
+    }
+    .nav-toggle {
+        display: none;
+        width: 42px;
+        height: 42px;
+        padding: 0;
+        background: none;
+        border: 0;
+        border-radius: 10px;
+        cursor: pointer;
+        flex: 0 0 auto;
+    }
+    .nav-panel {
+        display: grid;
+        grid-template-rows: 0fr;
+        visibility: hidden;
+        transition: grid-template-rows 0.32s ease, visibility 0s linear 0.32s;
+    }
+    .nav-panel.open {
+        grid-template-rows: 1fr;
+        visibility: visible;
+        transition: grid-template-rows 0.32s ease, visibility 0s;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner {
+        min-height: 0;
+        overflow: hidden;
+    }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link:hover {
+        background-color: #e7f1ff;
+        color: #007bff;
+    }
+    .nav-panel a.panel-link.active {
+        color: #007bff;
+        font-weight: 600;
+        background-color: #e7f1ff;
+    }
+    .panel-social a:hover {
+        border-color: #007bff;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner {
+        min-height: 0;
+        overflow: hidden;
+    }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link:hover {
+        background-color: #e7f1ff;
+        color: #007bff;
+    }
+    .nav-panel a.panel-link.active {
+        color: #007bff;
+        font-weight: 600;
+        background-color: #e7f1ff;
+    }
+    .panel-social a:hover {
+        border-color: #007bff;
+    }
+        .crumb { margin: 0 0 0.8em; }
+        .crumb a {
+            display: inline-block;
+            padding: 4px 14px;
+            border: 1px solid #dee2e6;
+            border-radius: 999px;
+            background: #f8f9fa;
+            color: #0056b3;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+        .crumb a:hover { border-color: #007bff; color: #007bff; }
+    .nav-panel a.panel-link {
+        display: flex;
+        align-items: center;
+        padding: 0.8rem 0.75rem;
+        margin: 0 0.25rem;
+        border-radius: 10px;
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        min-height: 48px;
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+    .panel-social {
+        display: flex;
+        gap: 0.5rem;
+        padding: 0.9rem 1rem 0.25rem;
+        flex-wrap: wrap;
+    }
+    .panel-social a {
+        color: #007bff;
+        text-decoration: none;
+        font-weight: 500;
+        font-size: 0.9rem;
+        padding: 6px 12px;
+        border: 1px solid #dee2e6;
+        border-radius: 999px;
+        transition: border-color 0.15s ease;
+    }
+    @media (max-width: 768px) {
+        .nav-links { display: none; }
+        .nav-toggle { display: block; }
+    }
+
+    /* Section tab strip: one slim row, scrolls sideways when it overflows. */
+    .tabs-label {
+        float: left;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #6c757d;
+        font-weight: 700;
+        line-height: 1.2;
+        margin: 0;
+        padding: 8px 12px 0 0;
+    }
+    .tab-strip {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 2px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        margin: 0 0 1.25rem;
+        max-width: 100%;
+    }
+    .tab-strip::-webkit-scrollbar { display: none; }
+    .tab-strip a.tab-chip,
+    .tab-strip a.tab-link {
+        display: inline-block;
+        flex: 0 0 auto;
+        padding: 6px 10px;
+        border-radius: 999px;
+        color: #495057;
+        text-decoration: none;
+        font-size: 0.82rem;
+        font-weight: 500;
+        line-height: 1.35;
+        white-space: nowrap;
+    }
+    .tab-strip a.tab-chip:hover,
+    .tab-strip a.tab-link:hover { color: #007bff; }
+    .tab-strip a.tab-chip.active,
+    .tab-strip a.tab-link.active { background: #007bff; color: #ffffff; }
+    @media (max-width: 768px) {
+        .tabs-label { display: none; }
+        .tab-strip {
+            width: 100vw;
+            max-width: 100vw;
+            box-sizing: border-box;
+            margin-left: calc((100% - 100vw) / 2);
+            padding-left: calc((100vw - 100%) / 2);
+        }
+        .tab-strip a.tab-chip,
+        .tab-strip a.tab-link { font-size: 0.75rem; padding: 6px 8px; }
+    }
+
+    pre {
+      background: #0d1117;
+      color: #e6edf3;
+      padding: 14px 16px;
+      overflow-x: auto;
+      border-radius: 8px;
+      font-size: 0.9em;
+      margin: 1em 0;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+    }
+    /* P52 canonical inline items in prose: numbers and variables wear the body
+       font at body size and read as part of the sentence (keeps P50's quiet
+       treatment, no pill; code blocks and eq-cards keep the mono treatment). */
+    code {
+        font-family: inherit;
+        font-size: 1em;
+        color: #1a1a1a;
+        background: none;
+        padding: 0 0.08em;
+        overflow-wrap: break-word;
+    }
+    pre code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 1em; }
+    .eq-card code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 0.92em; }
+    pre code { /* Reset for code inside pre, already handled by pre styling */
+        background: none;
+        padding: 0;
+        font-size: 1em; /* Ensure pre's font size is inherited */
+        color: inherit;
+    }
+    ul {
+        padding-left: 20px;
+    }
+    li {
+        margin-bottom: 0.5em;
+    }
+    strong {
+        color: #2980b9;
+    }
+    .output {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 1rem 1.2rem;
+      border-radius: 6px;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+      font-size: 0.9em;
+      margin: 1em 0;
+      overflow-x: auto;
+      border-left: 4px solid #22c55e;
+    }
+    .output .dim { color: #94a3b8; }
+    .figure { margin: 1.75rem 0; text-align: center; }
+    .figure svg { max-width: 100%; height: auto; }
+    .q-phone { display: none; }
+    @media (max-width: 600px) { .q-wide { display: none; } .q-phone { display: block; margin: 0 auto; width: 100%; max-width: 360px; } }
+    .caption {
+      font-size: 0.9em; color: #555; margin-top: 1rem;
+      border-left: 3px solid #3498db; padding-left: 0.8em;
+      text-align: left;
+    }
+    .bw-demo {
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      padding: 1.25rem;
+      margin: 1.75rem 0;
+      background: #fbfcfd;
+    }
+    @media (max-width:480px){ .bw-demo{padding:.75rem} }
+    .bw-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      align-items: center;
+      margin-bottom: 0.6rem;
+    }
+    .bw-controls label { font-weight: bold; color: #2c3e50; }
+    .bw-controls input[type=range] { flex: 1 1 160px; max-width: 320px; accent-color: #3498db; }
+    #bwCanvas { display: block; width: 100%; height: 134px; }
+    .bw-stats {
+      text-align: center; margin: 0.8rem 0 0.4rem; font-size: 1em; color: #2c3e50;
+    }
+    .bw-stats strong { color: #2980b9; }
+    .bw-stat { white-space: nowrap; }
+    .rfh-legend { display: flex; gap: 1.2rem; flex-wrap: wrap; font-size: 0.85em; color: #555; margin: 0.2rem 0 0.4rem; }
+    .rfh-sw { display: inline-block; width: 14px; height: 10px; margin-right: 6px; }
+    .rfh-sw-blue { background: #3498db; }
+    .rfh-sw-orange { border: 2px solid #e67e22; height: 7px; background: transparent; }
+    .rfh-tri { display: inline-block; width: 0; height: 0; margin-right: 6px; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 9px solid #c0392b; }
+    #rfhCanvas { display: block; width: 100%; height: 300px; }
+    .rfh-lower { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-top: 0.8rem; align-items: flex-start; }
+    .rfh-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem 1.2rem; flex: 1 1 280px; }
+    .rfh-stats.crp-stats3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    @media (max-width: 760px) { .rfh-stats.crp-stats3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    .rfh-k { display: block; font-size: max(0.8em, 12px); color: #777; }
+    .rfh-v { font-size: 1.15em; color: #2c3e50; font-weight: bold; font-family: inherit; font-variant-numeric: tabular-nums; }
+    .play-btn {
+      font: inherit;
+      padding: 0.45rem 1.1rem;
+      border-radius: 999px;
+      border: 1px solid #3498db;
+      background: #eaf4fd;
+      color: #1a6fa8;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .play-btn:hover:not(:disabled) { background: #d9eafa; }
+    .play-btn:disabled { opacity: 0.65; cursor: default; }
+    .snr-wrap { height: 10px; background: #e8edf2; border-radius: 5px; overflow: hidden; margin: 0.55rem 0 0.15rem; }
+    /* Batch 4 refocus: caption card, shared by every widget. */
+    .cap-card {
+      font-size: 15px;
+      line-height: 1.65;
+      color: #2c3e50;
+      background: #ffffff;
+      border: 1px solid #e3e8ee;
+      border-left: 3px solid #2c3e50;
+      border-radius: 10px;
+      padding: 18px;
+      margin: 14px 0 0;
+    }
+    .cap-card > strong { display: block; font-size: 15px; margin-bottom: 6px; }
+    .cap-card ul { list-style: none; margin: 0; padding: 0; }
+    .cap-card li { position: relative; padding-left: 18px; margin: 7px 0; }
+    .cap-card li::before {
+      content: ""; position: absolute; left: 0; top: 9px;
+      width: 6px; height: 6px; border-radius: 50%; background: #2c3e50;
+    }
+    .cap-card li.try-it {
+      background: rgba(44, 62, 80, 0.08);
+      border-radius: 6px;
+      padding: 7px 10px 7px 30px;
+    }
+    .cap-card li.try-it::before { left: 12px; top: 16px; }
+    .canvas-wrap { position: relative; }
+    @media (max-width: 480px){
+    }
+    /* rfh outlier blink marker + note/verdict line */
+    .rfh-blink {
+      position: absolute;
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      background: #c0392b;
+      border: 2px solid #fff;
+      box-shadow: 0 0 6px rgba(192, 57, 43, 0.9);
+      pointer-events: none;
+      opacity: 0;
+      z-index: 4;
+    }
+    .rfh-blink.on { animation: rfh-blink 0.8s ease-in-out infinite; }
+    @keyframes rfh-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.15; } }
+    .rfh-note {
+      min-height: 0;
+      margin-top: 0.6rem;
+      font-size: 0.95em;
+      color: #2c3e50;
+    }
+    .rfh-note strong { color: #c0392b; }
+    .snr-bar { height: 100%; width: 100%; border-radius: 5px; background: #27ae60; transition: width 0.35s ease, background-color 0.35s ease; }
+    .snr-cap { font-size: 0.8em; color: #888; text-align: center; }
+    /* Stat cards and data tables (readability sweep) */
+    .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:1.2em 0}
+    .stat-card{border:1px solid #bdc3c7;border-radius:8px;padding:14px 16px;background:#f7f9fb}
+    .stat-num{font-size:1.9em;font-weight:800;color:#2c3e50;line-height:1.15}
+    .stat-unit{font-size:.55em;font-weight:600;color:#7f8c8d}.stat-vs{font-size:max(12px,.55em);font-weight:600;color:#7f8c8d}
+    .stat-label{font-size:.92em;font-weight:600;margin-top:6px;color:#2c3e50}
+    .stat-note{font-size:.82em;color:#7f8c8d;margin-top:3px}
+    .datatable{border-collapse:collapse;margin:1.2em 0;width:100%;max-width:560px;font-size:.95em}
+    .datatable th,.datatable td{border:1px solid #bdc3c7;padding:.45em .6em;text-align:center}
+    .datatable th{background:#2c3e50;color:#fff;font-weight:600}
+    .datatable tr:nth-child(even) td{background:#f7f9fb}
+    .table-scroll{overflow-x:auto;max-width:100%;-webkit-overflow-scrolling:touch;margin:1.2em 0}
+    .table-scroll .datatable{margin:0}
+    /* Phone fit: smaller type and padding, long code tokens may wrap so the table fits its box instead of scrolling sideways. */
+    @media (max-width: 600px) {
+      .datatable { font-size: .82em; }
+      .datatable th, .datatable td { padding: .35em .3em; overflow-wrap: normal; word-break: normal; }
+    }
+    /* References (last section on tutorial pages) */
+    .brefs { line-height: 1.7; }
+    .brefs li { margin: 0.35em 0; }
+    /* Display math (matches other tutorial pages) */
+    .math-display {
+            font-size: 1.38rem;
+        text-align: center;
+        margin: 1.4rem 0;
+        overflow-x: auto;
+        max-width: 100%;
+    }
+    /* Let wide display equations scroll instead of pushing the page wide */
+    .mjx-chtml.MJXc-display {
+        overflow-x: auto;
+        overflow-y: hidden;
+        max-width: 100%;
+    }
+    /* Numbered walkthrough steps */
+/* Worked-example card (Round 9 template): a calm sage card that sets
+           math walkthrough steps apart from body text. Body font throughout,
+           all math in MathJax, one computation per line, generous spacing. */
+        .worked-example {
+            background: #f1f6ed;
+            border: 1px solid #d9e4d1;
+            border-left: 3px solid #6f9a63;
+            border-radius: 10px;
+            padding: 14px 20px;
+            margin: 1.1em 0;
+            max-width: 680px;
+            color: #2c3e50;
+            line-height: 1.8;
+            overflow-x: auto;
+        }
+        ol.worked-example {
+            list-style: none;
+            counter-reset: wex-step;
+            padding-left: 20px;
+        }
+        ol.worked-example > li {
+            counter-increment: wex-step;
+            position: relative;
+            margin: 0;
+            padding: 8px 0 8px 44px;
+        }
+        ol.worked-example > li + li { border-top: 1px dashed #cbdabf; }
+        ol.worked-example > li::before {
+            content: counter(wex-step);
+            position: absolute;
+            left: 0;
+            top: 9px;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: #6f9a63;
+            color: #ffffff;
+            font-size: 13px;
+            font-weight: 700;
+            line-height: 28px;
+            text-align: center;
+        }
+        @media (max-width: 480px) {
+            .worked-example { padding: 12px; font-size: 15px; }
+            ol.worked-example { padding-left: 12px; }
+            ol.worked-example > li { padding-left: 38px; }
+        }
+        /* Shared walkthrough equation-card contract (verbatim, all pages) */
+        
+        .eq-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+
+          padding:1rem 1.2rem;margin:1.75rem auto;max-width:640px;overflow-x:auto}
+
+        .eq-what{font-size:.95rem;color:#334155;margin:0 0 .6rem;line-height:1.55}
+
+        .eq-line{font-size:1.38rem;line-height:2.0;letter-spacing:.015em;padding:.5rem .6rem;white-space:normal;font-weight:500;opacity:.38;border-left:3px solid transparent}
+
+        .eq-line.eq-active{opacity:1;border-left-color:#2c3e50}
+.eq-line sub,.eq-line sup{font-size:.68em}
+.frac{display:inline-flex;flex-direction:column;text-align:center;vertical-align:middle;margin:0 .18em;font-size:.8em;line-height:1.3}
+.frac .top{padding:0 .3em .1em}
+.frac .bot{border-top:2px solid currentColor;padding:.1em .3em 0}
+      .eq-why{display:none;visibility:hidden;font-size:1rem;color:#475569;padding:.15rem .35rem .4rem;line-height:1.65}
+      .eq-why.eq-active{display:block;visibility:visible}
+      .eq-card.eq-stepped .eq-line{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-line.eq-active{display:block;opacity:1;visibility:visible}
+      .eq-card.eq-stepped .eq-legend .eq-item{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-legend .eq-item.eq-active{display:block;visibility:visible}
+
+        .eqt{font-weight:600;padding:0 .1em;border-radius:3px}
+
+        .eqt.eqt-active{text-decoration:underline;text-underline-offset:2px}
+
+        .eq-legend{font-size:.85rem;color:#475569;margin-top:.6rem;line-height:1.75}
+
+        .eq-legend .eq-item{display:block}
+
+        .eq-legend .eq-item code{white-space:nowrap}
+
+        .eq-sw{display:inline-block;width:.7em;height:.7em;border-radius:2px;
+
+          margin:0 .25em 0 .6em;vertical-align:baseline}
+
+        @media (max-width:480px){.eq-card{padding:.85rem .9rem}.eq-line{font-size:1.24rem;line-height:1.95}}
+/* P70 inline variables and inline code, one style site-wide (VAR-STYLE.md v2) */
+var,.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic;font-weight:400;font-size:1em;color:#1d4e89;background:#edf3fa;border-radius:3px;padding:0 .18em;white-space:nowrap;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+var sub,var sup,.mvar sub,.mvar sup{font-size:.72em;font-style:normal}
+pre var,code var,.eq-line var{font:inherit;color:inherit;background:none;padding:0}
+svg text.mvar,svg tspan.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic}
+:not(pre)>code:not(.eq-line code){font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,Courier,monospace;font-size:.86em;color:#24292f;background:#f1f3f5;border:1px solid #dfe3e8;border-radius:4px;padding:.06em .32em;white-space:normal;overflow-wrap:anywhere}
+/* P79 numbering (NUMBERING.md) */
+.secnum{font-variant-numeric:tabular-nums;margin-right:.4em;color:inherit;font-weight:inherit}
+.tab-strip .secnum{margin-right:.3em;opacity:.75}
+.fignum{font-weight:600;margin-right:.3em;font-variant-numeric:tabular-nums}
+/* P80 code sections (CODE-SECTIONS.md) */
+@media (max-width:480px){pre{font-size:.76em;padding:12px 10px}}
+pre.cs{position:relative;background-attachment:local;padding-left:20px}
+pre.cs code{display:block;line-height:1.55}
+pre.cs .cs-g{position:absolute;left:3px;width:11px;text-align:center;font:700 11px/1 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;-webkit-user-select:none;user-select:none;pointer-events:none}
+pre.cs .cs-g::before{content:attr(data-n)}
+ol.cs-notes{list-style:none;padding-left:0;margin:-.4em 0 1em}
+ol.cs-notes li{margin:0 0 .3em;padding-left:1.9em;position:relative}
+ol.cs-notes .cs-n{position:absolute;left:0;top:.1em;min-width:1.35em;padding:0 .25em;border-radius:4px;font:700 .8em/1.45 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;text-align:center;color:#0d1117}
+ol.cs-notes li:nth-child(6n+1) .cs-n{background:#79b8ff}
+ol.cs-notes li:nth-child(6n+2) .cs-n{background:#ffab70}
+ol.cs-notes li:nth-child(6n+3) .cs-n{background:#85e89d}
+ol.cs-notes li:nth-child(6n+4) .cs-n{background:#d2a8ff}
+ol.cs-notes li:nth-child(6n+5) .cs-n{background:#ffa198}
+ol.cs-notes li:nth-child(6n+6) .cs-n{background:#76e3ea}
+.q-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}.q-scroll-hint{display:none;font-size:.85rem;color:#666;margin:.3rem 0 0}@media (max-width:480px){.q-scroll img{width:640px;max-width:none!important}.q-scroll-hint{display:block}}
+/* phone legibility: eq-legend subscripts stay at least 11 px (P57 minFont) */
+.eq-legend var sub,.eq-legend var sup{font-size:.82em}
+svg text.mvar,svg tspan.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic}
+/* phone code blocks: smaller type, long statements wrap instead of scrolling sideways */
+        /* diagram-side dim/highlight (SVG/DOM). Do NOT use .hl/.dim: taken. */
+        .eq-dim{opacity:.32}
+        .eq-hl{filter:drop-shadow(0 0 3px currentColor)}
+  
+/* canonical spacing: display math */
+.MathJax_Display, mjx-container[display="true"] { margin: 1.4rem 0 !important; }
+    /* Compact phone walkthrough layout (canonical block, every tutorial page):
+       two-column eq legends, tightened demo spacing, and diagrams capped so
+       controls and diagram share the first phone screen. Phone widths only;
+       desktop rendering and equation typography are unchanged. */
+    @media (max-width:480px){
+      .demo{padding:.75rem}
+      .demo>*{margin-top:.6rem;margin-bottom:.6rem}
+      .demo>*:first-child{margin-top:0}
+      .demo .eq-card{margin:1rem auto;padding:.7rem .8rem}
+      .demo .cap-card,.demo .capcard{padding:.85rem .95rem}
+      .eq-legend{display:grid;grid-template-columns:1fr 1fr;column-gap:.9rem;row-gap:.1rem;line-height:1.5}
+      .eq-legend .eq-item:has(> code ~ code){grid-column:1/-1}
+      .demo svg,.demo canvas{max-height:55vh}
+    }
+</style>
+  <script type="text/javascript" async
+    src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML">
+  </script>
+  <script type="text/x-mathjax-config">
+    MathJax.Hub.Config({
+      tex2jax: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        displayMath: [['$$','$$'], ['\\[','\\]']],
+        processEscapes: true
+      },
+      showProcessingMessages: false,
+      messageStyle: "none"
+    });
+  </script>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+  <script>
+  </script>
+<style>
+/* Static teaching diagrams (mtd), shared across tutorials, 2026-11-01 */
+.figure.mtd-fig { margin: 1.75rem 0; }
+.mtd-fig > svg.mtd-svg { display: block; width: 100%; height: auto; margin: 0 auto; }
+.mtd-fig .caption { margin-top: 1rem; }
+@media (max-width: 400px) { .figure svg { width: calc(100% + 48px) !important; max-width: none !important; margin-left: -24px !important; margin-right: -24px !important; } }
+.mtd-svg text { fill: #2c3e50; font-family: sans-serif; }
+.mtd-svg .mtd-sub { fill: #555; }
+.mtd-svg .mtd-t1 { fill: #1f618d; }
+.mtd-svg .mtd-t2 { fill: #ca6f1e; }
+.mtd-svg .mtd-pu { fill: #7d3c98; }
+.mtd-svg .mtd-red { fill: #c0392b; }
+.mtd-svg .mtd-grn { fill: #148f77; }
+.mtd-svg line, .mtd-svg path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.mtd-svg .mtd-s.mtd-c1 { stroke: #1f618d; } .mtd-svg .mtd-f.mtd-c1 { fill: #1f618d; }
+.mtd-svg .mtd-s.mtd-c2 { stroke: #ca6f1e; } .mtd-svg .mtd-f.mtd-c2 { fill: #ca6f1e; }
+.mtd-svg .mtd-s.mtd-cp { stroke: #7d3c98; } .mtd-svg .mtd-f.mtd-cp { fill: #7d3c98; }
+.mtd-svg .mtd-s.mtd-cr { stroke: #c0392b; } .mtd-svg .mtd-f.mtd-cr { fill: #c0392b; }
+.mtd-svg .mtd-s.mtd-cg { stroke: #2c3e50; } .mtd-svg .mtd-f.mtd-cg { fill: #2c3e50; }
+.mtd-svg .mtd-sep { stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-pic { fill: #fbfcfd; stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-axis { stroke: #7f8c8d; stroke-width: 1.5px; }
+.mtd-svg .mtd-arc { stroke: #2c3e50; stroke-width: 2px; }
+.mtd-svg .mtd-dot { fill: #2c3e50; }
+.mtd-svg .mtd-guide { stroke: #7f8c8d; stroke-width: 1.4px; stroke-dasharray: 4 4; }
+.mtd-svg .mtd-ring { fill: #fbfcfd; stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-pt { fill: #1f618d; opacity: .55; }
+.mtd-svg .mtd-cross { stroke: #2c3e50; stroke-width: 2.2px; }
+.mtd-svg .mtd-barbg { fill: #eef1f4; }
+.mtd-svg .mtd-bar { fill: #7d3c98; }
+.mtd-svg .mtd-cart { fill: #ffffff; stroke: #2c3e50; stroke-width: 2px; }
+.mtd-svg .mtd-zero { stroke: #95a5a6; stroke-width: 1.2px; stroke-dasharray: 4 4; }
+.mtd-svg .mtd-axisl { stroke: #7f8c8d; stroke-width: 2px; }
+.mtd-svg .mtd-norm { stroke: #148f77; stroke-width: 4px; }
+.mtd-svg .mtd-read { fill: #ffffff; stroke: #2c3e50; stroke-width: 2.5px; }
+.mtd-svg .mtd-ball { fill: #7d3c98; fill-opacity: .08; stroke: #7d3c98; stroke-width: 1.6px; stroke-dasharray: 5 4; }
+.mtd-svg .mtd-box { fill: #fbfcfd; stroke: #bdc3c7; stroke-width: 1.4px; }
+.mtd-svg .mtd-crossbg { fill: #ffffff; }
+.mtd-svg .mtd-halo { stroke: #ffffff; stroke-width: 5px; stroke-linejoin: round; paint-order: stroke; }
+.mtd-svg .mtd-box.mtd-note { stroke-dasharray: 5 4; }
+.mtd-svg .mtd-qzw { fill: #ffffff; }
+</style>
+<style>
+/* Phone fit (2026-11-01): the real-weights histogram tool keeps its slider,
+   buttons, plot and readout inside one 360 px phone screen. Phone only. */
+@media (max-width: 480px) {
+  .rfh-demo .bw-controls { gap: 0.5rem 0.6rem; }
+  .rfh-demo .bw-controls .play-btn { padding: 0.45rem 0.8rem; }
+  .rfh-demo .rfh-legend { gap: 0.15rem 1rem; }
+  .rfh-demo .rfh-lower { margin-top: 0.5rem; }
+  .rfh-demo .rfh-note { margin-top: 0.4rem; }
+  .rfh-demo .caption { margin-top: 0.6rem; }
+}
+</style>
+<style>
+.dek { font-size: 1.15em; color: #555; margin-top: 0.2em; }
+/* Series and page map (B-TF, 2026-11-02) */
+.sermap { margin: .5rem 0 1.1rem; font-size: .8rem; line-height: 1.3; }
+.sermap ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; row-gap: 5px; }
+.sermap li { display: flex; align-items: center; margin: 0; padding: 0; line-height: 1.25; }
+.sermap li + li::before { content: "\2192"; color: #95a5a6; margin: 0 5px; }
+.sermap a, .sermap .sm-here { display: inline-block; padding: 2px 7px; line-height: 1.25; border-radius: 6px; text-decoration: none; }
+.sermap .sm-series a { padding: 1px 2px; color: #1f618d; text-decoration: underline; text-decoration-color: #a9cce3; text-underline-offset: 2px; }
+.sermap .sm-series .sm-here { padding: 1px 6px; background: #148f77; color: #fff; font-weight: 600; }
+.sermap .sm-series { row-gap: 0; }
+.sermap .sm-series a, .sermap .sm-series .sm-here, .sermap .sm-also a { display: inline-flex; align-items: center; min-height: 44px; box-sizing: border-box; }
+.sermap .sm-flow { margin-top: 6px; padding-left: 8px; border-left: 3px solid #148f77; }
+.sermap .sm-flow a { border: 1px solid #d5dbdb; background: #f8f9fa; color: #2c3e50; }
+.sermap .sm-also { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin: 6px 0 0; line-height: 1.25; color: #566573; }
+.sermap .sm-also a { border: 1px dashed #a9cce3; color: #1f618d; background: #fff; }
+.sermap a:hover { border-color: #1f618d; }
+@media (max-width: 400px) { .sermap { font-size: .72rem; } .sermap a, .sermap .sm-here { padding: 2px 5px; } .sermap li + li::before { margin: 0 3px; } }
+</style>
+</head>
+<body>
+       <nav class="topnav" aria-label="Site">
+    <div class="nav-inner">
+        <a class="wordmark" href="index.html">Ramin Anushiravani</a>
+        <div class="nav-links">
+            <a href="tutorial.html" class="active">Tutorials</a>
+            <a href="pubs.html">Publications</a>
+            <a href="index.html">About</a>
+            <a href="work.html">Projects</a>
+        </div>
+        <button class="nav-toggle" id="navToggle" aria-expanded="false" aria-controls="navPanel" aria-label="Menu"><span></span><span></span><span></span></button>
+    </div>
+    <div class="nav-panel" id="navPanel">
+        <div class="nav-panel-inner">
+            <div class="nav-panel-body">
+                <a class="panel-link active" href="tutorial.html">Tutorials</a>
+                <a class="panel-link" href="pubs.html">Publications</a>
+                <a class="panel-link" href="index.html">About</a>
+                <a class="panel-link" href="work.html">Projects</a>
+                <div class="panel-social">
+                    <a href="https://linkedin.com/in/raminanushiravani" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+                    <a href="https://github.com/raminaeye/" target="_blank" rel="noopener noreferrer">GitHub</a>
+                    <a href="https://scholar.google.com/citations?user=kouXx8gAAAAJ&hl=en" target="_blank" rel="noopener noreferrer">Google Scholar</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</nav>
+
+    <p class="crumb"><a href="tutorial.html">&larr; All tutorials</a></p>
+
+    <div class="tab-strip">
+        <a class="tab-chip" href="https://github.com/raminaeye/ML-Concepts/blob/main/notebooks/quantization/quantization.ipynb" target="_blank" rel="noopener noreferrer">Companion notebook</a>
+    </div>
+   <h1>Post-Training Quantization and Quantization-Aware Training</h1>
+  <p class="dek">Dynamic, static and QAT workflows in PyTorch</p>
+  <nav class="sermap" aria-label="The quantization series">
+      <ol class="sm-series">
+        <li><a href="quantization.html">Quantization Basics</a></li>
+        <li><span class="sm-here" aria-current="page">Post-Training Quantization and Quantization-Aware Training</span></li>
+        <li><a href="quantization-debugging.html">Debugging a Quantized Model</a></li>
+      </ol>
+    </nav>
+
+   <p class="tabs-label">On this page</p>
+   <div class="tab-strip">
+     <a class="tab-link" href="#dynamic-quantization"><span class="secnum">1</span> Dynamic quantization</a>
+     <a class="tab-link" href="#static-quantization"><span class="secnum">2</span> Static quantization</a>
+     <a class="tab-link" href="#quantization-aware-training-qat"><span class="secnum">3</span> Quantization-Aware Training (QAT)</a>
+     <a class="tab-link" href="#in-practice"><span class="secnum">4</span> Quantization in practice</a>
+     <a class="tab-link" href="#references"><span class="secnum">5</span> References</a>
+   </div>
+
+   <figure id="fig-when" class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 256" style="max-width:480px" role="img" aria-label="Timeline from training through deploy to each input. QAT rounds weights and activations on every training step. Static PTQ measures activation ranges once, just before deploy, then runs with fixed scales. Dynamic PTQ measures activation ranges again on every input after deploy"><text class="mtd-sub" x="160" y="24" text-anchor="middle" style="font-size:15px;font-weight:700">training</text><text class="mtd-sub" x="318" y="24" text-anchor="middle" style="font-size:15px;font-weight:700">each input</text><line x1="232" y1="10" x2="232" y2="232" style="stroke:#7f8c8d;stroke-width:1.5px;stroke-dasharray:5 4"/><text x="232" y="248" text-anchor="middle" style="font-size:15px;font-weight:700">deploy</text><text x="8" y="75" style="font-size:15px;font-weight:700;fill:#ca6f1e">QAT</text><line x1="100" y1="70" x2="392" y2="70" style="stroke:#bdc3c7;stroke-width:3px"/><text x="8" y="145" style="font-size:15px;font-weight:700;fill:#148f77">static</text><text class="mtd-sub" x="8" y="163" style="font-size:15px">PTQ</text><line x1="100" y1="140" x2="392" y2="140" style="stroke:#bdc3c7;stroke-width:3px"/><text x="8" y="215" style="font-size:15px;font-weight:700;fill:#1f618d">dynamic</text><text class="mtd-sub" x="8" y="233" style="font-size:15px">PTQ</text><line x1="100" y1="210" x2="392" y2="210" style="stroke:#bdc3c7;stroke-width:3px"/><line x1="106" y1="60" x2="106" y2="80" style="stroke:#ca6f1e;stroke-width:2.5px"/><line x1="118" y1="60" x2="118" y2="80" style="stroke:#ca6f1e;stroke-width:2.5px"/><line x1="130" y1="60" x2="130" y2="80" style="stroke:#ca6f1e;stroke-width:2.5px"/><line x1="142" y1="60" x2="142" y2="80" style="stroke:#ca6f1e;stroke-width:2.5px"/><line x1="154" y1="60" x2="154" y2="80" style="stroke:#ca6f1e;stroke-width:2.5px"/><line x1="166" y1="60" x2="166" y2="80" style="stroke:#ca6f1e;stroke-width:2.5px"/><line x1="178" y1="60" x2="178" y2="80" style="stroke:#ca6f1e;stroke-width:2.5px"/><line x1="190" y1="60" x2="190" y2="80" style="stroke:#ca6f1e;stroke-width:2.5px"/><line x1="202" y1="60" x2="202" y2="80" style="stroke:#ca6f1e;stroke-width:2.5px"/><line x1="214" y1="60" x2="214" y2="80" style="stroke:#ca6f1e;stroke-width:2.5px"/><text x="160" y="100" text-anchor="middle" style="font-size:15px;fill:#ca6f1e">round every step</text><circle cx="214" cy="140" r="8" style="fill:#148f77"/><text x="204" y="170" text-anchor="end" style="font-size:15px;fill:#148f77">measure once</text><line x1="250" y1="200" x2="250" y2="220" style="stroke:#1f618d;stroke-width:2.5px"/><line x1="264" y1="200" x2="264" y2="220" style="stroke:#1f618d;stroke-width:2.5px"/><line x1="278" y1="200" x2="278" y2="220" style="stroke:#1f618d;stroke-width:2.5px"/><line x1="292" y1="200" x2="292" y2="220" style="stroke:#1f618d;stroke-width:2.5px"/><line x1="306" y1="200" x2="306" y2="220" style="stroke:#1f618d;stroke-width:2.5px"/><line x1="320" y1="200" x2="320" y2="220" style="stroke:#1f618d;stroke-width:2.5px"/><line x1="334" y1="200" x2="334" y2="220" style="stroke:#1f618d;stroke-width:2.5px"/><line x1="348" y1="200" x2="348" y2="220" style="stroke:#1f618d;stroke-width:2.5px"/><line x1="362" y1="200" x2="362" y2="220" style="stroke:#1f618d;stroke-width:2.5px"/><line x1="376" y1="200" x2="376" y2="220" style="stroke:#1f618d;stroke-width:2.5px"/><line x1="390" y1="200" x2="390" y2="220" style="stroke:#1f618d;stroke-width:2.5px"/><text x="318" y="184" text-anchor="middle" style="font-size:15px;fill:#1f618d">measure per input</text></svg><figcaption class="caption"><span class="fignum">Figure 1.</span> When each method measures ranges and rounds.</figcaption></figure>
+   <p><strong>Post-Training Quantization (PTQ)</strong> quantizes a trained model once, with no retraining, and <strong>Quantization-Aware Training (QAT)</strong> trains with the rounding on; both run the round trip from <a href="quantization.html">Quantization Basics</a> on every weight and activation. Weights can be quantized any time, but an activation's range is only known once inputs flow through the model, so the three paths differ only in when that range is fixed: per batch at run time (dynamic PTQ), once on sample inputs before deployment (static PTQ), or during training (QAT) (<a href="#fig-when">Figure 1</a>).</p>
+<div class="eq-card" id="ptqRecapEq">
+<div class="eq-what">The round trip from Quantization Basics, run on every weight and activation.</div>
+<div class="eq-line eq-active" data-eqline="0"><span class="eqt" style="color:#d35400">x<sub>q</sub></span> = round(<span class="frac"><span class="top"><span class="eqt" style="color:#2a7fbf">x</span></span><span class="bot"><span class="eqt" style="color:#2a7fbf">s</span></span></span>) + <span class="eqt" style="color:#2c3e50">z</span></div>
+<div class="eq-why eq-active" data-eqline="0">The <strong>scale</strong> <var>s</var> is one grid step, so <var>x</var>/<var>s</var> counts steps and round picks the nearest integer; the <strong>zero point</strong> <var>z</var> shifts the count so float 0 lands on an integer.</div>
+<div class="eq-line eq-active" data-eqline="1"><span class="eqt" style="color:#d35400">x<sub>q</sub></span> = clamp(<span class="eqt" style="color:#d35400">x<sub>q</sub></span>, 0, 255)</div>
+<div class="eq-why eq-active" data-eqline="1">clamp keeps the stored integer <var>x<sub>q</sub></var> on the 8-bit grid, 0 to 255; a value outside the range is clipped to an end.</div>
+<div class="eq-line eq-active" data-eqline="2"><span class="eqt" style="color:#d35400">x&#770;</span> = <span class="eqt" style="color:#2a7fbf">s</span>&#183;(<span class="eqt" style="color:#d35400">x<sub>q</sub></span> &#8722; <span class="eqt" style="color:#2c3e50">z</span>)</div>
+<div class="eq-why eq-active" data-eqline="2">Reading back undoes the shift and multiplies by the step; <var>x&#770;</var> differs from <var>x</var> only by the rounding, or by the clipping when <var>x</var> fell outside the range <var>s</var> and <var>z</var> were set from.</div>
+</div>
+   <p><a href="quantization.html#quantize-one-tensor">Quantize one tensor</a> walks the round trip step by step. The listings use PyTorch's <code>torch.ao.quantization</code> (now marked deprecated, see <a href="#in-practice">Quantization in practice</a>).</p>
+
+   <section>
+     <h2 id="dynamic-quantization"><span class="secnum">1</span> Dynamic quantization</h2>
+     <p>Dynamic quantization is the low-effort option: the weights are quantized once after training. Activations arrive in float32 and get quantized to int8 on the fly, per batch.</p>
+     <p>One call to <code>quantize_dynamic</code> takes a trained float <code>model</code>, returns <code>qmodel</code>, and swaps every <code>nn.Linear</code> for an int8 version (PyTorch's qint8, signed integers &#8722;128 to 127; quint8 is the unsigned 0 to 255 type).</p>
+     <pre class="cs" data-cs="4,5-6"><code class="language-python">import torch.nn as nn
+import torch.ao.quantization as tq
+
+model.eval()
+layers = {nn.Linear}  # default dtype qint8
+qmodel = tq.quantize_dynamic(model, layers)</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>Inference mode.</li>
+  <li><span class="cs-n">2</span>Swaps every linear layer for a dynamic int8 version: weights quantized now, activations per batch.</li>
+</ol>
+     
+     <p>It helps most on CPUs, for <a href="rnn.html">LSTMs</a> (recurrent networks that read a sequence one step at a time) and Linear-heavy models such as <a href="transformer-block.html#the-full-block">Transformers</a>. In our run of the companion notebook, on its small MNIST (handwritten-digit) <a href="cnn.html">CNN</a> (convolutional neural network), accuracy barely moved (<a href="#fig-dyn">Figure 2</a>).</p>
+     <figure id="fig-dyn" class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 300" style="max-width:480px" role="img" aria-label="Dynamic quantization of one Linear layer: weights stored as int8, one byte each instead of a 32-bit float; activations arrive in float32 and are quantized to int8 on the fly with a scale computed from each batch; the matmul runs in int8 and its output goes back to float32. On the companion small MNIST CNN, test accuracy is 91.36 percent in full precision and 91.30 percent with only its Linear layers dynamically quantized"><rect class="" x="8" y="8" width="180" height="60" rx="7" style="fill:#e8f6f3;stroke:#148f77;stroke-width:1.6px"/><text class="mtd-grn" x="98" y="32" text-anchor="middle" style="font-size:15px;font-weight:700">weights: int8</text><text class="mtd-sub" x="98" y="54" text-anchor="middle" style="font-size:15px">1 byte, not 4</text><rect class="" x="212" y="8" width="180" height="60" rx="7" style="fill:#eaf2f8;stroke:#1f618d;stroke-width:1.6px"/><text class="mtd-t1" x="302" y="32" text-anchor="middle" style="font-size:15px;font-weight:700">activations: fp32</text><text class="mtd-sub" x="302" y="54" text-anchor="middle" style="font-size:15px">to int8 per batch</text><line class="mtd-s mtd-cg" x1="98" y1="68" x2="160.8" y2="94.2" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cg" points="170.0,98.0 158.7,99.2 162.9,89.1"/><line class="mtd-s mtd-cg" x1="302" y1="68" x2="239.2" y2="94.2" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cg" points="230.0,98.0 237.1,89.1 241.3,99.2"/><rect class="" x="60" y="100" width="280" height="60" rx="7" style="fill:#fbfcfd;stroke:#7f8c8d;stroke-width:1.4px"/><text class="" x="200" y="124" text-anchor="middle" style="font-size:15px;font-weight:700">int8 matmul</text><text class="mtd-sub" x="200" y="146" text-anchor="middle" style="font-size:15px">the Linear layer's multiply</text><line class="mtd-s mtd-cg" x1="200" y1="160" x2="200.0" y2="178.0" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cg" points="200.0,188.0 194.5,178.0 205.5,178.0"/><text class="mtd-sub" x="212" y="182" text-anchor="start" style="font-size:15px">output back to float32</text><text class="" x="200" y="212" text-anchor="middle" style="font-size:15px;font-weight:700">small MNIST CNN, test accuracy</text><text class="" x="110" y="242" text-anchor="end" style="font-size:15px;font-weight:700">float</text><rect class="" x="118" y="224" width="200.99200000000002" height="24" rx="3" style="fill:#95a5a6;stroke:none"/><text class="" x="312.992" y="242" text-anchor="end" style="font-size:15px;font-weight:700;fill:#ffffff">91.36%</text><text class="" x="110" y="276" text-anchor="end" style="font-size:15px;font-weight:700">dynamic int8</text><rect class="" x="118" y="258" width="200.86" height="24" rx="3" style="fill:#148f77;stroke:none"/><text class="" x="312.86" y="276" text-anchor="end" style="font-size:15px;font-weight:700;fill:#ffffff">91.30%</text></svg><figcaption class="caption"><span class="fignum">Figure 2.</span> Only the Linear layers are quantized; the run trained for one epoch.</figcaption></figure>
+     <p>Why not CNNs? PyTorch's dynamic quantization does not cover Conv2d, and it pays off only when loading weights dominates run time. In a CNN, reading and writing the activation maps between layers dominates, and dynamic quantization keeps those activations in float32. Static quantization keeps them int8, which is why <a href="#wrapping-up">Figure 12</a> sends CNNs to static PTQ.</p>
+   </section>
+
+   <section>
+     <h2 id="static-quantization"><span class="secnum">2</span> Static quantization</h2>
+     <p>Static quantization runs everything in int8: weights and activations. The activations' range is measured once, before deployment: <strong>calibration</strong> runs some inputs through the model (no labels needed) and records each activation's range. It suits CNNs on phones and small boards.</p>
+     <p>The listings on this page and on <a href="quantization-debugging.html">Debugging a Quantized Model</a> share one toy model, <code>TinyCNN</code>, on 1&#215;28&#215;28 MNIST images, defined in the next listing.</p>
+     <pre class="cs" data-cs="6-10,13-15"><code class="language-python">import torch.nn as nn
+
+class TinyCNN(nn.Module):
+    def __init__(self):
+        super().__init__()
+        # 1x28x28 -&gt; 8x26x26
+        self.conv1 = nn.Conv2d(1, 8, 3)
+        self.relu1 = nn.ReLU()
+        self.pool = nn.MaxPool2d(2)
+        self.fc = nn.Linear(8 * 13 * 13, 10)
+
+    def forward(self, x):
+        h = self.relu1(self.conv1(x))
+        h = self.pool(h)
+        return self.fc(h.flatten(1))</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>One 3x3 convolution with 8 channels, ReLU, 2x2 pooling, and a 10-class linear layer.</li>
+  <li><span class="cs-n">2</span>Forward pass: convolution, ReLU, pooling, flatten, classify.</li>
+</ol>
+     <p>Calibration needs an <strong>observer</strong>, a small module PyTorch inserts after a tensor that records its min and max (or its histogram) and computes <var>s</var> and <var>z</var> from them as in <a href="quantization.html#quick-refresher-scale-and-zero-point">Scale and zero point</a>. In the eager-mode listing below (eager mode places stubs and fusions by hand; <a href="#visualize-with-fx">FX graph mode</a> automates them), the backend is the library that runs the int8 ops (<code>"x86"</code> on Intel and AMD CPUs, <code>"qnnpack"</code> on ARM).</p>
+     <pre class="cs" data-cs="4-7,8-10,11-14,15-16"><code class="language-python">import copy, torch
+import torch.ao.quantization as tq
+
+fp32 = copy.deepcopy(model_fp32).eval()
+model = tq.QuantWrapper(fp32)
+pair = [["conv1", "relu1"]]
+tq.fuse_modules(fp32, pair, inplace=True)
+model.qconfig = tq.get_default_qconfig("x86")
+# insert observers
+tq.prepare(model, inplace=True)
+# calibrate
+with torch.no_grad():
+    for x, _ in calib_loader:
+        model(x)
+# swap in int8 modules
+tq.convert(model, inplace=True)</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>Float copy wrapped with quant and dequant stubs; conv1 and relu1 fused into one op.</li>
+  <li><span class="cs-n">2</span>Default x86 QConfig, then observers inserted.</li>
+  <li><span class="cs-n">3</span>Calibration: run real batches so the observers record ranges.</li>
+  <li><span class="cs-n">4</span>Replaces each module with its int8 version.</li>
+</ol>
+     <p id="fig-8">In our run of the companion notebook, on its larger fused MNIST CNN trained for 10 epochs, accuracy held and the model shrank to a quarter of its size (<a href="#fig-static-run">Figure 3</a>).</p>
+     <figure id="fig-static-run" class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 262" style="max-width:480px" role="img" aria-label="Companion fused MNIST CNN, int8 against float: test accuracy 97.85 against 98.08 percent; model size 1.21 MB against 4.80 MB; inference time for one batch on CPU 0.0145 s against 0.0190 s"><rect class="" x="150" y="4" width="14" height="14" rx="2" style="fill:#95a5a6;stroke:none"/><text class="mtd-sub" x="170" y="16" text-anchor="start" style="font-size:15px;font-weight:700">float</text><rect class="" x="240" y="4" width="14" height="14" rx="2" style="fill:#148f77;stroke:none"/><text class="mtd-grn" x="260" y="16" text-anchor="start" style="font-size:15px;font-weight:700">int8</text><text class="" x="8" y="46" text-anchor="start" style="font-size:15px;font-weight:700">test accuracy</text><rect class="" x="8" y="54" width="270.0" height="20" rx="2" style="fill:#95a5a6;stroke:none"/><text class="mtd-sub" x="284.0" y="70" text-anchor="start" style="font-size:15px;font-weight:700">98.08%</text><rect class="" x="8" y="80" width="269.36684339314843" height="20" rx="2" style="fill:#148f77;stroke:none"/><text class="mtd-grn" x="283.36684339314843" y="96" text-anchor="start" style="font-size:15px;font-weight:700">97.85%</text><text class="" x="8" y="124" text-anchor="start" style="font-size:15px;font-weight:700">model size</text><rect class="" x="8" y="132" width="270.0" height="20" rx="2" style="fill:#95a5a6;stroke:none"/><text class="mtd-sub" x="284.0" y="148" text-anchor="start" style="font-size:15px;font-weight:700">4.80 MB</text><rect class="" x="8" y="158" width="68.0625" height="20" rx="2" style="fill:#148f77;stroke:none"/><text class="mtd-grn" x="82.0625" y="174" text-anchor="start" style="font-size:15px;font-weight:700">1.21 MB</text><text class="" x="8" y="202" text-anchor="start" style="font-size:15px;font-weight:700">one CPU batch</text><rect class="" x="8" y="210" width="270.0" height="20" rx="2" style="fill:#95a5a6;stroke:none"/><text class="mtd-sub" x="284.0" y="226" text-anchor="start" style="font-size:15px;font-weight:700">0.0190 s</text><rect class="" x="8" y="236" width="206.05263157894737" height="20" rx="2" style="fill:#148f77;stroke:none"/><text class="mtd-grn" x="220.05263157894737" y="252" text-anchor="start" style="font-size:15px;font-weight:700">0.0145 s</text></svg><figcaption class="caption"><span class="fignum">Figure 3.</span> Static int8 against float on the companion repo's fused MNIST CNN.</figcaption></figure>
+     <h3><span class="secnum">2.1</span> Fuse first</h3>
+     <p>Fusing Conv + <a href="normalization.html#batchnorm">BatchNorm</a> (a layer that rescales each batch of activations to a steady range) + ReLU (which zeroes negatives and passes positives) into a single op before quantizing saves memory traffic, runs faster, and removes the rounding step between the three (<a href="#fig-fuse">Figure 4</a>). At inference the batch norm's scale and shift fold into the convolution's weights<!-- link-pending: normalization-quantization.html#bn-fold -->. Dynamic mode has no fusion step.</p>
+     <figure id="fig-fuse" class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 206" style="max-width:480px" role="img" aria-label="Unfused, a convolution, a batch norm and a ReLU each end in a rounding to int8, three roundings. Fused, one Conv plus BatchNorm plus ReLU op ends in one rounding.">
+<text x="8" y="20" style="font-size:15px;font-weight:700">three ops, three roundings</text>
+<rect class="mtd-box" x="8" y="32" width="80" height="40" rx="6"/><text x="48" y="57" text-anchor="middle" style="font-size:15px">Conv</text>
+<rect class="mtd-box" x="120" y="32" width="80" height="40" rx="6"/><text x="160" y="57" text-anchor="middle" style="font-size:15px">BN</text>
+<rect class="mtd-box" x="232" y="32" width="80" height="40" rx="6"/><text x="272" y="57" text-anchor="middle" style="font-size:15px">ReLU</text>
+<line x1="88" y1="52" x2="94" y2="52" style="stroke:#2c3e50;stroke-width:1.6px"/><circle cx="104" cy="52" r="9" style="fill:#ca6f1e"/><line x1="113" y1="52" x2="119" y2="52" style="stroke:#2c3e50;stroke-width:1.6px"/>
+<line x1="200" y1="52" x2="206" y2="52" style="stroke:#2c3e50;stroke-width:1.6px"/><circle cx="216" cy="52" r="9" style="fill:#ca6f1e"/><line x1="225" y1="52" x2="231" y2="52" style="stroke:#2c3e50;stroke-width:1.6px"/>
+<line x1="312" y1="52" x2="318" y2="52" style="stroke:#2c3e50;stroke-width:1.6px"/><circle cx="328" cy="52" r="9" style="fill:#ca6f1e"/><line x1="337" y1="52" x2="380" y2="52" style="stroke:#2c3e50;stroke-width:1.6px"/><polygon points="380,47 390,52 380,57" style="fill:#2c3e50"/>
+<text x="8" y="112" style="font-size:15px;font-weight:700">fused into one op, one rounding</text>
+<rect class="mtd-box" x="8" y="124" width="304" height="40" rx="6" style="stroke:#1f618d"/><text x="160" y="149" text-anchor="middle" style="font-size:15px">Conv + BN + ReLU</text>
+<line x1="312" y1="144" x2="318" y2="144" style="stroke:#2c3e50;stroke-width:1.6px"/><circle cx="328" cy="144" r="9" style="fill:#ca6f1e"/><line x1="337" y1="144" x2="380" y2="144" style="stroke:#2c3e50;stroke-width:1.6px"/><polygon points="380,139 390,144 380,149" style="fill:#2c3e50"/>
+<circle cx="17" cy="192" r="7" style="fill:#ca6f1e"/><text class="mtd-sub" x="32" y="197" style="font-size:15px">a round and clamp onto the int8 grid</text>
+</svg><figcaption class="caption"><span class="fignum">Figure 4.</span> Fusing leaves one rounding where there were three.</figcaption></figure>
+     <h3><span class="secnum">2.2</span> QConfig sets the grid per tensor</h3>
+     <figure id="fig-9" class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 312" style="max-width:480px" role="img" aria-label="Three channels with narrow, narrow and wide weight ranges. With one scale for the whole tensor, the grid ticks are spaced for the wide channel and the two narrow channels hold only the zero tick. With one scale per channel, every channel gets seven ticks across its own range"><text x="8" y="20" style="font-size:18px;font-weight:700">One scale for the whole tensor</text><text class="mtd-sub" x="8" y="60" style="font-size:17px">channel 1</text><rect class="mtd-barbg" x="216.0" y="46" width="48" height="16" rx="4"/><line class="mtd-s mtd-c2" x1="240.0" y1="41" x2="240.0" y2="67" style="stroke-width:2.5px"/><text class="mtd-sub" x="8" y="100" style="font-size:17px">channel 2</text><rect class="mtd-barbg" x="204.0" y="86" width="72" height="16" rx="4"/><line class="mtd-s mtd-c2" x1="240.0" y1="81" x2="240.0" y2="107" style="stroke-width:2.5px"/><text class="mtd-sub" x="8" y="140" style="font-size:17px">channel 3</text><rect class="mtd-barbg" x="100.0" y="126" width="280" height="16" rx="4"/><line class="mtd-s mtd-c2" x1="100.0" y1="121" x2="100.0" y2="147" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="146.7" y1="121" x2="146.7" y2="147" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="193.3" y1="121" x2="193.3" y2="147" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="240.0" y1="121" x2="240.0" y2="147" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="286.7" y1="121" x2="286.7" y2="147" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="333.3" y1="121" x2="333.3" y2="147" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="380.0" y1="121" x2="380.0" y2="147" style="stroke-width:2.5px"/><line class="mtd-sep" x1="0" y1="152" x2="400" y2="152"/><text x="8" y="180" style="font-size:18px;font-weight:700">One scale per channel</text><text class="mtd-sub" x="8" y="220" style="font-size:17px">channel 1</text><rect class="mtd-barbg" x="216.0" y="206" width="48" height="16" rx="4"/><line class="mtd-s mtd-c2" x1="216.0" y1="201" x2="216.0" y2="227" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="224.0" y1="201" x2="224.0" y2="227" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="232.0" y1="201" x2="232.0" y2="227" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="240.0" y1="201" x2="240.0" y2="227" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="248.0" y1="201" x2="248.0" y2="227" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="256.0" y1="201" x2="256.0" y2="227" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="264.0" y1="201" x2="264.0" y2="227" style="stroke-width:2.5px"/><text class="mtd-sub" x="8" y="260" style="font-size:17px">channel 2</text><rect class="mtd-barbg" x="204.0" y="246" width="72" height="16" rx="4"/><line class="mtd-s mtd-c2" x1="204.0" y1="241" x2="204.0" y2="267" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="216.0" y1="241" x2="216.0" y2="267" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="228.0" y1="241" x2="228.0" y2="267" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="240.0" y1="241" x2="240.0" y2="267" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="252.0" y1="241" x2="252.0" y2="267" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="264.0" y1="241" x2="264.0" y2="267" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="276.0" y1="241" x2="276.0" y2="267" style="stroke-width:2.5px"/><text class="mtd-sub" x="8" y="300" style="font-size:17px">channel 3</text><rect class="mtd-barbg" x="100.0" y="286" width="280" height="16" rx="4"/><line class="mtd-s mtd-c2" x1="100.0" y1="281" x2="100.0" y2="307" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="146.7" y1="281" x2="146.7" y2="307" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="193.3" y1="281" x2="193.3" y2="307" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="240.0" y1="281" x2="240.0" y2="307" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="286.7" y1="281" x2="286.7" y2="307" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="333.3" y1="281" x2="333.3" y2="307" style="stroke-width:2.5px"/><line class="mtd-s mtd-c2" x1="380.0" y1="281" x2="380.0" y2="307" style="stroke-width:2.5px"/></svg><figcaption class="caption"><span class="fignum">Figure 5.</span> A shared scale gives narrow channels almost no grid ticks.</figcaption></figure>
+     <p>A QConfig tells PyTorch how to quantize each tensor: <strong>symmetric</strong> or <strong>asymmetric</strong> (both drawn in <a href="quantization.html#quick-refresher-scale-and-zero-point">Scale and zero point</a>), and <strong>per-tensor</strong> (one scale for the whole tensor) or <strong>per-channel</strong> (one scale per channel, a channel being the output of one convolution filter; <a href="#fig-9">Figure 5</a>).</p>
+     <p>Per-channel gives each narrow channel its whole grid, so accuracy rises, for a few extra numbers per layer and a backend that supports it. PyTorch's x86 default uses per-channel weights and per-tensor activations (<a href="https://docs.pytorch.org/docs/2.3/_modules/torch/ao/quantization/qconfig.html">qconfig source</a>).</p>
+     <p>In the listing, <code>model</code> is the TinyCNN.</p>
+     <pre class="cs" data-cs="3-4,5-6,7-8"><code class="language-python">import torch.ao.quantization as tq
+
+# quint8 activations
+act = tq.MinMaxObserver
+# int8, one scale per output channel
+wt = tq.default_per_channel_weight_observer
+qc = tq.QConfig(act, wt)
+model.qconfig = qc</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>Activation observer: per-tensor min-max, unsigned 8-bit.</li>
+  <li><span class="cs-n">2</span>Weight observer: per-channel, signed 8-bit.</li>
+  <li><span class="cs-n">3</span>Both go into one QConfig on the model.</li>
+</ol>
+     <h3 id="calibration-matters"><span class="secnum">2.3</span> Calibration data</h3>
+     <p>A few hundred real inputs are usually enough. The observer only knows the values calibration showed it (<a href="#fig-10">Figure 6</a>): if the set is too small or does not look like production, it learns the wrong ranges and either clips real activations or wastes resolution (<a href="#calibDemo">Figure 7</a>).</p>
+     <p>After <code>convert()</code> the ranges are baked in and the int8 model is not trained further, so a bad calibration means calibrating again.</p>
+     <figure id="fig-10" class="figure">
+       <svg class="q-wide" viewBox="0 0 900 140" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Calibration flow diagram">
+         <defs>
+           <marker id="qarrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+             <polygon points="0 0, 8 3, 0 6" fill="#3498db"/>
+           </marker>
+         </defs>
+         <g font-family="sans-serif" font-size="15" text-anchor="middle">
+           <rect x="10" y="30" width="150" height="80" rx="8" fill="#ecf0f1" stroke="#3498db" stroke-width="2"/>
+           <text x="85" y="63" fill="#2c3e50">real inputs</text>
+           <text x="85" y="85" fill="#555">(MNIST images)</text>
+           <rect x="190" y="30" width="150" height="80" rx="8" fill="#ecf0f1" stroke="#3498db" stroke-width="2"/>
+           <text x="265" y="63" fill="#2c3e50">model +</text>
+           <text x="265" y="85" fill="#2c3e50">observers</text>
+           <rect x="370" y="30" width="150" height="80" rx="8" fill="#ecf0f1" stroke="#3498db" stroke-width="2"/>
+           <text x="445" y="63" fill="#2c3e50">min/max</text>
+           <text x="445" y="85" fill="#2c3e50">per layer</text>
+           <rect x="550" y="30" width="150" height="80" rx="8" fill="#ecf0f1" stroke="#3498db" stroke-width="2"/>
+           <text x="625" y="63" fill="#2c3e50">scale &amp;</text>
+           <text x="625" y="85" fill="#2c3e50">zero point</text>
+           <rect x="730" y="30" width="150" height="80" rx="8" fill="#2e86c1" stroke="#2c3e50" stroke-width="2"/>
+           <text x="805" y="63" fill="#ffffff">int8</text>
+           <text x="805" y="85" fill="#ffffff">model</text>
+         </g>
+         <g stroke="#3498db" stroke-width="2">
+           <line x1="160" y1="70" x2="190" y2="70" marker-end="url(#qarrow)"/>
+           <line x1="340" y1="70" x2="370" y2="70" marker-end="url(#qarrow)"/>
+           <line x1="520" y1="70" x2="550" y2="70" marker-end="url(#qarrow)"/>
+           <line x1="700" y1="70" x2="730" y2="70" marker-end="url(#qarrow)"/>
+         </g>
+       </svg>
+       <svg class="q-phone" viewBox="0 0 300 318" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Calibration flow diagram">
+         <defs><marker id="qarrowP" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#3498db"/></marker></defs>
+         <g font-family="sans-serif" font-size="16" text-anchor="middle">
+           <rect x="30" y="6" width="240" height="44" rx="8" fill="#ecf0f1" stroke="#3498db" stroke-width="2"/>
+           <text x="150" y="34" fill="#2c3e50">real inputs <tspan fill="#555">(MNIST images)</tspan></text>
+           <rect x="30" y="72" width="240" height="44" rx="8" fill="#ecf0f1" stroke="#3498db" stroke-width="2"/>
+           <text x="150" y="100" fill="#2c3e50">model + <tspan fill="#2c3e50">observers</tspan></text>
+           <rect x="30" y="138" width="240" height="44" rx="8" fill="#ecf0f1" stroke="#3498db" stroke-width="2"/>
+           <text x="150" y="166" fill="#2c3e50">min/max <tspan fill="#2c3e50">per layer</tspan></text>
+           <rect x="30" y="204" width="240" height="44" rx="8" fill="#ecf0f1" stroke="#3498db" stroke-width="2"/>
+           <text x="150" y="232" fill="#2c3e50">scale &amp; <tspan fill="#2c3e50">zero point</tspan></text>
+           <rect x="30" y="270" width="240" height="44" rx="8" fill="#2e86c1" stroke="#2c3e50" stroke-width="2"/>
+           <text x="150" y="298" fill="#ffffff">int8 <tspan fill="#ffffff">model</tspan></text>
+         </g>
+         <g stroke="#3498db" stroke-width="2">
+           <line x1="150" y1="50" x2="150" y2="70" marker-end="url(#qarrowP)"/>
+           <line x1="150" y1="116" x2="150" y2="136" marker-end="url(#qarrowP)"/>
+           <line x1="150" y1="182" x2="150" y2="202" marker-end="url(#qarrowP)"/>
+           <line x1="150" y1="248" x2="150" y2="268" marker-end="url(#qarrowP)"/>
+         </g>
+       </svg>
+       <p class="caption"><span class="fignum">Figure 6.</span> Calibration data flows through; each layer's min and max set its scale.</p>
+     </figure>
+<style>
+  #calibDemo .calib-seg { display: inline-flex; gap: 0; }
+  #calibDemo .calib-seg .play-btn { border-radius: 0; }
+  #calibDemo .calib-seg .play-btn:first-child { border-radius: 6px 0 0 6px; }
+  #calibDemo .calib-seg .play-btn:last-child { border-radius: 0 6px 6px 0; margin-left: -1px; }
+  #calibDemo .calib-seg .play-btn.active { background: #007bff; color: #fff; }
+  #calibCanvas { display: block; width: 100%; height: 220px; }
+  #calibRead { margin: 0.5rem 0 0; text-align: center; min-height: 1.5em; }
+  @media (max-width: 480px) {
+    #calibCanvas { height: 190px; }
+    #calibDemo .bw-controls { gap: 0.4rem 0.5rem; }
+    #calibDemo .bw-controls .play-btn { padding: 0.45rem 0.6rem; font-size: 0.85rem; }
+  }
+</style>
+<div class="bw-demo demo" id="calibDemo">
+  <div class="bw-controls">
+    <button type="button" class="play-btn" id="calibPlay" title="Feed the calibration batches one at a time">Play</button>
+    <button type="button" class="play-btn" id="calibReset" title="Stop and show the finished calibration">Reset</button>
+    <span class="calib-seg" id="calibToggle" role="group" aria-label="Calibration set">
+      <button type="button" class="play-btn active" id="calibMatch" aria-pressed="true">like production</button>
+      <button type="button" class="play-btn" id="calibMiss" aria-pressed="false">missing loud inputs</button>
+    </span>
+  </div>
+  <div class="canvas-wrap"><canvas id="calibCanvas" role="img" aria-label="Grey histogram of production activations, blue ticks for calibration values, an orange bracket for the observer's min-max range, and a red shaded tail for production values the range clips"></canvas></div>
+  <p id="calibRead" aria-live="polite"></p>
+  <p class="caption"><span class="fignum">Figure 7.</span> Illustrative batches widen the range; missing loud inputs clip the tail.</p>
+</div>
+<script>
+(function () {
+  var cv = document.getElementById('calibCanvas');
+  if (!cv) return;
+  var ctx = cv.getContext('2d');
+  var read = document.getElementById('calibRead');
+  var playBtn = document.getElementById('calibPlay');
+  var resetBtn = document.getElementById('calibReset');
+  var bMatch = document.getElementById('calibMatch');
+  var bMiss = document.getElementById('calibMiss');
+  function rng(seed) { return function () { seed |= 0; seed = seed + 0x6D2B79F5 | 0; var t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  function normal(r) { var u = 1 - r(), v = r(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
+  function draw(r, mu, n) { var a = []; for (var i = 0; i < n; i++) a.push(Math.exp(mu + 0.5 * normal(r))); return a; }
+  var XMAX = 4, NB = 40;
+  var prod = draw(rng(7), -0.4, 3000).filter(function (x) { return x < XMAX; });
+  var hist = new Array(NB).fill(0);
+  prod.forEach(function (x) { hist[Math.min(NB - 1, Math.floor(x / XMAX * NB))]++; });
+  var hmax = Math.max.apply(null, hist);
+  var NBATCH = 8, BSIZE = 64;
+  function batches(mu, seed) { var r = rng(seed), out = []; for (var b = 0; b < NBATCH; b++) out.push(draw(r, mu, BSIZE)); return out; }
+  var SETS = { match: batches(-0.4, 11), miss: batches(-1.1, 23) };
+  var mode = 'match', seen = NBATCH, lo = 0, hi = 0, shownHi = 0, textHi = 0, timer = null, anim = null;
+  function rangeAfter(k) { var a = Infinity, b = -Infinity; for (var i = 0; i < k; i++) SETS[mode][i].forEach(function (x) { if (x < a) a = x; if (x > b) b = x; }); return [a, b]; }
+  function clippedShare(a, b) { var c = 0; prod.forEach(function (x) { if (x > b || x < a) c++; }); return c / prod.length; }
+  function sizeCanvas() { var dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight; cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); return [w, h]; }
+  function render() {
+    var wh = sizeCanvas(), W = wh[0], H = wh[1];
+    var L = 10, R = W - 10, top = 30, base = H - 52;
+    function X(v) { return L + v / XMAX * (R - L); }
+    ctx.clearRect(0, 0, W, H);
+    var bw = (R - L) / NB;
+    for (var i = 0; i < NB; i++) {
+      var x0 = L + i * bw, hh = hist[i] / hmax * (base - top);
+      var clipped = seen > 0 && (x0 + bw / 2) > X(shownHi);
+      ctx.fillStyle = clipped ? '#c0392b' : '#bdc3c7';
+      ctx.fillRect(x0 + 0.5, base - hh, bw - 1, hh);
+    }
+    ctx.strokeStyle = '#7f8c8d'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(L, base + 0.5); ctx.lineTo(R, base + 0.5); ctx.stroke();
+    ctx.font = '14px sans-serif'; ctx.textAlign = 'right'; ctx.fillStyle = '#555';
+    ctx.fillText('production activations', R, 18);
+    for (var b = 0; b < seen; b++) {
+      ctx.strokeStyle = b === seen - 1 ? 'rgba(31,97,141,0.95)' : 'rgba(31,97,141,0.35)';
+      ctx.lineWidth = 1;
+      SETS[mode][b].forEach(function (x) { if (x < XMAX) { var px = X(x); ctx.beginPath(); ctx.moveTo(px, base + 4); ctx.lineTo(px, base + 14); ctx.stroke(); } });
+    }
+    ctx.textAlign = 'left'; ctx.fillStyle = '#1f618d';
+    ctx.fillText(seen ? 'calibration values' : 'no batches yet', L, base + 30);
+    if (seen > 0) {
+      var a = X(lo), c = X(shownHi);
+      ctx.strokeStyle = '#ca6f1e'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(a, base - 6); ctx.lineTo(a, top - 6); ctx.lineTo(c, top - 6); ctx.lineTo(c, base - 6); ctx.stroke();
+      ctx.fillStyle = '#ca6f1e'; ctx.textAlign = c > W * 0.6 ? 'right' : 'left';
+      ctx.fillText('observer range', c > W * 0.6 ? c - 6 : c + 6, top + 10);
+      var share = clippedShare(lo, shownHi);
+      if (share > 0.005) {
+        /* the clipped tail: shade everything past the observer box and name it outside the box */
+        ctx.fillStyle = 'rgba(192,57,43,0.12)'; ctx.fillRect(c + 2, top - 6, Math.max(0, R - c - 2), base - top + 6);
+        ctx.fillStyle = '#c0392b'; ctx.textAlign = 'left';
+        var tw = ctx.measureText('clipped tail').width;
+        if (c + 8 + tw <= R) ctx.fillText('clipped tail', c + 8, base - 40);
+      }
+    }
+    ctx.textAlign = 'left'; ctx.fillStyle = '#555'; ctx.fillText('0', L, base + 46); ctx.textAlign = 'right'; ctx.fillText(String(XMAX), R, base + 46);
+    var txt;
+    if (!seen) txt = 'batches seen 0 of ' + NBATCH;
+    else txt = 'batches seen ' + seen + ' of ' + NBATCH + ' \u00b7 range ' + lo.toFixed(2) + ' to ' + textHi.toFixed(2) + ' \u00b7 production values clipped ' + (100 * clippedShare(lo, textHi)).toFixed(1) + '%';
+    if (read.textContent !== txt) read.textContent = txt;
+  }
+  function stop() { if (timer) { clearTimeout(timer); timer = null; } if (anim) { cancelAnimationFrame(anim); anim = null; } playBtn.textContent = 'Play'; playBtn.disabled = false; }
+  function rest() { stop(); seen = NBATCH; var r = rangeAfter(seen); lo = r[0]; hi = r[1]; shownHi = hi; textHi = hi; render(); }
+  function step() {
+    seen++; var r = rangeAfter(seen), from = seen === 1 ? r[0] : shownHi; lo = r[0]; hi = r[1]; textHi = hi;
+    var t0 = null;
+    function tick(t) { if (t0 === null) t0 = t; var u = Math.min(1, (t - t0) / 450); shownHi = from + (hi - from) * (1 - Math.pow(1 - u, 3)); render(); if (u < 1) anim = requestAnimationFrame(tick); else { anim = null; if (seen < NBATCH) timer = setTimeout(step, 1600); else stop(); } }
+    anim = requestAnimationFrame(tick);
+  }
+  playBtn.addEventListener('click', function () {
+    if (typeof playScrollEnsure === 'function') playScrollEnsure(document.getElementById('calibDemo'));
+    stop();
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) { rest(); return; }
+    seen = 0; lo = 0; hi = 0; shownHi = 0; textHi = 0;
+    playBtn.textContent = 'Playing...'; playBtn.disabled = true;
+    step();
+  });
+  resetBtn.addEventListener('click', rest);
+  function setMode(m) { mode = m; bMatch.classList.toggle('active', m === 'match'); bMiss.classList.toggle('active', m === 'miss'); bMatch.setAttribute('aria-pressed', String(m === 'match')); bMiss.setAttribute('aria-pressed', String(m === 'miss')); rest(); }
+  bMatch.addEventListener('click', function () { setMode('match'); });
+  bMiss.addEventListener('click', function () { setMode('miss'); });
+  window.addEventListener('resize', render);
+  rest();
+})();
+</script>
+     <h3 id="histogram-observers"><span class="secnum">2.4</span> Histogram observers</h3>
+     <p>One outlier stretches a min-max range over every bin (<a href="quantization.html#a-real-histogram-from-a-real-model">A real weight histogram</a>). A histogram observer applies the MSE strategy from <a href="quantization.html#where-should-the-range-end">Where the range should end</a> to activations: it builds a histogram of what it sees during calibration, tries many clipping ranges, and keeps the one with the smallest round-trip error.</p>
+     <div class="eq-card" id="quantHistEqStatic">
+<div class="eq-what">The observer keeps the clipping range <var>r</var> whose round trip loses the least.</div>
+<div class="eq-line eq-active" data-eqline="0">range = argmin<sub>r</sub> &#8214;<span class="eqt" style="color:#2a7fbf">x</span> &#8722; <span class="eqt" style="color:#d35400">x&#770;</span><sub>r</sub>&#8214;<sup>2</sup></div>
+<div class="eq-why eq-active" data-eqline="0"><var>x</var> is what the observer saw during calibration and <var>x&#770;<sub>r</sub></var> is the same values quantized with range <var>r</var> and read back. Squaring the gaps makes one clipped outlier cost far more than many small rounding misses, so the winner clips only the rare extreme values.</div>
+</div>
+     <p>The QConfig below, as in <a href="#static-quantization">Static quantization</a>, swaps in a histogram observer for activations and keeps per-channel MinMax weights; <code>model</code> is the TinyCNN.</p>
+     <pre class="cs" data-cs="3-4,5-6,7-8"><code class="language-python">import torch.ao.quantization as tq
+
+# quint8, MSE range from histogram
+act = tq.HistogramObserver
+# int8, one scale per output channel
+wt = tq.default_per_channel_weight_observer
+qc = tq.QConfig(act, wt)
+model.qconfig = qc</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>Activations get the histogram observer, which picks the range that minimizes the error in the card above.</li>
+  <li><span class="cs-n">2</span>Weights keep the per-channel signed 8-bit observer from 2.2.</li>
+  <li><span class="cs-n">3</span>Both go into one QConfig on the model.</li>
+</ol>
+     <p>It matters most when activations have long tails, skew, or several peaks, the cases where MinMax quietly costs accuracy.</p>
+     <h3 id="be-smart-about-quant-boundaries"><span class="secnum">2.5</span> Keeping tensors quantized between layers</h3>
+     <p>Every quant-dequant boundary moves data from int8 to float and back, which kills performance and breaks layer fusion (<a href="#fig-boundaries">Figure 8</a>). ReLU, pooling and many elementwise ops quantize safely, so everything between the entry and exit stubs can stay int8. In eager mode the listing below places the stubs by hand, as <code>QuantWrapper</code> did above; FX inserts them itself.</p>
+     <figure id="fig-boundaries" class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 206" style="max-width:480px" role="img" aria-label="Top, a quantize stub at the entry, conv, relu, pool and fc in int8, a dequantize stub at the exit. Bottom, the same four layers with a dequantize and quantize hop between every pair.">
+<text class="mtd-grn" x="6" y="20" style="font-size:15px;font-weight:700">stubs at the entry and exit only</text>
+<rect x="6" y="32" width="32" height="36" rx="5" style="fill:#fdf2e9;stroke:#ca6f1e;stroke-width:1.6px"/><text x="22" y="55" text-anchor="middle" style="font-size:15px">Q</text>
+<rect x="46" y="32" width="68" height="36" rx="5" style="fill:#eaf2f8;stroke:#1f618d;stroke-width:1.4px"/><text x="80" y="55" text-anchor="middle" style="font-size:15px">conv</text>
+<rect x="120" y="32" width="68" height="36" rx="5" style="fill:#eaf2f8;stroke:#1f618d;stroke-width:1.4px"/><text x="154" y="55" text-anchor="middle" style="font-size:15px">relu</text>
+<rect x="194" y="32" width="68" height="36" rx="5" style="fill:#eaf2f8;stroke:#1f618d;stroke-width:1.4px"/><text x="228" y="55" text-anchor="middle" style="font-size:15px">pool</text>
+<rect x="268" y="32" width="68" height="36" rx="5" style="fill:#eaf2f8;stroke:#1f618d;stroke-width:1.4px"/><text x="302" y="55" text-anchor="middle" style="font-size:15px">fc</text>
+<rect x="344" y="32" width="44" height="36" rx="5" style="fill:#fdf2e9;stroke:#ca6f1e;stroke-width:1.6px"/><text x="366" y="55" text-anchor="middle" style="font-size:15px">DQ</text>
+<text class="mtd-sub" x="191" y="88" text-anchor="middle" style="font-size:15px">int8 from the first layer to the last</text>
+<text class="mtd-red" x="6" y="122" style="font-size:15px;font-weight:700">back to float between every layer</text>
+<rect x="6" y="134" width="56" height="36" rx="5" style="fill:#eaf2f8;stroke:#1f618d;stroke-width:1.4px"/><text x="34" y="157" text-anchor="middle" style="font-size:15px">conv</text>
+<rect x="68" y="130" width="42" height="46" rx="5" style="fill:#fdedec;stroke:#c0392b;stroke-width:1.6px"/><text x="89" y="149" text-anchor="middle" style="font-size:15px">DQ</text><text x="89" y="167" text-anchor="middle" style="font-size:15px">Q</text>
+<rect x="116" y="134" width="56" height="36" rx="5" style="fill:#eaf2f8;stroke:#1f618d;stroke-width:1.4px"/><text x="144" y="157" text-anchor="middle" style="font-size:15px">relu</text>
+<rect x="178" y="130" width="42" height="46" rx="5" style="fill:#fdedec;stroke:#c0392b;stroke-width:1.6px"/><text x="199" y="149" text-anchor="middle" style="font-size:15px">DQ</text><text x="199" y="167" text-anchor="middle" style="font-size:15px">Q</text>
+<rect x="226" y="134" width="56" height="36" rx="5" style="fill:#eaf2f8;stroke:#1f618d;stroke-width:1.4px"/><text x="254" y="157" text-anchor="middle" style="font-size:15px">pool</text>
+<rect x="288" y="130" width="42" height="46" rx="5" style="fill:#fdedec;stroke:#c0392b;stroke-width:1.6px"/><text x="309" y="149" text-anchor="middle" style="font-size:15px">DQ</text><text x="309" y="167" text-anchor="middle" style="font-size:15px">Q</text>
+<rect x="336" y="134" width="56" height="36" rx="5" style="fill:#eaf2f8;stroke:#1f618d;stroke-width:1.4px"/><text x="364" y="157" text-anchor="middle" style="font-size:15px">fc</text>
+<text class="mtd-sub" x="199" y="194" text-anchor="middle" style="font-size:15px">each red hop goes int8 to float and back</text>
+</svg><figcaption class="caption"><span class="fignum">Figure 8.</span> Every hop back to float adds two conversions and blocks fusion.</figcaption></figure>
+     <pre class="cs" data-cs="7-9,11-13"><code class="language-python">import torch.nn as nn
+import torch.ao.quantization as tq
+
+class QuantTinyCNN(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.quant = tq.QuantStub()
+        self.body = TinyCNN()
+        self.dequant = tq.DeQuantStub()
+
+    def forward(self, x):
+        h = self.body(self.quant(x))
+        return self.dequant(h)</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>A quant stub at the entry, the float network, a dequant stub at the exit.</li>
+  <li><span class="cs-n">2</span>Inputs are quantized once and outputs dequantized once.</li>
+</ol>
+     <h3 id="visualize-with-fx"><span class="secnum">2.6</span> FX graph mode</h3>
+     <p>FX, PyTorch's graph-tracing toolkit, turns the model into a graph, so FX quantization applies the qconfig to every nested layer, inserts the observers and stubs, and fuses layers itself.</p>
+     <p>In the FX version of the static workflow, <code>qfx.prepare_fx</code> traces <code>model_fp32</code> with one example input and inserts observers, calibration fills them, and <code>qfx.convert_fx</code> returns the int8 model. To check where FX put the observers, see <a href="quantization-debugging.html#run-fx-print-tabular">Read the FX graph table</a>.</p>
+     <pre class="cs" data-cs="5-8,9-12,13"><code class="language-python">import torch
+import torch.ao.quantization as tq
+import torch.ao.quantization.quantize_fx as qfx
+
+example = (torch.randn(1, 1, 28, 28),)
+qmap = tq.get_default_qconfig_mapping("x86")
+model = model_fp32.eval()
+prep = qfx.prepare_fx(model, qmap, example)
+# calibrate
+with torch.no_grad():
+    for x, _ in calib_loader:
+        prep(x)
+model_int8 = qfx.convert_fx(prep)</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>FX traces the model and inserts observers from the default mapping.</li>
+  <li><span class="cs-n">2</span>Calibration batches fill the observers.</li>
+  <li><span class="cs-n">3</span>Converts to int8 kernels.</li>
+</ol>
+   </section>
+
+   <section>
+        <h2 id="quantization-aware-training-qat"><span class="secnum">3</span> Quantization-Aware Training (QAT)</h2>
+        <p>When PTQ costs too much accuracy, QAT fine-tunes with the rounding switched on, so training learns around it. The observers become <strong>FakeQuantize</strong> modules, which let a gradient pass through the rounding (by the straight-through estimator explained below).</p>
+     <p>The first listing copies the trained float model in train mode and lets <code>qfx.prepare_qat_fx</code> insert a FakeQuantize wherever the QAT qconfig mapping asks for one; the second trains as usual with <a href="crossentropy-loss.html">cross-entropy</a>, switches to eval mode and converts. Each FakeQuantize runs the round trip from <a href="quantization.html#quantize-one-tensor">Quantize one tensor</a> in every forward pass; <code>train_loader</code> and <code>optimizer</code> are the usual ones from float training.</p>
+        <pre class="cs" data-cs="5-6,7-9"><code class="language-python">import copy, torch
+import torch.ao.quantization as tq
+import torch.ao.quantization.quantize_fx as qfx
+
+qat_qmap = tq.get_default_qat_qconfig_mapping("x86")
+example = (torch.randn(1, 1, 28, 28),)
+model = copy.deepcopy(model_fp32)
+model.train()
+qat_model = qfx.prepare_qat_fx(model, qat_qmap, example)</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>The default QAT mapping for x86 and an example input for tracing.</li>
+  <li><span class="cs-n">2</span>A train-mode copy with fake-quantize modules inserted.</li>
+</ol>
+        <pre class="cs" data-cs="3-8,9-10"><code class="language-python">import torch.nn.functional as F
+
+for x, y in train_loader:
+    logits = qat_model(x)
+    loss = F.cross_entropy(logits, y)
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+qat_model.eval()
+model_int8 = qfx.convert_fx(qat_model)</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>Ordinary training: the forward pass runs through fake quantization.</li>
+  <li><span class="cs-n">2</span>After training, convert to int8 kernels.</li>
+</ol>
+        <p>QAT can learn activation clipping, push small weights out of dead zones (the band around zero that all rounds to zero), and learn quantization-friendly distributions.</p>
+        <p>Rounding and clamping have no useful <a href="gradient-descent.html">gradient</a>, so QAT uses a <strong>Straight-Through Estimator (STE)</strong>: in the backward pass it pretends the rounding output equals its input.</p>
+        <pre class="cs" data-cs="6-7,10-11"><code class="language-python">import torch
+from torch.autograd import Function
+
+class RoundSTE(Function):
+    @staticmethod
+    def forward(ctx, x):
+        return torch.round(x)
+
+    @staticmethod
+    def backward(ctx, grad):
+        return grad  # straight through</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>Forward: real rounding.</li>
+  <li><span class="cs-n">2</span>Backward: pass the gradient through unchanged (the straight-through estimator).</li>
+</ol>
+        <figure id="fig-11" class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 258" style="max-width:480px" role="img" aria-label="Left, the forward pass: rounding turns the input into a staircase of whole-number outputs. Right, the backward pass: the straight-through estimator treats the staircase as the straight line output equals input, so the gradient passes through unchanged"><text class="" x="100.0" y="22.0" text-anchor="middle" style="font-size:18px;font-weight:700">Forward pass</text><line class="mtd-axis" x1="16" y1="136" x2="184" y2="136"/><line class="mtd-axis" x1="100" y1="218" x2="100" y2="54"/><line class="mtd-s mtd-c2" x1="16.8" y1="214.0" x2="35.0" y2="214.0" style="stroke-width:3.5px"/><line class="mtd-s mtd-c2" x1="35.0" y1="188.0" x2="61.0" y2="188.0" style="stroke-width:3.5px"/><line class="mtd-s mtd-c2" x1="61.0" y1="162.0" x2="87.0" y2="162.0" style="stroke-width:3.5px"/><line class="mtd-s mtd-c2" x1="87.0" y1="136.0" x2="113.0" y2="136.0" style="stroke-width:3.5px"/><line class="mtd-s mtd-c2" x1="113.0" y1="110.0" x2="139.0" y2="110.0" style="stroke-width:3.5px"/><line class="mtd-s mtd-c2" x1="139.0" y1="84.0" x2="165.0" y2="84.0" style="stroke-width:3.5px"/><line class="mtd-s mtd-c2" x1="165.0" y1="58.0" x2="183.2" y2="58.0" style="stroke-width:3.5px"/><text class="mtd-t2" x="100.0" y="248.0" text-anchor="middle" style="font-size:16px;font-weight:600">round: output in steps</text><text class="mtd-sub" x="182.0" y="156.0" text-anchor="end" style="font-size:15px">in</text><text class="mtd-sub" x="106.0" y="66.0" text-anchor="start" style="font-size:15px">out</text><text class="" x="300.0" y="22.0" text-anchor="middle" style="font-size:18px;font-weight:700">Backward pass</text><line class="mtd-axis" x1="216" y1="136" x2="384" y2="136"/><line class="mtd-axis" x1="300" y1="218" x2="300" y2="54"/><line class="mtd-s mtd-cg" x1="216.8" y1="214.0" x2="235.0" y2="214.0" style="stroke-width:2.5px;opacity:.25"/><line class="mtd-s mtd-cg" x1="235.0" y1="188.0" x2="261.0" y2="188.0" style="stroke-width:2.5px;opacity:.25"/><line class="mtd-s mtd-cg" x1="261.0" y1="162.0" x2="287.0" y2="162.0" style="stroke-width:2.5px;opacity:.25"/><line class="mtd-s mtd-cg" x1="287.0" y1="136.0" x2="313.0" y2="136.0" style="stroke-width:2.5px;opacity:.25"/><line class="mtd-s mtd-cg" x1="313.0" y1="110.0" x2="339.0" y2="110.0" style="stroke-width:2.5px;opacity:.25"/><line class="mtd-s mtd-cg" x1="339.0" y1="84.0" x2="365.0" y2="84.0" style="stroke-width:2.5px;opacity:.25"/><line class="mtd-s mtd-cg" x1="365.0" y1="58.0" x2="383.2" y2="58.0" style="stroke-width:2.5px;opacity:.25"/><line class="mtd-s mtd-cp" x1="219.4" y1="216.6" x2="380.6" y2="55.4" style="stroke-width:3.5px"/><text class="mtd-pu" x="300.0" y="248.0" text-anchor="middle" style="font-size:16px;font-weight:600">as if output = input</text><text class="mtd-sub" x="382.0" y="156.0" text-anchor="end" style="font-size:15px">in</text><text class="mtd-sub" x="306.0" y="66.0" text-anchor="start" style="font-size:15px">out</text><line class="mtd-sep" x1="200" y1="8" x2="200" y2="256"/></svg><figcaption class="caption"><span class="fignum">Figure 9.</span> Rounding makes steps forward; STE passes gradients straight back.</figcaption></figure>
+        <p><a href="#qatStep">Figure 10</a> follows one weight through those steps.</p>
+<style>
+  .qat-dots { display: flex; gap: 10px; justify-content: center; margin: 0 0 0.6rem; }
+  .qat-dot { width: 34px; height: 34px; border-radius: 50%; border: 2px solid #3498db; background: #fff; color: #1a6fa8; font-weight: 700; font-size: 15px; cursor: pointer; line-height: 1; padding: 0; }
+  .qat-dot.active { background: #3498db; color: #fff; }
+  .qat-dot:focus-visible { outline: 2px solid #2c3e50; outline-offset: 2px; }
+  .qat-controls { display: flex; gap: 0.8rem; justify-content: center; margin: 0 0 0.4rem; }
+  #qatStep .play-btn:disabled { opacity: .35; cursor: default; }
+  #qatSvg { width: 100%; max-width: 520px; height: auto; display: block; margin: 0 auto; }
+  #qatRead { min-height: 2.8em; margin: 0.5rem 0 0; text-align: center; }
+</style>
+<div class="bw-demo demo" id="qatStep">
+<div class="qat-dots">
+  <button type="button" class="qat-dot active" data-s="0" aria-label="Step 1: forward pass">1</button>
+  <button type="button" class="qat-dot" data-s="1" aria-label="Step 2: loss">2</button>
+  <button type="button" class="qat-dot" data-s="2" aria-label="Step 3: backward pass">3</button>
+  <button type="button" class="qat-dot" data-s="3" aria-label="Step 4: first update">4</button>
+  <button type="button" class="qat-dot" data-s="4" aria-label="Step 5: second update">5</button>
+</div>
+<div class="qat-controls">
+  <button type="button" class="play-btn" id="qatPrev">Prev</button>
+  <button type="button" class="play-btn" id="qatNext">Next</button>
+</div>
+<svg id="qatSvg" viewBox="0 0 346 222" role="img" aria-label="One weight trained with fake quantization on a 4-bit grid with step 0.12"></svg>
+<p class="fig-caption"><span class="fignum">Figure 10.</span> Illustrative STE steps carry a weight across a bin edge.</p>
+<p id="qatRead" aria-live="polite"></p>
+<div class="eq-card" id="qatStepEq">
+  <div class="eq-what">The forward pass uses the snapped weight; the backward pass treats the rounding as if it were not there.</div>
+  <div class="eq-line" data-eqline="0"><span class="eqt" style="color:#d35400">x&#770;</span> = <span class="eqt" style="color:#2a7fbf">s</span>&#183;round(<span class="frac"><span class="top"><span class="eqt" style="color:#1f618d">w</span></span><span class="bot"><span class="eqt" style="color:#2a7fbf">s</span></span></span>)</div>
+  <div class="eq-why" data-eqline="0">The float weight <var>w</var> is divided by the grid step <var>s</var>, rounded to the nearest level and multiplied back, so the layer computes with <var>x&#770;</var>, the value int8 inference will use. It is the round trip of the first card on the symmetric weight grid from <a href="quantization.html#quick-refresher-scale-and-zero-point">Scale and zero point</a>, where the zero point is 0, so the shift drops out.</div>
+  <div class="eq-line" data-eqline="1"><span class="frac"><span class="top">&#8706;L</span><span class="bot">&#8706;<span class="eqt" style="color:#1f618d">w</span></span></span> = <span class="frac"><span class="top">&#8706;L</span><span class="bot">&#8706;<span class="eqt" style="color:#d35400">x&#770;</span></span></span></div>
+  <div class="eq-why" data-eqline="1">Round has zero slope almost everywhere, so the straight-through estimator copies the loss gradient at <var>x&#770;</var> onto <var>w</var> unchanged, and the optimizer moves the float weight.</div>
+</div>
+</div>
+<script>
+(function () {
+  var svg = document.getElementById('qatSvg');
+  if (!svg) return;
+  var out = document.getElementById('qatRead');
+  var prev = document.getElementById('qatPrev');
+  var next = document.getElementById('qatNext');
+  var dots = Array.prototype.slice.call(document.querySelectorAll('#qatStep .qat-dot'));
+  var S = 0.12, TGT = 0.33, ETA = 0.6;
+  function snap(w) { return S * Math.round(w / S); }
+  var W = [0.21];
+  for (var i = 0; i < 2; i++) { var w = W[W.length - 1]; W.push(w - ETA * (snap(w) - TGT)); }
+  var STATES = [
+    { w: W[0], ghost: null, show: 'fwd' },
+    { w: W[0], ghost: null, show: 'loss' },
+    { w: W[0], ghost: null, show: 'back' },
+    { w: W[1], ghost: W[0], show: 'upd' },
+    { w: W[2], ghost: W[1], show: 'upd' }
+  ];
+  var TEXT = [
+    'The float weight 0.21 snaps to the nearest level, 0.24, and the layer computes with 0.24.',
+    'The loss compares the snapped weight with the target 0.33, and it sits 0.09 too low.',
+    'The gradient at the snapped weight is copied straight through to the float weight.',
+    'The float weight moves up to ' + W[1].toFixed(3) + ', still nearest 0.24, so the snapped weight does not change yet.',
+    'The next step takes it to ' + W[2].toFixed(3) + ', past the bin edge 0.30, and the snapped weight jumps to 0.36.'
+  ];
+  var EQMAP = [[0], [0], [1], [1], [0]];
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(t, a) { var e = document.createElementNS(NS, t); for (var k in a) e.setAttribute(k, a[k]); return e; }
+  function tx(x, y, s, size, anchor, color, weight) { var e = el('text', { x: x, y: y, 'text-anchor': anchor || 'middle' }); e.setAttribute('style', 'font-family:sans-serif;font-size:' + Math.max(size || 14, 16) + 'px;fill:' + (color || '#2c3e50') + (weight ? ';font-weight:' + weight : '')); e.textContent = s; return e; }
+  function ln(x1, y1, x2, y2, color, wdt, dash) { var e = el('line', { x1: x1, y1: y1, x2: x2, y2: y2 }); e.setAttribute('style', 'stroke:' + color + ';stroke-width:' + (wdt || 1.5) + 'px' + (dash ? ';stroke-dasharray:' + dash : '')); return e; }
+  function head(x, y, dir, color) { var p = dir === 'down' ? [x - 5, y - 9, x + 5, y - 9, x, y] : dir === 'up' ? [x - 5, y + 9, x + 5, y + 9, x, y] : [x - 9, y - 5, x - 9, y + 5, x, y]; var e = el('polygon', { points: p.join(' ') }); e.setAttribute('style', 'fill:' + color); return e; }
+  function X(v) { return 24 + v / 0.48 * 300; }
+  var BLUE = '#1f618d', ORANGE = '#d35400', GREEN = '#148f77', RED = '#c0392b', INK = '#2c3e50';
+  var YW = 62, YG = 150;
+  function render(k) {
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    var st = STATES[k], xh = snap(st.w);
+    svg.appendChild(tx(6, 22, 'float weight w', 16, 'start', BLUE, 700));
+    svg.appendChild(ln(24, YW, 324, YW, '#bdc3c7', 1.5));
+    svg.appendChild(tx(6, 118, 'grid, step 0.12', 16, 'start', ORANGE, 700));
+    svg.appendChild(ln(24, YG, 324, YG, '#7f8c8d', 2));
+    [0, 0.12, 0.24, 0.36, 0.48].forEach(function (v) { svg.appendChild(ln(X(v), YG - 6, X(v), YG + 6, '#7f8c8d', 2)); svg.appendChild(tx(X(v), YG + 22, v.toFixed(2), 15, 'middle', '#555')); });
+    [0.06, 0.18, 0.30, 0.42].forEach(function (v) { svg.appendChild(ln(X(v), YW - 14, X(v), YG - 10, '#bdc3c7', 1.2, '4 4')); });
+    svg.appendChild(tx(X(0.30), 34, 'bin edge 0.30', 14, 'middle', '#7f8c8d'));
+    var tg = X(TGT);
+    var tri = el('polygon', { points: [tg - 6, YG + 36, tg + 6, YG + 36, tg, YG + 28].join(' ') }); tri.setAttribute('style', 'fill:' + GREEN); svg.appendChild(tri);
+    svg.appendChild(tx(tg, YG + 52, 'target 0.33', 15, 'middle', GREEN, 700));
+    if (st.ghost !== null) { var gc = el('circle', { cx: X(st.ghost), cy: YW, r: 6 }); gc.setAttribute('style', 'fill:none;stroke:' + BLUE + ';stroke-width:1.5px;stroke-dasharray:3 3'); svg.appendChild(gc); svg.appendChild(ln(X(st.ghost) + 8, YW, X(st.w) - 10, YW, BLUE, 2)); svg.appendChild(head(X(st.w) - 8, YW, 'right', BLUE)); }
+    var wx = X(st.w), hx = X(xh);
+    if (st.show === 'fwd' || st.show === 'upd') { svg.appendChild(ln(wx, YW + 8, hx, YG - 16, ORANGE, 1.8)); svg.appendChild(head(hx, YG - 8, 'down', ORANGE)); }
+    if (st.show === 'loss') { var yb = YG - 24; svg.appendChild(ln(hx, yb, tg, yb, RED, 2)); svg.appendChild(ln(hx, yb - 6, hx, yb + 6, RED, 2)); svg.appendChild(ln(tg, yb - 6, tg, yb + 6, RED, 2)); svg.appendChild(tx((hx + tg) / 2, yb - 9, 'gap 0.09', 15, 'middle', RED, 700)); }
+    if (st.show === 'back') { svg.appendChild(ln(hx - 12, YG - 10, wx - 4, YW + 16, RED, 2, '5 3')); svg.appendChild(head(wx - 3, YW + 8, 'up', RED)); svg.appendChild(tx(hx + 20, (YW + YG) / 2 + 4, 'gradient copied', 15, 'start', RED, 700)); }
+    var c = el('circle', { cx: wx, cy: YW, r: 7 }); c.setAttribute('style', 'fill:' + BLUE); svg.appendChild(c);
+    var near = Math.abs(wx - X(0.30)) < 40; svg.appendChild(tx(near ? (st.w > 0.30 ? wx + 11 : wx - 11) : wx, near ? YW - 9 : YW - 12, st.w.toFixed(3), 15, near ? (st.w > 0.30 ? 'start' : 'end') : 'middle', BLUE, 700));
+    var sq = el('rect', { x: hx - 7, y: YG - 7, width: 14, height: 14 }); sq.setAttribute('style', 'fill:' + ORANGE); svg.appendChild(sq);
+    out.textContent = TEXT[k];
+    dots.forEach(function (d, i) { d.classList.toggle('active', i === k); });
+    prev.disabled = (k === 0);
+    next.disabled = (k === STATES.length - 1);
+    syncEq('qatStepEq', EQMAP[k]);
+  }
+  function syncEq(cardId, lines) {
+    var card = document.getElementById(cardId);
+    if (!card) return;
+    lines = lines || [];
+    var stepped = lines.length > 0;
+    card.classList.toggle('eq-stepped', stepped);
+    var ls = card.querySelectorAll('.eq-line');
+    for (var i = 0; i < ls.length; i++) ls[i].classList.toggle('eq-active', !stepped || lines.indexOf(i) >= 0);
+    var ws = card.querySelectorAll('.eq-why');
+    for (var j = 0; j < ws.length; j++) { var n = parseInt(ws[j].getAttribute('data-eqline'), 10); ws[j].classList.toggle('eq-active', stepped && lines.indexOf(n) >= 0); }
+  }
+  var cur = 0;
+  function go(k) { cur = Math.max(0, Math.min(STATES.length - 1, k)); render(cur); }
+  prev.addEventListener('click', function () { go(cur - 1); });
+  next.addEventListener('click', function () { go(cur + 1); });
+  dots.forEach(function (d) { d.addEventListener('click', function () { go(parseInt(d.getAttribute('data-s'), 10)); }); });
+  render(0);
+})();
+</script>
+        <p>Inside <code>FakeQuantize</code> the observer is usually a <code>MovingAverageMinMaxObserver</code>, which keeps an exponential moving average of the min and max seen in training; PTQ uses <code>MinMaxObserver</code> or <code>HistogramObserver</code> instead. <code>prepare_qat_fx()</code> inserts the <code>FakeQuantize</code> modules; <code>convert_fx()</code> replaces them with real quantized ops. A <code>FakeQuantize</code> holds its observer plus the quantize-and-read-back step, and <a href="quantization-debugging.html#inspect-activation-post-process">Inspect the observers' recorded ranges</a> prints both.</p>
+<div class="eq-card" id="quantEmaEqStatic">
+<div class="eq-what">The moving-average observer's update, run once per training batch. For an illustrative example, with <var>c</var> = 0.01, a running min of 0.00 and a batch whose smallest activation is &#8722;0.4, the new running min is &#8722;0.004: one loud batch moves it only 1% of the way.</div>
+<div class="eq-line eq-active" data-eqline="0"><span class="eqt" style="color:#2a7fbf">m<sub>t</sub></span> = (1 &#8722; <span class="eqt" style="color:#8e44ad">c</span>)&#183;<span class="eqt" style="color:#2a7fbf">m<sub>t&#8722;1</sub></span> + <span class="eqt" style="color:#8e44ad">c</span>&#183;<span class="eqt" style="color:#d35400">b<sub>t</sub></span></div>
+<div class="eq-why eq-active" data-eqline="0"><span class="eqt" style="color:#2a7fbf"><var>m<sub>t</sub></var></span> is the running min after batch <var>t</var>. It keeps most of the previous value <span class="eqt" style="color:#2a7fbf"><var>m<sub>t&#8722;1</sub></var></span>; <span class="eqt" style="color:#8e44ad"><var>c</var></span> is the averaging constant that sets how far each new batch moves it, and <span class="eqt" style="color:#d35400"><var>b<sub>t</sub></var></span> is the smallest activation in batch <var>t</var>. The running max updates the same way.</div>
+</div>
+     <p>Raising <var>c</var> makes the range follow the latest batches faster but jump with each noisy batch; lowering it smooths the range but reacts slowly, and <var>c</var> = 0 freezes it. PyTorch's <code>MovingAverageMinMaxObserver</code> defaults to <var>c</var> = 0.01 (its <code>averaging_constant</code>, <a href="https://docs.pytorch.org/docs/2.3/_modules/torch/ao/quantization/observer.html">observer source</a>).</p>
+        <h3 id="qat-training-fakequantize-details"><span class="secnum">3.1</span> Freezing observers and BatchNorm statistics in QAT</h3>
+        <figure id="fig-12" class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 224" style="max-width:480px" role="img" aria-label="Quantization-aware training in phases: during warm up the scale moves as observers update every batch; after the freeze it stays flat while the model adapts to one fixed noise; at convert it is baked into real int8 layers"><rect class="mtd-pic" x="6.0" y="6.0" width="152.0" height="212.0" rx="6"/><text class="" x="82.0" y="28.0" text-anchor="middle" style="font-size:17px;font-weight:700">Warm up</text><text class="mtd-sub" x="82.0" y="182.0" text-anchor="middle" style="font-size:16px">ranges update</text><text class="mtd-sub" x="82.0" y="204.0" text-anchor="middle" style="font-size:16px">every batch</text><rect class="mtd-box" x="162.0" y="6.0" width="136.0" height="212.0" rx="6" style="fill:#ffffff;stroke:#e1e4e8;stroke-width:1px"/><text class="" x="230.0" y="28.0" text-anchor="middle" style="font-size:17px;font-weight:700">Freeze</text><text class="mtd-sub" x="230.0" y="182.0" text-anchor="middle" style="font-size:16px">noise fixed,</text><text class="mtd-sub" x="230.0" y="204.0" text-anchor="middle" style="font-size:16px">model adapts</text><rect class="mtd-pic" x="302.0" y="6.0" width="92.0" height="212.0" rx="6"/><text class="" x="348.0" y="28.0" text-anchor="middle" style="font-size:17px;font-weight:700">Convert</text><text class="mtd-sub" x="348.0" y="182.0" text-anchor="middle" style="font-size:16px">real int8</text><text class="mtd-sub" x="348.0" y="204.0" text-anchor="middle" style="font-size:16px">layers</text><polyline class="mtd-s mtd-c2" style="stroke-width:3px;fill:none" points="10.0,100.5 13.0,114.2 16.0,129.5 19.0,126.5 22.0,132.0 25.0,121.3 28.0,120.9 31.0,108.0 34.0,100.3 37.0,87.7 40.0,84.7 43.0,82.2 46.0,84.0 49.0,91.6 52.0,96.4 55.0,105.9 58.0,114.5 61.0,117.9 64.0,118.9 67.0,121.9 70.0,115.0 73.0,108.8 76.0,104.2 79.0,98.0 82.0,94.3 85.0,92.4 88.0,95.5 91.0,95.1 94.0,98.7 97.0,103.4 100.0,108.9 103.0,109.7 106.0,111.2 109.0,114.7 112.0,109.8 115.0,108.6 118.0,106.6 121.0,105.0 124.0,99.6 127.0,96.6 130.0,98.5 133.0,98.0 136.0,99.5 139.0,102.1 142.0,104.2 145.0,106.3 148.0,107.3 151.0,109.2 154.0,109.2 157.0,107.5 160.0,105.9 160.0,104.0"/><line class="mtd-s mtd-c2" x1="160" y1="104" x2="300" y2="104" style="stroke-width:3px"/><line class="mtd-s mtd-cp" x1="300" y1="104" x2="388" y2="104" style="stroke-width:3px;stroke-dasharray:6 5"/><text class="mtd-t2" x="230.0" y="92.0" text-anchor="middle" style="font-size:16px;font-weight:600">scale</text></svg><figcaption class="caption"><span class="fignum">Figure 11.</span> The scale moves in warm up, then freezes, then is baked in at convert.</figcaption></figure>
+        <p>QAT starts from the trained FP32 model and fine-tunes it with a small learning rate; PyTorch's tutorial uses SGD at 0.0001 for 8 epochs, freezing the batch-norm statistics after the fourth epoch and the observers after the fifth (<a href="https://docs.pytorch.org/tutorials/advanced/static_quantization_tutorial.html">static quantization tutorial</a>).</p>
+        <p>A common schedule warms up first (<a href="#fig-12">Figure 11</a>), letting the observers learn the scale and zero point while the model trains, then freezes them and keeps training on one fixed pattern of quantization noise. Freezing earlier gives more epochs on a fixed grid but a range measured on fewer batches; freezing later tracks the range longer but leaves less time to adapt.</p>
+        <pre class="cs" data-cs="6-8,9-11,12-17"><code class="language-python">import torch.nn.functional as F
+import torch.ao.quantization as tq
+import torch.ao.nn.intrinsic.qat as nniqat
+
+for epoch in range(num_epochs):
+    if epoch == bn_freeze_epochs:
+        # freeze BN running stats
+        qat_model.apply(nniqat.freeze_bn_stats)
+    if epoch == warmup_epochs:
+        # freeze scale and zero point
+        qat_model.apply(tq.disable_observer)
+    for x, y in train_loader:
+        out = qat_model(x)
+        loss = F.cross_entropy(out, y)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>Freeze the batch-norm statistics in a model with fused Conv + BatchNorm, such as the companion fused MNIST CNN. Each keeps its last running mean and variance, so the batch-norm scale folded into the conv weights stops moving and the weight grid sees a steady tensor. <code>TinyCNN</code> has no BatchNorm, so on it this line does nothing.</li>
+  <li><span class="cs-n">2</span>After the warm-up epochs, freeze every observer so scale and zero point stop moving.</li>
+  <li><span class="cs-n">3</span>Training continues with fixed quantization grids.</li>
+</ol>
+   </section>
+
+   <section>
+     <h2 id="in-practice"><span class="secnum">4</span> Quantization in practice</h2>
+     <ul>
+       <li>Static PTQ costs one no-grad forward pass over the calibration set. PyTorch's accuracy guide asks for at least 100 samples with several per class, and more data costs only calibration time (<a href="https://docs.pytorch.org/docs/2.1/quantization-accuracy-debugging.html">Quantization Accuracy Debugging</a>).</li>
+       <li>QAT adds a quantize and read-back to every FakeQuantize on every forward pass, so each training step is slower than float training.</li>
+       <li>PyTorch now marks <code>torch.ao.quantization</code> eager and FX quantization for migration to <a href="https://docs.pytorch.org/ao/stable/index.html">torchao</a> (<code>quantize_</code> for eager, <code>prepare_pt2e</code> and <code>convert_pt2e</code> for graph mode) and plans to delete it in a future release (<a href="https://docs.pytorch.org/docs/2.15/quantization.html">PyTorch 2.15 quantization docs</a>). The ideas on this page carry over unchanged; the import paths do not.</li>
+       <li>A model left in train mode during calibration keeps dropout and batch-norm updates on, and the ranges come out wrong.</li>
+     </ul>
+     <p>The <a href="https://docs.pytorch.org/docs/2.1/quantization.html">PyTorch quantization docs</a> tie each path to a different bottleneck (<a href="#wrapping-up">Figure 12</a>).</p>
+     <figure id="wrapping-up" class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 222" style="max-width:480px" role="img" aria-label="Which path to take. Dynamic PTQ when loading weights dominates run time, as in LSTM and Transformer models at small batch sizes. Static PTQ when memory and compute both matter, CNNs being the typical case. QAT when static PTQ loses too much accuracy.">
+<a href="#dynamic-quantization"><rect x="6" y="8" width="104" height="56" rx="8" style="fill:#1f618d"/><text x="58" y="41" text-anchor="middle" style="font-size:14px;font-weight:700;fill:#ffffff">Dynamic PTQ</text>
+<text x="120" y="31" style="font-size:15px">loading weights dominates run time</text><text class="mtd-sub" x="120" y="53" style="font-size:15px">LSTM, Transformer, small batches</text></a>
+<a href="#static-quantization"><rect x="6" y="80" width="104" height="56" rx="8" style="fill:#148f77"/><text x="58" y="113" text-anchor="middle" style="font-size:14px;font-weight:700;fill:#ffffff">Static PTQ</text>
+<text x="120" y="103" style="font-size:15px">memory and compute both matter</text><text class="mtd-sub" x="120" y="125" style="font-size:15px">CNNs, the typical case</text></a>
+<a href="#quantization-aware-training-qat"><rect x="6" y="152" width="104" height="56" rx="8" style="fill:#ca6f1e"/><text x="58" y="185" text-anchor="middle" style="font-size:14px;font-weight:700;fill:#ffffff">QAT</text>
+<text x="120" y="175" style="font-size:15px">static PTQ loses too much</text><text class="mtd-sub" x="120" y="197" style="font-size:15px">accuracy, so train with rounding on</text></a>
+</svg><figcaption class="caption"><span class="fignum">Figure 12.</span> Which path fits which model; each row links its section.</figcaption></figure>
+     <p>If accuracy still dropped, which layer lost it? <a href="quantization-debugging.html">Debugging a Quantized Model</a> traces it layer by layer. <a href="prune.html">Pruning</a> and <a href="kd.html">Knowledge Distillation</a> shrink a model in other ways.</p>
+   </section>
+
+    <section>
+        <h2 id="references"><span class="secnum">5</span> References</h2>
+        <ol class="brefs">
+            <li>Jacob, B., et al. (2018). Quantization and Training of Neural Networks for Efficient Integer-Arithmetic-Only Inference. <a href="https://arxiv.org/abs/1712.05877">arXiv:1712.05877</a>. Source of the scale and zero point scheme and of training with simulated quantization.</li>
+            <li>Nagel, M., et al. (2021). A White Paper on Neural Network Quantization. <a href="https://arxiv.org/abs/2106.08295">arXiv:2106.08295</a>. Source of the MSE range-setting method that the histogram observer also uses.</li>
+        </ol>
+    </section>
+
+            <script>
+        (function () {
+            var nav = document.querySelector('.topnav');
+            function onNavScroll() {
+                nav.classList.toggle('scrolled', window.scrollY > 4);
+            }
+            window.addEventListener('scroll', onNavScroll, { passive: true });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            window.addEventListener('resize', function () {
+                if (window.innerWidth > 768) {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            onNavScroll();
+            var toggle = document.getElementById('navToggle');
+            var panel = document.getElementById('navPanel');
+            if (toggle && panel) {
+                toggle.addEventListener('click', function () {
+                    var open = panel.classList.toggle('open');
+                    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                });
+                panel.addEventListener('click', function (e) {
+                    if (e.target && e.target.classList && e.target.classList.contains('panel-link')) {
+                        panel.classList.remove('open');
+                        toggle.setAttribute('aria-expanded', 'false');
+                    }
+                });
+            }
+            var links = Array.prototype.slice.call(document.querySelectorAll('.tab-strip a.tab-chip[href^="#"]'));
+            if (!links.length) return;
+            var tabLinks = {};
+            links.forEach(function (a) { tabLinks[a.getAttribute('href').slice(1)] = a; });
+            var current = null;
+            function centerTab(tab) {
+                var strip = tab.parentElement;
+                if (!strip || !strip.classList.contains('tab-strip')) return;
+                var sr = strip.getBoundingClientRect();
+                var pr = tab.getBoundingClientRect();
+                strip.scrollLeft += (pr.width >= sr.width) ? (pr.left - sr.left) : (pr.left - sr.left) - (sr.width - pr.width) / 2;
+            }
+            function setActive(id) {
+                if (!tabLinks[id] || id === current) return;
+                current = id;
+                links.forEach(function (a) {
+                    a.classList.toggle('active', a.getAttribute('href') === '#' + id);
+                });
+                centerTab(tabLinks[id]);
+            }
+            links.forEach(function (a) {
+                a.addEventListener('click', function () {
+                    setActive(a.getAttribute('href').slice(1));
+                });
+            });
+            setActive(links[0].getAttribute('href').slice(1));
+            if ('IntersectionObserver' in window) {
+                var obs = new IntersectionObserver(function (entries) {
+                    entries.forEach(function (en) {
+                        if (en.isIntersecting) setActive(en.target.id);
+                    });
+                }, { rootMargin: '-35% 0px -55% 0px' });
+                Object.keys(tabLinks).forEach(function (id) {
+                    var el = document.getElementById(id);
+                    if (el) obs.observe(el);
+                });
+                window.addEventListener('scroll', function () {
+                    if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) {
+                        setActive(links[links.length - 1].getAttribute('href').slice(1));
+                    }
+                }, { passive: true });
+            }
+            window.addEventListener('load', function () {
+                var act = document.querySelector('.tab-strip a.active');
+                if (act) centerTab(act);
+            });
+        })();
+    </script>
+  <script>
+  /* Shared Play helpers: no-yank scrolling. */
+  function playScrollEnsure(el) {
+    /* Disabled 2026-10-06: user hates scroll-on-Play. No scrolling. */
+    return;
+  }
+  </script>
+  <script> /* r7reflow-reserve */
+  /* Scroll-stability (2026-10-09, Round 7 reflow sweep): Play-button label swaps
+     ("Play"/"Pause"/"Stop", "Playing...") widened or narrowed these buttons and
+     shifted their Reset siblings (up to 13px; 71px on streamPlay; 168px on obPlay).
+     Reserve each button's width to its widest label variant so the control rows
+     never reflow. Buttons are border-box in this UA stylesheet, so minWidth floors
+     the measured border-box width directly. Follows the r4scroll reserve pattern. */
+  (function () {
+    var sets = {
+      'calibPlay': ['Play', 'Playing...']
+    };
+    Object.keys(sets).forEach(function (id) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      var prev = btn.textContent, max = 0;
+      sets[id].forEach(function (t) {
+        btn.textContent = t;
+        var w = btn.getBoundingClientRect().width;
+        if (w > max) max = w;
+      });
+      btn.textContent = prev;
+      btn.style.minWidth = Math.ceil(max) + 'px';
+    });
+  })();
+  </script>
+<script>
+/* P80 code sections (CODE-SECTIONS.md) */
+(function(){
+  var C=['121,184,255','255,171,112','133,232,157','210,168,255','255,161,152','118,227,234'];
+  function lay(pre){
+    var code=pre.querySelector('code'); if(!code) return;
+    var lh=parseFloat(getComputedStyle(code).lineHeight);
+    var pt=parseFloat(getComputedStyle(pre).paddingTop);
+    var old=pre.querySelectorAll('.cs-g'); for(var j=0;j<old.length;j++) pre.removeChild(old[j]);
+    var imgs=[],sizes=[],pos=[];
+    (pre.getAttribute('data-cs')||'').split(',').forEach(function(r,i){
+      var m=r.trim().match(/^(\d+)(?:-(\d+))?$/); if(!m) return;
+      var a=+m[1],b=+(m[2]||m[1]),c=C[i%C.length],top=pt+(a-1)*lh,h=(b-a+1)*lh;
+      imgs.push('linear-gradient(rgba('+c+',.55),rgba('+c+',.55))','linear-gradient(rgba('+c+',.13),rgba('+c+',.13))');
+      sizes.push('3px '+h+'px','100% '+h+'px'); pos.push('0 '+top+'px','0 '+top+'px');
+      var g=document.createElement('span'); g.className='cs-g'; g.setAttribute('aria-hidden','true');
+      g.setAttribute('data-n',String(i+1)); g.style.top=(top+(lh-11)/2)+'px'; g.style.color='rgb('+c+')';
+      pre.insertBefore(g,code);
+    });
+    pre.style.backgroundImage=imgs.join(','); pre.style.backgroundSize=sizes.join(',');
+    pre.style.backgroundPosition=pos.join(','); pre.style.backgroundRepeat='no-repeat';
+  }
+  function all(){ var p=document.querySelectorAll('pre.cs'); for(var i=0;i<p.length;i++) lay(p[i]); }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',all); else all();
+  window.addEventListener('load',all);
+  window.addEventListener('resize',all);
+  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(all);
+})();
+</script>
+</body>
+</html>

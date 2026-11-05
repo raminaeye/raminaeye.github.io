@@ -1405,9 +1405,9 @@ z = np.linalg.solve(corr, np.array([1.0, 1.0]))  # [0.621 0.621]</code></pre>
   }
   el('polygon', {points: O.x + ',' + O.y + ' ' + (O.x + S) + ',' + O.y + ' ' + (O.x + S) + ',' + (O.y - S) + ' ' + O.x + ',' + (O.y - S), style: 'fill:none;stroke:#7f8c8d;stroke-width:1.4px;stroke-dasharray:4 4'}, base);
   /* moved grid: enough lines of each family to reach every corner of the panel (half-diagonal R units from O), drawn long and clipped;
-     near a flat matrix the lines crowd together, so every stride-th line is drawn, chosen so drawn lines of a family stay at least
-     GAP svg units apart measured across the lines (spacing of one family is S |det| / |b|), at most 2 x 121 lines */
-  var gl = [], R = Math.sqrt(170 * 170 + 170 * 170) / S + 0.2, KMAX = 60, GAP = 6;
+     near a flat matrix the lines crowd together (spacing of one family is S |det| / |b| svg units), so every stride-th line is drawn,
+     stride a power of two so drawn lines stay at least GAP apart; the lines the next stride will drop fade out first, so density never jumps */
+  var gl = [], R = Math.sqrt(170 * 170 + 170 * 170) / S + 0.2, GAP = 10.5;
   function gline(j){ while (gl.length <= j) gl.push(el('line', {style: 'stroke:#a9cce3;stroke-width:1.2px'}, grid)); return gl[j]; }
   var sqP = el('polygon', {style: 'fill:#7d3c98;fill-opacity:.28;stroke:#7d3c98;stroke-width:2px'}, top);
   var areaT = el('text', {x: 22, y: 35, 'text-anchor': 'start', style: 'font-size:16px;font-weight:700;fill:#7d3c98;paint-order:stroke;stroke:#fbfcfd;stroke-width:4px;stroke-linejoin:round'}, top);
@@ -1435,16 +1435,20 @@ z = np.linalg.solve(corr, np.array([1.0, 1.0]))  # [0.621 0.621]</code></pre>
     var t = amt.value / 100, A = M(t), det = A[0][0] * A[1][1] - A[0][1] * A[1][0], n = 0;
     var c1 = mul(A, [1, 0]), c2 = mul(A, [0, 1]), c3 = [c1[0] + c2[0], c1[1] + c2[1]];
     /* family 1: the moved line x = i is i*c1 + s*c2; family 2: y = i is s*c1 + i*c2;
-       when the two families are under 1.6 degrees apart (but not yet flat) they drift in and out of step and band, so only family 1 is drawn */
-    var lc1 = Math.sqrt(c1[0] * c1[0] + c1[1] * c1[1]), lc2 = Math.sqrt(c2[0] * c2[0] + c2[1] * c2[1]);
-    var near = Math.abs(det) >= 0.005 && Math.abs(det) < lc1 * lc2 * Math.sin(1.6 * Math.PI / 180);
-    (near ? [[c1, c2]] : [[c1, c2], [c2, c1]]).forEach(function(f){
+       two families at almost the same angle drift in and out of step and band, so family 2 fades smoothly
+       from full at 8 degrees apart to gone at 1.6 degrees (still drawn flat at det 0, where both are one line) */
+    var lc1 = Math.sqrt(c1[0] * c1[0] + c1[1] * c1[1]), lc2 = Math.sqrt(c2[0] * c2[0] + c2[1] * c2[1]), flat = Math.abs(det) < 0.005;
+    var ang = flat ? 0 : Math.asin(Math.min(1, Math.abs(det) / (lc1 * lc2))) * 180 / Math.PI;
+    var u = flat ? 1 : Math.max(0, Math.min(1, (ang - 1.6) / (8 - 1.6))), o2 = u * u * (3 - 2 * u);
+    (o2 < 0.001 ? [[c1, c2]] : [[c1, c2], [c2, c1]]).forEach(function(f, fi){
       var a = f[0], b = f[1], bb = b[0] * b[0] + b[1] * b[1], lb = Math.sqrt(bb);
-      var reach = Math.abs(det) < 0.005 ? 6 : R * lb / Math.abs(det), sp = S * Math.abs(det) / lb, stride = Math.max(1, Math.ceil(reach / KMAX), sp > 0 && Math.abs(det) >= 0.005 ? Math.ceil(GAP / sp - 1e-9) : 1), K = Math.ceil(reach / stride);
+      var reach = flat ? 6 : R * lb / Math.abs(det), sp = S * Math.abs(det) / lb;
+      var stride = flat || sp >= GAP ? 1 : Math.pow(2, Math.ceil(Math.log(GAP / sp) / Math.LN2 - 1e-9)), half = stride / 2;
+      var fo = stride > 1 ? Math.pow(Math.max(0, Math.min(1, (half * sp - GAP / 2) / (GAP / 2))), 2) : 0, step = fo > 0.001 ? half : stride, K = Math.ceil(reach / step);
       for (var m = -K; m <= K; m++) {
-        var i = m * stride, s0 = -i * (a[0] * b[0] + a[1] * b[1]) / bb, h = (R + 0.5) / lb;
+        var i = m * step, op = (i % stride !== 0 ? fo : 1) * (fi ? o2 : 1), s0 = -i * (a[0] * b[0] + a[1] * b[1]) / bb, h = (R + 0.5) / lb;
         var p0 = P([i * a[0] + (s0 - h) * b[0], i * a[1] + (s0 - h) * b[1]]), p1 = P([i * a[0] + (s0 + h) * b[0], i * a[1] + (s0 + h) * b[1]]), ln = gline(n++);
-        ln.setAttribute('x1', p0.x); ln.setAttribute('y1', p0.y); ln.setAttribute('x2', p1.x); ln.setAttribute('y2', p1.y); ln.style.display = '';
+        ln.setAttribute('x1', p0.x); ln.setAttribute('y1', p0.y); ln.setAttribute('x2', p1.x); ln.setAttribute('y2', p1.y); ln.style.display = ''; ln.style.strokeOpacity = op < 1 ? op : '';
       }
     });
     for (var z = n; z < gl.length; z++) gl[z].style.display = 'none';

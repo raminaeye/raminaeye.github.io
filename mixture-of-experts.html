@@ -1,0 +1,1830 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mixture of Experts (MoE)</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem;
+      line-height: 1.6;
+      color: #333;
+    }
+    h1, h2, h3, h4 {
+      color: #2c3e50;
+      margin-top: 1.5em;
+      margin-bottom: 0.5em;
+    }
+    h1 { font-size: 2.5em; border-bottom: 2px solid #3498db; padding-bottom: 0.3em;}
+    h2 { font-size: 2em; border-bottom: 1px solid #bdc3c7; padding-bottom: 0.2em;}
+    h3 { font-size: 1.5em; }
+    h4 { font-size: 1.2em; color: #555;}
+
+    /* Shared site nav (matches index.html topnav) */
+    body { padding-top: calc(64px + 1.5rem); }
+    h1, h2, h3 { scroll-margin-top: 84px; }
+    .topnav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        z-index: 1000;
+        background: rgba(255, 255, 255, 0.65);
+        backdrop-filter: blur(18px) saturate(1.5);
+        -webkit-backdrop-filter: blur(18px) saturate(1.5);
+        border-bottom: 1px solid transparent;
+        transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+    .topnav.scrolled {
+        background: rgba(255, 255, 255, 0.88);
+        border-bottom-color: #dee2e6;
+        box-shadow: 0 6px 24px rgba(33, 37, 41, 0.07);
+    }
+    .nav-inner {
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 0 1.5rem;
+        height: 64px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+    .wordmark {
+        font-weight: 700;
+        color: #212529;
+        text-decoration: none;
+        font-size: 1.05rem;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+    }
+    .nav-links {
+        display: flex;
+        gap: 2px;
+        align-items: center;
+    }
+    .nav-links a {
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        font-size: 0.95rem;
+        padding: 8px 14px;
+        border-radius: 999px;
+        transition: color 0.18s ease, background-color 0.18s ease;
+    }
+    .nav-links a:hover {
+        color: #007bff;
+        background-color: #e7f1ff;
+    }
+    .nav-links a.active {
+        color: #007bff;
+        background-color: #e7f1ff;
+        font-weight: 600;
+    }
+    .nav-links a:focus-visible,
+    .wordmark:focus-visible,
+    .nav-toggle:focus-visible,
+    .panel-link:focus-visible,
+    .panel-social a:focus-visible {
+        outline: 2px solid #007bff;
+        outline-offset: 2px;
+    }
+    @media (hover: hover) {
+        .nav-toggle:hover { background-color: #e7f1ff; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .topnav,
+        .nav-links a,
+        .nav-toggle span,
+        .nav-panel,
+        .nav-panel a.panel-link {
+            transition: none;
+        }
+    }
+    @media (hover: hover) {
+        .nav-toggle:hover { background-color: #e7f1ff; }
+    }
+    .nav-toggle {
+        display: none;
+        width: 42px;
+        height: 42px;
+        padding: 0;
+        background: none;
+        border: 0;
+        border-radius: 10px;
+        cursor: pointer;
+        flex: 0 0 auto;
+    }
+    .nav-panel {
+        display: grid;
+        grid-template-rows: 0fr;
+        visibility: hidden;
+        transition: grid-template-rows 0.32s ease, visibility 0s linear 0.32s;
+    }
+    .nav-panel.open {
+        grid-template-rows: 1fr;
+        visibility: visible;
+        transition: grid-template-rows 0.32s ease, visibility 0s;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner {
+        min-height: 0;
+        overflow: hidden;
+    }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link:hover {
+        background-color: #e7f1ff;
+        color: #007bff;
+    }
+    .nav-panel a.panel-link.active {
+        color: #007bff;
+        font-weight: 600;
+        background-color: #e7f1ff;
+    }
+    .panel-social a:hover {
+        border-color: #007bff;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner {
+        min-height: 0;
+        overflow: hidden;
+    }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link:hover {
+        background-color: #e7f1ff;
+        color: #007bff;
+    }
+    .nav-panel a.panel-link.active {
+        color: #007bff;
+        font-weight: 600;
+        background-color: #e7f1ff;
+    }
+    .panel-social a:hover {
+        border-color: #007bff;
+    }
+    /* Section tab strip: one slim row, scrolls sideways when it overflows. */
+    .tabs-label {
+        float: left;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #6c757d;
+        font-weight: 700;
+        line-height: 1.2;
+        margin: 0;
+        padding: 8px 12px 0 0;
+    }
+    .tab-strip {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 2px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        margin: 0 0 1.25rem;
+        max-width: 100%;
+    }
+    .tab-strip::-webkit-scrollbar { display: none; }
+    .tab-strip a.tab-chip,
+    .tab-strip a.tab-link {
+        display: inline-block;
+        flex: 0 0 auto;
+        padding: 6px 10px;
+        border-radius: 999px;
+        color: #495057;
+        text-decoration: none;
+        font-size: 0.82rem;
+        font-weight: 500;
+        line-height: 1.35;
+        white-space: nowrap;
+    }
+    .tab-strip a.tab-chip:hover,
+    .tab-strip a.tab-link:hover { color: #007bff; }
+    .tab-strip a.tab-chip.active,
+    .tab-strip a.tab-link.active { background: #007bff; color: #ffffff; }
+    @media (max-width: 768px) {
+        .tabs-label { display: none; }
+        .tab-strip {
+            width: 100vw;
+            max-width: 100vw;
+            box-sizing: border-box;
+            margin-left: calc((100% - 100vw) / 2);
+            padding-left: calc((100vw - 100%) / 2);
+        }
+        .tab-strip a.tab-chip,
+        .tab-strip a.tab-link { font-size: 0.75rem; padding: 6px 8px; }
+    }
+        .crumb { margin: 0 0 0.8em; }
+        .crumb a {
+            display: inline-block;
+            padding: 4px 14px;
+            border: 1px solid #dee2e6;
+            border-radius: 999px;
+            background: #f8f9fa;
+            color: #0056b3;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+        .crumb a:hover { border-color: #007bff; color: #007bff; }
+    .nav-panel a.panel-link {
+        display: flex;
+        align-items: center;
+        padding: 0.8rem 0.75rem;
+        margin: 0 0.25rem;
+        border-radius: 10px;
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        min-height: 48px;
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+    .panel-social {
+        display: flex;
+        gap: 0.5rem;
+        padding: 0.9rem 1rem 0.25rem;
+        flex-wrap: wrap;
+    }
+    .panel-social a {
+        color: #007bff;
+        text-decoration: none;
+        font-weight: 500;
+        font-size: 0.9rem;
+        padding: 6px 12px;
+        border: 1px solid #dee2e6;
+        border-radius: 999px;
+        transition: border-color 0.15s ease;
+    }
+    @media (max-width: 768px) {
+        .nav-links { display: none; }
+        .nav-toggle { display: block; }
+    }
+
+    pre {
+      background: #0d1117;
+      color: #e6edf3;
+      padding: 14px 16px;
+      overflow-x: auto;
+      border-radius: 8px;
+      font-size: 0.9em;
+      margin: 1em 0;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+    }
+    /* P52 canonical inline items in prose: numbers and variables wear the body
+       font at body size and read as part of the sentence (keeps P50's quiet
+       treatment, no pill; code blocks and eq-cards keep the mono treatment). */
+    code {
+        font-family: inherit;
+        font-size: 1em;
+        color: #1a1a1a;
+        background: none;
+        padding: 0 0.08em;
+        overflow-wrap: break-word;
+    }
+    pre code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 1em; }
+    .eq-card code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 0.92em; }
+    pre code {
+      background: none;
+      padding: 0;
+      font-size: 1em;
+      color: inherit;
+    }
+    ul, ol {
+      padding-left: 20px;
+    }
+    li {
+      margin-bottom: 0.5em;
+    }
+    strong {
+      color: #2980b9;
+    }
+    hr {
+      border: 0;
+      height: 1px;
+      background: #bdc3c7;
+      margin-top: 2em;
+      margin-bottom: 2em;
+    }
+    /* Rendered output block, not a print() cell */
+    .output {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 1rem 1.2rem;
+      border-radius: 6px;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+      font-size: 0.9em;
+      margin: 1em 0;
+      overflow-x: auto;
+      border-left: 4px solid #22c55e;
+    }
+    .output .dim { color: #94a3b8; }
+    /* Readability sweep: stat cards, data tables, numbered walkthroughs */
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 1.2em 0; }
+    .stat-card { border: 1px solid #bdc3c7; border-radius: 8px; padding: 14px 16px; background: #f7f9fb; }
+    .stat-num { font-size: 1.9em; font-weight: 800; color: #2c3e50; line-height: 1.15; }
+    .stat-unit { font-size: .55em; font-weight: 600; color: #7f8c8d; } .stat-vs { font-size: max(12px, .55em); font-weight: 600; color: #7f8c8d; }
+    .stat-label { font-size: .92em; font-weight: 600; margin-top: 6px; color: #2c3e50; }
+    .stat-note { font-size: .82em; color: #7f8c8d; margin-top: 3px; }
+    .datatable { border-collapse: collapse; margin: 1.2em 0; width: 100%; max-width: 560px; font-size: .95em; }
+    .datatable th, .datatable td { border: 1px solid #bdc3c7; padding: .45em .6em; text-align: center; }
+    .datatable th { background: #2c3e50; color: #fff; font-weight: 600; }
+    .datatable tr:nth-child(even) td { background: #f7f9fb; }
+    .datatable tr td.mask { background: #d8dee3; color: #6b7a89; font-weight: 600; }
+    .datatable caption { caption-side: bottom; text-align: left; font-size: .85em; color: #555; padding: .5em 0 0; border-left: 3px solid #3498db; padding-left: .8em; }
+/* Worked-example card (Round 9 template): a calm sage card that sets
+           math walkthrough steps apart from body text. Body font throughout,
+           all math in MathJax, one computation per line, generous spacing. */
+        .worked-example {
+            background: #f1f6ed;
+            border: 1px solid #d9e4d1;
+            border-left: 3px solid #6f9a63;
+            border-radius: 10px;
+            padding: 14px 20px;
+            margin: 1.1em 0;
+            max-width: 680px;
+            color: #2c3e50;
+            line-height: 1.8;
+            overflow-x: auto;
+        }
+        ol.worked-example {
+            list-style: none;
+            counter-reset: wex-step;
+            padding-left: 20px;
+        }
+        ol.worked-example > li {
+            counter-increment: wex-step;
+            position: relative;
+            margin: 0;
+            padding: 8px 0 8px 44px;
+        }
+        ol.worked-example > li + li { border-top: 1px dashed #cbdabf; }
+        ol.worked-example > li::before {
+            content: counter(wex-step);
+            position: absolute;
+            left: 0;
+            top: 9px;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: #6f9a63;
+            color: #ffffff;
+            font-size: 13px;
+            font-weight: 700;
+            line-height: 28px;
+            text-align: center;
+        }
+        @media (max-width: 480px) {
+            .worked-example { padding: 12px; font-size: 15px; }
+            ol.worked-example { padding-left: 12px; }
+            ol.worked-example > li { padding-left: 38px; }
+        }
+    .caption {
+      font-size: 0.9em; color: #555; margin-top: 1rem;
+      border-left: 3px solid #3498db; padding-left: 0.8em;
+    }
+    .diagram {
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      padding: 1rem;
+      margin: 1.75rem 0;
+      background: #fbfcfd;
+      overflow-x: auto;
+    }
+    /* Interactive demo */
+    .demo {
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      padding: 1.25rem;
+      margin: 1.75rem 0;
+      background: #fbfcfd;
+    }
+    .demo-controls { margin: 0.8rem 0 1rem; }
+    .demo-controls label { display: block; margin: 0.6em 0 0.3em; color: #2c3e50; }
+    .demo-controls input[type="range"] { width: 100%; }
+    .demo-controls select { font-size: 1em; padding: 0.3em 0.6em; }
+    .attn-toggle { display: inline-flex; border: 1px solid #bdc3c7; border-radius: 6px; overflow: hidden; margin: 0.6rem 0.6rem 1rem 0; flex-wrap: wrap; }
+    .attn-toggle button {
+      border: none; background: #fff; padding: 0.45em 1.0em; cursor: pointer;
+      font-size: 1em; color: #2c3e50; font-family: inherit;
+    }
+    .attn-toggle button.active { background: #3498db; color: #fff; font-weight: bold; }
+    .table-scroll { overflow-x: auto; margin: 0 auto 1rem; }
+    .attn-mini { border-collapse: collapse; margin: 0 auto; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; font-size: 0.85em; }
+    .attn-mini th, .attn-mini td { border: 1px solid #bdc3c7; padding: 0.35em 0.55em; text-align: center; white-space: nowrap; }
+    .attn-mini th { background: #ecf0f1; color: #2c3e50; }
+    .attn-mini tr.hl td { background: #d6eafb; }
+    .attn-mini tr.hl th.rowhead { background: #3498db; color: #fff; }
+    .attn-mini td.blocked { background: rgba(231,76,60,0.45); color: #7b241c; font-weight: bold; }
+    #causalDemo .kchip.masked rect, #causalDemo .qchip.masked rect { fill: #f2f4f4; stroke: #d5dbdb; }
+    #causalDemo .kchip.masked text, #causalDemo .qchip.masked text { fill: #aab7b8; }
+    .attn-bars { max-width: 560px; margin: 0 auto; }
+    .attn-bar-row { display: flex; align-items: center; gap: 0.6em; margin: 0.45em 0; }
+    .attn-bar-row .lbl { width: 4.2em; text-align: right; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; color: #2c3e50; flex: none; font-size: 0.9em; }
+    .attn-bar-track { flex: 1; background: #ecf0f1; border-radius: 4px; height: 1.4em; min-width: 0; }
+    .attn-bar-fill { background: #3498db; border-radius: 4px; height: 100%; }
+    .attn-bar-fill.alt { background: #e67e22; }
+    .attn-bar-row .val { width: 2.8em; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; color: #2c3e50; flex: none; }
+    /* headRoles paired bars: both heads side by side per token */
+    .pair-tracks { display: flex; gap: 0.5em; flex: 1; min-width: 0; }
+    .pair-tracks .attn-bar-track.dim { opacity: 0.3; }
+    .attn-bar-row .val.pair { width: 6.6em; font-size: 0.85em; }
+    /* Fit-in-one-page: tighter bar rows for the 12-token headRoles viz. */
+    #headRoles .attn-bar-row { margin: 0.28em 0; }
+    #headRoles .attn-bar-track { height: 1.15em; }
+    /* One attention layer, walked through (attnLayer): 4-step stepper, HTML canvas. */
+    #attnLayer .stepper { display: flex; align-items: center; gap: 0.7rem; margin: 0.8rem 0; flex-wrap: wrap; }
+    #attnLayer .dots { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+    #attnLayer .dot { border: 1px solid #bdc3c7; background: #fff; border-radius: 999px; padding: 0.3em 0.85em; font-size: 0.9em; color: #2c3e50; cursor: pointer; }
+    #attnLayer .dot.active { background: #3498db; border-color: #3498db; color: #fff; font-weight: bold; }
+    #attnLayer .dot:focus-visible, #attnLayer .stepper .play-btn:focus-visible { outline: 2px solid #e67e22; outline-offset: 2px; }
+    #attnLayer .play-btn:disabled { opacity: 0.45; cursor: default; }
+    #attnLayer .al-canvas { margin: 1rem 0 0.4rem; }
+    #attnLayer .al-scene { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .7rem; }
+    #attnLayer .al-region { border: 1px solid #dfe6ec; border-radius: 10px; padding: .5rem .6rem; background: #fff; }
+    #attnLayer .al-region-title { font-size: .78rem; font-weight: 700; color: #2c3e50; margin: 0 0 .35rem; }
+    /* Shared walkthrough equation-card contract (verbatim, all pages) */
+    
+    .eq-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+
+      padding:1rem 1.2rem;margin:1.75rem auto;max-width:640px;overflow-x:auto}
+
+    .eq-what{font-size:.95rem;color:#334155;margin:0 0 .6rem;line-height:1.55}
+
+    .eq-line{font-size:1.38rem;line-height:2.0;letter-spacing:.015em;padding:.5rem .6rem;white-space:normal;font-weight:500;opacity:.38;border-left:3px solid transparent}
+
+    .eq-line.eq-active{opacity:1;border-left-color:#2c3e50}
+.eq-line sub,.eq-line sup{font-size:.68em}
+.frac{display:inline-flex;flex-direction:column;text-align:center;vertical-align:middle;margin:0 .18em;font-size:.8em;line-height:1.3}
+.frac .top{padding:0 .3em .1em}
+.frac .bot{border-top:2px solid currentColor;padding:.1em .3em 0}
+.rad{display:inline-flex;align-items:flex-start;vertical-align:middle;white-space:nowrap}
+.rad .rad-sym{font-size:1.12em;line-height:1}
+.rad .rad-body{border-top:.09em solid currentColor;line-height:1.18;padding:0 .12em 0 .04em}
+      .eq-why{display:none;visibility:hidden;font-size:1rem;color:#475569;padding:.15rem .35rem .4rem;line-height:1.65}
+      .eq-why.eq-active{display:block;visibility:visible}
+      .eq-card.eq-stepped .eq-line{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-line.eq-active{display:block;opacity:1;visibility:visible}
+      .eq-card.eq-stepped .eq-legend .eq-item{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-legend .eq-item.eq-active{display:block;visibility:visible}
+
+    .eqt{font-weight:600;padding:0 .1em;border-radius:3px}
+
+    .eqt.eqt-active{text-decoration:underline;text-underline-offset:2px}
+
+    .eq-legend{font-size:.85rem;color:#475569;margin-top:.6rem;line-height:1.75}
+
+    .eq-legend .eq-item{display:block}
+
+    .eq-legend .eq-item code{white-space:nowrap}
+
+    .eq-sw{display:inline-block;width:.7em;height:.7em;border-radius:2px;
+
+      margin:0 .25em 0 .6em;vertical-align:baseline}
+
+    @media (max-width:480px){.eq-card{padding:.85rem .9rem}.eq-line{font-size:1.24rem;line-height:1.95}}
+/* P70 inline variables and inline code, one style site-wide (VAR-STYLE.md v2) */
+var,.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic;font-weight:400;font-size:1em;color:#1d4e89;background:#edf3fa;border-radius:3px;padding:0 .18em;white-space:nowrap;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+var sub,var sup,.mvar sub,.mvar sup{font-size:.72em;font-style:normal}
+pre var,code var,.eq-line var{font:inherit;color:inherit;background:none;padding:0}
+svg text.mvar,svg tspan.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic}
+:not(pre)>code:not(.eq-line code){font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,Courier,monospace;font-size:.86em;color:#24292f;background:#f1f3f5;border:1px solid #dfe3e8;border-radius:4px;padding:.06em .32em;white-space:normal;overflow-wrap:anywhere}
+/* P79 numbering (NUMBERING.md) */
+.secnum{font-variant-numeric:tabular-nums;margin-right:.4em;color:inherit;font-weight:inherit}
+.tab-strip .secnum{margin-right:.3em;opacity:.75}
+.fignum{font-weight:600;margin-right:.3em;font-variant-numeric:tabular-nums}
+/* P80 code sections (CODE-SECTIONS.md) */
+pre.cs{position:relative;background-attachment:local;padding-left:20px}
+pre.cs code{display:block;line-height:1.55}
+pre.cs .cs-g{position:absolute;left:3px;width:11px;text-align:center;font:700 11px/1 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;-webkit-user-select:none;user-select:none;pointer-events:none}
+pre.cs .cs-g::before{content:attr(data-n)}
+ol.cs-notes{list-style:none;padding-left:0;margin:-.4em 0 1em}
+ol.cs-notes li{margin:0 0 .3em;padding-left:1.9em;position:relative}
+ol.cs-notes .cs-n{position:absolute;left:0;top:.1em;min-width:1.35em;padding:0 .25em;border-radius:4px;font:700 .8em/1.45 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;text-align:center;color:#0d1117}
+ol.cs-notes li:nth-child(6n+1) .cs-n{background:#79b8ff}
+ol.cs-notes li:nth-child(6n+2) .cs-n{background:#ffab70}
+ol.cs-notes li:nth-child(6n+3) .cs-n{background:#85e89d}
+ol.cs-notes li:nth-child(6n+4) .cs-n{background:#d2a8ff}
+ol.cs-notes li:nth-child(6n+5) .cs-n{background:#ffa198}
+ol.cs-notes li:nth-child(6n+6) .cs-n{background:#76e3ea}
+    /* diagram-side dim/highlight (SVG/DOM). Do NOT use .hl/.dim: taken. */
+    .eq-dim{opacity:.58}
+    .eq-hl{filter:drop-shadow(0 0 3px currentColor)}
+    #attnLayer .al-row { display: flex; align-items: center; gap: 0.35rem; margin: 0.5em 0; padding: 0.45em 0.55em; border: 2px solid transparent; border-radius: 10px; flex-wrap: wrap; }
+    #attnLayer .al-row.follow { border-color: #e67e22; background: #fef9f0; }
+    #attnLayer .al-token { font-weight: bold; min-width: 2.4em; text-align: center; background: #ecf0f1; border-radius: 6px; padding: 0.25em 0.4em; font-size: 0.95em; }
+    #attnLayer .al-row.follow .al-token { background: #e67e22; color: #fff; }
+    #attnLayer .al-follow { font-size: 0.85em; color: #8a4b00; font-weight: bold; }
+    #attnLayer .al-strip { display: inline-flex; align-items: flex-end; gap: 1px; height: 46px; }
+    #attnLayer .al-bar { width: 5px; background: #3498db; border-radius: 2px; }
+    #attnLayer .al-bar.pos { background: repeating-linear-gradient(45deg, #8e44ad, #8e44ad 3px, #d2b4de 3px, #d2b4de 6px); }
+    #attnLayer .al-bar.al-pre { background: #c9d2d9; }
+    #attnLayer .al-bar.mix { background: #2ecc71; }
+    #attnLayer .al-op { color: #555; font-weight: bold; font-size: 1.05em; }
+    #attnLayer .al-legend { font-size: 0.9em; color: #555; margin: 0.7em 0 0; }
+    #attnLayer .al-legend .sw { display: inline-block; width: 1.1em; height: 0.85em; border-radius: 3px; margin-right: 0.35em; vertical-align: middle; }
+    #attnLayer .al-legend .sw.word { background: #3498db; }
+    #attnLayer .al-legend .sw.pos { background: repeating-linear-gradient(45deg, #8e44ad, #8e44ad 2px, #d2b4de 2px, #d2b4de 4px); }
+    #attnLayer .al-legend .sw.mix { background: #2ecc71; }
+    #attnLayer .al-note { font-size: 0.92em; color: #555; margin: 0 0 0.5em; }
+    #attnLayer table.al-grid { border-collapse: collapse; margin: 0.4rem 0; }
+    #attnLayer table.al-grid th, #attnLayer table.al-grid td { border: 1px solid #bdc3c7; width: 62px; height: 40px; text-align: center; padding: 0; }
+    #attnLayer table.al-grid th { background: #ecf0f1; color: #2c3e50; font-size: 0.9em; width: auto; padding: 0.2em 0.7em; height: auto; }
+    #attnLayer table.al-grid tr.follow td { box-shadow: inset 0 0 0 3px #e67e22; }
+    #attnLayer table.al-grid tr.follow th.rowhead { background: #e67e22; color: #fff; }
+    #attnLayer .al-wtrack { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #f4f6f7; }
+    #attnLayer .al-wfill { height: 14px; background: #e67e22; border-radius: 3px; }
+    #attnLayer .al-flow { display: flex; align-items: center; gap: 0.55rem; flex-wrap: wrap; margin: 0.6rem 0; }
+    #attnLayer .al-fnode { text-align: center; }
+    #attnLayer .al-flabel { font-size: 0.85em; color: #555; margin-top: 0.35em; max-width: 9em; }
+    #attnLayer .al-smallnote { font-size: 0.8em; color: #777; margin: 0.55em 0 0; }
+    #attnLayer .al-arrow { font-size: 1.5em; color: #2c3e50; font-weight: bold; }
+    #attnLayer .al-arrow.thick { font-size: 2em; color: #e67e22; }
+    /* attnLayer phone scene (max-width 480px): the four regions stack in a
+       compact geometry so the stepper and the full scene share one phone
+       screen. Strips also shrink in the script (bar heights scale 0.47). */
+    @media (max-width: 480px) {
+      #attnLayer .stepper { gap: .4rem; margin: .3rem 0; }
+      #attnLayer .stepper .play-btn { padding: .35rem .8rem; }
+      #attnLayer .dot { padding: .18em .5em; font-size: .8em; }
+      #attnLayer .al-canvas { margin: .45rem 0 .25rem; }
+      #attnLayer .al-scene { gap: .4rem; }
+      #attnLayer .al-region { padding: .3rem .45rem; }
+      #attnLayer .al-region-title { font-size: .72rem; margin: 0 0 .2rem; }
+      #attnLayer .al-row { margin: .3em 0; padding: .28em .4em; gap: .3rem; }
+      #attnLayer .al-strip { height: 24px; }
+      #attnLayer .al-bar { width: 4px; }
+      #attnLayer .al-token { min-width: 2.2em; padding: .2em .3em; font-size: .9em; }
+      #attnLayer .al-legend { font-size: .8em; margin: .35em 0 0; line-height: 1.4; }
+      #attnLayer .al-note { font-size: .86em; margin: 0 0 .3em; line-height: 1.35; }
+      #attnLayer .al-smallnote { font-size: .76em; margin: .35em 0 0; line-height: 1.35; }
+      #attnLayer .al-follow { line-height: 1.2; }
+      #attnLayer table.al-grid { margin: .2rem 0; }
+      #attnLayer table.al-grid td { width: 40px; height: 22px; }
+      #attnLayer table.al-grid th { padding: .08em .3em; font-size: .82em; }
+      #attnLayer .al-wfill { height: 10px; }
+      #attnLayer .al-flow { gap: .4rem; margin: .3rem 0; }
+      #attnLayer .al-flabel { font-size: .78em; margin-top: .25em; max-width: 12em; }
+      #attnLayer .al-arrow { font-size: 1.25em; }
+      #attnLayer .al-arrow.thick { font-size: 1.6em; }
+    }
+    .head-key { display: flex; flex-wrap: wrap; gap: 1.2em; justify-content: center; margin: 0.4rem 0 0.6rem; font-size: 0.9em; color: #555; }
+    .head-key .sw { display: inline-block; width: 1.4em; height: 0.9em; border-radius: 3px; margin-right: 0.4em; vertical-align: middle; }
+    .head-key .sw.blue { background: #3498db; }
+    .head-key .sw.orange { background: #e67e22; }
+    /* maskDemo legend key: lives outside the grid, so 0/-inf text never has to fit a cell */
+    .mask-legend { display: flex; flex-wrap: wrap; gap: 1.2em; justify-content: center; margin: 0.6rem 0; font-size: 0.9em; color: #555; }
+    .mask-legend .sw { display: inline-block; width: 1.4em; height: 1em; border-radius: 3px; margin-right: 0.4em; vertical-align: middle; border: 1px solid #bdc3c7; }
+    .mask-legend .sw.allow { background: rgba(46,204,113,0.55); }
+    .mask-legend .sw.block { background: rgba(231,76,60,0.55); }
+    .demo-stats {
+      text-align: center; margin-top: 1rem; font-size: 0.95em; color: #2c3e50;
+    }
+    .demo-stats strong { color: #2980b9; }
+    .big-nums { display: flex; flex-wrap: wrap; gap: 1rem; justify-content: center; margin: 1rem 0; }
+    .big-num { text-align: center; min-width: 140px; }
+    .big-num .v { font-size: 1.5em; font-weight: bold; color: #2980b9; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; }
+    .big-num .k { font-size: 0.85em; color: #555; }
+    .chart-legend { display: flex; flex-wrap: wrap; gap: 1.2em; justify-content: center; margin: 0.4rem 0 0.6rem; font-size: 0.9em; color: #555; }
+    .chart-legend .sw { display: inline-block; width: 24px; height: 0; border-top: 3px solid #3498db; vertical-align: middle; margin-right: 0.4em; }
+    .chart-legend .sw.orange { border-top-color: #e67e22; }
+    .chart-legend .sw.gray { border-top: 3px dashed #95a5a6; }
+    canvas.flopchart { width: 100%; max-width: 600px; height: auto; display: block; margin: 0 auto; }
+    .kvbar-row { display: flex; align-items: center; gap: 0.6em; margin: 0.5em 0; }
+    .kvbar-row .lbl { width: 11em; text-align: right; color: #2c3e50; flex: none; font-size: 0.9em; }
+    .kvbar-track { flex: 1; background: #ecf0f1; border-radius: 4px; height: 1.5em; min-width: 0; position: relative; }
+    .kvbar-fill { background: #e74c3c; border-radius: 4px; height: 100%; }
+    .kvbar-fill.cache { background: #27ae60; }
+    .kvbar-row .val { width: 7em; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; color: #2c3e50; flex: none; font-size: 0.85em; }
+    .kvbar-title { font-weight: bold; color: #2c3e50; margin: 0.7em 0 0.1em; }
+    .mask-grid {
+      border-collapse: collapse;
+      table-layout: fixed;
+      margin: 0 auto;
+    }
+    .mask-grid td {
+      border: 1px solid #7f8c8d;
+      width: 26px; height: 26px;
+      padding: 0;
+    }
+    /* Fit-in-one-page: streamMask uses a slightly tighter grid. */
+    #streamMask .mask-grid td { width: 22px; height: 22px; }
+    #streamMask .ctl-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 1rem; margin: 0.8rem 0 0.2rem; }
+    #streamMask .ctl-row .play-row { margin: 0; }
+    #streamMask .ctl-row .demo-buttons { margin-bottom: 0; justify-content: flex-start; }
+    .mask-grid td.allow { background: #3498db; }
+    .mask-grid td.block { background: #f4f6f7; }
+    .demo-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      justify-content: center;
+      margin-bottom: 1rem;
+    }
+    .demo-buttons button {
+      border: 1px solid #bdc3c7;
+      background: #fff;
+      padding: 0.5em 1.1em;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.9em;
+      color: #2c3e50;
+    }
+    .demo-buttons button.active {
+      background: #3498db;
+      color: #fff;
+      font-weight: bold;
+      border-color: #3498db;
+    }
+    /* Play buttons and plain-English walkthroughs */
+    .play-row { margin: 0.8rem 0 0.2rem; display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
+    .play-btn {
+      border: 1px solid #2980b9; background: #2980b9; color: #fff;
+      padding: 0.45em 1.3em; border-radius: 6px; cursor: pointer;
+      font-size: 0.95em; font-weight: bold; font-family: inherit;
+      flex: 0 0 auto;
+    }
+    .play-btn:hover { background: #1f6fa5; }
+    .play-btn.stop { background: #e74c3c; border-color: #e74c3c; }
+    .play-btn.stop:hover { background: #c0392b; }
+    .howto {
+      background: #eef6fb; border-left: 4px solid #3498db;
+      padding: 0.7em 1em; border-radius: 0 6px 6px 0;
+      font-size: 0.95em; color: #2c3e50; margin: 0.8rem 0;
+    }
+    .howto strong { color: #2980b9; }
+    /* Caption card (refocus round, shared across widgets) */
+    .capcard {
+      background: #ffffff;
+      border: 1px solid #e3e8ee;
+      border-left: 3px solid #2c3e50;
+      border-radius: 10px;
+      padding: 18px;
+      margin-top: 14px;
+      font-size: 15px;
+      line-height: 1.65;
+      color: #2c3e50;
+    }
+    .howto.capcard strong, .caption.capcard strong { color: #2c3e50; }
+    .capcard .cap-title {
+      display: block;
+      font-size: 15px;
+      font-weight: bold;
+      color: #2c3e50;
+      margin-bottom: 8px;
+    }
+    .capcard ul { list-style: none; margin: 0; padding: 0; }
+    .capcard li { position: relative; padding-left: 16px; margin: 0 0 7px; }
+    .capcard li:last-child { margin-bottom: 0; }
+    /* Fit-in-one-page: tighter how-to cards on phones. */
+    @media (max-width: 480px) {
+      .howto.capcard { padding: 12px 13px; font-size: 14px; line-height: 1.55; }
+      .capcard li { margin: 0 0 5px; }
+      .capcard .cap-title { margin-bottom: 6px; }
+    }
+    .capcard li::before {
+      content: ""; position: absolute; left: 2px; top: 0.68em;
+      width: 6px; height: 6px; border-radius: 50%; background: #2c3e50;
+    }
+    .canvas-wrap { position: relative; }
+    
+    /* Same side-by-side treatment for the causal twin. */
+    #causalDemo .canvas-wrap { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 1.25rem; align-items: start; }
+    @media (max-width: 768px) { #causalDemo .canvas-wrap { display: block; } }
+    .attn-bar-fill { transition: width 0.4s ease; }
+    /* KV cache blocks */
+    .kv-blocks { display: flex; flex-wrap: wrap; gap: 3px; margin: 0.8rem 0; }
+    .kv-block { width: 14px; height: 14px; border-radius: 3px; background: #ecf0f1; }
+    .kv-block.on { background: #27ae60; animation: kvpop 0.4s ease; }
+    @keyframes kvpop { from { transform: scale(0.4); } to { transform: scale(1); } }
+    .kv-stage { font-size: 0.9em; color: #555; margin: 0.6rem 0 0.2rem; }
+    /* Pinned-total flash (headParams) */
+    .big-num .v.pinned-flash { animation: pinflash 0.5s ease; }
+    @keyframes pinflash { 0% { color: #27ae60; } 100% { color: #2980b9; } }
+    /* Streaming token strips */
+    .stream-strip { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 0.5rem 0; font-size: 0.9em; color: #2c3e50; }
+    .tok {
+      display: inline-block; min-width: 1.8em; padding: 0.25em 0.4em; text-align: center;
+      border-radius: 4px; background: #ecf0f1; color: #7f8c8d;
+      font-family: 'SFMono-Regular', Consolas, Menlo, monospace; font-size: 0.85em;
+    }
+    .tok.arrived { background: #d6eaf8; color: #2c3e50; }
+    .tok.emitted { background: #27ae60; color: #fff; }
+    .mask-grid td.pending { background: #e9ecef; }
+    /* Head slicing visual (headParams): the 512-dim pie being re-sliced */
+    .slice-wrap { max-width: 560px; margin: 0.8rem auto 0.2rem; }
+    .slice-bar { display: flex; height: 34px; border-radius: 6px; overflow: hidden; border: 1px solid #bdc3c7; }
+    .slice-seg {
+      height: 100%; border-right: 1px solid #fff; box-sizing: border-box;
+      transition: width 0.45s ease, background-color 0.45s ease;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; color: #fff; font-weight: bold; min-width: 0; overflow: hidden;
+      white-space: nowrap;
+    }
+    .slice-cap { text-align: center; font-size: 0.9em; color: #555; margin-top: 0.35rem; }
+    /* Param bill bar (headParams): fixed-length bar, constant total, 75/25 QKV vs output-proj */
+    .bill-bar { display: flex; height: 30px; border-radius: 6px; overflow: hidden; border: 2px solid #2c3e50; }
+    .bill-seg { height: 100%; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+      font-size: 12px; color: #fff; font-weight: bold; white-space: nowrap; overflow: hidden; }
+    .bill-bar.bill-pulse { animation: billpulse 0.5s ease; }
+    @keyframes billpulse { 0% { box-shadow: 0 0 0 4px rgba(39,174,96,.55); } 100% { box-shadow: 0 0 0 0 rgba(39,174,96,0); } }
+    .bill-cap { text-align: center; font-size: 0.9em; color: #555; margin-top: 0.35rem; }
+    /* Let wide display equations scroll instead of pushing the page wide */
+    .mjx-chtml.MJXc-display { overflow-x: auto; overflow-y: hidden; max-width: 100%; }
+    /* Source-level containment for raw $$ display math before MathJax typesets */
+    .dmath { overflow-x: auto; max-width: 100%; margin: 1.4rem 0; }
+    /* Small screens: keep heatmaps and bars usable */
+    @media (max-width: 520px) {
+      .attn-mini { font-size: 0.75em; }
+      .attn-mini th, .attn-mini td { padding: 0.3em 0.45em; }
+      .kvbar-row { flex-wrap: wrap; }
+      .kvbar-row .lbl { width: 100%; text-align: left; margin-bottom: 0.2em; }
+      .kvbar-track { flex: 1 1 55%; }
+      .kvbar-row .val { width: auto; }
+      .big-num { min-width: 110px; }
+      .big-num .v { font-size: 1.25em; }
+    }
+    /* Static paper-figure citation */
+    .fig-cite { border-left: 3px solid #bdc3c7; margin: 1em 0; padding: 0.4em 0 0.4em 1em; color: #555; font-size: 0.9em; }
+
+  
+/* canonical spacing: display math */
+.MathJax_Display, mjx-container[display="true"] { margin: 1.4rem 0 !important; }
+figcaption { margin-top: 1rem; }
+    /* Compact phone walkthrough layout (canonical block, every tutorial page):
+       two-column eq legends, tightened demo spacing, and diagrams capped so
+       controls and diagram share the first phone screen. Phone widths only;
+       desktop rendering and equation typography are unchanged. */
+    @media (max-width:480px){
+      .demo{padding:.75rem}
+      .demo>*{margin-top:.6rem;margin-bottom:.6rem}
+      .demo>*:first-child{margin-top:0}
+      .demo .eq-card{margin:1rem auto;padding:.7rem .8rem}
+      .demo .cap-card,.demo .capcard{padding:.85rem .95rem}
+      .eq-legend{display:grid;grid-template-columns:1fr 1fr;column-gap:.9rem;row-gap:.1rem;line-height:1.5}
+      .eq-legend .eq-item:has(> code ~ code){grid-column:1/-1}
+      .demo svg,.demo canvas{max-height:55vh}
+    }
+</style>
+
+  <script type="text/javascript" async
+    src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML">
+  </script>
+  <script type="text/x-mathjax-config">
+    MathJax.Hub.Config({
+      tex2jax: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        displayMath: [['$$','$$'], ['\\[','\\]']],
+        processEscapes: true
+      },
+      showProcessingMessages: false,
+      messageStyle: "none"
+    });
+  </script>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+<style>
+/* Static teaching diagrams (mtd), shared across tutorials, 2026-11-01 */
+.figure.mtd-fig { margin: 1.75rem 0; }
+.mtd-fig > svg.mtd-svg { display: block; width: 100%; height: auto; margin: 0 auto; }
+.mtd-fig .caption { margin-top: 1rem; }
+.mtd-svg text { fill: #2c3e50; font-family: sans-serif; }
+.mtd-svg .mtd-sub { fill: #555; }
+.mtd-svg .mtd-t1 { fill: #1f618d; }
+.mtd-svg .mtd-t2 { fill: #ca6f1e; }
+.mtd-svg .mtd-pu { fill: #7d3c98; }
+.mtd-svg .mtd-red { fill: #c0392b; }
+.mtd-svg .mtd-grn { fill: #148f77; }
+.mtd-svg line, .mtd-svg path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.mtd-svg .mtd-s.mtd-c1 { stroke: #1f618d; } .mtd-svg .mtd-f.mtd-c1 { fill: #1f618d; }
+.mtd-svg .mtd-s.mtd-c2 { stroke: #ca6f1e; } .mtd-svg .mtd-f.mtd-c2 { fill: #ca6f1e; }
+.mtd-svg .mtd-s.mtd-cp { stroke: #7d3c98; } .mtd-svg .mtd-f.mtd-cp { fill: #7d3c98; }
+.mtd-svg .mtd-s.mtd-cr { stroke: #c0392b; } .mtd-svg .mtd-f.mtd-cr { fill: #c0392b; }
+.mtd-svg .mtd-s.mtd-cg { stroke: #2c3e50; } .mtd-svg .mtd-f.mtd-cg { fill: #2c3e50; }
+.mtd-svg .mtd-sep { stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-pic { fill: #fbfcfd; stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-axis { stroke: #7f8c8d; stroke-width: 1.5px; }
+.mtd-svg .mtd-arc { stroke: #2c3e50; stroke-width: 2px; }
+.mtd-svg .mtd-dot { fill: #2c3e50; }
+.mtd-svg .mtd-guide { stroke: #7f8c8d; stroke-width: 1.4px; stroke-dasharray: 4 4; }
+.mtd-svg .mtd-ring { fill: #fbfcfd; stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-pt { fill: #1f618d; opacity: .55; }
+.mtd-svg .mtd-cross { stroke: #2c3e50; stroke-width: 2.2px; }
+.mtd-svg .mtd-barbg { fill: #eef1f4; }
+.mtd-svg .mtd-bar { fill: #7d3c98; }
+.mtd-svg .mtd-cart { fill: #ffffff; stroke: #2c3e50; stroke-width: 2px; }
+.mtd-svg .mtd-zero { stroke: #95a5a6; stroke-width: 1.2px; stroke-dasharray: 4 4; }
+.mtd-svg .mtd-axisl { stroke: #7f8c8d; stroke-width: 2px; }
+.mtd-svg .mtd-norm { stroke: #148f77; stroke-width: 4px; }
+.mtd-svg .mtd-read { fill: #ffffff; stroke: #2c3e50; stroke-width: 2.5px; }
+.mtd-svg .mtd-ball { fill: #7d3c98; fill-opacity: .08; stroke: #7d3c98; stroke-width: 1.6px; stroke-dasharray: 5 4; }
+.mtd-svg .mtd-box { fill: #fbfcfd; stroke: #bdc3c7; stroke-width: 1.4px; }
+.mtd-svg .mtd-crossbg { fill: #ffffff; }
+.mtd-svg .mtd-halo { stroke: #ffffff; stroke-width: 5px; stroke-linejoin: round; paint-order: stroke; }
+.mtd-svg .mtd-box.mtd-note { stroke-dasharray: 5 4; }
+</style>
+<style>
+/* Mixture of Experts pages (mixture-of-experts.html, mixture-of-experts-designs.html), 2026-11-04 */
+.dek { font-size: 1.15em; color: #555; margin-top: 0.2em; }
+nav.prereq { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .4rem; margin: .6rem 0 1.1rem; }
+nav.prereq .prereq-label { font-size: .82rem; font-weight: 600; color: #6c757d; margin-right: .15rem; }
+nav.prereq a.prereq-chip { display: inline-block; padding: .15rem .6rem; border: 1px solid #ced4da; border-radius: 999px; font-size: .85rem; line-height: 1.4; color: #0056b3; text-decoration: none; }
+nav.prereq a.prereq-chip:hover, nav.prereq a.prereq-chip:focus-visible { background: #e7f1ff; border-color: #007bff; }
+nav.prereq-sec { margin: .2rem 0 .9rem; }
+nav.prereq-sec p { margin: 0; font-size: .9rem; line-height: 1.5; color: #495057; }
+.mo-svg { display: block; width: 100%; max-width: 460px; margin: 0 auto; height: auto; }
+.mo-svg text { font-family: inherit; font-size: 15px; fill: #2c3e50; }
+.mo-svg .mo-s { fill: #4a5568; }
+.mo-svg .mo-sm { font-size: 15px; }
+.mo-tool .mo-svg text, .mo-tool .mo-svg .mo-sm { font-size: 16.5px; }
+.mo-svg .mo-b { font-weight: 700; }
+.mo-svg .mo-wt { fill: #ffffff; }
+.mo-svg .c-x { fill: #7d3c98; } .mo-svg .c-z { fill: #1f6aa5; } .mo-svg .c-p { fill: #117a65; }
+.mo-svg .c-g { fill: #a85a14; } .mo-svg .c-e { fill: #1e8449; } .mo-svg .c-f { fill: #c0392b; }
+.mo-svg .c-mut { fill: #5f6b6d; }
+.mo-svg .b-z { fill: #1f6aa5; } .mo-svg .b-p { fill: #148f77; } .mo-svg .b-f { fill: #c0392b; }
+.mo-svg .b-e { fill: #1e8449; } .mo-svg .b-g { fill: #ca6f1e; } .mo-svg .b-mut { fill: #b8c2cc; }
+.mo-svg .mo-box { fill: #fbfcfd; stroke: #bdc3c7; stroke-width: 1.4px; }
+.mo-svg .mo-ebox { fill: #eef8f1; stroke: #1e8449; stroke-width: 1.6px; }
+.mo-svg .mo-elit { fill: #d4efdf; stroke: #1e8449; stroke-width: 2.6px; }
+.mo-svg .mo-edim { fill: #f4f6f7; stroke: #d5dbdb; stroke-width: 1.2px; }
+.mo-svg .mo-rbox { fill: #eaf2fa; stroke: #1f6aa5; stroke-width: 1.6px; }
+.mo-svg .mo-xbox { fill: #f5eef8; stroke: #7d3c98; stroke-width: 1.6px; }
+.mo-svg .mo-chip { fill: #ffffff; stroke: #7d3c98; stroke-width: 1.6px; }
+.mo-svg .mo-ring { fill: #ffffff; stroke: #1e8449; stroke-width: 3px; }
+.mo-svg .mo-dot { fill: #ca6f1e; }
+.mo-svg .mo-ar { stroke: #7f8c8d; stroke-width: 1.8px; fill: none; }
+.mo-svg .mo-ah { fill: #7f8c8d; }
+.mo-svg .mo-dimar { stroke: #d5dbdb; stroke-width: 1.4px; fill: none; }
+.mo-svg .mo-dimah { fill: #d5dbdb; }
+.mo-svg .mo-gar { stroke: #ca6f1e; fill: none; stroke-linecap: round; }
+.mo-svg .mo-gah { fill: #ca6f1e; }
+.mo-svg .mo-even { stroke: #2c3e50; stroke-width: 1.4px; stroke-dasharray: 5 4; }
+.mo-svg .mo-base { stroke: #7f8c8d; stroke-width: 1.2px; }
+.mo-svg .mo-grid { fill: #ffffff; stroke: #d5dbdb; stroke-width: 1px; }
+.mo-svg .mo-hl { fill: none; stroke: #2c3e50; stroke-width: 2.4px; }
+.mo-svg .mo-ghost { fill: none; stroke: #2c3e50; stroke-width: 1.6px; stroke-dasharray: 4 3; }
+.mo-svg .mo-drop { fill: #fdedec; stroke: #c0392b; stroke-width: 1.8px; stroke-dasharray: 5 3; }
+.mo-svg .mo-slot { fill: #ffffff; stroke: #95a5a6; stroke-width: 1.4px; }
+.mo-svg .mo-kept { fill: #d4efdf; stroke: #1e8449; stroke-width: 1.6px; }
+.mo-svg .mo-tick { stroke: #2c3e50; stroke-width: 1.4px; }
+.mo-svg .mo-line { stroke: #7f8c8d; stroke-width: 2px; }
+.mo-svg .mo-mkc { fill: #2c3e50; }
+.mo-svg .mo-mkt { fill: #ffffff; font-size: 15px; font-weight: 700; }
+.mo-svg .mo-sumc { fill: #ffffff; stroke: #2c3e50; stroke-width: 1.8px; }
+.mo-svg .mo-full { fill: #ffffff; stroke: #7f8c8d; stroke-width: 1.4px; }
+.mo-svg .mo-act { fill: #1e8449; }
+.mo-svg .mo-sep { stroke: #e1e4e8; stroke-width: 1px; }
+.mo-svg .mo-bias { fill: #7d3c98; }
+.mo-svg .mo-gpu { fill: #fbfcfd; stroke: #2c3e50; stroke-width: 1.6px; }
+.mo-svg .mo-mem { fill: #d6eaf8; }
+.mo-svg .mo-comp { fill: #1f6aa5; }
+.mo-svg .mo-band { fill: #f4f6f7; }
+.mo-mk { display: inline-block; min-width: 1.35em; height: 1.35em; line-height: 1.35em; border-radius: 50%; background: #2c3e50; color: #ffffff; font-size: 12.5px; font-weight: 700; text-align: center; font-style: normal; margin-right: .2em; vertical-align: .1em; }
+.eq-why.mo-eqlink, .eq-why.mo-eqsrc { font-size: .9rem; color: #4a5568; }
+.figure.mo-imgfig { margin: 1.75rem 0; }
+.mo-imgfig img { display: block; width: 100%; height: auto; margin: 0 auto; }
+.mo-imgfig .mo-imgwrap { max-width: 460px; margin: 0 auto; }
+.mo-tablewrap { overflow-x: auto; max-width: 100%; margin: 0 auto; }
+.mo-table { border-collapse: collapse; width: 100%; font-size: .88rem; line-height: 1.45; }
+.mo-table th, .mo-table td { border-bottom: 1px solid #e2e8f0; padding: .4rem .45rem; text-align: left; vertical-align: top; color: #2c3e50; }
+.mo-table th { background: #f4f6f8; font-weight: 700; }
+.mo-table td:first-child { font-weight: 600; white-space: nowrap; }
+@media (max-width: 600px) {
+  .mo-stack table, .mo-stack tbody, .mo-stack tr, .mo-stack td { display: block; width: auto; }
+  .mo-stack thead { display: none; }
+  .mo-stack tr { border-bottom: 1px solid #e2e8f0; padding: .3rem 0; }
+  .mo-stack td { border: 0; padding: .06rem .2rem; }
+  .mo-stack td::before { content: attr(data-h) " "; font-weight: 700; color: #4a5568; }
+  .mo-stack td:first-child::before { content: none; }
+  .mo-stack td:first-child { font-size: 1rem; }
+}
+.mo-fails { margin: .8rem 0 1rem; padding-left: 1.2rem; }
+.mo-fails li { margin: .4rem 0; line-height: 1.55; }
+/* tools: moeRoute and moeBalance */
+.mo-tool .mo-ctl { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: .5rem; margin-bottom: .3rem; }
+.mo-tool .mo-ctl button { min-height: 44px; min-width: 44px; padding: .35rem .8rem; border: 1px solid #bdc3c7; border-radius: 6px; background: #ffffff; color: #2c3e50; font: inherit; cursor: pointer; }
+.mo-tool .mo-ctl button:disabled { color: #5f6b6d; border-color: #e1e4e8; cursor: default; }
+.mo-tool .mo-ctl button[aria-pressed="true"] { background: #2471a3; border-color: #2471a3; color: #ffffff; }
+.mo-tool .mo-ctl .mo-lab { font-weight: 600; color: #2c3e50; font-size: .92rem; }
+.mo-tool .mo-dots { display: inline-flex; gap: 2px; }
+.mo-tool .mo-dots button { min-width: 30px; padding: 0; border: 0; background: transparent; }
+.mo-tool .mo-dots button span { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #2c3e50; background: #ffffff; vertical-align: middle; }
+.mo-tool .mo-dots button[aria-current="step"] span { background: #2c3e50; }
+.mo-tool svg { display: block; width: 100%; max-width: 460px; margin: .2rem auto; height: auto; }
+.mo-tool .demo-stats { min-height: 3.2em; }
+.mo-tool .mo-in { animation: moIn .6s ease; }
+@keyframes moIn { from { opacity: 0; } to { opacity: 1; } }
+.mo-tool .mo-tr { transition: opacity .6s ease, stroke-width .6s ease; }
+@media (prefers-reduced-motion: reduce) { .mo-tool .mo-in { animation: none; } .mo-tool .mo-tr { transition: none; } }
+</style>
+<style>
+/* Series and page map (B-TF, 2026-11-02) */
+.sermap { margin: .5rem 0 1.1rem; font-size: .8rem; line-height: 1.3; }
+.sermap ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; row-gap: 5px; }
+.sermap li { display: flex; align-items: center; margin: 0; padding: 0; line-height: 1.25; }
+.sermap li + li::before { content: "\2192"; color: #95a5a6; margin: 0 5px; }
+.sermap a, .sermap .sm-here { display: inline-block; padding: 2px 7px; line-height: 1.25; border-radius: 6px; text-decoration: none; }
+.sermap .sm-series a { padding: 1px 2px; color: #1f618d; text-decoration: underline; text-decoration-color: #a9cce3; text-underline-offset: 2px; }
+.sermap .sm-series .sm-here { padding: 1px 6px; background: #117a65; color: #fff; font-weight: 600; }
+.sermap .sm-series { row-gap: 0; }
+.sermap .sm-series a, .sermap .sm-series .sm-here, .sermap .sm-also a { display: inline-flex; align-items: center; min-height: 44px; box-sizing: border-box; }
+.sermap .sm-flow { margin-top: 6px; padding-left: 8px; border-left: 3px solid #117a65; }
+.sermap .sm-flow a { border: 1px solid #d5dbdb; background: #f8f9fa; color: #2c3e50; }
+.sermap .sm-also { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin: 6px 0 0; line-height: 1.25; color: #566573; }
+.sermap .sm-also a { border: 1px dashed #a9cce3; color: #1f618d; background: #fff; }
+.sermap a:hover { border-color: #1f618d; }
+@media (max-width: 400px) { .sermap { font-size: .72rem; } .sermap a, .sermap .sm-here { padding: 2px 5px; } .sermap li + li::before { margin: 0 3px; } }
+</style>
+<style>
+/* 12 px floor for subscripts, superscripts and nested exponents (owner ruling 2026-11-03, as audio fix wave 11).
+   Same em sizes as the canonical rules, never under 12 px; html raises specificity by one type.
+   The canonical eq-card block is not edited. */
+html sub,html sup{font-size:max(12px,.83em)}
+html .eq-line sub,html .eq-line sup{font-size:max(12px,.68em)}
+html var sub,html var sup,html .mvar sub,html .mvar sup{font-size:max(12px,.72em)}
+</style>
+</head>
+<body>
+      <nav class="topnav" aria-label="Site">
+    <div class="nav-inner">
+        <a class="wordmark" href="index.html">Ramin Anushiravani</a>
+        <div class="nav-links">
+            <a href="tutorial.html" class="active">Tutorials</a>
+            <a href="pubs.html">Publications</a>
+            <a href="index.html">About</a>
+            <a href="work.html">Projects</a>
+        </div>
+        <button class="nav-toggle" id="navToggle" aria-expanded="false" aria-controls="navPanel" aria-label="Menu"><span></span><span></span><span></span></button>
+    </div>
+    <div class="nav-panel" id="navPanel">
+        <div class="nav-panel-inner">
+            <div class="nav-panel-body">
+                <a class="panel-link active" href="tutorial.html">Tutorials</a>
+                <a class="panel-link" href="pubs.html">Publications</a>
+                <a class="panel-link" href="index.html">About</a>
+                <a class="panel-link" href="work.html">Projects</a>
+                <div class="panel-social">
+                    <a href="https://linkedin.com/in/raminanushiravani" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+                    <a href="https://github.com/raminaeye/" target="_blank" rel="noopener noreferrer">GitHub</a>
+                    <a href="https://scholar.google.com/citations?user=kouXx8gAAAAJ&hl=en" target="_blank" rel="noopener noreferrer">Google Scholar</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</nav>
+
+    <p class="crumb"><a href="tutorial.html">&larr; All tutorials</a></p>
+    <!-- prev-next: generator pending -->
+
+  <h1>Mixture of Experts (MoE)</h1>
+  <p class="dek">Top-k routing and even load</p>
+
+  <nav class="sermap" aria-label="The Mixture of Experts series"><ol class="sm-series"><li><span class="sm-here" aria-current="page">Mixture of Experts (MoE)</span></li><li><a href="mixture-of-experts-designs.html">Mixture of Experts Designs</a></li></ol></nav>
+
+  <nav class="prereq" aria-label="Before you start"><span class="prereq-label">Before you start</span><a class="prereq-chip" href="gradient-descent.html#loss-landscape" title="Gradient Descent, section 1" aria-label="Loss landscape, taught in Gradient Descent, section 1">Loss landscape</a><a class="prereq-chip" href="mlp.html#how" title="Neural network layers and weights, Multilayer Perceptrons, section 3" aria-label="Neural network layers and weights, taught in Multilayer Perceptrons, section 3">Layers and weights</a><!-- link-pending: linear-algebra.html#matrix-vector --><a class="prereq-chip" href="transformer-block.html#the-full-block" title="The Transformer Block, section 1" aria-label="FFN in a block, taught in The Transformer Block, section 1">FFN in a block</a><a class="prereq-chip" href="transformer-cost.html#attention-cost" title="FFN FLOPs per token, Transformer Cost and Efficiency, section 1" aria-label="FFN FLOPs per token, taught in Transformer Cost and Efficiency, section 1">FFN FLOPs</a><a class="prereq-chip" href="decoding.html#softmax" title="Softmax, Temperature and Decoding, section 1" aria-label="Softmax, taught in Softmax, Temperature and Decoding, section 1">Softmax</a></nav>
+
+  <p class="tabs-label">On this page</p>
+  <div class="tab-strip">
+    <a class="tab-chip" href="#big-picture"><span class="secnum">1</span> What a mixture of experts changes</a>
+    <a class="tab-chip" href="#router"><span class="secnum">2</span> The router picks k experts for each token</a>
+    <a class="tab-chip" href="#balance-loss"><span class="secnum">3</span> Without pressure, a few experts take every token</a>
+    <a class="tab-chip" href="#capacity"><span class="secnum">4</span> Each expert has a fixed number of slots</a>
+    <a class="tab-chip" href="#z-loss"><span class="secnum">5</span> The z-loss keeps router scores small</a>
+    <a class="tab-chip" href="#code"><span class="secnum">6</span> A complete MoE layer in PyTorch</a>
+    <a class="tab-chip" href="#references"><span class="secnum">7</span> References</a>
+  </div>
+
+  <p>
+    A dense transformer block sends every token through the same feed-forward network (FFN).
+    A <strong>mixture of experts</strong> (MoE) block keeps attention and the residual, and swaps that FFN for <var>N</var> FFNs, called <strong>experts</strong>, plus a small <strong>router</strong> that picks <var>k</var> of them for each token.
+    The tokens are the pieces a tokenizer cuts text into, as in <a href="tokenizers.html">Tokenizers</a>.
+  </p>
+  <figure class="figure mtd-fig" id="moeMapFig">
+<svg class="mtd-svg mo-svg" viewBox="0 0 360 384" role="img" aria-label="Map of a dense transformer block beside an MoE block. Both keep attention and the residual add. The dense block sends every token through one FFN. The MoE block has a router, marker 1, that scores four experts; two chosen experts run, marker 2; their outputs are added by weight, marker 3."><text class="mo-b" x="82" y="18" text-anchor="middle">dense block</text><text class="mo-b" x="270" y="18" text-anchor="middle">MoE block</text><rect class="mo-box" x="12" y="32" width="140" height="36" rx="6"/><text x="82" y="55" text-anchor="middle">attention</text><line class="mo-ar" x1="82.0" y1="68.0" x2="82.0" y2="83.0"/><polygon class="mo-ah" points="82.0,92.0 77.0,83.0 87.0,83.0"/><rect class="mo-box" x="200" y="32" width="140" height="36" rx="6"/><text x="270" y="55" text-anchor="middle">attention</text><line class="mo-ar" x1="270.0" y1="68.0" x2="270.0" y2="83.0"/><polygon class="mo-ah" points="270.0,92.0 265.0,83.0 275.0,83.0"/><rect class="mo-ebox" x="12" y="92" width="140" height="150" rx="8"/><text class="mo-b c-e" x="82" y="160" text-anchor="middle">one FFN</text><text class="mo-s" x="82" y="182" text-anchor="middle">every token</text><line class="mo-ar" x1="82.0" y1="242.0" x2="82.0" y2="263.0"/><polygon class="mo-ah" points="82.0,272.0 77.0,263.0 87.0,263.0"/><rect class="mo-rbox" x="220" y="92" width="100" height="32" rx="6"/><text class="mo-b c-z" x="270" y="113" text-anchor="middle">router</text><circle class="mo-mkc" cx="336" cy="108" r="10"/><text class="mo-mkt" x="336" y="113" text-anchor="middle" aria-hidden="true">1</text><line class="mo-ar" x1="270.0" y1="124.0" x2="224.1" y2="146.1"/><polygon class="mo-ah" points="216.0,150.0 221.9,141.6 226.3,150.6"/><rect class="mo-elit" x="200" y="150" width="32" height="40" rx="5"/><text class="mo-sm c-e mo-b" x="216" y="175" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">1</tspan></text><line class="mo-ar" x1="270.0" y1="124.0" x2="257.1" y2="142.6"/><polygon class="mo-ah" points="252.0,150.0 253.0,139.8 261.2,145.4"/><rect class="mo-elit" x="236" y="150" width="32" height="40" rx="5"/><text class="mo-sm c-e mo-b" x="252" y="175" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">2</tspan></text><line class="mo-dimar" x1="270.0" y1="124.0" x2="282.9" y2="142.6"/><polygon class="mo-dimah" points="288.0,150.0 278.8,145.4 287.0,139.8"/><rect class="mo-edim" x="272" y="150" width="32" height="40" rx="5"/><text class="mo-sm c-mut" x="288" y="175" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">3</tspan></text><line class="mo-dimar" x1="270.0" y1="124.0" x2="315.9" y2="146.1"/><polygon class="mo-dimah" points="324.0,150.0 313.7,150.6 318.1,141.6"/><rect class="mo-edim" x="308" y="150" width="32" height="40" rx="5"/><text class="mo-sm c-mut" x="324" y="175" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">4</tspan></text><circle class="mo-mkc" cx="352" cy="170" r="8"/><text class="mo-mkt" x="352" y="175" text-anchor="middle" aria-hidden="true">2</text><line class="mo-ar" x1="216.0" y1="190.0" x2="254.0" y2="209.8"/><polygon class="mo-ah" points="262.0,214.0 251.7,214.3 256.3,205.4"/><line class="mo-ar" x1="252.0" y1="190.0" x2="258.5" y2="205.7"/><polygon class="mo-ah" points="262.0,214.0 253.9,207.6 263.2,203.8"/><circle class="mo-sumc" cx="270" cy="222" r="11"/><text class="mo-b" x="270" y="227" text-anchor="middle">+</text><circle class="mo-mkc" cx="300" cy="222" r="10"/><text class="mo-mkt" x="300" y="227" text-anchor="middle" aria-hidden="true">3</text><line class="mo-ar" x1="270.0" y1="233.0" x2="270.0" y2="263.0"/><polygon class="mo-ah" points="270.0,272.0 265.0,263.0 275.0,263.0"/><circle class="mo-sumc" cx="82" cy="284" r="12"/><text class="mo-b" x="82" y="289" text-anchor="middle">+</text><line class="mo-ar" x1="82.0" y1="296.0" x2="82.0" y2="317.0"/><polygon class="mo-ah" points="82.0,326.0 77.0,317.0 87.0,317.0"/><text class="mo-s" x="82" y="344" text-anchor="middle">output</text><circle class="mo-sumc" cx="270" cy="284" r="12"/><text class="mo-b" x="270" y="289" text-anchor="middle">+</text><line class="mo-ar" x1="270.0" y1="296.0" x2="270.0" y2="317.0"/><polygon class="mo-ah" points="270.0,326.0 265.0,317.0 275.0,317.0"/><text class="mo-s" x="270" y="344" text-anchor="middle">output</text><path class="mo-ar" d="M 12 50 L 4 50 L 4 284 L 58 284"/><polygon class="mo-ah" points="70,284 61,279 61,289"/><path class="mo-ar" d="M 200 50 L 192 50 L 192 284 L 246 284"/><polygon class="mo-ah" points="258,284 249,279 249,289"/><text class="mo-s mo-sm" x="176" y="372" text-anchor="middle">residual: x + FFN(x) in both</text></svg>
+    <figcaption class="caption"><span class="fignum">Figure 1.</span> Only the FFN changes: <span class="mo-mk">1</span> score, <span class="mo-mk">2</span> run the chosen experts, <span class="mo-mk">3</span> add by weight.</figcaption>
+  </figure>
+
+  <h2 id="big-picture"><span class="secnum">1</span> What a mixture of experts changes</h2>
+
+  <p>
+    Stored weights grow with <var>N</var>, the number of experts. The work per token grows with <var>k</var>, the number of experts each token uses (<a href="#moeStoreFig">Figure 2</a>).
+    The two illustrative toys use the sizes of section 6&rsquo;s code: token width <var>d</var> = 512 and hidden width 2,048, so one FFN holds 2.1M weights and costs 4.19M floating-point operations (FLOPs) per token.
+    In the Switch Transformer paper (Fedus et al., 2021), Switch-Base with 64 experts matched T5-Base, a dense model with the same compute per token, in one-seventh of the training time.
+    Mixtral (Jiang et al., 2024) is called 8x7B but stores 47B parameters, not 56B, because only the FFNs are copied; attention and the embeddings are shared.
+    DeepSeek-V3 (DeepSeek-AI, 2024) stores 671B and uses 37B per token.
+  </p>
+  <figure class="figure mtd-fig" id="moeStoreFig">
+<svg class="mtd-svg mo-svg" viewBox="0 0 360 310" role="img" aria-label="Four bars, each the full stored weights, with the part used per token filled. Dense toy FFN: 2.1 million of 2.1 million, 100 percent, 4.19 million FLOPs per token. MoE toy with 8 experts and top-2: 4.2 million of 16.8 million, 25 percent, 8.39 million FLOPs. Mixtral 8x7B: 13 billion of 47 billion, 27.7 percent, and it matches or beats Llama 2 70B. DeepSeek-V3: 37 billion of 671 billion, 5.5 percent."><text class="mo-b" x="4" y="20">① dense toy FFN</text><text class="mo-b c-e" x="356" y="20" text-anchor="end">100%</text><rect class="mo-full" x="4" y="28" width="352" height="22" rx="4"/><rect class="mo-act" x="4" y="28" width="352.0" height="22" rx="4"/><text class="mo-s mo-sm" x="4" y="68">2.1M of 2.1M used; 4.19M FFN FLOPs per token</text><text class="mo-b" x="4" y="96">② MoE toy, 8 experts, top-2</text><text class="mo-b c-e" x="356" y="96" text-anchor="end">25%</text><rect class="mo-full" x="4" y="104" width="352" height="22" rx="4"/><rect class="mo-act" x="4" y="104" width="88.0" height="22" rx="4"/><text class="mo-s mo-sm" x="4" y="144">4.2M of 16.8M used; 8.39M FFN FLOPs per token</text><text class="mo-b" x="4" y="172">③ Mixtral 8x7B</text><text class="mo-b c-e" x="356" y="172" text-anchor="end">27.7%</text><rect class="mo-full" x="4" y="180" width="352" height="22" rx="4"/><rect class="mo-act" x="4" y="180" width="97.5" height="22" rx="4"/><text class="mo-s mo-sm" x="4" y="220">13B of 47B used; matches or beats Llama 2 70B</text><text class="mo-b" x="4" y="248">④ DeepSeek-V3</text><text class="mo-b c-e" x="356" y="248" text-anchor="end">5.5%</text><rect class="mo-full" x="4" y="256" width="352" height="22" rx="4"/><rect class="mo-act" x="4" y="256" width="19.4" height="22" rx="4"/><text class="mo-s mo-sm" x="4" y="296">37B of 671B used</text></svg>
+    <figcaption class="caption"><span class="fignum">Figure 2.</span> Stored (full bar) against used per token (filled); <span class="mo-mk">1</span> and <span class="mo-mk">2</span> are illustrative.</figcaption>
+  </figure>
+
+  <p>
+    Training optimizes the usual next-token loss of <a href="transformer-block.html#decoder-only-gpt">The Transformer Block, section 7</a>, plus the two small terms of sections 3 and 5.
+    The router runs at every MoE layer, for every token, on every forward pass, in training and at inference, where that means every generated token (<a href="decoding.html#generate-loop">the generate loop</a>). Nothing is carried between steps except the learned weights.
+    Per token, the router costs 2&middot;<var>d</var>&middot;<var>N</var> FLOPs: 8,192 for the illustrative <var>d</var> = 512 and <var>N</var> = 8. The <var>k</var> expert FFNs cost the rest.
+  </p>
+
+  <h2 id="router"><span class="secnum">2</span> The router picks k experts for each token</h2>
+
+  <h3 id="router-softmax"><span class="secnum">2.1</span> Scores and softmax</h3>
+
+  <p>
+    The running example is the prompt &ldquo;the cat has 3&rdquo;, four tokens an LLM has read while predicting the next one; the digit is its own token (<a href="tokenizers.html#numbers">Tokenizers, section 5.1</a>).
+    Four experts keep the grids readable; Mixtral has 8 per layer.
+    The scores are illustrative values, set up as the start of collapse: E<sub>1</sub> already wins the article, the noun and the verb, and only the digit pulls hard to its own expert, as counting tokens did for encoder experts in ST-MoE (Zoph et al., 2022).
+  </p>
+  <p>
+    Trained routers follow token type and syntax more than topic. Mixtral&rsquo;s router shows no clear expert per topic, while tokens like &ldquo;self&rdquo; in Python and indentation keep returning to the same experts. ST-MoE&rsquo;s encoder experts specialize in token groups, and its decoder experts far less.
+  </p>
+  <figure class="figure mtd-fig" id="moeGridFig">
+<svg class="mtd-svg mo-svg" viewBox="0 0 360 234" role="img" aria-label="Two grids, four tokens by four experts. Left, teaching scores z: the 2.0, 0.5, 0.1, minus 0.5; cat 1.2, 1.0, minus 0.2, 0.0; has 1.5, 0.2, 0.8, minus 1.0; 3 0.3, minus 0.4, 0.1, 2.2. Right, softmax shares p: the 0.69, 0.15, 0.10, 0.06; cat 0.42, 0.35, 0.10, 0.13; has 0.54, 0.15, 0.27, 0.04; 3 0.11, 0.06, 0.09, 0.74. The cat row is outlined in both."><text class="mo-b c-z" x="114" y="16" text-anchor="middle">scores z</text><text class="mo-b c-p" x="274" y="16" text-anchor="middle">shares p</text><text class="c-e" x="57.0" y="40" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">1</tspan></text><text class="c-e" x="95.0" y="40" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">2</tspan></text><text class="c-e" x="133.0" y="40" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">3</tspan></text><text class="c-e" x="171.0" y="40" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">4</tspan></text><text class="c-e" x="217.0" y="40" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">1</tspan></text><text class="c-e" x="255.0" y="40" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">2</tspan></text><text class="c-e" x="293.0" y="40" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">3</tspan></text><text class="c-e" x="331.0" y="40" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">4</tspan></text><text class="c-x mo-b" x="32" y="75" text-anchor="end">the</text><rect class="mo-grid" x="38" y="50" width="38" height="38"/><text class="mo-sm c-z" x="57.0" y="74" text-anchor="middle">2.0</text><rect class="mo-grid" x="198" y="50" width="38" height="38"/><rect class="b-p" x="199" y="51" width="36" height="36" fill-opacity="0.46"/><text class="mo-sm mo-b" x="217.0" y="74" text-anchor="middle">0.69</text><rect class="mo-grid" x="76" y="50" width="38" height="38"/><text class="mo-sm c-z" x="95.0" y="74" text-anchor="middle">0.5</text><rect class="mo-grid" x="236" y="50" width="38" height="38"/><rect class="b-p" x="237" y="51" width="36" height="36" fill-opacity="0.16"/><text class="mo-sm" x="255.0" y="74" text-anchor="middle">0.15</text><rect class="mo-grid" x="114" y="50" width="38" height="38"/><text class="mo-sm c-z" x="133.0" y="74" text-anchor="middle">0.1</text><rect class="mo-grid" x="274" y="50" width="38" height="38"/><rect class="b-p" x="275" y="51" width="36" height="36" fill-opacity="0.14"/><text class="mo-sm" x="293.0" y="74" text-anchor="middle">0.10</text><rect class="mo-grid" x="152" y="50" width="38" height="38"/><text class="mo-sm c-z" x="171.0" y="74" text-anchor="middle">−0.5</text><rect class="mo-grid" x="312" y="50" width="38" height="38"/><rect class="b-p" x="313" y="51" width="36" height="36" fill-opacity="0.11"/><text class="mo-sm" x="331.0" y="74" text-anchor="middle">0.06</text><text class="c-x mo-b" x="32" y="113" text-anchor="end">cat</text><rect class="mo-grid" x="38" y="88" width="38" height="38"/><text class="mo-sm c-z" x="57.0" y="112" text-anchor="middle">1.2</text><rect class="mo-grid" x="198" y="88" width="38" height="38"/><rect class="b-p" x="199" y="89" width="36" height="36" fill-opacity="0.31"/><text class="mo-sm mo-b" x="217.0" y="112" text-anchor="middle">0.42</text><rect class="mo-grid" x="76" y="88" width="38" height="38"/><text class="mo-sm c-z" x="95.0" y="112" text-anchor="middle">1.0</text><rect class="mo-grid" x="236" y="88" width="38" height="38"/><rect class="b-p" x="237" y="89" width="36" height="36" fill-opacity="0.27"/><text class="mo-sm" x="255.0" y="112" text-anchor="middle">0.35</text><rect class="mo-grid" x="114" y="88" width="38" height="38"/><text class="mo-sm c-z" x="133.0" y="112" text-anchor="middle">−0.2</text><rect class="mo-grid" x="274" y="88" width="38" height="38"/><rect class="b-p" x="275" y="89" width="36" height="36" fill-opacity="0.14"/><text class="mo-sm" x="293.0" y="112" text-anchor="middle">0.10</text><rect class="mo-grid" x="152" y="88" width="38" height="38"/><text class="mo-sm c-z" x="171.0" y="112" text-anchor="middle">0.0</text><rect class="mo-grid" x="312" y="88" width="38" height="38"/><rect class="b-p" x="313" y="89" width="36" height="36" fill-opacity="0.15"/><text class="mo-sm" x="331.0" y="112" text-anchor="middle">0.13</text><text class="c-x mo-b" x="32" y="151" text-anchor="end">has</text><rect class="mo-grid" x="38" y="126" width="38" height="38"/><text class="mo-sm c-z" x="57.0" y="150" text-anchor="middle">1.5</text><rect class="mo-grid" x="198" y="126" width="38" height="38"/><rect class="b-p" x="199" y="127" width="36" height="36" fill-opacity="0.38"/><text class="mo-sm mo-b" x="217.0" y="150" text-anchor="middle">0.54</text><rect class="mo-grid" x="76" y="126" width="38" height="38"/><text class="mo-sm c-z" x="95.0" y="150" text-anchor="middle">0.2</text><rect class="mo-grid" x="236" y="126" width="38" height="38"/><rect class="b-p" x="237" y="127" width="36" height="36" fill-opacity="0.16"/><text class="mo-sm" x="255.0" y="150" text-anchor="middle">0.15</text><rect class="mo-grid" x="114" y="126" width="38" height="38"/><text class="mo-sm c-z" x="133.0" y="150" text-anchor="middle">0.8</text><rect class="mo-grid" x="274" y="126" width="38" height="38"/><rect class="b-p" x="275" y="127" width="36" height="36" fill-opacity="0.23"/><text class="mo-sm" x="293.0" y="150" text-anchor="middle">0.27</text><rect class="mo-grid" x="152" y="126" width="38" height="38"/><text class="mo-sm c-z" x="171.0" y="150" text-anchor="middle">−1.0</text><rect class="mo-grid" x="312" y="126" width="38" height="38"/><rect class="b-p" x="313" y="127" width="36" height="36" fill-opacity="0.10"/><text class="mo-sm" x="331.0" y="150" text-anchor="middle">0.04</text><text class="c-x mo-b" x="32" y="189" text-anchor="end">3</text><rect class="mo-grid" x="38" y="164" width="38" height="38"/><text class="mo-sm c-z" x="57.0" y="188" text-anchor="middle">0.3</text><rect class="mo-grid" x="198" y="164" width="38" height="38"/><rect class="b-p" x="199" y="165" width="36" height="36" fill-opacity="0.14"/><text class="mo-sm" x="217.0" y="188" text-anchor="middle">0.11</text><rect class="mo-grid" x="76" y="164" width="38" height="38"/><text class="mo-sm c-z" x="95.0" y="188" text-anchor="middle">−0.4</text><rect class="mo-grid" x="236" y="164" width="38" height="38"/><rect class="b-p" x="237" y="165" width="36" height="36" fill-opacity="0.11"/><text class="mo-sm" x="255.0" y="188" text-anchor="middle">0.06</text><rect class="mo-grid" x="114" y="164" width="38" height="38"/><text class="mo-sm c-z" x="133.0" y="188" text-anchor="middle">0.1</text><rect class="mo-grid" x="274" y="164" width="38" height="38"/><rect class="b-p" x="275" y="165" width="36" height="36" fill-opacity="0.13"/><text class="mo-sm" x="293.0" y="188" text-anchor="middle">0.09</text><rect class="mo-grid" x="152" y="164" width="38" height="38"/><text class="mo-sm c-z" x="171.0" y="188" text-anchor="middle">2.2</text><rect class="mo-grid" x="312" y="164" width="38" height="38"/><rect class="b-p" x="313" y="165" width="36" height="36" fill-opacity="0.49"/><text class="mo-sm mo-b" x="331.0" y="188" text-anchor="middle">0.74</text><rect class="mo-hl" x="36" y="86" width="156" height="42" rx="3"/><rect class="mo-hl" x="196" y="86" width="156" height="42" rx="3"/><text class="mo-s mo-sm" x="180" y="226" text-anchor="middle">each row of p adds to 1; bold is the top share</text></svg>
+    <figcaption class="caption"><span class="fignum">Figure 3.</span> Illustrative scores for four tokens; each row of shares adds to 1.</figcaption>
+  </figure>
+
+  <p>
+    In the &ldquo;cat&rdquo; row, the scores 1.2, 1.0, &minus;0.2 and 0.0 become shares 0.42, 0.35, 0.10 and 0.13.
+    The router gives each expert a score for this token with one matrix multiply; a higher score means a bigger share.
+  </p>
+
+  <div class="eq-card" id="moeRouterEq">
+    <p class="eq-what">The router scores every expert, then softmax turns the scores into shares.</p>
+    <div class="eq-line eq-active"><span style="white-space:nowrap"><span style="color:#1f6aa5">z</span> = <span style="color:#7d3c98">x</span> W<sub>r</sub></span></div>
+    <div class="eq-line eq-active"><span style="white-space:nowrap"><span style="color:#117a65">p<sub>i</sub></span> =</span> <span style="white-space:nowrap"><span class="frac"><span class="top">e<sup><span style="color:#1f6aa5">z<sub>i</sub></span></sup></span><span class="bot">&Sigma;<sub>j</sub> e<sup><span style="color:#1f6aa5">z<sub>j</sub></span></sup></span></span></span></div>
+    <div class="eq-why eq-active"><var>x</var> is the token&rsquo;s vector after attention, the input the dense FFN would get. <var>W</var><sub>r</sub>, <var>d</var> by <var>N</var>, is the only new weight matrix: 2,048 numbers for the illustrative <var>d</var> = 512 and 4 experts, against 2,097,152 in one expert.</div>
+    <div class="eq-why eq-active"><var>z</var><sub>i</sub> is expert <var>i</var>&rsquo;s score; scores can be negative, so they are not shares yet. e<sup><var>z</var><sub>i</sub></sup> makes each one positive, and dividing by the sum &Sigma;<sub><var>j</var></sub> over all <var>N</var> experts makes the shares <var>p</var><sub>i</sub> add to 1.</div>
+    <div class="eq-why eq-active">Back to the whole: <var>p</var> is the router&rsquo;s vote over experts for this one token, computed fresh for every token.</div>
+    <div class="eq-why eq-active mo-eqlink">Decoding&rsquo;s softmax with <var>N</var> experts in place of the vocabulary; <a href="#moeGateEq">the next card</a> keeps the top <var>k</var>.</div>
+    <div class="eq-why eq-active mo-eqsrc">Source: Switch Transformer eq. 1, written there as <var>W</var><sub>r</sub> &middot; <var>x</var>; Shazeer et al. (2017) eq. 2.</div>
+  </div>
+
+  <h3 id="top-k"><span class="secnum">2.2</span> Top-k and the weighted sum</h3>
+  <nav class="prereq-sec" aria-label="Builds on"><p>Builds on <a href="mlp.html#backward">the backward pass</a> (Multilayer Perceptrons, section 4.1)</p></nav><!-- link-pending: backpropagation.html -->
+
+  <p>
+    Keep the <var>k</var> largest shares, run only those experts, and blend their outputs by weights called <strong>gates</strong>.
+    The sparsely gated layer with noisy top-k comes from Shazeer et al. (2017), and the renormalized top-2 from GShard (Lepikhin et al., 2020).
+  </p>
+  <figure class="figure mtd-fig" id="moePickFig">
+<svg class="mtd-svg mo-svg" viewBox="0 0 360 246" role="img" aria-label="Picks for each token. With k equal to 1: the to E1 with gate 0.69, cat to E1 0.42, has to E1 0.54, 3 to E4 0.74. With k equal to 2: the to E1 0.82 and E2 0.18; cat to E1 0.55 and E2 0.45; has to E1 0.67 and E3 0.33; 3 to E4 0.87 and E1 0.13."><text class="mo-s mo-sm" x="30" y="18" text-anchor="middle">token</text><text class="mo-b" x="120" y="18" text-anchor="middle">k = 1</text><text class="mo-b" x="260" y="18" text-anchor="middle">k = 2</text><line class="mo-sep" x1="172" y1="28" x2="172" y2="214"/><rect class="mo-chip" x="4" y="32" width="52" height="30" rx="15"/><text class="c-x mo-b" x="30" y="52" text-anchor="middle">the</text><rect class="mo-ring" x="74" y="32" width="88" height="30" rx="15"/><text class="c-e mo-b" x="86" y="52">E<tspan baseline-shift="sub" font-size="15">1</tspan></text><text class="c-g mo-b" x="152" y="52" text-anchor="end">0.69</text><rect class="mo-ring" x="180" y="32" width="84" height="30" rx="15"/><text class="c-e mo-b" x="192" y="52">E<tspan baseline-shift="sub" font-size="15">1</tspan></text><text class="c-g mo-b" x="254" y="52" text-anchor="end">0.82</text><rect class="mo-ebox" x="270" y="32" width="84" height="30" rx="15"/><text class="c-e mo-b" x="282" y="52">E<tspan baseline-shift="sub" font-size="15">2</tspan></text><text class="c-g mo-b" x="344" y="52" text-anchor="end">0.18</text><circle class="mo-dot" cx="350" cy="36" r="5"/><rect class="mo-chip" x="4" y="78" width="52" height="30" rx="15"/><text class="c-x mo-b" x="30" y="98" text-anchor="middle">cat</text><rect class="mo-ring" x="74" y="78" width="88" height="30" rx="15"/><text class="c-e mo-b" x="86" y="98">E<tspan baseline-shift="sub" font-size="15">1</tspan></text><text class="c-g mo-b" x="152" y="98" text-anchor="end">0.42</text><rect class="mo-ring" x="180" y="78" width="84" height="30" rx="15"/><text class="c-e mo-b" x="192" y="98">E<tspan baseline-shift="sub" font-size="15">1</tspan></text><text class="c-g mo-b" x="254" y="98" text-anchor="end">0.55</text><rect class="mo-ebox" x="270" y="78" width="84" height="30" rx="15"/><text class="c-e mo-b" x="282" y="98">E<tspan baseline-shift="sub" font-size="15">2</tspan></text><text class="c-g mo-b" x="344" y="98" text-anchor="end">0.45</text><circle class="mo-dot" cx="350" cy="82" r="5"/><rect class="mo-chip" x="4" y="124" width="52" height="30" rx="15"/><text class="c-x mo-b" x="30" y="144" text-anchor="middle">has</text><rect class="mo-ring" x="74" y="124" width="88" height="30" rx="15"/><text class="c-e mo-b" x="86" y="144">E<tspan baseline-shift="sub" font-size="15">1</tspan></text><text class="c-g mo-b" x="152" y="144" text-anchor="end">0.54</text><rect class="mo-ring" x="180" y="124" width="84" height="30" rx="15"/><text class="c-e mo-b" x="192" y="144">E<tspan baseline-shift="sub" font-size="15">1</tspan></text><text class="c-g mo-b" x="254" y="144" text-anchor="end">0.67</text><rect class="mo-ebox" x="270" y="124" width="84" height="30" rx="15"/><text class="c-e mo-b" x="282" y="144">E<tspan baseline-shift="sub" font-size="15">3</tspan></text><text class="c-g mo-b" x="344" y="144" text-anchor="end">0.33</text><circle class="mo-dot" cx="350" cy="128" r="5"/><rect class="mo-chip" x="4" y="170" width="52" height="30" rx="15"/><text class="c-x mo-b" x="30" y="190" text-anchor="middle">3</text><rect class="mo-ring" x="74" y="170" width="88" height="30" rx="15"/><text class="c-e mo-b" x="86" y="190">E<tspan baseline-shift="sub" font-size="15">4</tspan></text><text class="c-g mo-b" x="152" y="190" text-anchor="end">0.74</text><rect class="mo-ring" x="180" y="170" width="84" height="30" rx="15"/><text class="c-e mo-b" x="192" y="190">E<tspan baseline-shift="sub" font-size="15">4</tspan></text><text class="c-g mo-b" x="254" y="190" text-anchor="end">0.87</text><rect class="mo-ebox" x="270" y="170" width="84" height="30" rx="15"/><text class="c-e mo-b" x="282" y="190">E<tspan baseline-shift="sub" font-size="15">1</tspan></text><text class="c-g mo-b" x="344" y="190" text-anchor="end">0.13</text><circle class="mo-dot" cx="350" cy="174" r="5"/><text class="mo-s mo-sm" x="180" y="236" text-anchor="middle">ring: first pick; dot: second pick; orange: gate</text></svg>
+    <figcaption class="caption"><span class="fignum">Figure 4.</span> Illustrative gates; with <var>k</var> = 2 each token&rsquo;s two gates add to 1.</figcaption>
+  </figure>
+
+  <p>The Switch Transformer paper draws the same step for one token.</p>
+
+  <figure class="figure mo-imgfig" id="moeSwitchFig">
+    <div class="mo-imgwrap"><picture><source media="(min-width: 700px)" srcset="figures/papers/switch-fig2-right.png"><img src="figures/papers/switch-fig2-router.png" alt="From the Switch Transformer paper: a router box draws a bar chart of four scores and sends the token to FFN 2 of four FFN experts, FFN 1 to FFN 4. A dotted line carries the gate value p = 0.65 to a multiply sign above FFN 2." width="550" height="380"></picture></div>
+    <figcaption class="caption"><span class="fignum">Figure 5.</span> From the Switch paper (their Fig. 2): &ldquo;&hellip;the output of the selected FFN multiplied by the router gate value (dotted-line).&rdquo;</figcaption>
+  </figure>
+
+  <p>
+    With the illustrative scores and <var>k</var> = 1, &ldquo;the&rdquo;, &ldquo;cat&rdquo; and &ldquo;has&rdquo; go to E<sub>1</sub> and &ldquo;3&rdquo; goes to E<sub>4</sub>, with gates 0.69, 0.42, 0.54 and 0.74. With <var>k</var> = 2, &ldquo;cat&rdquo; keeps E<sub>1</sub> and E<sub>2</sub> with gates 0.55 and 0.45, and E<sub>3</sub> and E<sub>4</sub> do no work for it.
+    Pick the <var>k</var> experts the router likes best for this token, run only those, and add their outputs weighted by their gates.
+  </p>
+
+  <div class="eq-card" id="moeGateEq">
+    <p class="eq-what">Keep the top <var>k</var> shares as gates and add the chosen experts&rsquo; outputs.</p>
+    <div class="eq-line eq-active"><span style="white-space:nowrap"><var>S</var> = top-<var>k</var> indices of <span style="color:#117a65">p</span></span></div>
+    <div class="eq-line eq-active"><span style="white-space:nowrap"><span style="color:#a85a14">g<sub>i</sub></span> = <span style="color:#117a65">p<sub>i</sub></span></span> <span style="white-space:nowrap">(<var>k</var> = 1)</span></div>
+    <div class="eq-line eq-active"><span style="white-space:nowrap"><span style="color:#a85a14">g<sub>i</sub></span> =</span> <span style="white-space:nowrap"><span class="frac"><span class="top"><span style="color:#117a65">p<sub>i</sub></span></span><span class="bot">&Sigma;<sub>j&isin;S</sub> <span style="color:#117a65">p<sub>j</sub></span></span></span></span> <span style="white-space:nowrap">(<var>k</var> &ge; 2)</span></div>
+    <div class="eq-line eq-active"><span style="white-space:nowrap"><var>y</var> =</span> <span style="white-space:nowrap">&Sigma;<sub>i&isin;S</sub> <span style="color:#a85a14">g<sub>i</sub></span> <span style="color:#1e8449">E<sub>i</sub></span>(<span style="color:#7d3c98">x</span>)</span></div>
+    <div class="eq-why eq-active"><var>S</var> is the chosen set; &isin; <var>S</var> means &ldquo;one of the chosen&rdquo;.</div>
+    <div class="eq-why eq-active">Line 2: with one expert, Switch keeps the raw share as the gate, so an unsure router shrinks the output; that is how the task loss reaches the router. A gate fixed at 1 would give it no gradient.</div>
+    <div class="eq-why eq-active">Line 3: with two or more, the kept shares are divided by their sum so the gates add to 1; Mixtral&rsquo;s softmax over only the kept scores gives the same numbers.</div>
+    <div class="eq-why eq-active">Line 4: <var>E</var><sub>i</sub>(<var>x</var>) is expert <var>i</var>&rsquo;s FFN on this token. Unchosen experts are never computed: &ldquo;Wherever G(x)<sub>i</sub> = 0, we need not compute E<sub>i</sub>(x)&rdquo;.</div>
+    <div class="eq-why eq-active">Back to the whole: <var>y</var> replaces FFN(<var>x</var>), and the residual still adds <var>x</var> + <var>y</var>.</div>
+    <div class="eq-why eq-active">In training, Switch multiplies <var>x</var> by random numbers between 1 &minus; <var>&epsilon;</var> and 1 + <var>&epsilon;</var> (<var>&epsilon;</var> is a small spread). This jitter was the best of four methods it tried; noisy top-k gating adds noise to the scores. Both let idle experts win near ties.</div>
+    <div class="eq-why eq-active mo-eqlink">Uses <a href="#moeRouterEq">the router card</a>&rsquo;s <var>p</var>; <a href="#moeAuxEq">the balance card</a> counts where <var>S</var> sends tokens.</div>
+    <div class="eq-why eq-active mo-eqsrc">Source: Switch eq. 2, section 2.1, Table 11; Mixtral section 2.1; GShard Algorithm 1; Shazeer et al. section 2.</div>
+  </div>
+
+  <div class="demo mo-tool" id="moeRoute">
+    <div class="mo-ctl">
+      <button type="button" id="mrPrev" aria-label="Previous step">Back</button>
+      <span class="mo-dots" id="mrDots" role="group" aria-label="Steps"></span>
+      <button type="button" id="mrNext" aria-label="Next step">Next</button>
+    </div>
+    <div class="mo-ctl" role="group" aria-label="Experts per token">
+      <span class="mo-lab">experts per token</span>
+      <button type="button" id="mrK1" aria-pressed="true">1</button>
+      <button type="button" id="mrK2" aria-pressed="false">2</button>
+    </div>
+    <svg id="mrSvg" class="mo-svg" viewBox="0 0 360 430" role="img" aria-label="Router walkthrough for the four tokens and four experts."></svg>
+    <p class="caption fig-caption"><span class="fignum">Figure 6.</span> Illustrative scores of Figure 3; arrow width is the gate.</p>
+    <p class="demo-stats" id="mrRead" aria-live="polite"></p>
+  </div>
+
+  <h2 id="balance-loss"><span class="secnum">3</span> Without pressure, a few experts take every token</h2>
+
+  <p>
+    An expert that wins a few more tokens gets trained more and wins even more. <a href="#references">The noisy top-k gating paper</a> saw it: &ldquo;This imbalance is self-reinforcing, as the favored experts are trained more rapidly and thus are selected even more by the gating network.&rdquo;
+    In the running example E<sub>1</sub> already takes 3 of 4 tokens.
+  </p>
+  <figure class="figure mtd-fig" id="moePushFig">
+<svg class="mtd-svg mo-svg" viewBox="0 0 360 334" role="img" aria-label="Bars per expert. f, where tokens went: E1 0.75, E2 0, E3 0, E4 0.25. P, where the router wanted them: 0.44, 0.18, 0.14, 0.24. A dashed line marks the even share 0.25. An arrow pushes E1's P down and arrows push E2 to E4 up; dashed outlines show P after one push, 0.40, 0.20, 0.16, 0.25, and cat then picks E2. Below, a scale of the balance loss: 1.0 for an even split, 1.56 here, and the ceiling 4.0, which is N, when every token and all the share sit on E1."><rect class="b-f" x="8" y="6" width="14" height="14" rx="2"/><text class="mo-sm" x="28" y="18">f: where tokens went</text><rect class="b-p" x="190" y="6" width="14" height="14" rx="2"/><text class="mo-sm" x="210" y="18">P: router wanted</text><line class="mo-base" x1="16" y1="190" x2="350" y2="190"/><line class="mo-even" x1="16" y1="140.0" x2="350" y2="140.0"/><rect class="b-f" x="28" y="40.0" width="30" height="150.0" rx="2"/><text class="mo-sm" x="43" y="34.0" text-anchor="middle">0.75</text><rect class="b-p" x="60" y="102.0" width="30" height="88.0" rx="2"/><rect class="mo-ghost" x="60" y="110.0" width="30" height="80.0"/><text class="mo-sm" x="77" y="96.0" text-anchor="middle">0.44</text><text class="c-e mo-b" x="59" y="208" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">1</tspan></text><line class="mo-gar" stroke-width="2.4" x1="100.0" y1="98.0" x2="100.0" y2="123.0"/><polygon class="mo-gah" points="100.0,132.0 96.0,123.0 104.0,123.0"/><text class="mo-sm mo-b c-f" x="123" y="184" text-anchor="middle">0</text><rect class="b-p" x="140" y="155.0" width="30" height="35.0" rx="2"/><rect class="mo-ghost" x="140" y="150.0" width="30" height="40.0"/><text class="mo-sm" x="157" y="134.0" text-anchor="middle">0.18</text><text class="c-e mo-b" x="139" y="208" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">2</tspan></text><line class="mo-gar" stroke-width="2.4" x1="180.0" y1="177.0" x2="180.0" y2="154.0"/><polygon class="mo-gah" points="180.0,145.0 184.0,154.0 176.0,154.0"/><text class="mo-sm mo-b c-f" x="203" y="184" text-anchor="middle">0</text><rect class="b-p" x="220" y="161.6" width="30" height="28.4" rx="2"/><rect class="mo-ghost" x="220" y="158.0" width="30" height="32.0"/><text class="mo-sm" x="237" y="134.0" text-anchor="middle">0.14</text><text class="c-e mo-b" x="219" y="208" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">3</tspan></text><line class="mo-gar" stroke-width="2.4" x1="260.0" y1="183.6" x2="260.0" y2="160.6"/><polygon class="mo-gah" points="260.0,151.6 264.0,160.6 256.0,160.6"/><rect class="b-f" x="268" y="140.0" width="30" height="50.0" rx="2"/><text class="mo-sm" x="283" y="134.0" text-anchor="middle">0.25</text><rect class="b-p" x="300" y="141.4" width="30" height="48.6" rx="2"/><rect class="mo-ghost" x="300" y="140.0" width="30" height="50.0"/><text class="mo-sm" x="317" y="134.0" text-anchor="middle">0.24</text><text class="c-e mo-b" x="299" y="208" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">4</tspan></text><line class="mo-gar" stroke-width="2.4" x1="340.0" y1="163.4" x2="340.0" y2="140.4"/><polygon class="mo-gah" points="340.0,131.4 344.0,140.4 336.0,140.4"/><text class="mo-s mo-sm" x="180" y="234" text-anchor="middle">dashed line: even share 1/N = 0.25</text><text class="mo-s mo-sm" x="180" y="252" text-anchor="middle">outlines: P after one push; cat now picks E<tspan baseline-shift="sub" font-size="15">2</tspan></text><text class="mo-b" x="4" y="299">L<tspan baseline-shift="sub" font-size="15">aux</tspan></text><line class="mo-line" x1="46" y1="294" x2="340" y2="294"/><line class="mo-tick" x1="88.0" y1="286" x2="88.0" y2="302"/><circle class="b-mut" cx="88.0" cy="294" r="5"/><text class="mo-sm mo-b c-e" x="88.0" y="320" text-anchor="middle">1.0 even</text><line class="mo-tick" x1="135.0" y1="286" x2="135.0" y2="302"/><circle class="b-f" cx="135.0" cy="294" r="5"/><text class="mo-sm mo-b c-f" x="135.04000000000002" y="280" text-anchor="middle">1.56 here</text><line class="mo-tick" x1="340.0" y1="286" x2="340.0" y2="302"/><circle class="b-mut" cx="340.0" cy="294" r="5"/><text class="mo-sm mo-b mo-s" x="346.0" y="320" text-anchor="end">4.0 = N, all on E<tspan baseline-shift="sub" font-size="15">1</tspan></text></svg>
+    <figcaption class="caption"><span class="fignum">Figure 7.</span> Illustrative <var>f</var> and <var>P</var>; arrows show one exaggerated push of the loss.</figcaption>
+  </figure>
+
+  <p>
+    Count where tokens went, average where the router wanted them to go, and charge a penalty that is smallest when both are even.
+    In this illustrative example the loss is 1.56, against 1.0 for an even split and at most 4.0, which is <var>N</var>, when every token and all the share sit on E<sub>1</sub>.
+  </p>
+
+  <div class="eq-card" id="moeAuxEq">
+    <p class="eq-what">The balance loss multiplies where tokens went by where the router wanted them, per expert.</p>
+    <div class="eq-line eq-active"><span style="white-space:nowrap"><span style="color:#c0392b">f<sub>i</sub></span> =</span> <span style="white-space:nowrap"><span class="frac"><span class="top">1</span><span class="bot"><var>T</var></span></span> &Sigma;<sub>x&isin;B</sub> 1{argmax<sub>j</sub> <span style="color:#117a65">p<sub>j</sub></span>(<span style="color:#7d3c98">x</span>) = <var>i</var>}</span></div>
+    <div class="eq-line eq-active"><span style="white-space:nowrap"><span style="color:#117a65">P<sub>i</sub></span> =</span> <span style="white-space:nowrap"><span class="frac"><span class="top">1</span><span class="bot"><var>T</var></span></span> &Sigma;<sub>x&isin;B</sub> <span style="color:#117a65">p<sub>i</sub></span>(<span style="color:#7d3c98">x</span>)</span></div>
+    <div class="eq-line eq-active"><span style="white-space:nowrap"><var>L</var><sub>aux</sub> = <var>N</var></span> <span style="white-space:nowrap">&Sigma;<sub>i</sub> <span style="color:#c0392b">f<sub>i</sub></span> <span style="color:#117a65">P<sub>i</sub></span></span></div>
+    <div class="eq-why eq-active"><var>B</var> is the batch, all sequences together, and <var>T</var> its number of tokens. 1{&hellip;} is 1 when the token&rsquo;s top choice, argmax<sub><var>j</var></sub>, is expert <var>i</var>, so <var>f</var><sub>i</sub> is the fraction of tokens sent to <var>i</var>; the count is the load <var>&ell;</var><sub>i</sub> = <var>T</var> <var>f</var><sub>i</sub>.</div>
+    <div class="eq-why eq-active">A count has no gradient, so <var>f</var> alone cannot teach the router; <var>P</var><sub>i</sub> averages the smooth shares of <a href="#moeRouterEq">the router card</a>, and can.</div>
+    <div class="eq-why eq-active">Line 3: the push on each <var>P</var><sub>i</sub> grows with <var>f</var><sub>i</sub>, so the busiest expert&rsquo;s share is pulled down hardest and the idle ones rise. <var>N</var> in front makes an even split cost 1.0 for any <var>N</var>.</div>
+    <div class="eq-why eq-active">Back to the whole: <var>L</var><sub>aux</sub> joins the task loss with weight <var>&alpha;</var> (<a href="#moeZEq">the z-loss card</a>, line 3) and never changes the forward pass.</div>
+    <div class="eq-why eq-active">Switch counts only top-1 picks in <var>f</var>; with <var>k</var> = 2 some implementations count both, so <var>f</var> adds to <var>k</var>. Switch puts <var>&alpha;</var> inside this line; this page applies it once, in the total.</div>
+    <div class="eq-why eq-active mo-eqlink"><var>f</var> comes from <a href="#moeGateEq">the gate card</a>; <a href="#moeCapEq">the capacity card</a> turns uneven loads into dropped tokens.</div>
+    <div class="eq-why eq-active mo-eqsrc">Source: Switch eqs. 4 to 6, section 2.2, <var>&alpha;</var> = 10<sup>&minus;2</sup>; Shazeer et al. section 4.</div>
+  </div>
+
+  <p>Repeated every training step, the push spreads the load. The toy below routes 512 tokens per step.</p>
+
+  <div class="demo mo-tool" id="moeBalance">
+    <div class="mo-ctl">
+      <button type="button" id="mbPlay">Play</button>
+      <button type="button" id="mbReset">Reset</button>
+    </div>
+    <div class="mo-ctl" role="group" aria-label="Balance loss">
+      <span class="mo-lab">balance loss</span>
+      <button type="button" id="mbOff" aria-pressed="true">off</button>
+      <button type="button" id="mbOn" aria-pressed="false">on</button>
+    </div>
+    <svg id="mbSvg" class="mo-svg" viewBox="0 0 360 250" role="img" aria-label="Share of tokens per expert for eight experts."></svg>
+    <p class="caption fig-caption"><span class="fignum">Figure 8.</span> Illustrative top-1 toy with Mixtral’s 8 experts and an exaggerated push.</p>
+    <p class="demo-stats" id="mbRead" aria-live="polite"></p>
+  </div>
+
+  <h2 id="capacity"><span class="secnum">4</span> Each expert has a fixed number of slots</h2>
+
+  <p>
+    Accelerators run compiled code that needs tensor sizes fixed in advance (Switch, section 2.2), so each expert gets <var>C</var> slots per batch, its <strong>capacity</strong>.
+    A token past <var>C</var> skips this layer&rsquo;s experts and rides the residual unchanged.
+  </p>
+  <figure class="figure mtd-fig" id="moeCapFig">
+<svg class="mtd-svg mo-svg" viewBox="0 0 360 356" role="img" aria-label="Two panels of expert slots for the four tokens with k equal to 1. CF 1.0 gives 1 slot per expert: E1 keeps the, E4 keeps 3, cat and has are dropped, and the slots of E2 and E3 are empty; 2 of 4 tokens dropped, 2 of 4 slots empty. CF 2.0 gives 2 slots: E1 keeps the and cat, E4 keeps 3, has is dropped; 1 of 4 dropped, 5 of 8 slots empty."><text class="mo-b" x="4" y="18">CF 1.0, C = 1 slot per expert</text><text class="c-e mo-b" x="46" y="39" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">1</tspan></text><rect class="mo-kept" x="8" y="50" width="76" height="30" rx="5"/><text class="c-x mo-b" x="46" y="70" text-anchor="middle">the</text><text class="c-e mo-b" x="134" y="39" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">2</tspan></text><rect class="mo-slot" x="96" y="50" width="76" height="30" rx="5"/><text class="mo-s mo-sm" x="134" y="70" text-anchor="middle">empty</text><text class="c-e mo-b" x="222" y="39" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">3</tspan></text><rect class="mo-slot" x="184" y="50" width="76" height="30" rx="5"/><text class="mo-s mo-sm" x="222" y="70" text-anchor="middle">empty</text><text class="c-e mo-b" x="310" y="39" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">4</tspan></text><rect class="mo-kept" x="272" y="50" width="76" height="30" rx="5"/><text class="c-x mo-b" x="310" y="70" text-anchor="middle">3</text><rect class="mo-drop" x="8" y="90" width="76" height="28" rx="5"/><text class="c-f mo-b" x="46" y="109" text-anchor="middle">cat</text><rect class="mo-drop" x="92" y="90" width="76" height="28" rx="5"/><text class="c-f mo-b" x="130" y="109" text-anchor="middle">has</text><text class="c-f mo-sm" x="182" y="101">← dropped,</text><text class="c-f mo-sm" x="182" y="117">ride the residual</text><text class="mo-s" x="4" y="144">2 of 4 tokens dropped, 2 of 4 slots empty</text><text class="mo-b" x="4" y="182">CF 2.0, C = 2 slots per expert</text><text class="c-e mo-b" x="46" y="203" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">1</tspan></text><rect class="mo-kept" x="8" y="214" width="76" height="30" rx="5"/><text class="c-x mo-b" x="46" y="234" text-anchor="middle">the</text><rect class="mo-kept" x="8" y="250" width="76" height="30" rx="5"/><text class="c-x mo-b" x="46" y="270" text-anchor="middle">cat</text><text class="c-e mo-b" x="134" y="203" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">2</tspan></text><rect class="mo-slot" x="96" y="214" width="76" height="30" rx="5"/><text class="mo-s mo-sm" x="134" y="234" text-anchor="middle">empty</text><rect class="mo-slot" x="96" y="250" width="76" height="30" rx="5"/><text class="mo-s mo-sm" x="134" y="270" text-anchor="middle">empty</text><text class="c-e mo-b" x="222" y="203" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">3</tspan></text><rect class="mo-slot" x="184" y="214" width="76" height="30" rx="5"/><text class="mo-s mo-sm" x="222" y="234" text-anchor="middle">empty</text><rect class="mo-slot" x="184" y="250" width="76" height="30" rx="5"/><text class="mo-s mo-sm" x="222" y="270" text-anchor="middle">empty</text><text class="c-e mo-b" x="310" y="203" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">4</tspan></text><rect class="mo-kept" x="272" y="214" width="76" height="30" rx="5"/><text class="c-x mo-b" x="310" y="234" text-anchor="middle">3</text><rect class="mo-slot" x="272" y="250" width="76" height="30" rx="5"/><text class="mo-s mo-sm" x="310" y="270" text-anchor="middle">empty</text><rect class="mo-drop" x="8" y="290" width="76" height="28" rx="5"/><text class="c-f mo-b" x="46" y="309" text-anchor="middle">has</text><text class="c-f mo-sm" x="98" y="301">← dropped,</text><text class="c-f mo-sm" x="98" y="317">ride the residual</text><text class="mo-s" x="4" y="344">1 of 4 tokens dropped, 5 of 8 slots empty</text></svg>
+    <figcaption class="caption"><span class="fignum">Figure 9.</span> Illustrative routing: a small capacity factor drops tokens, a large one pads.</figcaption>
+  </figure>
+
+  <p>
+    With <var>T</var> = 4 tokens, <var>N</var> = 4 experts and <var>k</var> = 1, a fair share is one token per expert, and E<sub>1</sub> receives &ldquo;the&rdquo;, &ldquo;cat&rdquo; and &ldquo;has&rdquo; in that order.
+    Give each expert room for its fair share of the batch, times a safety margin.
+  </p>
+
+  <div class="eq-card" id="moeCapEq">
+    <p class="eq-what">Capacity is the fair share of the batch times a margin.</p>
+    <div class="eq-line eq-active"><span style="white-space:nowrap"><var>C</var> = CF &times;</span> <span style="white-space:nowrap"><span class="frac"><span class="top"><var>k</var> <var>T</var></span><span class="bot"><var>N</var></span></span></span></div>
+    <div class="eq-why eq-active"><var>k</var><var>T</var>/<var>N</var> is the fair share: <var>T</var> tokens, <var>k</var> slots each, spread over <var>N</var> experts. CF, the <strong>capacity factor</strong>, is the margin: 1.0 is none, above 1 adds buffer, below 1 always drops. Code rounds <var>C</var> down.</div>
+    <div class="eq-why eq-active">Back to the whole: too small a <var>C</var> drops tokens; too large leaves empty slots that still cost memory and compute.</div>
+    <div class="eq-why eq-active mo-eqlink">Uses <a href="#moeAuxEq">the balance card</a>&rsquo;s loads. <a href="mixture-of-experts-designs.html#bias-balance">Mixture of Experts Designs, section 1</a>, balances well enough to drop none.</div>
+    <div class="eq-why eq-active mo-eqsrc">Source: GShard section 2.2 for the <var>k</var> form (<var>k</var> = 2); Switch eq. 3 for <var>k</var> = 1; ST-MoE section 4.1. Arrival order follows the cumulative sum (Switch, their Fig. 15).</div>
+  </div>
+
+  <p>
+    A bigger CF drops fewer tokens and pads more empty slots. Switch typically drops under 1% of tokens and found CF 1.0 and 1.25 best; ST-MoE trains at 1.25 and evaluates at 2.0.
+  </p>
+
+  <h2 id="z-loss"><span class="secnum">5</span> The z-loss keeps router scores small</h2>
+
+  <p>
+    Softmax ignores a shift of all scores (<a href="decoding.html#softmax">Softmax, Temperature and Decoding, section 1</a>), so scores can drift large without changing any choice.
+    Large scores round badly in bfloat16, the 16-bit format big models train in.
+  </p>
+  <figure class="figure mtd-fig" id="moeBf16Fig">
+<svg class="mtd-svg mo-svg" viewBox="0 0 360 212" role="img" aria-label="Two number lines of the same length, each 0.5 wide, with one tick per value bfloat16 can store. Near 2 the ticks are 0.0156 apart, 32 steps, and the error of e to the z is at most 0.78 percent. Near 20 they are 0.125 apart, 4 steps, and the error is up to 6.45 percent. float32 has 65,536 times more ticks."><g transform="translate(0,4)"><text class="mo-b c-z" x="4" y="18">near 2: step 0.0156</text><text class="mo-sm mo-b c-f" x="356" y="18" text-anchor="end">error of e<tspan baseline-shift="super" font-size="15">z</tspan> up to 0.78%</text><line class="mo-line" x1="20" y1="46" x2="340" y2="46"/><line class="mo-tick" x1="20.0" y1="37" x2="20.0" y2="55"/><line class="mo-tick" x1="30.0" y1="37" x2="30.0" y2="55"/><line class="mo-tick" x1="40.0" y1="37" x2="40.0" y2="55"/><line class="mo-tick" x1="50.0" y1="37" x2="50.0" y2="55"/><line class="mo-tick" x1="60.0" y1="37" x2="60.0" y2="55"/><line class="mo-tick" x1="70.0" y1="37" x2="70.0" y2="55"/><line class="mo-tick" x1="80.0" y1="37" x2="80.0" y2="55"/><line class="mo-tick" x1="90.0" y1="37" x2="90.0" y2="55"/><line class="mo-tick" x1="100.0" y1="37" x2="100.0" y2="55"/><line class="mo-tick" x1="110.0" y1="37" x2="110.0" y2="55"/><line class="mo-tick" x1="120.0" y1="37" x2="120.0" y2="55"/><line class="mo-tick" x1="130.0" y1="37" x2="130.0" y2="55"/><line class="mo-tick" x1="140.0" y1="37" x2="140.0" y2="55"/><line class="mo-tick" x1="150.0" y1="37" x2="150.0" y2="55"/><line class="mo-tick" x1="160.0" y1="37" x2="160.0" y2="55"/><line class="mo-tick" x1="170.0" y1="37" x2="170.0" y2="55"/><line class="mo-tick" x1="180.0" y1="37" x2="180.0" y2="55"/><line class="mo-tick" x1="190.0" y1="37" x2="190.0" y2="55"/><line class="mo-tick" x1="200.0" y1="37" x2="200.0" y2="55"/><line class="mo-tick" x1="210.0" y1="37" x2="210.0" y2="55"/><line class="mo-tick" x1="220.0" y1="37" x2="220.0" y2="55"/><line class="mo-tick" x1="230.0" y1="37" x2="230.0" y2="55"/><line class="mo-tick" x1="240.0" y1="37" x2="240.0" y2="55"/><line class="mo-tick" x1="250.0" y1="37" x2="250.0" y2="55"/><line class="mo-tick" x1="260.0" y1="37" x2="260.0" y2="55"/><line class="mo-tick" x1="270.0" y1="37" x2="270.0" y2="55"/><line class="mo-tick" x1="280.0" y1="37" x2="280.0" y2="55"/><line class="mo-tick" x1="290.0" y1="37" x2="290.0" y2="55"/><line class="mo-tick" x1="300.0" y1="37" x2="300.0" y2="55"/><line class="mo-tick" x1="310.0" y1="37" x2="310.0" y2="55"/><line class="mo-tick" x1="320.0" y1="37" x2="320.0" y2="55"/><line class="mo-tick" x1="330.0" y1="37" x2="330.0" y2="55"/><line class="mo-tick" x1="340.0" y1="37" x2="340.0" y2="55"/><text class="mo-sm" x="20" y="74" text-anchor="middle">2</text><text class="mo-sm" x="340" y="74" text-anchor="middle">2.5</text><text class="mo-s mo-sm" x="180" y="74" text-anchor="middle">one tick per value bfloat16 can store</text><text class="mo-b c-z" x="4" y="112">near 20: step 0.125</text><text class="mo-sm mo-b c-f" x="356" y="112" text-anchor="end">error of e<tspan baseline-shift="super" font-size="15">z</tspan> up to 6.45%</text><line class="mo-line" x1="20" y1="140" x2="340" y2="140"/><line class="mo-tick" x1="20.0" y1="131" x2="20.0" y2="149"/><line class="mo-tick" x1="100.0" y1="131" x2="100.0" y2="149"/><line class="mo-tick" x1="180.0" y1="131" x2="180.0" y2="149"/><line class="mo-tick" x1="260.0" y1="131" x2="260.0" y2="149"/><line class="mo-tick" x1="340.0" y1="131" x2="340.0" y2="149"/><text class="mo-sm" x="20" y="168" text-anchor="middle">20</text><text class="mo-sm" x="340" y="168" text-anchor="middle">20.5</text><text class="mo-s mo-sm" x="180" y="168" text-anchor="middle">one tick per value bfloat16 can store</text><text class="mo-s mo-sm" x="180" y="198" text-anchor="middle">float32 has 65,536 times more ticks in each span</text></g></svg>
+    <figcaption class="caption"><span class="fignum">Figure 10.</span> bfloat16 keeps 8 significant bits, so its step near 20 is 8 times its step near 2.</figcaption>
+  </figure>
+  <figure class="figure mtd-fig" id="moeScaleFig">
+<svg class="mtd-svg mo-svg" viewBox="0 0 360 296" role="img" aria-label="Shares for the token the in three cases. Scores times 1: 2.0, 0.5, 0.1, minus 0.5 give shares 0.69, 0.15, 0.10, 0.06 and a z-loss of 5.15 over the four tokens. Scores times 10: E1 takes a share of 1.00 and the z-loss is 314. Scores centered by subtracting each token's mean: the same shares as times 1 and a z-loss of 3.17."><text class="mo-b c-p" x="180" y="16" text-anchor="middle">shares p for the token “the”</text><text class="mo-b" x="60" y="42" text-anchor="middle">scores × 1</text><line class="mo-base" x1="6" y1="170" x2="114" y2="170"/><rect class="b-p" x="10" y="101.3" width="22" height="68.7" rx="2"/><text class="mo-sm c-e" x="21" y="186" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">1</tspan></text><rect class="b-p" x="36" y="154.7" width="22" height="15.299999999999999" rx="2"/><text class="mo-sm c-e" x="47" y="186" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">2</tspan></text><rect class="b-p" x="62" y="159.7" width="22" height="10.299999999999999" rx="2"/><text class="mo-sm c-e" x="73" y="186" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">3</tspan></text><rect class="b-p" x="88" y="164.4" width="22" height="5.6000000000000005" rx="2"/><text class="mo-sm c-e" x="99" y="186" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">4</tspan></text><text class="mo-sm mo-b c-p" x="60" y="95.3" text-anchor="middle">0.69</text><text class="mo-sm c-z" x="60" y="210" text-anchor="middle">z: 2.0, 0.5,</text><text class="mo-sm c-z" x="60" y="228" text-anchor="middle">0.1, −0.5</text><text class="mo-b" x="60" text-anchor="middle" y="256">L<tspan baseline-shift="sub" font-size="15">z</tspan> = 5.15</text><text class="mo-b" x="180" y="42" text-anchor="middle">scores × 10</text><line class="mo-base" x1="126" y1="170" x2="234" y2="170"/><rect class="b-p" x="130" y="70.0" width="22" height="100.0" rx="2"/><text class="mo-sm c-e" x="141" y="186" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">1</tspan></text><text class="mo-sm c-e" x="167" y="186" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">2</tspan></text><text class="mo-sm c-e" x="193" y="186" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">3</tspan></text><text class="mo-sm c-e" x="219" y="186" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">4</tspan></text><text class="mo-sm mo-b c-p" x="180" y="64.0" text-anchor="middle">1.00</text><text class="mo-sm c-z" x="180" y="210" text-anchor="middle">z: 20, 5,</text><text class="mo-sm c-z" x="180" y="228" text-anchor="middle">1, −5</text><text class="mo-b" x="180" text-anchor="middle" y="256">L<tspan baseline-shift="sub" font-size="15">z</tspan> = 314</text><text class="mo-b" x="300" y="42" text-anchor="middle">centered</text><line class="mo-base" x1="246" y1="170" x2="354" y2="170"/><rect class="b-p" x="250" y="101.3" width="22" height="68.7" rx="2"/><text class="mo-sm c-e" x="261" y="186" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">1</tspan></text><rect class="b-p" x="276" y="154.7" width="22" height="15.299999999999999" rx="2"/><text class="mo-sm c-e" x="287" y="186" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">2</tspan></text><rect class="b-p" x="302" y="159.7" width="22" height="10.299999999999999" rx="2"/><text class="mo-sm c-e" x="313" y="186" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">3</tspan></text><rect class="b-p" x="328" y="164.4" width="22" height="5.6000000000000005" rx="2"/><text class="mo-sm c-e" x="339" y="186" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">4</tspan></text><text class="mo-sm mo-b c-p" x="300" y="95.3" text-anchor="middle">0.69</text><text class="mo-sm c-z" x="300" y="210" text-anchor="middle">z: 1.48, −0.03,</text><text class="mo-sm c-z" x="300" y="228" text-anchor="middle">−0.43, −1.03</text><text class="mo-b" x="300" text-anchor="middle" y="256">L<tspan baseline-shift="sub" font-size="15">z</tspan> = 3.17</text><text class="mo-s mo-sm" x="180" y="282" text-anchor="middle">L<tspan baseline-shift="sub" font-size="15">z</tspan> averages all four tokens of the example</text></svg>
+    <figcaption class="caption"><span class="fignum">Figure 11.</span> Illustrative scores: times 10 raises the z-loss; centering lowers it.</figcaption>
+  </figure>
+
+  <p>
+    Penalize big router scores, because softmax does not need them and big numbers round badly.
+  </p>
+
+  <div class="eq-card" id="moeZEq">
+    <p class="eq-what">The z-loss charges the size of each token&rsquo;s scores, and joins the total loss.</p>
+    <div class="eq-line eq-active"><span style="white-space:nowrap"><var>a</var>(<span style="color:#7d3c98">x</span>) = log &Sigma;<sub>i</sub> e<sup><span style="color:#1f6aa5">z<sub>i</sub></span></sup></span></div>
+    <div class="eq-line eq-active"><span style="white-space:nowrap"><var>L</var><sub>z</sub> =</span> <span style="white-space:nowrap"><span class="frac"><span class="top">1</span><span class="bot"><var>T</var></span></span> &Sigma;<sub>x&isin;B</sub> <var>a</var>(<span style="color:#7d3c98">x</span>)<sup>2</sup></span></div>
+    <div class="eq-line eq-active"><span style="white-space:nowrap"><var>L</var> = <var>L</var><sub>task</sub></span> <span style="white-space:nowrap">+ <var>&alpha;</var> <var>L</var><sub>aux</sub></span> <span style="white-space:nowrap">+ <var>&beta;</var> <var>L</var><sub>z</sub></span></div>
+    <div class="eq-why eq-active">Line 1: <var>a</var> is the log of <a href="#moeRouterEq">the router card</a>&rsquo;s softmax denominator, about the largest score when one dominates.</div>
+    <div class="eq-why eq-active">Line 2: squaring makes large values cost far more; the average runs over the <var>T</var> tokens.</div>
+    <div class="eq-why eq-active">Line 3 is the whole training loss: <var>L</var><sub>task</sub> is the next-token loss of section 1, and <var>&alpha;</var> and <var>&beta;</var> weight the two router terms. <var>&beta;</var> is 0.001 in ST-MoE; at 0.01 and above the z-loss is driven near zero, and 0 removes the term.</div>
+    <div class="eq-why eq-active">bfloat16 keeps 8 significant bits against float32&rsquo;s 24, so its rounding step grows with the number (<a href="#moeBf16Fig">Figure 10</a>).</div>
+    <div class="eq-why eq-active">Back to the whole: <var>L</var><sub>z</sub> leaves <var>p</var> unchanged and keeps <var>z</var> where bfloat16 is precise. In ST-MoE, 3 of 3 runs with it trained stably, against 4 of 6 for the baseline.</div>
+    <div class="eq-why eq-active mo-eqlink"><a href="mixture-of-experts-designs.html#bias-balance">Mixture of Experts Designs, section 1</a>, replaces the <var>&alpha;</var> term with a bias.</div>
+    <div class="eq-why eq-active mo-eqsrc">Source: ST-MoE eqs. 5 and 6 with <var>c</var><sub>z</sub> = 0.001, section 3.4, Table 4 and their Fig. 7.</div>
+  </div>
+
+  <h2 id="code"><span class="secnum">6</span> A complete MoE layer in PyTorch</h2>
+  <nav class="prereq-sec" aria-label="Builds on"><p>Builds on <a href="gradient-descent.html#in-practice">the gradient step in PyTorch</a> (Gradient Descent, section 2)</p></nav>
+
+  <h3 id="code-layer"><span class="secnum">6.1</span> The layer</h3>
+
+  <p class="code-lead">Router, top-k, dispatch and combine in one module.</p>
+
+<pre class="cs" data-cs="1-13,16-18,19-21,22-29"><code class="language-python">import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class MoELayer(nn.Module):
+    def __init__(self, d_model, d_ff, n_experts, k=1):
+        super().__init__()
+        self.k = k
+        self.router = nn.Linear(d_model, n_experts, bias=False)
+        self.experts = nn.ModuleList(
+            nn.Sequential(nn.Linear(d_model, d_ff), nn.ReLU(),
+                          nn.Linear(d_ff, d_model))
+            for _ in range(n_experts))
+
+    def forward(self, x):             # x: (tokens, d_model)
+        xf = x.float()                # router in float32
+        z = F.linear(xf, self.router.weight.float())
+        p = z.softmax(dim=-1)
+        g, idx = p.topk(self.k, dim=-1)
+        if self.k &gt; 1:
+            g = g / g.sum(dim=-1, keepdim=True)
+        y = torch.zeros_like(x)
+        for e, expert in enumerate(self.experts):
+            tok, slot = (idx == e).nonzero(as_tuple=True)
+            if tok.numel() == 0:
+                continue
+            out = expert(x[tok]) * g[tok, slot, None]
+            y = y.index_add(0, tok, out.to(x.dtype))
+        return y, z, p, idx</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>The router <var>W</var><sub>r</sub> (<a href="#moeRouterEq">router card</a>, line 1) and the <var>N</var> experts <var>E</var><sub>i</sub>, each the dense FFN&rsquo;s Linear, ReLU, Linear (<a href="#moeGateEq">gate card</a>, line 4).</li>
+  <li><span class="cs-n">2</span>Scores <var>z</var> and shares <var>p</var>, router card lines 1 and 2, computed from float32 copies of <var>x</var> and <var>W</var><sub>r</sub>, as Switch section 2.4 casts the router input; under autocast, turn it off for these lines.</li>
+  <li><span class="cs-n">3</span>The chosen set <var>S</var> and gates <var>g</var>, gate card lines 1 to 3; renormalized only when <var>k</var> &gt; 1.</li>
+  <li><span class="cs-n">4</span>Each expert runs only on its tokens, scaled by their gates, and the results are added back in place, gate card line 4 and <a href="#moeRoute">Figure 6</a>, step 5.</li>
+</ol>
+
+  <h3 id="code-step"><span class="secnum">6.2</span> Losses and one training step</h3>
+
+  <p class="code-lead">The two extra losses and one optimizer step with them.</p>
+
+<pre class="cs" data-cs="1-4,6-7,9-21"><code class="language-python">def load_balance_loss(p, idx, n):
+    f = F.one_hot(idx[:, 0], n).float().mean(0)  # top-1 counts
+    P = p.mean(0)
+    return n * (f * P).sum()
+
+def router_z_loss(z):
+    return torch.logsumexp(z, dim=-1).pow(2).mean()
+
+ALPHA, BETA = 1e-2, 1e-3
+moe = MoELayer(512, 2048, 8, k=1)
+opt = torch.optim.AdamW(moe.parameters())
+x, target = torch.randn(64, 512), torch.randn(64, 512)
+y, z, p, idx = moe(x)
+# stand-in for the model's next-token loss
+task = F.mse_loss(y, target)
+lb = load_balance_loss(p, idx, 8)
+zl = router_z_loss(z)
+loss = task + ALPHA * lb + BETA * zl
+opt.zero_grad()
+loss.backward()
+opt.step()</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span><var>f</var>, <var>P</var> and <var>L</var><sub>aux</sub>, <a href="#moeAuxEq">balance card</a> lines 1 to 3, with the top-1 pick in column 0.</li>
+  <li><span class="cs-n">2</span><var>L</var><sub>z</sub>, <a href="#moeZEq">z-loss card</a> lines 1 and 2.</li>
+  <li><span class="cs-n">3</span>The total of z-loss card line 3, with <var>&alpha;</var> from Switch and <var>&beta;</var> from ST-MoE, then one step.</li>
+</ol>
+
+  <h3 id="code-capacity"><span class="secnum">6.3</span> Dropping tokens past capacity</h3>
+
+  <p class="code-lead">A mask of the tokens each expert keeps, in arrival order, for <var>k</var> = 1.</p>
+
+<pre class="cs" data-cs="1-7"><code class="language-python">def capacity_mask(top1, n, cf):
+    T = top1.numel()
+    C = int(cf * T / n)                  # slots per expert
+    onehot = F.one_hot(top1, n)
+    pos = onehot.cumsum(0) * onehot      # arrival order
+    keep = pos.sum(-1) &lt;= C
+    return keep</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span><a href="#moeCapEq">The capacity card</a> with <var>k</var> = 1, and <a href="#moeCapFig">Figure 9</a>: top-1 picks 0, 0, 0, 3 at CF 1.0 give keep True, False, False, True.</li>
+</ol>
+
+  <h3 id="settings"><span class="secnum">6.4</span> Where it plugs in and what the settings do</h3>
+
+  <p>
+    The layer replaces the FFN call inside each MoE block, and the two losses join the task loss before backward. The router runs in float32 even when the rest runs in bfloat16 (Switch, section 2.4).
+  </p>
+
+  <div class="mo-tablewrap mo-stack">
+  <table class="mo-table">
+    <thead><tr><th>knob</th><th>enters</th><th>raise it</th><th>lower it</th><th>default</th></tr></thead>
+    <tbody>
+      <tr><td><var>k</var></td><td data-h="enters">gate card</td><td data-h="raise it">more compute and communication, more expert combinations</td><td data-h="lower it">less compute</td><td data-h="default">Switch 1; GShard and Mixtral 2</td></tr>
+      <tr><td><var>N</var></td><td data-h="enters">every card</td><td data-h="raise it">more stored weights at the same compute, fewer tokens per expert</td><td data-h="lower it"><var>N</var> = 1 is the dense FFN</td><td data-h="default">Mixtral 8</td></tr>
+      <tr><td><var>&alpha;</var></td><td data-h="enters">z-loss card, line 3</td><td data-h="raise it">spreads load faster but fights the task loss</td><td data-h="lower it">collapse can start</td><td data-h="default">Switch 10<sup>&minus;2</sup>, swept 10<sup>&minus;1</sup> to 10<sup>&minus;5</sup>; Hugging Face&rsquo;s 0.001 is a default, not a published value</td></tr>
+      <tr><td>CF</td><td data-h="enters">capacity card</td><td data-h="raise it">fewer drops, more padding</td><td data-h="lower it">below 1 always drops</td><td data-h="default">Switch 1.0 to 1.25; ST-MoE 1.25 train, 2.0 eval</td></tr>
+      <tr><td><var>&beta;</var></td><td data-h="enters">z-loss card, line 3</td><td data-h="raise it">scores pushed toward 0</td><td data-h="lower it">0 removes the term</td><td data-h="default">ST-MoE 0.001</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>
+    The Hugging Face Transformers version is <a href="https://github.com/huggingface/transformers/blob/main/src/transformers/models/mixtral/modeling_mixtral.py">modeling_mixtral.py</a>, with MixtralSparseMoeBlock, MixtralTopKRouter and load_balancing_loss_func.
+    A collapsing router does not show in the task loss, only in the load shares; what goes wrong is in <a href="mixture-of-experts-designs.html#failures">Mixture of Experts Designs, section 9</a>.
+  </p>
+
+  <p>
+    Bias balancing, the real designs from Switch to DeepSeek-V3, experts across GPUs and fine-tuning continue in <a href="mixture-of-experts-designs.html">Mixture of Experts Designs</a>.
+  </p>
+
+  <h2 id="references"><span class="secnum">7</span> References</h2>
+  <ol class="brefs">
+    <li>Shazeer, N., et al. (2017). Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer. ICLR 2017. <a href="https://arxiv.org/abs/1701.06538">arXiv:1701.06538</a>.</li>
+    <li>Lepikhin, D., et al. (2020). GShard: Scaling Giant Models with Conditional Computation and Automatic Sharding. <a href="https://arxiv.org/abs/2006.16668">arXiv:2006.16668</a>.</li>
+    <li>Fedus, W., Zoph, B., Shazeer, N. (2021). Switch Transformers: Scaling to Trillion Parameter Models with Simple and Efficient Sparsity. JMLR 2022. <a href="https://arxiv.org/abs/2101.03961">arXiv:2101.03961</a>.</li>
+    <li>Zoph, B., et al. (2022). ST-MoE: Designing Stable and Transferable Sparse Expert Models. <a href="https://arxiv.org/abs/2202.08906">arXiv:2202.08906</a>.</li>
+    <li>Jiang, A. Q., et al. (2024). Mixtral of Experts. <a href="https://arxiv.org/abs/2401.04088">arXiv:2401.04088</a>.</li>
+    <li>DeepSeek-AI (2024). DeepSeek-V3 Technical Report. <a href="https://arxiv.org/abs/2412.19437">arXiv:2412.19437</a>.</li>
+    <li>Hugging Face Transformers. <a href="https://github.com/huggingface/transformers/blob/main/src/transformers/models/mixtral/modeling_mixtral.py">modeling_mixtral.py</a>, the Mixtral router, experts and load-balancing loss.</li>
+  </ol>
+  <script>
+  /* moeRoute (mixture-of-experts.html): one token, then all four, through the router and top-k.
+     Teaching values from checks/rev3_numbers.out (Cards 1 and 2). Rest state: step 5, k = 1. */
+  (function () {
+    var svg = document.getElementById('mrSvg');
+    if (!svg) return;
+    var NS = 'http://www.w3.org/2000/svg';
+    var read = document.getElementById('mrRead');
+    var prev = document.getElementById('mrPrev'), next = document.getElementById('mrNext');
+    var dots = document.getElementById('mrDots');
+    var bK1 = document.getElementById('mrK1'), bK2 = document.getElementById('mrK2');
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var TOK = ['the', 'cat', 'has', '3'];
+    var Z = [1.2, 1.0, -0.2, 0.0];
+    var P = ['0.42', '0.35', '0.10', '0.13'], PV = [0.423, 0.346, 0.104, 0.127];
+    var GATE = { 1: [[0, '0.42']], 2: [[0, '0.55'], [1, '0.45']] };
+    // per expert: list of [token index, first pick?]
+    var ROUTED = {
+      1: [[[0, 1], [1, 1], [2, 1]], [], [], [[3, 1]]],
+      2: [[[0, 1], [1, 1], [2, 1], [3, 0]], [[0, 0], [1, 0]], [[2, 0]], [[3, 1]]]
+    };
+    var BOX = [[4, 246], [184, 246], [4, 338], [184, 338]];
+    var TEXT = {
+      1: ['The token \u201ccat\u201d arrives, and the four experts wait.',
+          'The router scores \u201ccat\u201d: 1.2, 1.0, \u22120.2 and 0.0 for E1 to E4.',
+          'Softmax turns the scores into shares 0.42, 0.35, 0.10 and 0.13, which add to 1.',
+          'With one expert per token, only E1 runs for \u201ccat\u201d, weighted 0.42; E2 to E4 stay idle.',
+          'All four tokens routed: E1 holds the, cat and has, E4 holds 3, and E2 and E3 get nothing.'],
+      2: ['The token \u201ccat\u201d arrives, and the four experts wait.',
+          'The router scores \u201ccat\u201d: 1.2, 1.0, \u22120.2 and 0.0 for E1 to E4.',
+          'Softmax turns the scores into shares 0.42, 0.35, 0.10 and 0.13, which add to 1.',
+          'With two experts per token, E1 and E2 run for \u201ccat\u201d, weighted 0.55 and 0.45; E3 and E4 stay idle.',
+          'All four tokens routed twice: E1 holds 4 chips, E2 2, E3 1 and E4 1; rings mark first picks, dots second.']
+    };
+    var CHANGE = {
+      2: { 3: '\u201ccat\u201d now also runs E2, weighted 0.45, and E1\u2019s gate becomes 0.55 after the two shares are renormalized.',
+           4: 'Every token now also runs its second pick: E2 gains the and cat, E3 gains has, and E1 gains 3.' },
+      1: { 3: '\u201ccat\u201d drops E2 and runs E1 alone, weighted by its raw share 0.42.',
+           4: 'Second picks removed: E1 keeps the, cat and has, E4 keeps 3, and E2 and E3 go idle.' }
+    };
+    var step = 4, k = 1;
+
+    function el(name, attrs, text, cls) {
+      var e = document.createElementNS(NS, name);
+      for (var a in attrs) e.setAttribute(a, attrs[a]);
+      if (cls) e.setAttribute('class', cls);
+      if (text != null) e.textContent = text;
+      return e;
+    }
+    function sub(textEl, base, s) {
+      textEl.appendChild(document.createTextNode(base));
+      var ts = el('tspan', { 'baseline-shift': 'sub', 'font-size': '16.5' }, s);
+      textEl.appendChild(ts);
+      return textEl;
+    }
+    function arrowEl(g, x1, y1, x2, y2, w, cls, hcls) {
+      var dx = x2 - x1, dy = y2 - y1, L = Math.sqrt(dx * dx + dy * dy), ux = dx / L, uy = dy / L;
+      var hd = 8 + w, bx = x2 - ux * hd, by = y2 - uy * hd, px = -uy * (4 + w), py = ux * (4 + w);
+      g.appendChild(el('line', { x1: x1, y1: y1, x2: bx, y2: by, 'stroke-width': w }, null, cls));
+      g.appendChild(el('polygon', { points: x2 + ',' + y2 + ' ' + (bx + px) + ',' + (by + py) + ' ' + (bx - px) + ',' + (by - py) }, null, hcls));
+    }
+    function chip(g, x, y, w, label, cls) {
+      g.appendChild(el('rect', { x: x, y: y, width: w, height: 30, rx: 15 }, null, cls || 'mo-chip'));
+      g.appendChild(el('text', { x: x + w / 2, y: y + 20, 'text-anchor': 'middle' }, label, 'c-x mo-b'));
+    }
+
+    function draw(fadeK) {
+      while (svg.firstChild) svg.removeChild(svg.firstChild);
+      var g = el('g', {});
+      svg.appendChild(g);
+      var fade = function (node) { if (!reduce) node.setAttribute('class', (node.getAttribute('class') || '') + ' mo-in'); return node; };
+      // tokens
+      if (step < 4) {
+        var gt = el('g', {}); chip(gt, 150, 6, 60, 'cat'); g.appendChild(step === 0 ? fade(gt) : gt);
+        arrowEl(g, 180, 36, 180, 62, 1.8, 'mo-ar', 'mo-ah');
+      } else {
+        var gt4 = el('g', {});
+        for (var i = 0; i < 4; i++) chip(gt4, 24 + i * 84, 6, 60, TOK[i]);
+        g.appendChild(gt4);
+      }
+      // router box
+      g.appendChild(el('rect', { x: 60, y: 62, width: 240, height: 152, rx: 8 }, null, 'mo-rbox'));
+      g.appendChild(el('text', { x: 72, y: 84 }, 'router', 'mo-b c-z'));
+      var xs = [120, 160, 200, 240], gb = el('g', {});
+      if (step === 1) {
+        g.appendChild(el('line', { x1: 96, y1: 150, x2: 264, y2: 150 }, null, 'mo-base'));
+        g.appendChild(el('text', { x: 288, y: 84, 'text-anchor': 'end' }, 'scores z', 'mo-sm c-z'));
+        for (var j = 0; j < 4; j++) {
+          var h = Math.abs(Z[j]) * 34, y = Z[j] >= 0 ? 150 - h : 150;
+          gb.appendChild(el('rect', { x: xs[j] - 14, y: y, width: 28, height: Math.max(h, 1.5), rx: 2 }, null, 'b-z'));
+          var ly = Z[j] >= 0 ? 150 - h - 6 : 150 + h + 15;
+          gb.appendChild(el('text', { x: xs[j], y: ly, 'text-anchor': 'middle' }, String(Z[j].toFixed(1)).replace('-', '\u2212'), 'mo-sm c-z'));
+          gb.appendChild(sub(el('text', { x: xs[j], y: 198, 'text-anchor': 'middle' }, null, 'mo-sm c-e'), 'E', String(j + 1)));
+        }
+        g.appendChild(fade(gb));
+      } else if (step >= 2) {
+        g.appendChild(el('line', { x1: 96, y1: 180, x2: 264, y2: 180 }, null, 'mo-base'));
+        g.appendChild(el('text', { x: 288, y: 84, 'text-anchor': 'end' }, step < 4 ? 'shares p, sum 1' : 'shares p of \u201ccat\u201d', 'mo-sm c-p'));
+        for (var m = 0; m < 4; m++) {
+          var hp = PV[m] * 150;
+          gb.appendChild(el('rect', { x: xs[m] - 14, y: 180 - hp, width: 28, height: hp, rx: 2 }, null, 'b-p'));
+          gb.appendChild(el('text', { x: xs[m], y: 180 - hp - 6, 'text-anchor': 'middle' }, P[m], 'mo-sm c-p'));
+          gb.appendChild(sub(el('text', { x: xs[m], y: 198, 'text-anchor': 'middle' }, null, 'mo-sm c-e'), 'E', String(m + 1)));
+        }
+        g.appendChild(step === 2 ? fade(gb) : gb);
+      }
+      // experts
+      var lit = [false, false, false, false];
+      if (step === 3) GATE[k].forEach(function (pr) { lit[pr[0]] = true; });
+      if (step === 4) ROUTED[k].forEach(function (lst, e) { lit[e] = lst.length > 0; });
+      for (var e = 0; e < 4; e++) {
+        var bx = BOX[e][0], by = BOX[e][1];
+        var cls = step < 3 ? 'mo-ebox' : (lit[e] ? 'mo-elit' : 'mo-edim');
+        g.appendChild(el('rect', { x: bx, y: by, width: 172, height: 84, rx: 8 }, null, cls + ' mo-tr'));
+        g.appendChild(sub(el('text', { x: bx + 10, y: by + 22 }, null, 'mo-b ' + (step >= 3 && !lit[e] ? 'c-mut' : 'c-e')), 'E', String(e + 1)));
+        if (step >= 3 && !lit[e]) g.appendChild(el('text', { x: bx + 162, y: by + 22, 'text-anchor': 'end' }, 'idle', 'mo-sm c-mut'));
+      }
+      // step 4: arrows from the router to the lit experts, width = gate
+      if (step === 3) {
+        GATE[k].forEach(function (pr) {
+          var e = pr[0], gv = parseFloat(pr[1]), tx = BOX[e][0] + 86, ga = el('g', {});
+          arrowEl(ga, 180 + (e === 0 ? -20 : 20), 214, tx, 244, 2 + 12 * gv, 'mo-gar', 'mo-gah');
+          ga.appendChild(el('text', { x: (180 + tx) / 2 + (e === 0 ? -64 : 64), y: 233, 'text-anchor': 'middle' }, pr[1], 'mo-b c-g'));
+          g.appendChild((fadeK && e === 1) || !fadeK ? fade(ga) : ga);
+        });
+      }
+      // step 5: chips inside experts, ring on first pick, dot on second
+      if (step === 4) {
+        ROUTED[k].forEach(function (lst, e) {
+          lst.forEach(function (pr, n) {
+            var cx = BOX[e][0] + 4 + n * 41, cy = BOX[e][1] + 40, gc = el('g', {});
+            gc.appendChild(el('rect', { x: cx, y: cy, width: 38, height: 28, rx: 14 }, null, pr[1] ? 'mo-ring' : 'mo-chip'));
+            gc.appendChild(el('text', { x: cx + 19, y: cy + 19, 'text-anchor': 'middle' }, TOK[pr[0]], 'mo-sm c-x mo-b'));
+            if (!pr[1]) gc.appendChild(el('circle', { cx: cx + 36, cy: cy + 1, r: 4.5 }, null, 'mo-dot'));
+            g.appendChild((fadeK ? !pr[1] : false) ? fade(gc) : gc);
+          });
+        });
+      }
+      svg.setAttribute('aria-label', TEXT[k][step]);
+    }
+
+    var dotBtns = [];
+    for (var d = 0; d < 5; d++) {
+      (function (d) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.setAttribute('aria-label', 'Step ' + (d + 1) + ' of 5');
+        b.appendChild(document.createElement('span'));
+        b.addEventListener('click', function () { show(d); });
+        dots.appendChild(b);
+        dotBtns.push(b);
+      })(d);
+    }
+    function show(s, fadeK) {
+      step = s;
+      draw(fadeK);
+      dotBtns.forEach(function (b, i) { if (i === s) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current'); });
+      prev.disabled = s === 0; next.disabled = s === 4;
+      read.textContent = fadeK && CHANGE[k][s] ? CHANGE[k][s] : (fadeK ? 'One or two experts per token makes no difference until step 4. ' + TEXT[k][s] : TEXT[k][s]);
+    }
+    function setK(v) {
+      if (v === k) return;
+      k = v;
+      bK1.setAttribute('aria-pressed', k === 1 ? 'true' : 'false');
+      bK2.setAttribute('aria-pressed', k === 2 ? 'true' : 'false');
+      show(step, true);
+    }
+    prev.addEventListener('click', function () { if (step > 0) show(step - 1); });
+    next.addEventListener('click', function () { if (step < 4) show(step + 1); });
+    bK1.addEventListener('click', function () { setK(1); });
+    bK2.addEventListener('click', function () { setK(2); });
+    function fitRead() {
+      read.style.minHeight = '';
+      var mx = 0, keep = read.textContent;
+      [1, 2].forEach(function (kk) {
+        TEXT[kk].concat([CHANGE[kk][3], CHANGE[kk][4]]).forEach(function (s) { read.textContent = s; mx = Math.max(mx, read.offsetHeight); });
+      });
+      read.style.minHeight = mx + 'px';
+      read.textContent = keep;
+    }
+    show(4);
+    fitRead();
+    window.addEventListener('resize', fitRead);
+  })();
+  </script>
+  <script>
+  /* moeBalance (mixture-of-experts.html): share of tokens per expert over 40 toy steps, balance loss off or on.
+     Data: checks/balance_sim.json (seeded toy, 8 experts, 512 tokens per step). Rest state: off, step 40. */
+  (function () {
+    var svg = document.getElementById('mbSvg');
+    if (!svg) return;
+    var D = {"off":[[0.0898,0.0508,0.0664,0.1582,0.2109,0.1602,0.1484,0.1152],[0.0781,0.0352,0.0449,0.1855,0.1914,0.1953,0.1406,0.1289],[0.0918,0.0234,0.0723,0.1621,0.1953,0.1855,0.127,0.1426],[0.0859,0.0254,0.0508,0.1699,0.2344,0.1797,0.1348,0.1191],[0.0605,0.0215,0.0352,0.1953,0.2441,0.1836,0.1328,0.127],[0.0566,0.0137,0.0352,0.1777,0.2598,0.1953,0.1406,0.1211],[0.0684,0.0117,0.0273,0.2227,0.2539,0.1992,0.1191,0.0977],[0.0547,0.0137,0.0234,0.1934,0.293,0.2051,0.125,0.0918],[0.0371,0.0059,0.0117,0.2129,0.2695,0.2598,0.1133,0.0898],[0.0195,0.0059,0.0117,0.168,0.3184,0.2812,0.123,0.0723],[0.0215,0.002,0.0039,0.1602,0.3887,0.2422,0.1211,0.0605],[0.0117,0.002,0.0039,0.1582,0.416,0.2441,0.1152,0.0488],[0.0215,0.0,0.002,0.1465,0.4355,0.2656,0.0898,0.0391],[0.0078,0.002,0.0,0.168,0.4219,0.2871,0.0801,0.0332],[0.0137,0.002,0.0,0.1328,0.4785,0.2812,0.0625,0.0293],[0.002,0.0,0.0,0.127,0.5332,0.2617,0.0527,0.0234],[0.0059,0.0,0.0,0.123,0.5254,0.2891,0.041,0.0156],[0.002,0.0,0.0,0.1035,0.5898,0.2676,0.0254,0.0117],[0.002,0.002,0.0,0.0586,0.6523,0.2441,0.0312,0.0098],[0.0,0.0,0.0,0.0625,0.7031,0.2051,0.0273,0.002],[0.0,0.0,0.0,0.0391,0.7695,0.1797,0.0078,0.0039],[0.0039,0.0,0.0,0.0293,0.7852,0.1699,0.0117,0.0],[0.0,0.0,0.0,0.0215,0.8418,0.1309,0.0059,0.0],[0.0,0.0,0.0,0.0117,0.9102,0.0723,0.0059,0.0],[0.0,0.0,0.0,0.0117,0.9375,0.0508,0.0,0.0],[0.0,0.0,0.0,0.0,0.9688,0.0312,0.0,0.0],[0.0,0.0,0.0,0.0,0.9805,0.0195,0.0,0.0],[0.0,0.0,0.0,0.0059,0.9883,0.0059,0.0,0.0],[0.0,0.0,0.0,0.002,0.998,0.0,0.0,0.0],[0.0,0.0,0.0,0.0,0.998,0.002,0.0,0.0],[0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0],[0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0],[0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0],[0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0],[0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0],[0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0],[0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0],[0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0],[0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0],[0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0],[0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0]],"on":[[0.0898,0.0508,0.0664,0.1582,0.2109,0.1602,0.1484,0.1152],[0.1406,0.1367,0.1719,0.1367,0.0801,0.0898,0.1035,0.1406],[0.1289,0.1035,0.0977,0.1133,0.1172,0.1699,0.1152,0.1543],[0.125,0.1816,0.1484,0.123,0.125,0.0664,0.1504,0.0801],[0.1055,0.0801,0.0723,0.1289,0.1562,0.1816,0.1094,0.166],[0.1465,0.1309,0.2148,0.1211,0.1094,0.041,0.1445,0.0918],[0.1133,0.1348,0.0527,0.1562,0.1211,0.2285,0.082,0.1113],[0.125,0.1055,0.1641,0.0898,0.1328,0.0371,0.1816,0.1641],[0.1465,0.1465,0.0703,0.1699,0.1172,0.1875,0.082,0.0801],[0.0859,0.1074,0.1836,0.0703,0.1328,0.0645,0.1816,0.1738],[0.1758,0.1328,0.0723,0.1523,0.166,0.1328,0.0781,0.0898],[0.082,0.1309,0.1523,0.1074,0.123,0.1172,0.1582,0.1289],[0.1465,0.1289,0.0996,0.125,0.1133,0.1445,0.1074,0.1348],[0.0996,0.127,0.1816,0.1445,0.1172,0.0996,0.1191,0.1113],[0.1445,0.1035,0.0781,0.1016,0.1309,0.1582,0.123,0.1602],[0.1016,0.1348,0.1406,0.1426,0.1309,0.1094,0.125,0.1152],[0.1504,0.1699,0.0957,0.1211,0.1055,0.1406,0.1094,0.1074],[0.1074,0.0781,0.1816,0.1211,0.1191,0.1113,0.1504,0.1309],[0.1309,0.1367,0.0723,0.1172,0.1602,0.1445,0.1035,0.1348],[0.1484,0.1328,0.125,0.1543,0.082,0.0957,0.1445,0.1172],[0.1074,0.1055,0.123,0.1191,0.1484,0.1348,0.1211,0.1406],[0.1289,0.125,0.1348,0.1191,0.1289,0.1562,0.1016,0.1055],[0.1113,0.1543,0.1328,0.0938,0.1191,0.0762,0.1875,0.125],[0.1758,0.0879,0.123,0.1523,0.1113,0.1445,0.0762,0.1289],[0.0898,0.1328,0.1309,0.1406,0.1367,0.1309,0.1172,0.1211],[0.1133,0.1465,0.1211,0.1133,0.1074,0.1152,0.1621,0.1211],[0.1602,0.084,0.1562,0.1133,0.1211,0.1289,0.0996,0.1367],[0.0762,0.1621,0.1035,0.1152,0.1602,0.1191,0.1504,0.1133],[0.1523,0.1133,0.1055,0.1211,0.1309,0.125,0.1074,0.1445],[0.1055,0.1348,0.1367,0.166,0.0918,0.1406,0.1152,0.1094],[0.1172,0.1133,0.127,0.0977,0.1562,0.084,0.1465,0.1582],[0.1387,0.1328,0.1152,0.1309,0.1309,0.1777,0.1113,0.0625],[0.1406,0.0957,0.1309,0.1309,0.1152,0.0801,0.1172,0.1895],[0.1133,0.1973,0.1152,0.1309,0.1016,0.1641,0.1035,0.0742],[0.1172,0.0645,0.168,0.1348,0.1484,0.0723,0.1699,0.125],[0.1465,0.1348,0.0781,0.0957,0.1035,0.2188,0.1016,0.1211],[0.0918,0.125,0.1602,0.1523,0.1348,0.0371,0.1465,0.1523],[0.1641,0.1289,0.0879,0.1055,0.1406,0.1484,0.0957,0.1289],[0.0977,0.1172,0.1641,0.1289,0.1133,0.0879,0.1484,0.1426],[0.1387,0.1465,0.084,0.1367,0.1211,0.1719,0.1133,0.0879],[0.127,0.1016,0.1543,0.1191,0.0918,0.1191,0.1543,0.1328]]};
+    var NS = 'http://www.w3.org/2000/svg';
+    var read = document.getElementById('mbRead');
+    var bPlay = document.getElementById('mbPlay'), bReset = document.getElementById('mbReset');
+    var bOff = document.getElementById('mbOff'), bOn = document.getElementById('mbOn');
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var mode = 'off', pos = 40, timer = null, raf = null;
+    var X0 = 54, BW = 28, GAP = 9, YB = 200, H = 158;
+    function el(name, attrs, text, cls) {
+      var e = document.createElementNS(NS, name);
+      for (var a in attrs) e.setAttribute(a, attrs[a]);
+      if (cls) e.setAttribute('class', cls);
+      if (text != null) e.textContent = text;
+      return e;
+    }
+    // static frame
+    svg.appendChild(el('line', { x1: X0 - 6, y1: YB, x2: 352, y2: YB }, null, 'mo-base'));
+    [0, 0.5, 1].forEach(function (v) {
+      svg.appendChild(el('text', { x: X0 - 8, y: YB - v * H + 5, 'text-anchor': 'end' }, Math.round(v * 100) + '%', 'mo-sm mo-s'));
+    });
+    var ghosts = [], bars = [], labs = [];
+    for (var i = 0; i < 8; i++) {
+      var x = X0 + i * (BW + GAP);
+      var g0 = D.off[0][i] * H;
+      ghosts.push(svg.appendChild(el('rect', { x: x, y: YB - g0, width: BW, height: g0 }, null, 'mo-ghost')));
+      bars.push(svg.appendChild(el('rect', { x: x + 3, y: YB, width: BW - 6, height: 0, rx: 2 }, null, 'b-e')));
+      var t = el('text', { x: x + BW / 2, y: YB + 18, 'text-anchor': 'middle' }, null, 'mo-sm c-e');
+      t.appendChild(document.createTextNode('E'));
+      var ts = el('tspan', { 'baseline-shift': 'sub', 'font-size': '16.5' }, String(i + 1));
+      t.appendChild(ts);
+      svg.appendChild(t);
+      labs.push(svg.appendChild(el('text', { x: x + BW / 2, y: YB - 6, 'text-anchor': 'middle' }, '', 'mo-sm mo-b')));
+    }
+    var ye = YB - 0.125 * H;
+    svg.appendChild(el('line', { x1: X0 - 6, y1: ye, x2: 352, y2: ye }, null, 'mo-even'));
+    svg.appendChild(el('text', { x: 352, y: 15, 'text-anchor': 'end' }, 'dashed line: even 12.5%; outlines: step 0', 'mo-sm mo-s'));
+    svg.appendChild(el('rect', { x: X0, y: 234, width: 352 - X0, height: 8, rx: 4 }, null, 'mo-band'));
+    var prog = svg.appendChild(el('rect', { x: X0, y: 234, width: 0, height: 8, rx: 4 }, null, 'b-z'));
+    var stepLab = svg.appendChild(el('text', { x: X0 - 10, y: 242, 'text-anchor': 'end' }, '', 'mo-sm mo-s'));
+
+    function pct(v) {
+      // a share under 1 that rounds to 100 would contradict the idle count; same for a non-zero share rounding to 0
+      if (v >= 1) return '100%';
+      var r = Math.round(v * 100);
+      if (r >= 100) return 'over 99%';
+      if (v > 0 && r === 0) return 'under 1%';
+      return r + '%';
+    }
+    function shares(p) {
+      var a = Math.floor(p), b = Math.min(40, a + 1), f = p - a, A = D[mode][a], B = D[mode][b];
+      return A.map(function (v, i) { return v + (B[i] - v) * f; });
+    }
+    function render(p) {
+      var s = shares(p), n = Math.floor(p), sn = D[mode][n];
+      var mx = Math.max.apply(null, s), mxn = Math.max.apply(null, sn);
+      for (var i = 0; i < 8; i++) {
+        var h = s[i] * H;
+        bars[i].setAttribute('y', YB - h);
+        bars[i].setAttribute('height', h);
+        labs[i].setAttribute('y', Math.min(YB - h, YB - D.off[0][i] * H) - 6);
+        labs[i].textContent = (sn[i] === mxn && mxn > 0.18) ? pct(sn[i]) : '';
+      }
+      prog.setAttribute('width', (352 - X0) * p / 40);
+      stepLab.textContent = String(n);
+    }
+    function sentence(n) {
+      var s = D[mode][n], mx = Math.max.apply(null, s), mn = Math.min.apply(null, s);
+      var idle = s.filter(function (v) { return v === 0; }).length;
+      if (mode === 'off') {
+        return 'Step ' + n + ', balance loss off: the busiest expert takes ' + pct(mx) + ' of the tokens' +
+          (idle ? ', and ' + (idle === 1 ? 'one expert is' : idle + ' experts are') + ' idle.' : ', and no expert is idle yet.');
+      }
+      return 'Step ' + n + ', balance loss on: shares run from ' + pct(mn) + ' to ' + pct(mx) +
+        (idle ? ', and ' + idle + ' experts are idle.' : ', and no expert is idle.');
+    }
+    function stop() {
+      if (timer) { clearInterval(timer); timer = null; }
+      if (raf) { cancelAnimationFrame(raf); raf = null; }
+      bPlay.textContent = 'Play';
+    }
+    function playLine() {
+      return 'Playing with the balance loss ' + mode + '. Pause to read the shares at one step.';
+    }
+    function settle(n) { pos = n; render(n); read.textContent = sentence(n); }
+    function play(from) {
+      stop();
+      if (reduce) { settle(40); return; }
+      var start = (typeof from === 'number') ? from : (pos < 40 ? Math.floor(pos) : 0);
+      settle(start);
+      read.textContent = playLine();
+      bPlay.textContent = 'Pause';
+      var t0 = null;
+      function frame(ts) {
+        if (t0 === null) t0 = ts;
+        var p = Math.min(40, start + (ts - t0) / 250);
+        pos = p; render(p);
+        if (p < 40) raf = requestAnimationFrame(frame); else { raf = null; bPlay.textContent = 'Play'; settle(40); }
+      }
+      raf = requestAnimationFrame(frame);
+    }
+    function playing() { return !!(timer || raf); }
+    bPlay.addEventListener('click', function () {
+      if (playing()) { stop(); settle(Math.floor(pos)); return; }
+      play();
+    });
+    bReset.addEventListener('click', function () { stop(); settle(0); });
+    function setMode(m) {
+      if (m === mode) return;
+      var wasPlaying = playing();
+      stop();
+      mode = m;
+      bOff.setAttribute('aria-pressed', m === 'off' ? 'true' : 'false');
+      bOn.setAttribute('aria-pressed', m === 'on' ? 'true' : 'false');
+      if (wasPlaying) play(0); else settle(40);
+    }
+    bOff.addEventListener('click', function () { setMode('off'); });
+    bOn.addEventListener('click', function () { setMode('on'); });
+    function fitRead() {
+      read.style.minHeight = '';
+      var mx = 0, keep = read.textContent, m0 = mode;
+      ['off', 'on'].forEach(function (m) {
+        mode = m;
+        for (var n = 0; n <= 40; n++) { read.textContent = sentence(n); mx = Math.max(mx, read.offsetHeight); }
+        read.textContent = playLine(); mx = Math.max(mx, read.offsetHeight);
+      });
+      mode = m0;
+      read.style.minHeight = mx + 'px';
+      read.textContent = keep;
+    }
+    settle(40);
+    fitRead();
+    window.addEventListener('resize', fitRead);
+  })();
+  </script>
+            <script>
+        (function () {
+            var nav = document.querySelector('.topnav');
+            function onNavScroll() {
+                nav.classList.toggle('scrolled', window.scrollY > 4);
+            }
+            window.addEventListener('scroll', onNavScroll, { passive: true });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            window.addEventListener('resize', function () {
+                if (window.innerWidth > 768) {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            onNavScroll();
+            var toggle = document.getElementById('navToggle');
+            var panel = document.getElementById('navPanel');
+            if (toggle && panel) {
+                toggle.addEventListener('click', function () {
+                    var open = panel.classList.toggle('open');
+                    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                });
+                panel.addEventListener('click', function (e) {
+                    if (e.target && e.target.classList && e.target.classList.contains('panel-link')) {
+                        panel.classList.remove('open');
+                        toggle.setAttribute('aria-expanded', 'false');
+                    }
+                });
+            }
+            var links = Array.prototype.slice.call(document.querySelectorAll('.tab-strip a.tab-chip[href^="#"]'));
+            if (!links.length) return;
+            var tabMap = {};
+            links.forEach(function (a) { tabMap[a.getAttribute('href').slice(1)] = a; });
+            var current = null;
+            function centerTab(tab) {
+                var strip = tab.parentElement;
+                if (!strip || !strip.classList.contains('tab-strip')) return;
+                var sr = strip.getBoundingClientRect();
+                var pr = tab.getBoundingClientRect();
+                strip.scrollLeft += (pr.width >= sr.width) ? (pr.left - sr.left) : (pr.left - sr.left) - (sr.width - pr.width) / 2;
+            }
+            function setActive(id) {
+                if (!tabMap[id] || id === current) return;
+                current = id;
+                links.forEach(function (a) {
+                    a.classList.toggle('active', a.getAttribute('href') === '#' + id);
+                });
+                centerTab(tabMap[id]);
+            }
+            links.forEach(function (a) {
+                a.addEventListener('click', function () {
+                    setActive(a.getAttribute('href').slice(1));
+                });
+            });
+            setActive(links[0].getAttribute('href').slice(1));
+            if ('IntersectionObserver' in window) {
+                var obs = new IntersectionObserver(function (entries) {
+                    entries.forEach(function (en) {
+                        if (en.isIntersecting) setActive(en.target.id);
+                    });
+                }, { rootMargin: '-35% 0px -55% 0px' });
+                Object.keys(tabMap).forEach(function (id) {
+                    var el = document.getElementById(id);
+                    if (el) obs.observe(el);
+                });
+                window.addEventListener('scroll', function () {
+                    if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) {
+                        setActive(links[links.length - 1].getAttribute('href').slice(1));
+                    }
+                }, { passive: true });
+            }
+            window.addEventListener('load', function () {
+                var act = document.querySelector('.tab-strip a.active');
+                if (act) centerTab(act);
+            });
+        })();
+    </script>
+<script>
+/* P80 code sections (CODE-SECTIONS.md) */
+(function(){
+  var C=['121,184,255','255,171,112','133,232,157','210,168,255','255,161,152','118,227,234'];
+  function lay(pre){
+    var code=pre.querySelector('code'); if(!code) return;
+    var lh=parseFloat(getComputedStyle(code).lineHeight);
+    var pt=parseFloat(getComputedStyle(pre).paddingTop);
+    var old=pre.querySelectorAll('.cs-g'); for(var j=0;j<old.length;j++) pre.removeChild(old[j]);
+    var imgs=[],sizes=[],pos=[];
+    (pre.getAttribute('data-cs')||'').split(',').forEach(function(r,i){
+      var m=r.trim().match(/^(\d+)(?:-(\d+))?$/); if(!m) return;
+      var a=+m[1],b=+(m[2]||m[1]),c=C[i%C.length],top=pt+(a-1)*lh,h=(b-a+1)*lh;
+      imgs.push('linear-gradient(rgba('+c+',.55),rgba('+c+',.55))','linear-gradient(rgba('+c+',.13),rgba('+c+',.13))');
+      sizes.push('3px '+h+'px','100% '+h+'px'); pos.push('0 '+top+'px','0 '+top+'px');
+      var g=document.createElement('span'); g.className='cs-g'; g.setAttribute('aria-hidden','true');
+      g.setAttribute('data-n',String(i+1)); g.style.top=(top+(lh-11)/2)+'px'; g.style.color='rgb('+c+')';
+      pre.insertBefore(g,code);
+    });
+    pre.style.backgroundImage=imgs.join(','); pre.style.backgroundSize=sizes.join(',');
+    pre.style.backgroundPosition=pos.join(','); pre.style.backgroundRepeat='no-repeat';
+  }
+  function all(){ var p=document.querySelectorAll('pre.cs'); for(var i=0;i<p.length;i++) lay(p[i]); }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',all); else all();
+  window.addEventListener('load',all);
+  window.addEventListener('resize',all);
+  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(all);
+})();
+</script>
+</body>
+</html>
+

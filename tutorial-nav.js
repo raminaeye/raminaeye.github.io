@@ -213,6 +213,13 @@
   /* Captured at load, before any await; never read again (C11). */
   var SELF = document.currentScript;
   var BASE = SELF && SELF.src;
+  /* PODCAST-HOOK (tutorial-podcasts/player/PLAN.md): load the listen row. */
+  try {
+    var pcs = document.createElement('script');
+    pcs.src = href('podcast-player.js');
+    pcs.async = true;
+    (document.head || document.documentElement).appendChild(pcs);
+  } catch (e) { /* nav keeps working */ }
 
   function pageName(pathname) {
     var p = String(pathname || '');

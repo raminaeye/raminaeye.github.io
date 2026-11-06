@@ -1281,66 +1281,139 @@ print(F.layer_norm(one_token, (3,)))  # [-1.22, 0., 1.22]</code></pre>
     <rect x="250" y="210" width="100" height="30" rx="6" style="fill:#eef1f4;stroke:#7f8c8d;stroke-width:1.2px"/>
     <text x="300" y="230" text-anchor="middle" style="font-size:16.5px">output</text>
   </svg><figcaption class="caption"><span class="fignum">Figure 3.</span> Same parts; only the LayerNorm moves. <var>f</var> is attention or the FFN; the blue line is the stream.</figcaption></figure>
-  <p>Xiong et al. (2020) measured the gradient size in each layer at the start of training, for both layouts.</p>
+  <p>Xiong et al. (2020) showed that going backward, a LayerNorm divides the gradient by the same spread it divided its input by going forward (the square root in the LN card of <a href="#layernorm-not-batchnorm">Section 2</a>).
+  So a larger input lets a smaller gradient through.
+  In Pre-LN every block adds onto the stream and nothing rescales it, so the stream's size, the root mean square (RMS) of its numbers, grows with each block, and the final LayerNorm divides the gradient by that growing size.
+  In Post-LN the stream is renormalized inside every block, so the last LayerNorm always divides by about the same size, and the gradient near the output stays large however many blocks are stacked.
+  Because each LayerNorm also breaks the identity path (the Post-LN card above), that large gradient is not carried down unchanged: it is largest near the output and smaller toward the input.</p>
+  <p>Large gradients near the output mean a full-size learning rate makes the first updates there too big, and training can diverge; warmup keeps the early steps small until the gradients settle.
+  Pre-LN's top gradient is smaller and shrinks as the stack deepens, so it can start at the full learning rate with no warmup.</p>
   <div class="demo" id="lnPlace">
     <style>
-      #lnPlace svg { display: block; width: 100%; max-width: 440px; height: auto; margin: 0 auto; }
-      #lnPlace svg text { font-family: sans-serif; fill: #2c3e50; }
+      /* lnPlace rev2 (P86): slide the depth; stream size per block and top-block gradient, Post-LN against Pre-LN. Plan: tool-depth-2026-11-05/plans/transformer-block/PLAN.md (rev 2) */
+      #lnPlace { -webkit-user-select: none; user-select: none; }
+      #lnPlace .demo-controls { max-width: 380px; margin: 0 auto .2rem; }
+      #lnPlace .demo-controls label { display: block; margin: 0 0 .2rem; font-weight: 600; }
+      #lnPlace .demo-controls input[type="range"] { display: block; height: 32px; margin: 0; cursor: pointer; }
+      #lnPlace .demo-buttons { margin: .45rem 0 0; gap: .4rem; flex-wrap: nowrap; }
+      #lnPlace .demo-buttons button { min-height: 44px; padding: .3rem .6rem; }
+      #lnPlace .demo-buttons button.active { background: #2c3e50; border-color: #2c3e50; }
+      #lnPlace svg { display: block; width: 100%; max-width: 380px; height: auto; margin: .6rem auto 0; }
+      #lnPlace svg text { font-family: sans-serif; font-size: 18px; font-weight: 600; fill: #2c3e50; }
+      #lnPlace .demo-stats { margin: .5rem 0 0; }
+      #lnPlace .mk{display:inline-block;min-width:1.25em;height:1.25em;line-height:1.25em;border-radius:50%;background:#2c3e50;color:#fff;font-family:sans-serif;font-weight:700;font-size:max(12px,.78em);line-height:1.25em;text-align:center;vertical-align:.08em;margin:0 .22em 0 .05em;font-style:normal}
+      @media (max-width: 480px) {
+        #lnPlace svg { width: calc(100% + 1.5rem); max-width: none; margin-left: -.75rem; margin-right: -.75rem; }
+      }
     </style>
-    <div class="demo-buttons" role="group" aria-label="Where LayerNorm sits">
-      <button type="button" data-ln="post" class="active" aria-pressed="true">Post-LN</button>
-      <button type="button" data-ln="pre" aria-pressed="false">Pre-LN</button>
+    <div class="demo-controls">
+      <label for="lnN" id="lnNLab"><var>N</var> = 6 blocks (2017 base model)</label>
+      <input type="range" id="lnN" min="6" max="24" step="1" value="6" autocomplete="off">
+      <div class="demo-buttons" role="group" aria-label="set N to a real model's depth">
+        <button type="button" data-n="6" class="active" aria-pressed="true">2017</button>
+        <button type="button" data-n="12" aria-pressed="false">BERT-base</button>
+        <button type="button" data-n="24" aria-pressed="false">BERT-large</button>
+      </div>
     </div>
-    <svg viewBox="0 0 400 250" role="img" aria-label="Gradient size per layer at the start of training, layers 1 to 6, where Post-LN bars grow toward the output side, Pre-LN bars stay level">
-      <text x="16" y="118" text-anchor="middle" transform="rotate(-90 16 118)" style="font-size:18px">gradient size</text>
-      <line x1="34" y1="206" x2="392" y2="206" style="stroke:#7f8c8d;stroke-width:1.5px"/>
-      <g id="lnBars"></g>
-      <text x="44" y="232" text-anchor="start" style="font-size:18px">layer 1, input</text>
-      <text x="396" y="232" text-anchor="end" style="font-size:18px">layer 6, output</text>
-    </svg>
-    <p class="caption"><span class="fignum">Figure 4.</span> Heights read approximately off the paper's Fig. 3(a), at initialization.</p>
-    <p class="demo-stats" id="lnStat" aria-live="polite">In Post-LN the gradient bars grow toward the output layers at the start, so training needs a warmup.</p>
+    <svg id="lnSvg" viewBox="0 0 400 412" role="img" aria-label="Toy picture of two stacks of N blocks at the start of training, Post-LN on the left and Pre-LN on the right. Blue bars show the size of the stream leaving each block, with a dashed line at the input's size; the red bar at the top shows the size of the gradient reaching the top block's FFN weights, in the toy."></svg>
+    <p class="demo-stats" id="lnStat">Post-LN's toy gradient is 2.6× bigger.</p>
+    <p class="caption"><span class="fignum">Figure 4.</span> <span class="mk" aria-label="marker 1">1</span> <span style="white-space:nowrap">Pre-LN's</span> stream grows. <span class="mk" aria-label="marker 2">2</span> Its gradient falls. <span class="mk" aria-label="marker 3">3</span> Not <span style="white-space:nowrap">Post-LN's.</span></p>
   </div>
   <script>
   (function () {
+    /* lnPlace rev2: numbers from plans/transformer-block/ln_tool_sim.json (toy encoder stacks at initialization, averaged over 128 random untrained stacks). */
     var root = document.getElementById('lnPlace'); if (!root) return;
-    var H = { post: [0.06, 0.11, 0.27, 0.36, 0.76, 1.27], pre: [0.22, 0.22, 0.22, 0.18, 0.17, 0.18] };
-    var BASE = 206, TOP = 30, MAX = 1.27, g = document.getElementById('lnBars'), bars = [], cur = H.post.slice(), raf = null;
-    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    for (var i = 0; i < 6; i++) {
-      var r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-      r.setAttribute('x', 50 + i * 57); r.setAttribute('width', 40); r.setAttribute('rx', 4);
-      r.style.fill = '#117a65'; g.appendChild(r); bars.push(r);
+    /* ln-const-start */ var LN = {"NMIN":6,"NMAX":24,"REST":6,"RMAX":1.198,"POST":[1.0,1.0582,1.0942,1.1141,1.124,1.1322,1.1247,1.1207,1.1247,1.1311,1.1328,1.1348,1.1479,1.1233,1.1516,1.1361,1.1307,1.1042,1.1227],"PRE":[0.392,0.3801,0.3643,0.3531,0.3431,0.3246,0.3166,0.3067,0.297,0.2902,0.2802,0.274,0.2659,0.2564,0.2517,0.2465,0.2399,0.2332,0.2314],"STREAM":[0.9991,1.2038,1.4158,1.6334,1.8527,2.0622,2.2535,2.453,2.6464,2.8393,3.0273,3.2056,3.3682,3.5247,3.6845,3.8337,3.9695,4.1029,4.2536,4.397,4.5257,4.6543,4.7752,4.9065,5.0155]}; /* ln-const-end */
+    var NS = 'http://www.w3.org/2000/svg', svg = document.getElementById('lnSvg'), range = document.getElementById('lnN');
+    var lab = document.getElementById('lnNLab'), stat = document.getElementById('lnStat');
+    var btns = Array.prototype.slice.call(root.querySelectorAll('.demo-buttons button'));
+    var G = { x0: [34, 234], bar: 154, lnY: 86, lnH: 30, redY: 126, redH: 24, top: 164, bottom: 476, pitch: 26 };
+    var SMAX = LN.STREAM[LN.NMAX] * 1.04, X1 = G.bar / SMAX;   /* X1: bar length at the input's size (RMS 1) */
+    var MODEL = { 6: ' (2017 base model)', 12: ' (BERT-base depth)', 24: ' (BERT-large depth)' };
+    function el(tag, at, parent, txt) {
+      var e = document.createElementNS(NS, tag);
+      for (var k in at) e.setAttribute(k, at[k]);
+      if (txt !== undefined) e.textContent = txt;
+      parent.appendChild(e); return e;
     }
-    function draw(v) { for (var i = 0; i < 6; i++) { var h = (BASE - TOP) * v[i] / MAX; bars[i].setAttribute('y', (BASE - h).toFixed(1)); bars[i].setAttribute('height', h.toFixed(1)); } }
-    function show(mode) {
-      var to = H[mode], from = cur.slice(), t0 = null;
-      if (raf) cancelAnimationFrame(raf);
-      if (reduce) { cur = to.slice(); draw(cur); return; }
-      function f(ts) {
-        if (t0 === null) t0 = ts;
-        var u = Math.min(1, (ts - t0) / 600), e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
-        for (var i = 0; i < 6; i++) cur[i] = from[i] + (to[i] - from[i]) * e;
-        draw(cur); if (u < 1) raf = requestAnimationFrame(f); else raf = null;
+    function marker(x, y, d) {
+      var g = el('g', {}, svg);
+      el('circle', { cx: x, cy: y, r: 12, style: 'fill:#2c3e50' }, g);
+      el('text', { x: x, y: y + 6, 'text-anchor': 'middle', style: 'fill:#ffffff;font-weight:700' }, g, d);
+      return g;
+    }
+    /* static parts */
+    el('text', { x: 100, y: 22, 'text-anchor': 'middle', style: 'font-weight:700' }, svg, 'Post-LN (2017)');
+    el('text', { x: 300, y: 22, 'text-anchor': 'middle', style: 'font-weight:700' }, svg, 'Pre-LN (today)');
+    var sep = el('line', { x1: 200, y1: 86, x2: 200, y2: 480, style: 'stroke:#d5d8dc;stroke-width:1.5px' }, svg);
+    el('text', { x: 8, y: 52, style: 'fill:#c0392b' }, svg, 'red bar, size of the gradient reaching');
+    var r2 = el('text', { x: 8, y: 76, style: 'fill:#c0392b' }, svg);
+    el('tspan', { style: 'font-style:italic' }, r2, 'W');
+    el('tspan', { dy: 5, style: 'font-size:17px' }, r2, '2');
+    el('tspan', { dy: -5 }, r2, ' in the top block\u2019s FFN');
+    var red = [];
+    for (var c = 0; c < 2; c++) {
+      el('rect', { x: G.x0[c], y: G.redY, width: G.bar, height: G.redH, rx: 4, style: 'fill:#eef1f4' }, svg);
+      red.push(el('rect', { x: G.x0[c], y: G.redY, width: 0, height: G.redH, rx: 4, style: 'fill:#c0392b' }, svg));
+    }
+    /* Pre-LN: one final LayerNorm above the top block, so the gradient passes it before reaching block N.
+       Post-LN: no top box; a purple tick on every row is the LN after each add. */
+    el('rect', { x: G.x0[1], y: G.lnY, width: G.bar, height: G.lnH, rx: 6, style: 'fill:#f4ecf7;stroke:#7d3c98;stroke-width:1.2px' }, svg);
+    el('rect', { x: G.x0[0] + G.bar - 18, y: G.lnY + 9, width: 5, height: 14, rx: 1, style: 'fill:#7d3c98' }, svg);
+    el('text', { x: G.x0[0] + G.bar - 22, y: G.lnY + 21, 'text-anchor': 'end', style: 'font-weight:400' }, svg, 'LN after each add');
+    el('text', { x: G.x0[1] + G.bar / 2, y: G.lnY + 21, 'text-anchor': 'middle', style: 'font-weight:400' }, svg, 'final LayerNorm');
+    var rows = el('g', {}, svg), ref = el('g', {}, svg);
+    var bl = el('text', { x: 8, y: 506, style: 'fill:#1f618d' }, svg, 'blue bar, size (RMS) of the stream ');
+    el('tspan', { style: 'font-style:italic' }, bl, 'x');
+    var leg = [bl, el('text', { x: 8, y: 530 }, svg, 'leaving each block, block 1 lowest'),
+      el('text', { x: 8, y: 554 }, svg, 'dashed line, the size of the input'),
+      el('text', { x: 8, y: 578, style: 'fill:#5d6d7e;font-weight:400' }, svg, 'Toy, 128 stacks at the start of training')];
+    var mk1 = marker(217, 0, '1');           /* beside the Pre-LN blue stream bars, at the top row (moved in draw) */
+    marker(217, G.redY + G.redH / 2, '2');   /* the Pre-LN red bar */
+    marker(17, G.redY + G.redH / 2, '3');    /* the Post-LN red bar */
+    function draw() {
+      var N = +range.value, k = N - LN.NMIN;
+      var post = LN.POST[k], pre = LN.PRE[k], ratio = post / pre;
+      red[0].setAttribute('width', (G.bar * post / LN.RMAX).toFixed(1));
+      red[1].setAttribute('width', (G.bar * pre / LN.RMAX).toFixed(1));
+      while (rows.firstChild) rows.removeChild(rows.firstChild);
+      while (ref.firstChild) ref.removeChild(ref.firstChild);
+      var p = Math.min(G.pitch, (G.bottom - G.top) / N), bh = Math.min(16, p - 5);
+      for (var i = 0; i < N; i++) {          /* i = 0 is block N, drawn at the top */
+        var y = G.top + i * p, b = N - i;      /* block number */
+        for (var c = 0; c < 2; c++) {
+          el('rect', { x: G.x0[c], y: y.toFixed(1), width: G.bar, height: (p - 2).toFixed(1), rx: 3, style: 'fill:#f4f6f7;stroke:#d5d8dc;stroke-width:1px' }, rows);
+          var s = c === 0 ? 1 : LN.STREAM[b];
+          el('rect', { x: G.x0[c], y: (y + (p - 2 - bh) / 2).toFixed(1), width: (G.bar * s / SMAX).toFixed(1), height: bh.toFixed(1), rx: 2, style: 'fill:#1f618d' }, rows);
+        }
+        el('rect', { x: G.x0[0] + G.bar - 5, y: (y + (p - 2 - bh) / 2).toFixed(1), width: 3, height: bh.toFixed(1), style: 'fill:#7d3c98' }, rows);   /* Post-LN: LN after the add */
       }
-      raf = requestAnimationFrame(f);
-    }
-    Array.prototype.forEach.call(root.querySelectorAll('button[data-ln]'), function (b) {
-      b.addEventListener('click', function () {
-        Array.prototype.forEach.call(root.querySelectorAll('button[data-ln]'), function (x) {
-          var on = x === b; x.classList.toggle('active', on); x.setAttribute('aria-pressed', on ? 'true' : 'false');
-        });
-        show(b.getAttribute('data-ln'));
-        document.getElementById('lnStat').textContent = b.getAttribute('data-ln') === 'post'
-          ? 'In Post-LN the gradient bars grow toward the output layers at the start, so training needs a warmup.'
-          : 'In Pre-LN the gradient bars start about even across layers, so training can skip the warmup.';
+      mk1.setAttribute('transform', 'translate(0,' + (G.top + (p - 2) / 2).toFixed(1) + ')');
+      var base = G.top + N * p;   /* the SVG ends just below the stack and its legend */
+      for (var c2 = 0; c2 < 2; c2++) {
+        var xr = (G.x0[c2] + X1).toFixed(1);
+        el('line', { x1: xr, y1: G.top - 4, x2: xr, y2: (base + 2).toFixed(1), style: 'stroke:#2c3e50;stroke-width:2px;stroke-dasharray:4 3' }, ref);
+      }
+      var r1 = (Math.floor(ratio * 10 + 0.5) / 10).toFixed(1);
+      sep.setAttribute('y2', base.toFixed(1));   /* starts at y 86, the top of the red bars, below the red legend it would otherwise cross */
+      leg.forEach(function (t, j) { t.setAttribute('y', (base + 30 + 24 * j).toFixed(1)); });
+      svg.setAttribute('viewBox', '0 0 400 ' + (base + 30 + 72 + 8).toFixed(0));
+      lab.innerHTML = '<var>N</var> = ' + N + ' blocks' + (MODEL[N] || '');
+      stat.textContent = 'Post-LN\'s toy gradient is ' + r1 + '\u00d7 bigger.';   /* sits right under the toy label */
+      range.setAttribute('aria-valuetext', N + ' blocks, Post-LN\u2019s top gradient is ' + r1 + ' times Pre-LN\u2019s in the toy');
+      btns.forEach(function (bt) {
+        var on = +bt.getAttribute('data-n') === N;
+        bt.classList.toggle('active', on); bt.setAttribute('aria-pressed', on ? 'true' : 'false');
       });
-    });
-    draw(cur);
+    }
+    range.addEventListener('input', draw);
+    range.addEventListener('keydown', function (e) { if (e.key === ' ' || e.key === 'Spacebar') e.preventDefault(); });   /* Space must not scroll the page; arrows keep their native steps */
+    btns.forEach(function (bt) { bt.addEventListener('click', function () { range.value = bt.getAttribute('data-n'); draw(); }); });
+    range.value = LN.REST;   /* rest state on every load, including back/forward restores */
+    draw();
   })();
   </script>
-  <p>Large gradients near the output mean a full-size learning rate makes the first updates there too big, and training can diverge; warmup keeps the early steps small until the gradients settle.
-  The original Post-LN Transformer warmed up with this schedule, then decayed.</p>
+  <p>The original Post-LN Transformer warmed up with this schedule, then decayed.</p>
   <div class="eq-card" id="tbLrEq">
       <div class="eq-what">The learning rate at each training step, from the original paper (warmup = 4000).</div>
       <div class="eq-line eq-active" data-eqline="0"><span style="white-space:nowrap">lrate =</span> <span class="eq-rhs" style="white-space:nowrap"><span class="eqt" style="color:#566573">d<sub>model</sub></span><sup>&#8722;0.5</sup> &#183; min(<span class="eqt" style="color:#a04000">a</span>, <span class="eqt" style="color:#1f618d">b</span>)</span></div>
@@ -1385,7 +1458,8 @@ print(lrate(4000), lrate(16000))  # about 7e-4, then half</code></pre>
     <p class="caption"><span class="fignum">Figure 5.</span> The rate peaks at step 4000; by step 12000 it is down to about 0.58 of the peak.</p>
   </figure>
 
-  <p>The same paper trained Pre-LN models with no warmup and, in its words, reached "comparable results with baselines while requiring significantly less training time".</p>
+  <p>The paper behind that backward rule also trained Pre-LN models with no warmup and, in its words, reached "comparable results with baselines while requiring significantly less training time".
+  One of its tests was BERT, a Post-LN stack of 12 blocks in BERT-base and 24 in BERT-large. Post-LN BERT-base was trained with 10,000 warmup steps to a peak of 1e-4; a peak of 3e-4 diverged. Pre-LN BERT-base started at 3e-4 with no warmup.</p>
 
   <hr>
 

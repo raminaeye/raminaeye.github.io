@@ -9,6 +9,7 @@
 
   /* EPISODES-BEGIN */
   var EPISODES = {
+    "linear-algebra.html": {"src": "podcasts/linear-algebra.mp3?v=bfd4a943", "secs": 767}
   };
   /* EPISODES-END */
 

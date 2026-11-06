@@ -1253,7 +1253,7 @@ html var sub,html var sup,html .mvar sub,html .mvar sup{font-size:max(12px,.72em
   <p>Later pages use the same scale for <a href="adc.html#snr">the SNR each ADC bit adds</a>, <a href="filters.html#iir">how much a filter cuts</a>, <a href="stft.html#windows">how far a window leaks</a> and <a href="psd.html#power-per-hertz">the PSD</a>.</p>
 
   <h2 id="chain"><span class="secnum">2</span> One signal down the chain</h2>
-  <p>Samples taken at 8&nbsp;kHz hold frequencies only up to half that rate, the 4&nbsp;kHz <strong>Nyquist frequency</strong>, so an anti-alias filter must cut a 5.2&nbsp;kHz <strong>whistle</strong>, added with some hiss to the made-up clip (illustrative), before the <strong>ADC</strong> samples. Figure 3 moves the clip one stage per step, in both domains.</p>
+  <p>Samples taken at 8&nbsp;kHz hold frequencies only up to half that rate, the 4&nbsp;kHz <strong>Nyquist frequency</strong>, so an anti-alias filter must cut a 5.2&nbsp;kHz <strong>whistle</strong>, added with some hiss to the made-up clip (illustrative), before the <strong>ADC</strong> samples. Any whistle the filter lets through <a href="aliasing.html#copies">folds back</a> to the rate minus its frequency, 8&nbsp;&#8722;&nbsp;5.2&nbsp;=&nbsp;2.8&nbsp;kHz, inside the speech band of an 8&nbsp;kHz phone call or speech recognizer.</p>
 
 
   <figure class="aud-tool" id="t0">
@@ -1265,13 +1265,14 @@ html var sub,html var sup,html .mvar sub,html .mvar sup{font-size:max(12px,.72em
     <div class="aud-ctl aud-seg" id="t0-chips" role="group" aria-label="Stage">
       <button type="button" class="aud-btn">Sensor</button><button type="button" class="aud-btn">Amplifier</button><button type="button" class="aud-btn">Anti-alias filter</button><button type="button" class="aud-btn">ADC</button><button type="button" class="aud-btn">Spectrum</button><button type="button" class="aud-btn">Denoise</button>
     </div>
+    <div class="aud-ctl"><label for="t0-fc" id="t0-fc-val">Cutoff 3&nbsp;kHz</label><input type="range" id="t0-fc" min="0" max="5" step="1" value="1" aria-valuetext="Cutoff 3 kHz"></div>
     <div class="aud-cv"><canvas class="aud-plot" id="t0-time" aria-label="Time view of the signal at the current stage"></canvas><canvas class="aud-plot" id="t0-freq" aria-label="Frequency view of the signal at the current stage"></canvas></div>
 
     <p class="aud-read" id="t0-text" aria-live="polite"></p>
-<p class="caption fig-caption"><span class="fignum">Figure 3.</span> <span class="mk" aria-label="marker 1">1</span><span style="color:#c0392b;font-weight:600">Nyquist</span>, 4&nbsp;kHz. <span class="mk" aria-label="marker 2">2</span>The <span style="color:#a3540f;font-weight:600">5.2&nbsp;kHz whistle</span>, before the ADC.</p>
+<p class="caption fig-caption"><span class="fignum">Figure 3.</span> <span class="mk" aria-label="marker 1">1</span><span style="color:#c0392b;font-weight:600">Nyquist</span>, 4&nbsp;kHz. <span class="mk" aria-label="marker 2">2</span><span style="color:#a3540f;font-weight:600">Whistle</span>, 5.2&nbsp;kHz. <span class="mk" aria-label="marker 3">3</span><span style="color:#a3540f;font-weight:600">Folded</span>, 2.8&nbsp;kHz.</p>
   </figure>
 
-  <p>In the frequency view, the filter leaves only a faint whistle, about 53&nbsp;dB lower than before. The Spectrum stage changes nothing; it only marks the chord&#8217;s three peaks.</p>
+  <p>Past 4&nbsp;kHz the folded whistle survives every later stage, and at 2&nbsp;kHz the band above 2&nbsp;kHz is lost as well.</p>
 
   <h2 id="pages"><span class="secnum">3</span> What each page answers</h2>
   <p>The thesis cited in <a href="#decibels">Section 1.1</a> is about editing audio by example. Its methods take an example recording and make another recording sound like it in tone (the EQ), background noise and room. In this series, <a href="spectral-subtraction.html">spectral subtraction</a> and the <a href="wiener-filter.html">Wiener filter</a> reduce background noise, and <a href="psd.html#eq-match">equalization matching</a> (Power Spectral Density, section 5) copies the tone of another recording.<!-- link-pending: reverberation.html (room, wave T4) extends this sentence --></p>
@@ -1331,35 +1332,59 @@ html var sub,html var sup,html .mvar sub,html .mvar sup{font-size:max(12px,.72em
   var GAIN = 15, SMALL = 1 / GAIN;
   var s1 = new Float64Array(N), s2 = x0;
   for (n = 0; n < N; n++) s1[n] = s2[n] * SMALL;
-  /* anti-alias filter: Butterworth, order 10, cutoff 3 kHz (about 53 dB down at 5.2 kHz, whistle_probe.js in fix wave 4) */
-  var s3 = DSP.sosFilter(s2, DSP.butterLowSOS(10, 3000, FS));
-  /* ADC: keep every 4th sample (8 kHz) and round to a coarse staircase so the steps show */
-  var M = N / 4, s4 = new Float64Array(M), STEP = 0.25;
-  for (i = 0; i < M; i++) s4[i] = Math.round(s3[4 * i] / STEP) * STEP;
-  /* denoise for display: lower every bin far below the peaks by 20 dB, then back to time */
-  var re = new Float64Array(M), im = new Float64Array(M);
-  for (i = 0; i < M; i++) re[i] = s4[i];
-  fft(re, im);
-  var pk = 0, pw = []; for (i = 0; i < M; i++) { pw[i] = re[i] * re[i] + im[i] * im[i]; if (pw[i] > pk) pk = pw[i]; }
-  for (i = 0; i < M; i++) if (pw[i] < pk * 1e-3) { re[i] *= 0.1; im[i] *= 0.1; }
-  for (i = 0; i < M; i++) im[i] = -im[i];
-  fft(re, im);
-  var s6 = new Float64Array(M); for (i = 0; i < M; i++) s6[i] = re[i] / M;
-  var hw32 = DSP.hann(N), hw8 = DSP.hann(M);
+  var M = N / 4, STEP = 0.25, hw32 = DSP.hann(N), hw8 = DSP.hann(M);
   function spec(x, w, len) { return DSP.spectrumDb(x, w, len); }
   var REF = Math.max.apply(null, Array.prototype.slice.call(spec(s2, hw32, N)));
   var REF8 = REF - 20 * Math.log10(4); /* same tone, a quarter of the samples */
-  var STAGES = [
-    { x: s1, rate: FS, sp: spec(s1, hw32, N), ref: REF, whistle: 1, text: 'The sensor gives a tiny voltage holding the chord, the click at 30\u00a0ms, faint hiss and the 5.2\u00a0kHz whistle.' },
-    { x: s2, rate: FS, sp: spec(s2, hw32, N), ref: REF, whistle: 1, text: 'Gain makes it big enough to measure. The whole spectrum rises and keeps its shape.' },
-    { x: s3, rate: FS, sp: spec(s3, hw32, N), ref: REF, whistle: 2, text: 'The anti-alias filter cuts the whistle by about 53\u00a0dB and cuts the hiss above about 3\u00a0kHz, before any sampling (illustrative numbers).' },
-    { x: s4, rate: 8000, sp: spec(s4, hw8, M), ref: REF8, text: 'The ADC keeps 8,000 rounded numbers per second. The little left above Nyquist folds back far below the rounding error, too faint to see.', dots: true },
-    { x: s4, rate: 8000, sp: spec(s4, hw8, M), ref: REF8, text: 'The spectrum shows the chord as three peaks, at 220, 277 and 330\u00a0Hz.', dots: true, peaks: true },
-    { x: s6, rate: 8000, sp: spec(s6, hw8, M), ref: REF8, text: 'Denoising lowers the flat floor and the click, and keeps the chord. The lone 2.5\u00a0kHz peak is noise that survived, the musical noise of <a href="#wrong">section 4</a>.', dots: false, peaks: true }
-  ];
+  /* P86: the anti-alias cutoff is the reader's knob. Stops 2, 3 (default), 4, 5, 6 kHz and off (0).
+     Every number in the texts below is computed by build-as-p86/chain.py, an exact port of this chain. */
+  var FCS = [2000, 3000, 4000, 5000, 6000, 0];
+  var FOLD = { 5000: 1, 6000: 1, 0: 1 };
+  var CUT = {
+    2000: 'A 2\u00a0kHz cutoff cuts the whistle by about 90\u00a0dB, but it also cuts the band from 2 to 4\u00a0kHz, where speech has consonants such as s and t (illustrative numbers).',
+    3000: 'The anti-alias filter cuts the whistle by about 53\u00a0dB and cuts the hiss above about 3\u00a0kHz, before any sampling (illustrative numbers).',
+    4000: 'A 4\u00a0kHz cutoff cuts the whistle by only about 26\u00a0dB, because the filter needs room above its cutoff to fall (illustrative numbers).',
+    5000: 'A 5\u00a0kHz cutoff cuts the whistle by only about 5\u00a0dB, so it reaches the ADC almost whole (illustrative numbers).',
+    6000: 'A 6\u00a0kHz cutoff lets the whistle through almost untouched, before any sampling (illustrative numbers).',
+    0: 'With no anti-alias filter, the whistle reaches the ADC at full strength, before any sampling (illustrative numbers).'
+  };
+  var ADC_LOW = 'The ADC keeps 8,000 rounded numbers per second. The little left above Nyquist folds back far below the rounding error, too faint to see.';
+  var ADC_4K = 'The ADC keeps 8,000 rounded numbers per second. What is left of the whistle folds to 2.8\u00a0kHz but hides in the rounding noise.';
+  var ADC_FOLD = 'The ADC keeps 8,000 rounded numbers per second. The whistle folds to 8\u00a0\u2212\u00a05.2\u00a0=\u00a02.8\u00a0kHz, inside the band, and wobbles the samples.';
+  var SPEC = 'The spectrum shows the chord as three peaks, at 220, 277 and 330\u00a0Hz.';
+  var DEN = 'Denoising lowers the flat floor and the click, and keeps the chord.';
+  var DEN_3K = DEN + ' The lone 2.5\u00a0kHz peak is noise that survived, the musical noise of <a href="#wrong">Section 4</a>.';
+  var DEN_FOLD = 'Denoising lowers only what sits far below the peaks, so the folded whistle stays. Nothing after sampling can tell it from a real 2.8\u00a0kHz sound.';
+  var STAGES;
+  function build(fc) {
+    var fold = !!FOLD[fc];
+    var s3 = fc ? DSP.sosFilter(s2, DSP.butterLowSOS(10, fc, FS)) : Float64Array.from(s2);
+    /* ADC: keep every 4th sample (8 kHz) and round to a coarse staircase so the steps show */
+    var s4 = new Float64Array(M), i;
+    for (i = 0; i < M; i++) s4[i] = Math.round(s3[4 * i] / STEP) * STEP;
+    /* denoise for display: lower every bin far below the peaks by 20 dB, then back to time */
+    var re = new Float64Array(M), im = new Float64Array(M);
+    for (i = 0; i < M; i++) re[i] = s4[i];
+    fft(re, im);
+    var pk = 0, pw = []; for (i = 0; i < M; i++) { pw[i] = re[i] * re[i] + im[i] * im[i]; if (pw[i] > pk) pk = pw[i]; }
+    for (i = 0; i < M; i++) if (pw[i] < pk * 1e-3) { re[i] *= 0.1; im[i] *= 0.1; }
+    for (i = 0; i < M; i++) im[i] = -im[i];
+    fft(re, im);
+    var s6 = new Float64Array(M); for (i = 0; i < M; i++) s6[i] = re[i] / M;
+    var sp4 = spec(s4, hw8, M);
+    STAGES = [
+      { x: s1, rate: FS, sp: spec(s1, hw32, N), ref: REF, whistle: 1, text: 'The sensor gives a tiny voltage holding the chord, the click at 30\u00a0ms, faint hiss and the 5.2\u00a0kHz whistle.' },
+      { x: s2, rate: FS, sp: spec(s2, hw32, N), ref: REF, whistle: 1, text: 'Gain makes it big enough to measure. The whole spectrum rises and keeps its shape.' },
+      { x: s3, rate: FS, sp: spec(s3, hw32, N), ref: REF, whistle: fc && fc <= 4000 ? 2 : 1, text: CUT[fc] },
+      { x: s4, rate: 8000, sp: sp4, ref: REF8, fold: fold, text: fold ? ADC_FOLD : fc === 4000 ? ADC_4K : ADC_LOW, dots: true },
+      { x: s4, rate: 8000, sp: sp4, ref: REF8, fold: fold, text: fold ? SPEC + ' The folded whistle at 2.8\u00a0kHz looks like a real sound.' : SPEC, dots: true, peaks: true },
+      { x: s6, rate: 8000, sp: spec(s6, hw8, M), ref: REF8, fold: fold, text: fold ? DEN_FOLD : fc === 3000 ? DEN_3K : DEN, dots: false, peaks: true }
+    ];
+  }
+  build(3000);
   var root = document.getElementById('t0'), chips = root.querySelectorAll('#t0-chips .aud-btn');
   var cvT = document.getElementById('t0-time'), cvF = document.getElementById('t0-freq'), txt = document.getElementById('t0-text');
-  var cur = 0, FLO = 50, FHI = 8000;
+  var cur = 0, FLO = 50, FHI = 8000, fcEl = document.getElementById('t0-fc'), fcVal = document.getElementById('t0-fc-val');
   function LX(F, f) { return F.X(Math.log(f / FLO) / Math.log(FHI / FLO)); }
   function drawTime(st) {
     var g = AUI.setup(cvT, 150), F = AUI.frame(g, { l: 34, r: 10, t: 22, b: 26 }, [20, 40], [-3.6, 3.6]), c = g.ctx;
@@ -1371,15 +1396,24 @@ html var sub,html var sup,html .mvar sub,html .mvar sup{font-size:max(12px,.72em
     AUI.path(g, xs, ys, '#1f618d', st.dots ? 1.4 : 1.4);
   }
   function drawFreq(st) {
-    var g = AUI.setup(cvF, 150), F = AUI.frame(g, { l: 34, r: 10, t: 22, b: 26 }, [0, 1], [-80, 6]), c = g.ctx;
+    var g = AUI.setup(cvF, 150), F = AUI.frame(g, { l: 34, r: 10, t: 22, b: 26 }, [0, 1], [-80, 16]), c = g.ctx;   /* P86: 16 dB headroom so a folded whistle peak stays clear of the Nyquist label row */
     c.fillStyle = '#2c3e50'; c.font = 'bold ' + AUI.FONT; c.fillText('Frequency view in Hz, level in dB', F.l, 15);
     if (st.rate === 8000) { c.fillStyle = '#eef1f4'; c.fillRect(LX(F, 4000), F.t, F.r - LX(F, 4000), F.b - F.t); }
     c.lineWidth = 1.2; c.strokeStyle = '#c0392b'; c.setLineDash([5, 4]); c.beginPath(); c.moveTo(LX(F, 4000), F.t); c.lineTo(LX(F, 4000), F.b); c.stroke(); c.setLineDash([]);
-    AUI.label(g, 'Nyquist', LX(F, 4000) - 4, F.t + 12, '#c0392b', 'right'); c.font = AUI.FONT; fw3Mark(c, 1, LX(F, 4000) - 16 - c.measureText('Nyquist').width, F.t + 8);
+    AUI.label(g, 'Nyquist', LX(F, 4000) - 4, F.t + 12, '#c0392b', 'right'); c.font = AUI.FONT;
+    /* P86: after the ADC, marker 1 sits in the empty band right of the line, clear of a folded 2.8 kHz peak */
+    fw3Mark(c, 1, st.rate === 8000 ? LX(F, 4000) + 14 : LX(F, 4000) - 16 - c.measureText('Nyquist').width, F.t + 8);
     AUI.axes(g, F, '', ''); [[100, '100'], [300, '300'], [1000, '1k'], [3000, '3k'], [5000, '5k'], [8000, '8k', 'right']].forEach(function (q) { AUI.tick(g, F, LX(F, q[0]), q[1], false, q[2]); });   /* fix wave 3: true x for every tick; on a phone the guard drops the 8k edge label, never 3k or the 5k by the whistle */
     var L = st.sp.length, len = (L - 1) * 2, xs = [], ys = [];
     for (var k = 1; k < L; k++) { var f = k * st.rate / len; if (f < FLO) continue; if (f > FHI) break; xs.push(LX(F, f)); ys.push(F.Y(Math.max(-80, Math.min(0, st.sp[k] - st.ref)))); }
     AUI.path(g, xs, ys, '#1f618d', 1.4);
+    if (st.fold) {   /* P86: the folded whistle, drawn in the whistle's orange, marker 3 */
+      var fx = [], fy = [], top = F.b;
+      for (k = 1; k < L; k++) { f = k * st.rate / len; if (f < 2600) continue; if (f > 3000) break; fx.push(LX(F, f)); fy.push(F.Y(Math.max(-80, Math.min(0, st.sp[k] - st.ref)))); top = Math.min(top, fy[fy.length - 1]); }
+      AUI.path(g, fx, fy, '#ca6f1e', 2.2);
+      var ly = Math.max(F.t + 12, top + 5), lx = LX(F, 2600) - 2;
+      AUI.label(g, 'folded \u25B8', lx, ly, '#ca6f1e', 'right', true); c.font = 'bold ' + AUI.FONT; fw3Mark(c, 3, lx - 12 - c.measureText('folded \u25B8').width, ly - 4);
+    }
     /* labels sit left of the Nyquist line and point right, so they never cross it */
     if (st.whistle === 1) { AUI.label(g, 'whistle \u25B8', LX(F, 4000) - 4, F.t + 32, '#ca6f1e', 'right', true); c.font = 'bold ' + AUI.FONT; fw3Mark(c, 2, LX(F, 4000) - 16 - c.measureText('whistle \u25B8').width, F.t + 28); }   /* fix wave 14: this row 4 px lower, so markers 1 and 2 keep 4 px apart and from the labels */
     if (st.whistle === 2) { AUI.label(g, 'whistle cut \u25B8', LX(F, 4000) - 4, F.t + 32, '#7f8c8d', 'right', true); c.font = 'bold ' + AUI.FONT; fw3Mark(c, 2, LX(F, 4000) - 16 - c.measureText('whistle cut \u25B8').width, F.t + 28); }
@@ -1394,6 +1428,13 @@ html var sub,html var sup,html .mvar sub,html .mvar sup{font-size:max(12px,.72em
   chips.forEach(function (b, j) { b.addEventListener('click', function () { play.stop(); show(j); }); });
   root.querySelector('.aud-prev').addEventListener('click', function () { play.stop(); show(Math.max(0, cur - 1)); });
   root.querySelector('.aud-next').addEventListener('click', function () { play.stop(); show(Math.min(STAGES.length - 1, cur + 1)); });
+  fcEl.addEventListener('input', function () {
+    var fc = FCS[+fcEl.value], t = fc ? 'Cutoff ' + fc / 1000 + '\u00a0kHz' : 'No filter';
+    fcVal.textContent = t; fcEl.setAttribute('aria-valuetext', t.replace('\u00a0', ' '));
+    build(fc);
+    /* the cutoff cannot change Sensor or Amplifier, so the knob jumps there to the ADC, where the fold shows */
+    show(cur < 2 && !play.running() ? 3 : cur);
+  });
   AUI.onResize(function () { show(cur); });
   show(0);
 })();

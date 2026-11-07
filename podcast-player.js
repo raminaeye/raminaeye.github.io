@@ -9,7 +9,8 @@
 
   /* EPISODES-BEGIN */
   var EPISODES = {
-    "linear-algebra.html": {"src": "podcasts/linear-algebra.mp3?v=bfd4a943", "secs": 767}
+    "linear-algebra.html": {"src": "podcasts/linear-algebra.mp3?v=bfd4a943", "secs": 767},
+    "probability.html": {"src": "podcasts/probability.mp3?v=8d890cce", "secs": 894}
   };
   /* EPISODES-END */
 

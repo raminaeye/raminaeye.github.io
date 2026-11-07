@@ -12,7 +12,8 @@
     "distributions.html": {"src": "podcasts/distributions.mp3?v=5f4420a6", "secs": 1012},
     "eigen-svd.html": {"src": "podcasts/eigen-svd.mp3?v=abb880c4", "secs": 830},
     "linear-algebra.html": {"src": "podcasts/linear-algebra.mp3?v=bfd4a943", "secs": 767},
-    "probability.html": {"src": "podcasts/probability.mp3?v=8d890cce", "secs": 894}
+    "probability.html": {"src": "podcasts/probability.mp3?v=8d890cce", "secs": 894},
+    "regression.html": {"src": "podcasts/regression.mp3?v=304c9f3c", "secs": 723}
   };
   /* EPISODES-END */
 

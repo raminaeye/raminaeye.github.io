@@ -9,6 +9,7 @@
 
   /* EPISODES-BEGIN */
   var EPISODES = {
+    "distributions.html": {"src": "podcasts/distributions.mp3?v=5f4420a6", "secs": 1012},
     "linear-algebra.html": {"src": "podcasts/linear-algebra.mp3?v=bfd4a943", "secs": 767},
     "probability.html": {"src": "podcasts/probability.mp3?v=8d890cce", "secs": 894}
   };

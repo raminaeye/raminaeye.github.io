@@ -12,6 +12,8 @@
     "distributions.html": {"src": "podcasts/distributions.mp3?v=5f4420a6", "secs": 1012},
     "eigen-svd.html": {"src": "podcasts/eigen-svd.mp3?v=abb880c4", "secs": 830},
     "linear-algebra.html": {"src": "podcasts/linear-algebra.mp3?v=bfd4a943", "secs": 767},
+    "logistic.html": {"src": "podcasts/logistic.mp3?v=b0b41b70", "secs": 660},
+    "mlp.html": {"src": "podcasts/mlp.mp3?v=0c3ea04f", "secs": 676},
     "probability.html": {"src": "podcasts/probability.mp3?v=8d890cce", "secs": 894},
     "regression.html": {"src": "podcasts/regression.mp3?v=304c9f3c", "secs": 723}
   };

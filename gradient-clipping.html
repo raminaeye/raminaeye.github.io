@@ -1,0 +1,1201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gradient Clipping: Capping Exploding Gradients</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem;
+      line-height: 1.6;
+      color: #333;
+    }
+    h1, h2, h3, h4 {
+      color: #2c3e50; /* Darker shade for better contrast */
+      margin-top: 1.5em;
+      margin-bottom: 0.5em;
+    }
+    h1 { font-size: 2.5em; border-bottom: 2px solid #3498db; padding-bottom: 0.3em;}
+    .dek { font-size: 1.15em; color: #555; margin-top: 0.2em; }
+    h2 { font-size: 2em; border-bottom: 1px solid #bdc3c7; padding-bottom: 0.2em;}
+    h3 { font-size: 1.5em; }
+    h4 { font-size: 1.2em; color: #555;}
+
+    /* Keep wide display equations from overflowing on small screens */
+
+    /* Shared site nav (matches index.html topnav) */
+    body { padding-top: calc(64px + 1.5rem); }
+    h1, h2, h3, .demo[id], figure[id] { scroll-margin-top: 84px; }
+    .topnav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        z-index: 1000;
+        background: rgba(255, 255, 255, 0.65);
+        backdrop-filter: blur(18px) saturate(1.5);
+        -webkit-backdrop-filter: blur(18px) saturate(1.5);
+        border-bottom: 1px solid transparent;
+        transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+    .topnav.scrolled {
+        background: rgba(255, 255, 255, 0.88);
+        border-bottom-color: #dee2e6;
+        box-shadow: 0 6px 24px rgba(33, 37, 41, 0.07);
+    }
+    .nav-inner {
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 0 1.5rem;
+        height: 64px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+    .wordmark {
+        font-weight: 700;
+        color: #212529;
+        text-decoration: none;
+        font-size: 1.05rem;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+    }
+    .nav-links {
+        display: flex;
+        gap: 2px;
+        align-items: center;
+    }
+    .nav-links a {
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        font-size: 0.95rem;
+        padding: 8px 14px;
+        border-radius: 999px;
+        transition: color 0.18s ease, background-color 0.18s ease;
+    }
+    .nav-links a:hover {
+        color: #007bff;
+        background-color: #e7f1ff;
+    }
+    .nav-links a.active {
+        color: #007bff;
+        background-color: #e7f1ff;
+        font-weight: 600;
+    }
+    .nav-links a:focus-visible,
+    .wordmark:focus-visible,
+    .nav-toggle:focus-visible,
+    .panel-link:focus-visible,
+    .panel-social a:focus-visible {
+        outline: 2px solid #007bff;
+        outline-offset: 2px;
+    }
+    @media (hover: hover) {
+        .nav-toggle:hover { background-color: #e7f1ff; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .topnav,
+        .nav-links a,
+        .nav-toggle span,
+        .nav-panel,
+        .nav-panel a.panel-link {
+            transition: none;
+        }
+    }
+    @media (hover: hover) {
+        .nav-toggle:hover { background-color: #e7f1ff; }
+    }
+    .nav-toggle {
+        display: none;
+        width: 42px;
+        height: 42px;
+        padding: 0;
+        background: none;
+        border: 0;
+        border-radius: 10px;
+        cursor: pointer;
+        flex: 0 0 auto;
+    }
+    .nav-panel {
+        display: grid;
+        grid-template-rows: 0fr;
+        visibility: hidden;
+        transition: grid-template-rows 0.32s ease, visibility 0s linear 0.32s;
+    }
+    .nav-panel.open {
+        grid-template-rows: 1fr;
+        visibility: visible;
+        transition: grid-template-rows 0.32s ease, visibility 0s;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner {
+        min-height: 0;
+        overflow: hidden;
+    }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link:hover {
+        background-color: #e7f1ff;
+        color: #007bff;
+    }
+    .nav-panel a.panel-link.active {
+        color: #007bff;
+        font-weight: 600;
+        background-color: #e7f1ff;
+    }
+    .panel-social a:hover {
+        border-color: #007bff;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner {
+        min-height: 0;
+        overflow: hidden;
+    }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link:hover {
+        background-color: #e7f1ff;
+        color: #007bff;
+    }
+    .nav-panel a.panel-link.active {
+        color: #007bff;
+        font-weight: 600;
+        background-color: #e7f1ff;
+    }
+    .panel-social a:hover {
+        border-color: #007bff;
+    }
+        .crumb { margin: 0 0 0.8em; }
+        .crumb a {
+            display: inline-block;
+            padding: 4px 14px;
+            border: 1px solid #dee2e6;
+            border-radius: 999px;
+            background: #f8f9fa;
+            color: #0056b3;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+        .crumb a:hover { border-color: #007bff; color: #007bff; }
+    .nav-panel a.panel-link {
+        display: flex;
+        align-items: center;
+        padding: 0.8rem 0.75rem;
+        margin: 0 0.25rem;
+        border-radius: 10px;
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        min-height: 48px;
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+    .panel-social {
+        display: flex;
+        gap: 0.5rem;
+        padding: 0.9rem 1rem 0.25rem;
+        flex-wrap: wrap;
+    }
+    .panel-social a {
+        color: #007bff;
+        text-decoration: none;
+        font-weight: 500;
+        font-size: 0.9rem;
+        padding: 6px 12px;
+        border: 1px solid #dee2e6;
+        border-radius: 999px;
+        transition: border-color 0.15s ease;
+    }
+    @media (max-width: 768px) {
+        .nav-links { display: none; }
+        .nav-toggle { display: block; }
+    }
+
+    /* Section tab strip: one slim row, scrolls sideways when it overflows. */
+    .tabs-label {
+        float: left;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #6c757d;
+        font-weight: 700;
+        line-height: 1.2;
+        margin: 0;
+        padding: 8px 12px 0 0;
+    }
+    .tab-strip {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 2px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        margin: 0 0 1.25rem;
+        max-width: 100%;
+    }
+    .tab-strip::-webkit-scrollbar { display: none; }
+    .tab-strip a.tab-chip,
+    .tab-strip a.tab-link {
+        display: inline-block;
+        flex: 0 0 auto;
+        padding: 6px 10px;
+        border-radius: 999px;
+        color: #495057;
+        text-decoration: none;
+        font-size: 0.82rem;
+        font-weight: 500;
+        line-height: 1.35;
+        white-space: nowrap;
+    }
+    .tab-strip a.tab-chip:hover,
+    .tab-strip a.tab-link:hover { color: #007bff; }
+    .tab-strip a.tab-chip.active,
+    .tab-strip a.tab-link.active { background: #007bff; color: #ffffff; }
+    @media (max-width: 768px) {
+        .tabs-label { display: none; }
+        .tab-strip {
+            width: 100vw;
+            max-width: 100vw;
+            box-sizing: border-box;
+            margin-left: calc((100% - 100vw) / 2);
+            padding-left: calc((100vw - 100%) / 2);
+        }
+        .tab-strip a.tab-chip,
+        .tab-strip a.tab-link { font-size: 0.75rem; padding: 6px 8px; }
+    }
+
+    pre {
+      background: #0d1117;
+      color: #e6edf3;
+      padding: 14px 16px;
+      overflow-x: auto;
+      border-radius: 8px;
+      font-size: 0.9em;
+      margin: 1em 0;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+    }
+    /* P52 canonical inline items in prose: numbers and variables wear the body
+       font at body size and read as part of the sentence (keeps P50's quiet
+       treatment, no pill; code blocks and eq-cards keep the mono treatment). */
+    code {
+        font-family: inherit;
+        font-size: 1em;
+        color: #1a1a1a;
+        background: none;
+        padding: 0 0.08em;
+        overflow-wrap: break-word;
+    }
+    pre code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 1em; }
+    .eq-card code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 0.92em; }
+    pre code { /* Reset for code inside pre, already handled by pre styling */
+        background: none;
+        padding: 0;
+        font-size: 1em; /* Ensure pre's font size is inherited */
+        color: inherit;
+    }
+    ul, ol {
+        padding-left: 20px;
+    }
+    li {
+        margin-bottom: 0.5em;
+    }
+    strong {
+        color: #2980b9;
+    }
+    /* Labeled teaching diagrams: each teaches exactly one idea */
+    .diagram {
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      padding: 1.2rem;
+      margin: 1.75rem 0;
+      background: #fbfcfd;
+    }
+    .diagram svg {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+    .diagram .caption {
+      font-size: 0.9em;
+      color: #555;
+      margin-top: 1rem;
+      line-height: 1.5;
+    }
+    .diagram .caption strong {
+      color: #2c3e50;
+    }
+    /* Rendered result block, not a print() call */
+    .output {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 1rem 1.2rem;
+      border-radius: 6px;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+      font-size: 0.9em;
+      margin: 1em 0;
+      overflow-x: auto;
+      border-left: 4px solid #22c55e;
+      line-height: 1.7;
+    }
+    .output .dim { color: #94a3b8; }
+    .output .good { color: #4ade80; font-weight: bold; }
+    .output .bad { color: #ef4444; font-weight: bold; }
+    .output .src { color: #fbbf24; }
+    /* Stat cards: clean, scannable reference numbers */
+    .stat-title { font-size: 0.85em; font-weight: 700; color: #2c3e50; margin: 0 0 0.2rem; }
+    .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:1.2em 0}
+    .stat-card{border:1px solid #bdc3c7;border-radius:8px;padding:14px 16px;background:#f7f9fb}
+    .stat-num{font-size:1.9em;font-weight:800;color:#2c3e50;line-height:1.15}
+    .stat-unit{font-size:.55em;font-weight:600;color:#7f8c8d}.stat-vs{font-size:max(12px,.55em);font-weight:600;color:#7f8c8d}
+    .stat-label{font-size:.92em;font-weight:600;margin-top:6px;color:#2c3e50}
+    .stat-note{font-size:.82em;color:#7f8c8d;margin-top:3px}
+    /* Numbered walkthrough steps: one computation per step */
+/* Worked-example card (Round 9 template): a calm sage card that sets
+           math walkthrough steps apart from body text. */
+        .worked-example {
+            background: #f1f6ed;
+            border: 1px solid #d9e4d1;
+            border-left: 3px solid #6f9a63;
+            border-radius: 10px;
+            padding: 14px 20px;
+            margin: 1.1em 0;
+            max-width: 680px;
+            color: #2c3e50;
+            line-height: 1.8;
+            overflow-x: auto;
+        }
+        ol.worked-example {
+            list-style: none;
+            counter-reset: wex-step;
+            padding-left: 20px;
+        }
+        ol.worked-example > li {
+            counter-increment: wex-step;
+            position: relative;
+            margin: 0;
+            padding: 8px 0 8px 44px;
+        }
+        ol.worked-example > li + li { border-top: 1px dashed #cbdabf; }
+        ol.worked-example > li::before {
+            content: counter(wex-step);
+            position: absolute;
+            left: 0;
+            top: 9px;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: #6f9a63;
+            color: #ffffff;
+            font-size: 13px;
+            font-weight: 700;
+            line-height: 28px;
+            text-align: center;
+        }
+        @media (max-width: 480px) {
+            .worked-example { padding: 12px; font-size: 15px; }
+            ol.worked-example { padding-left: 12px; }
+            ol.worked-example > li { padding-left: 38px; }
+        }
+    /* Long inline formulas get their own scrollable line on small screens */
+    .math-scroll{display:block;overflow-x:auto;overflow-y:hidden;max-width:100%;padding:.1em 0}
+    /* Interactive demos */
+    .demo {
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      padding: 1.25rem;
+      margin: 1.75rem 0;
+      background: #fbfcfd;
+    }
+    .demo-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem 1rem;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    .demo-controls label { font-weight: bold; color: #2c3e50; white-space: nowrap; }
+    .demo-controls label var sub, .demo-controls label var sup { font-size: max(11px, .72em); }
+    .demo-controls input[type=range] {
+      flex: 1 1 140px;
+      min-width: 0;
+      max-width: 220px;
+      accent-color: #3498db;
+    }
+    #bvCanvas { display: block; width: 100%; height: 320px; max-width: 100%; }
+    .demo-stats {
+      text-align: center;
+      font-size: 1.02em;
+      color: #2c3e50;
+      margin: 1rem 0 0.4rem;
+    }
+    .chart-legend { display: flex; flex-wrap: wrap; gap: 0.4em 1.2em; font-size: 0.9em; color: #555; margin: 0.2rem 0 0.4rem 0; }
+    .chart-legend .lg-sw { display: inline-block; width: 24px; height: 0; border-top: 3px solid; vertical-align: middle; margin-right: 0.4em; }
+    .chart-legend .lg-blue { border-color: #2980b9; }
+    .chart-legend .lg-red { border-color: #c0392b; border-top-style: dashed; }
+    .demo-stats strong { color: #2980b9; }
+    .demo .caption {
+      font-size: 0.9em; color: #555; margin-top: 1rem;
+      border-left: 3px solid #3498db; padding-left: 0.8em;
+    }
+    .dim-note { font-size: 0.8em; color: #888; margin-top: 0.6rem; }
+    /* Bias-variance Play button (mirrors the race widget buttons) */
+    .demo .bv-btn { font: inherit; font-size: 0.92em; padding: 0.35rem 0.8rem; border: 1px solid #bdc3c7; border-radius: 6px; background: #fff; color: #2c3e50; cursor: pointer; }
+    .demo .bv-btn.active { background: #2980b9; border-color: #2980b9; color: #fff; font-weight: bold; }
+    .demo .bv-btn:disabled { opacity: 0.45; cursor: default; }
+    /* Fixed label width so the slider readouts can never change the controls-row wrap (no-scroll-on-Play) */
+    #bvToy #capVal, #bvToy #dataVal { display: inline-block; min-width: 3ch; }
+    .howto { font-size: 0.92em; color: #2c3e50; margin: 0.8rem 0 0.2rem; }
+    /* Caption card standard: white/lightest tint, 1px #e3e8ee border + 3px #2c3e50 left accent */
+    div.howto {
+      background: #fff;
+      border: 1px solid #e3e8ee;
+      border-left: 3px solid #2c3e50;
+      border-radius: 10px;
+      padding: 18px;
+      margin: 14px 0 0;
+      font-size: 15px;
+      line-height: 1.65;
+      color: #2c3e50;
+    }
+    div.howto .howto-head { font-weight: bold; font-size: 15px; margin: 0 0 0.4em; }
+    div.howto ul { list-style: none; margin: 0; padding: 0; }
+    div.howto ul li { position: relative; padding-left: 16px; margin: 7px 0; }
+    div.howto ul li::before {
+      content: ''; position: absolute; left: 0; top: 0.62em;
+      width: 6px; height: 6px; border-radius: 50%; background: #2c3e50;
+    }
+    div.howto ul li.tryit {
+      background: rgba(44,62,80,0.08);
+      padding: 7px 7px 7px 23px;
+      border-radius: 6px;
+    }
+    div.howto ul li.tryit::before { left: 7px; top: calc(0.62em + 7px); }
+    .canvas-wrap { position: relative; }
+    
+    /* Optimizer race widget */
+    #optRace { position: relative; }
+    #optRace .opt-btn { font: inherit; font-size: 0.92em; padding: 0.35rem 0.8rem; border: 1px solid #bdc3c7; border-radius: 6px; background: #fff; color: #2c3e50; cursor: pointer; }
+    #optRace .opt-btn.active { background: #2980b9; border-color: #2980b9; color: #fff; font-weight: bold; }
+    #optRace .gloss { margin: 0 0 0.6rem; padding-left: 1.2rem; color: #2c3e50; }
+    #optRace .gloss li { margin: 0.35rem 0; }
+    #optRace .race-wrap { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-start; }
+    #optRace .race-main { flex: 1 1 330px; min-width: 0; }
+    #optRace .race-side { flex: 1 1 230px; min-width: 0; }
+    #optRace canvas { display: block; width: 100%; height: auto; }
+    #optRace .side-title { text-align: center; font-weight: bold; color: #2c3e50; font-size: 0.92em; margin: 0 0 0.4rem; }
+    #optRace .bad { color: #c0392b; font-weight: bold; }
+    /* Shared walkthrough equation-card contract (verbatim, all pages) */
+    
+    .eq-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+
+      padding:1rem 1.2rem;margin:1.75rem auto;max-width:640px;overflow-x:auto}
+
+    .eq-what{font-size:.95rem;color:#334155;margin:0 0 .6rem;line-height:1.55}
+
+    .eq-line{font-size:1.38rem;line-height:2.0;letter-spacing:.015em;padding:.5rem .6rem;white-space:normal;font-weight:500;opacity:.38;border-left:3px solid transparent}
+
+    .eq-line.eq-active{opacity:1;border-left-color:#2c3e50}
+.eq-line sub,.eq-line sup{font-size:.68em}
+      .eq-why{display:none;visibility:hidden;font-size:1rem;color:#475569;padding:.15rem .35rem .4rem;line-height:1.65}
+      .eq-why.eq-active{display:block;visibility:visible}
+      .eq-card.eq-stepped .eq-line{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-line.eq-active{display:block;opacity:1;visibility:visible}
+      .eq-card.eq-stepped .eq-legend .eq-item{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-legend .eq-item.eq-active{display:block;visibility:visible}
+
+    .eqt{font-weight:600;padding:0 .1em;border-radius:3px}
+
+    .eqt.eqt-active{text-decoration:underline;text-underline-offset:2px}
+
+    .eq-legend{font-size:.85rem;color:#475569;margin-top:.6rem;line-height:1.75}
+
+    .eq-legend .eq-item{display:block}
+
+    .eq-legend .eq-item code{white-space:nowrap}
+
+    .eq-sw{display:inline-block;width:.7em;height:.7em;border-radius:2px;
+
+      margin:0 .25em 0 .6em;vertical-align:baseline}
+
+    @media (max-width:480px){.eq-card{padding:.85rem .9rem}.eq-line{font-size:1.24rem;line-height:1.95}}
+/* P70 inline variables and inline code, one style site-wide (VAR-STYLE.md v2) */
+var,.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic;font-weight:400;font-size:1em;color:#1d4e89;background:#edf3fa;border-radius:3px;padding:0 .18em;white-space:nowrap;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+var sub,var sup,.mvar sub,.mvar sup{font-size:.72em;font-style:normal}
+pre var,code var,.eq-line var{font:inherit;color:inherit;background:none;padding:0}
+svg text.mvar,svg tspan.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic}
+:not(pre)>code:not(.eq-line code){font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,Courier,monospace;font-size:.86em;color:#24292f;background:#f1f3f5;border:1px solid #dfe3e8;border-radius:4px;padding:.06em .32em;white-space:normal;overflow-wrap:anywhere}
+/* P79 numbering (NUMBERING.md) */
+.secnum{font-variant-numeric:tabular-nums;margin-right:.4em;color:inherit;font-weight:inherit}
+.tab-strip .secnum{margin-right:.3em;opacity:.75}
+.fignum{font-weight:600;margin-right:.3em;font-variant-numeric:tabular-nums}
+/* P80 code sections (CODE-SECTIONS.md) */
+pre.cs{position:relative;background-attachment:local;padding-left:20px}
+pre.cs code{display:block;line-height:1.55}
+pre.cs .cs-g{position:absolute;left:3px;width:11px;text-align:center;font:700 11px/1 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;-webkit-user-select:none;user-select:none;pointer-events:none}
+pre.cs .cs-g::before{content:attr(data-n)}
+ol.cs-notes{list-style:none;padding-left:0;margin:-.4em 0 1em}
+ol.cs-notes li{margin:0 0 .3em;padding-left:1.9em;position:relative}
+ol.cs-notes .cs-n{position:absolute;left:0;top:.1em;min-width:1.35em;padding:0 .25em;border-radius:4px;font:700 .8em/1.45 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;text-align:center;color:#0d1117}
+ol.cs-notes li:nth-child(6n+1) .cs-n{background:#79b8ff}
+ol.cs-notes li:nth-child(6n+2) .cs-n{background:#ffab70}
+ol.cs-notes li:nth-child(6n+3) .cs-n{background:#85e89d}
+ol.cs-notes li:nth-child(6n+4) .cs-n{background:#d2a8ff}
+ol.cs-notes li:nth-child(6n+5) .cs-n{background:#ffa198}
+ol.cs-notes li:nth-child(6n+6) .cs-n{background:#76e3ea}
+    /* diagram-side dim/highlight (SVG/DOM). Do NOT use .hl/.dim: taken. */
+    .eq-dim{opacity:.32}
+    .eq-hl{filter:drop-shadow(0 0 3px currentColor)}
+    hr {
+      border: 0;
+      height: 1px;
+      background: #bdc3c7;
+      margin-top: 2em;
+      margin-bottom: 2em;
+    }
+  
+/* canonical spacing: display math */
+    /* Compact phone walkthrough layout (canonical block, every tutorial page):
+       two-column eq legends, tightened demo spacing, and diagrams capped so
+       controls and diagram share the first phone screen. Phone widths only;
+       desktop rendering and equation typography are unchanged. */
+    @media (max-width:480px){
+      .demo{padding:.75rem}
+      .demo>*{margin-top:.6rem;margin-bottom:.6rem}
+      .demo>*:first-child{margin-top:0}
+      .demo .eq-card{margin:1rem auto;padding:.7rem .8rem}
+      .demo .cap-card,.demo .capcard{padding:.85rem .95rem}
+      .eq-legend{display:grid;grid-template-columns:1fr 1fr;column-gap:.9rem;row-gap:.1rem;line-height:1.5}
+      .eq-legend .eq-item:has(> code ~ code){grid-column:1/-1}
+      .demo svg,.demo canvas{max-height:55vh}
+    }
+    /* batch Da shared: tips and data tables, linked-card map (2026-11-02) */
+    .datatable{border-collapse:collapse;margin:1.2em 0;width:100%;max-width:640px;font-size:.95em} .datatable th,.datatable td{border:1px solid #bdc3c7;padding:.45em .6em;text-align:left;vertical-align:top} .datatable th{background:#2c3e50;color:#fff;font-weight:600} .datatable tr:nth-child(even) td{background:#f7f9fb} .datatable caption{text-align:left;padding:.5em 0 0;font-size:.92em;color:#555;caption-side:bottom}
+    @media (max-width:480px){.datatable{font-size:.88em}.datatable th,.datatable td{padding:.35em .4em}}
+    @media (max-width:480px){h2#failures+.datatable{table-layout:fixed}h2#failures+.datatable td,h2#failures+.datatable th{overflow-wrap:anywhere}}
+    .pmap{margin:1.75rem auto;max-width:640px;display:flex;flex-direction:column;align-items:stretch;gap:0}
+    .pmap-row{display:flex;gap:.6rem;justify-content:center;flex-wrap:wrap}
+    .pmap-link{width:2px;height:14px;background:#95a5a6;margin:0 auto}
+    .pmap a.pmap-card{flex:1 1 0;min-width:0;display:block;border:1.5px solid #bdc3c7;border-radius:8px;padding:.45rem .6rem;text-decoration:none;color:#2c3e50;background:#fbfcfd;text-align:center;line-height:1.3}
+    .pmap a.pmap-card:hover{border-color:#2980b9}
+    .pmap .pmap-name{display:block;font-weight:700;font-size:.98rem}
+    .pmap .pmap-fix{display:block;font-size:.85rem;color:#555}
+    .pmap-caption{text-align:center}
+    @media (max-width:480px){.pmap a.pmap-card{padding:.35rem .4rem}.pmap .pmap-name{font-size:.92rem}.pmap .pmap-fix{font-size:.8rem}}
+/* PREV-NEXT-BEGIN */
+nav.tut-seq{display:flex;align-items:center;gap:0 .75rem;margin:0 0 .25rem;font-size:.85rem;white-space:nowrap}
+nav.tut-seq a{position:relative;display:block;flex:0 1 auto;min-width:0;height:44px;line-height:44px;padding:0 2px;overflow:hidden;text-overflow:ellipsis;color:#0056b3;text-decoration:none}
+nav.tut-seq a.seq-home{flex:0 0 auto}
+nav.tut-seq a.seq-next{margin-left:auto}
+nav.tut-seq .seq-w{font-weight:600}
+nav.tut-seq a:hover{text-decoration:underline}
+nav.tut-seq a:focus-visible{outline:2px solid #0056b3;outline-offset:2px}
+@media (max-width:575px){nav.tut-seq .seq-t{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}}
+@media (forced-colors:active){nav.tut-seq a:focus-visible{outline-color:Highlight}}
+@media print{nav.tut-seq{display:none}}
+/* PREV-NEXT-END */
+/* TD-CODE-BEGIN variant D2: words and inline code in table cells break only between words; a table that holds inline code scrolls sideways with a right-edge fade while more is to the right, a pinned first column with an edge line once scrolled, and trimmed phone padding; <wbr> wrap points in table code act at 640 px and below only; a .tdc-stack table stacks per row on phones (VAR-STYLE.md v2 amendment 2026-11-05, D2) */
+td,th,td code:not(pre code),th code:not(pre code){overflow-wrap:normal!important;word-break:normal!important}
+table:has(td code){display:block;max-width:100%;overflow-x:auto}
+:where(table:has(td code)) :where(tr>:first-child){position:sticky;left:-1px;z-index:1;background-color:Canvas;box-shadow:inset -1px 0 0 var(--tdc-s)}
+@property --tdc-f{syntax:'<length>';inherits:false;initial-value:0px}
+@property --tdc-s{syntax:'<color>';inherits:true;initial-value:transparent}
+@keyframes tdc-hint{0%{--tdc-f:3rem;--tdc-s:transparent}3%{--tdc-s:rgba(0,0,0,.28)}85%{--tdc-f:3rem}100%{--tdc-f:0px;--tdc-s:rgba(0,0,0,.28)}}
+@supports (animation-timeline:scroll()){table:has(td code){-webkit-mask-image:linear-gradient(to left,rgba(0,0,0,.15),#000 var(--tdc-f));mask-image:linear-gradient(to left,rgba(0,0,0,.15),#000 var(--tdc-f));animation-name:tdc-hint;animation-duration:1ms;animation-timing-function:linear;animation-fill-mode:both;animation-timeline:scroll(self inline)}}
+@supports not (animation-timeline:scroll()){table:has(td code){background:linear-gradient(to left,Canvas 40%,rgba(255,255,255,0)) 100% 0/2.5rem 100% no-repeat local,radial-gradient(farthest-side at 100% 50%,rgba(0,0,0,.2),rgba(0,0,0,0)) 100% 0/.9rem 100% no-repeat scroll}}
+@media (min-width:641px){td wbr,th wbr{display:none}}
+@media (max-width:400px){table:has(td code) :is(td,th){padding-left:.35em!important;padding-right:.35em!important}}
+@media (max-width:640px){table.tdc-stack,table.tdc-stack :is(tbody,thead,tr,td){display:block;overflow:visible;-webkit-mask-image:none;mask-image:none;animation-name:none}table.tdc-stack tr:has(th){display:none}table.tdc-stack tr+tr{margin-top:.6em}table.tdc-stack td{position:static;box-shadow:none;border-width:0 1px;padding:.3em .6em!important}table.tdc-stack tr>td:first-child{border-top-width:1px;font-weight:700}table.tdc-stack tr>td:last-child{border-bottom-width:1px;padding-bottom:.5em!important}table.tdc-stack td[data-label]::before{content:attr(data-label) ": ";font-weight:600}}
+/* TD-CODE-END */
+/* MATH-BEGIN v1 (P88, site-math.js renders KaTeX; byte-identical on every page) */
+.eq-line{overflow-x:auto;overflow-y:hidden;white-space:normal}
+.eq-line .katex{font-size:1.02em;line-height:1.6}
+.eq-line .katex .base{margin:.15em 0}
+var .katex,p .katex,li .katex,td .katex,th .katex,figcaption .katex,.eq-why .katex,.eq-what .katex,.eq-legend .katex{font-size:1.06em}
+var:has(.katex){font-style:normal}
+.katex-display{margin:.6rem 0;overflow-x:auto;overflow-y:hidden}
+/* MATH-END */
+    /* Slider rows (fix wave 2): label on its own line, slider with both end labels on the next, so value words never move the ends */
+    .demo-controls label[for] { flex: 1 1 100%; white-space: normal; }
+    .demo-controls .sl-row { display: flex; align-items: center; gap: .5rem; flex: 1 1 100%; min-width: 0; max-width: 30rem; }
+    .demo-controls .sl-row input[type=range] { flex: 1 1 auto; min-width: 0; max-width: none; }
+    .demo-controls .sl-end { font-size: .85em; color: #555; white-space: nowrap; flex: 0 0 auto; }
+    /* Stacked phone tables (fix wave 2): the caption spans the full width */
+    @media (max-width:640px){ table.tdc-stack > caption { display: block; width: auto; } }
+</style>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+  <script src="site-math.js" defer></script>
+
+  <style>
+/* Static teaching diagrams (mtd), shared across tutorials, 2026-11-01 */
+.figure.mtd-fig { margin: 1.75rem 0; }
+.mtd-fig > svg.mtd-svg { display: block; width: 100%; height: auto; margin: 0 auto; }
+.mtd-fig .caption { margin-top: 1rem; }
+.mtd-svg text { fill: #2c3e50; font-family: sans-serif; }
+.mtd-svg .mtd-sub { fill: #555; }
+.mtd-svg .mtd-t1 { fill: #1f618d; }
+.mtd-svg .mtd-t2 { fill: #ca6f1e; }
+.mtd-svg .mtd-pu { fill: #7d3c98; }
+.mtd-svg .mtd-red { fill: #c0392b; }
+.mtd-svg .mtd-grn { fill: #148f77; }
+.mtd-svg line, .mtd-svg path, .mtd-svg polyline { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.mtd-svg .mtd-s.mtd-c1 { stroke: #1f618d; } .mtd-svg .mtd-f.mtd-c1 { fill: #1f618d; }
+.mtd-svg .mtd-s.mtd-c2 { stroke: #ca6f1e; } .mtd-svg .mtd-f.mtd-c2 { fill: #ca6f1e; }
+.mtd-svg .mtd-s.mtd-cp { stroke: #7d3c98; } .mtd-svg .mtd-f.mtd-cp { fill: #7d3c98; }
+.mtd-svg .mtd-s.mtd-cr { stroke: #c0392b; } .mtd-svg .mtd-f.mtd-cr { fill: #c0392b; }
+.mtd-svg .mtd-s.mtd-cg { stroke: #2c3e50; } .mtd-svg .mtd-f.mtd-cg { fill: #2c3e50; }
+.mtd-svg .mtd-sep { stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-pic { fill: #fbfcfd; stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-axis { stroke: #7f8c8d; stroke-width: 1.5px; }
+.mtd-svg .mtd-arc { stroke: #2c3e50; stroke-width: 2px; }
+.mtd-svg .mtd-dot { fill: #2c3e50; }
+.mtd-svg .mtd-guide { stroke: #7f8c8d; stroke-width: 1.4px; stroke-dasharray: 4 4; }
+.mtd-svg .mtd-ring { fill: #fbfcfd; stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-pt { fill: #1f618d; opacity: .55; }
+.mtd-svg .mtd-cross { stroke: #2c3e50; stroke-width: 2.2px; }
+.mtd-svg .mtd-barbg { fill: #eef1f4; }
+.mtd-svg .mtd-bar { fill: #7d3c98; }
+.mtd-svg .mtd-cart { fill: #ffffff; stroke: #2c3e50; stroke-width: 2px; }
+.mtd-svg .mtd-zero { stroke: #95a5a6; stroke-width: 1.2px; stroke-dasharray: 4 4; }
+.mtd-svg .mtd-axisl { stroke: #7f8c8d; stroke-width: 2px; }
+.mtd-svg .mtd-norm { stroke: #148f77; stroke-width: 4px; }
+.mtd-svg .mtd-read { fill: #ffffff; stroke: #2c3e50; stroke-width: 2.5px; }
+.mtd-svg .mtd-ball { fill: #7d3c98; fill-opacity: .08; stroke: #7d3c98; stroke-width: 1.6px; stroke-dasharray: 5 4; }
+.mtd-svg .mtd-box { fill: #fbfcfd; stroke: #bdc3c7; stroke-width: 1.4px; }
+.mtd-svg .mtd-crossbg { fill: #ffffff; }
+.mtd-svg .mtd-halo { stroke: #ffffff; stroke-width: 5px; stroke-linejoin: round; paint-order: stroke; }
+.mtd-svg .mtd-box.mtd-note { stroke-dasharray: 5 4; }
+</style>
+<style>
+/* Series and page map (B-TF, 2026-11-02) */
+.sermap { margin: .5rem 0 1.1rem; font-size: .8rem; line-height: 1.3; }
+.sermap ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; row-gap: 5px; }
+.sermap li { display: flex; align-items: center; margin: 0; padding: 0; line-height: 1.25; }
+.sermap li + li::before { content: "\2192"; color: #95a5a6; margin: 0 5px; }
+.sermap a, .sermap .sm-here { display: inline-block; padding: 2px 7px; line-height: 1.25; border-radius: 6px; text-decoration: none; }
+.sermap .sm-series a { padding: 1px 2px; color: #1f618d; text-decoration: underline; text-decoration-color: #a9cce3; text-underline-offset: 2px; }
+.sermap .sm-series .sm-here { padding: 1px 6px; background: #117a65; color: #fff; font-weight: 600; }
+.sermap .sm-series { row-gap: 0; }
+.sermap .sm-series a, .sermap .sm-series .sm-here, .sermap .sm-also a { display: inline-flex; align-items: center; min-height: 44px; box-sizing: border-box; }
+.sermap .sm-flow { margin-top: 6px; padding-left: 8px; border-left: 3px solid #117a65; }
+</style>
+<style>
+nav.prereq{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem .4rem;margin:.6rem 0 1.1rem}
+nav.prereq .prereq-label{font-size:.82rem;font-weight:600;color:#6c757d;margin-right:.15rem}
+nav.prereq a.prereq-chip{display:inline-block;padding:.15rem .6rem;border:1px solid #ced4da;border-radius:999px;font-size:.85rem;line-height:1.4;color:#0056b3;text-decoration:none}
+nav.prereq a.prereq-chip:hover,nav.prereq a.prereq-chip:focus-visible{background:#e7f1ff;border-color:#007bff}
+nav.prereq-sec{margin:.2rem 0 .9rem}
+nav.prereq-sec p{margin:0;font-size:.9rem;line-height:1.5;color:#495057}
+/* Optimizers rewrite 2026-11-05: series map arrows, tools */
+.pmap-step{display:flex;flex-direction:column;align-items:center;margin:0 auto}
+.pmap-step .pmap-link{height:10px;width:3px}
+.pmap-step .pmap-say{font-size:.8rem;color:#555;line-height:1.2;padding:1px 0}
+.pmap-step .pmap-link.pmap-arrow{height:12px;position:relative}
+.pmap-step .pmap-link.pmap-arrow::after{content:"";position:absolute;left:-5.5px;bottom:-8px;border-left:7px solid transparent;border-right:7px solid transparent;border-top:9px solid #95a5a6}
+.pmap-page{font-size:.78rem;font-weight:600;color:#117a65;text-align:center;margin:.5rem 0 .25rem;letter-spacing:.02em}
+.pmap a.pmap-card.pmap-here{border-color:#117a65}
+.seg{display:inline-flex;flex-wrap:wrap;gap:4px}
+.seg .bv-btn{min-height:40px}
+.demo .demo-read{font-size:.95rem;color:#2c3e50;margin:.4rem 0 .2rem;min-height:1.6em}
+#cgRead{min-height:3.2em}
+/* opt-polish (R10 4.1, 4.5): readouts that wrap at phone width reserve their tallest state, so the demo never jumps */
+@media (max-width:480px){#stRead{min-height:3.3em}}
+@media (max-width:389px){#raceRead{min-height:4.9em}}
+.demo svg.tool-svg{display:block;width:100%;height:auto;max-width:520px;margin:.3rem auto}
+.demo svg.tool-svg text{font-family:sans-serif;fill:#2c3e50}
+.knobs{font-size:.95em}
+.datatable td.num,.datatable th.num{text-align:right;font-variant-numeric:tabular-nums}
+@media (max-width:480px){.demo .demo-controls{gap:.4rem .5rem}}
+.diagram .diag-list{font-size:.92em;color:#2c3e50;margin:.6em 0 0;padding-left:1.4rem}
+.diagram .diag-list li{margin:.35em 0}
+ol.brefs{line-height:1.7;margin:1em 0 2em;padding-left:22px}
+ol.brefs li{margin-bottom:.5em}
+/* fix wave 3 (recheck-2 R3 n1): variables in the dark header band read as plain light italic text, no chip */
+.datatable th var{color:#fff;background:none;padding:0;border-radius:0}
+/* fix wave 3 (R3 n7, R4 P3): a hat centred over epsilon, and limits set under max */
+/* fix wave 4 (recheck-3 R6 m1): line-height 1 on the epsilon box, so the hat sits just above the epsilon instead of floating */
+.xh{position:relative;display:inline-block;line-height:1}
+.xh::after{content:"ˆ";position:absolute;left:0;right:0;top:-.05em;text-align:center;font-style:normal;line-height:1;padding-left:.12em}
+.lim{display:inline-flex;flex-direction:column;align-items:center;vertical-align:-.62em;line-height:1.05}
+.lim .lim-sub{font-size:.74em}
+</style>
+<style>
+/* one-topic optimizers split 2026-11-08: series flow row, walkthrough and tool bits */
+.sermap .sm-flow a{border:1px solid #d5dbdb;background:#f8f9fa;color:#2c3e50}
+.sermap .sm-flow .sm-here{background:#117a65;color:#fff;font-weight:600}
+.demo .demo-controls{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .7rem}
+.demo .walk-lbl{font-weight:600;color:#2c3e50}
+.demo .eq-card.eq-stepped .eq-why{display:none}
+.demo .eq-card.eq-stepped .eq-why.eq-active{display:block;visibility:visible}
+.bv-btn[aria-pressed="true"],.bv-btn.active{background:#2c3e50;color:#fff;border-color:#2c3e50}
+.demo input[type=range]{flex:1 1 140px;min-width:120px}
+.demo label{font-size:.95rem}
+.fam-list{padding-left:1.3rem}
+.fam-list li{margin:.35em 0}
+</style>
+<script>
+/* Walkthrough stepper shared by the optimizer pages (2026-11-08): controls, diagram, readout, eq-card last.
+   id+'Prev', 'Next', 'Reset', 'Lbl', 'Svg', 'Read', 'Card'; lines[i] is the eq-card line for step i. */
+window.OPWALK = function (id, n, draw, reads, lines) {
+  var $ = function (s) { return document.getElementById(id + s); };
+  var prev = $('Prev'), next = $('Next'), reset = $('Reset'), lbl = $('Lbl'), svg = $('Svg'), rd = $('Read'), card = $('Card');
+  if (!svg) return;
+  var cur = 0;
+  function show() {
+    svg.innerHTML = draw(cur);
+    rd.innerHTML = reads[cur];
+    if (window.siteMath) window.siteMath.typeset(rd);
+    lbl.textContent = 'Step ' + (cur + 1) + ' of ' + n;
+    if (card) Array.prototype.forEach.call(card.querySelectorAll('.eq-line, .eq-why'), function (e) {
+      e.classList.toggle('eq-active', String(lines[cur]) === e.getAttribute('data-eqline'));
+    });
+    prev.disabled = cur === 0; next.disabled = cur === n - 1;
+  }
+  prev.addEventListener('click', function () { if (cur > 0) { cur--; show(); } });
+  next.addEventListener('click', function () { if (cur < n - 1) { cur++; show(); } });
+  reset.addEventListener('click', function () { cur = 0; show(); });
+  show();
+};
+/* Animate a run: calls frame(k) for k = 1..total over about ms milliseconds; a newer call cancels the older one. */
+window.OPANIM = function (state, total, ms, frame) {
+  state.tok = (state.tok || 0) + 1; var tok = state.tok, t0 = null;
+  function go(ts) {
+    if (tok !== state.tok) return;
+    if (t0 === null) t0 = ts;
+    var k = Math.min(total, Math.max(1, Math.round((ts - t0) / ms * total)));
+    frame(k);
+    if (k < total) requestAnimationFrame(go);
+  }
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) { frame(total); return; }
+  requestAnimationFrame(go);
+};
+</script>
+<script>
+/* Shared SVG string helpers for the optimizer tools (2026-11-05). */
+window.OPK = (function () {
+  function n(v) { return (Math.round(v * 10) / 10).toString(); }
+  return {
+    n: n,
+    ln: function (x1, y1, x2, y2, c, w, d) { return '<line x1="' + n(x1) + '" y1="' + n(y1) + '" x2="' + n(x2) + '" y2="' + n(y2) + '" style="stroke:' + c + ';stroke-width:' + (w || 1.5) + 'px' + (d ? ';stroke-dasharray:' + d : '') + '"/>'; },
+    pl: function (pts, c, w, d, op, clip) { return '<polyline points="' + pts.map(function (p) { return n(p[0]) + ',' + n(p[1]); }).join(' ') + '" style="fill:none;stroke:' + c + ';stroke-width:' + (w || 2.5) + 'px;stroke-linecap:round;stroke-linejoin:round' + (d ? ';stroke-dasharray:' + d : '') + (op != null ? ';opacity:' + op : '') + '"' + (clip ? ' clip-path="url(#' + clip + ')"' : '') + '/>'; },
+    ar: function (pts, c, op) { return '<polygon points="' + pts.map(function (p) { return n(p[0]) + ',' + n(p[1]); }).join(' ') + '" style="fill:' + c + ';fill-opacity:' + (op == null ? 0.2 : op) + ';stroke:none"/>'; },
+    /* baseline text never below 15.5 viewBox px: tool svgs render 270 px wide at 360, so 12 px or more (fix wave 1, review B2 minor 20) */
+    tx: function (x, y, s, sz, anc, c, b) { return '<text class="mtd-halo" x="' + n(x) + '" y="' + n(y) + '" text-anchor="' + (anc || 'start') + '" style="font-size:' + Math.max(sz || 15, 15.5) + 'px;fill:' + (c || '#2c3e50') + (b ? ';font-weight:700' : '') + '">' + s + '</text>'; },
+    rc: function (x, y, w, h, f, s) { return '<rect x="' + n(x) + '" y="' + n(y) + '" width="' + n(Math.max(w, 0)) + '" height="' + n(Math.max(h, 0)) + '" style="fill:' + f + ';stroke:' + (s || 'none') + ';stroke-width:1px"/>'; },
+    ci: function (x, y, r, f) { return '<circle cx="' + n(x) + '" cy="' + n(y) + '" r="' + r + '" style="fill:' + f + ';stroke:#ffffff;stroke-width:1.5px"/>'; },
+    mk: function (x, y, k) { return '<circle cx="' + n(x) + '" cy="' + n(y) + '" r="10" style="fill:#2c3e50;stroke:#ffffff;stroke-width:2px"/><text x="' + n(x) + '" y="' + n(y + 5.5) + '" text-anchor="middle" style="font-size:15.5px;font-weight:700;fill:#ffffff">' + k + '</text>'; },
+    ell: function (X, Y, c, clip) { var pts = []; for (var i = 0; i <= 120; i++) { var t = 2 * Math.PI * i / 120; pts.push([X(Math.sqrt(c / 5) * Math.cos(t)), Y(Math.sqrt(c / 0.2) * Math.sin(t))]); } return this.pl(pts, '#d5dbe1', 1.2, null, null, clip); },
+    /* edge marker: an arrowhead at (x, y), the point where a path leaves the frame, pointing away from (px, py) */
+    edge: function (x, y, px, py, c) { var a = Math.atan2(y - py, x - px), ca = Math.cos(a), sa = Math.sin(a), bx = x - 14 * ca, by = y - 14 * sa; return '<polygon points="' + n(x) + ',' + n(y) + ' ' + n(bx - 8 * sa) + ',' + n(by + 8 * ca) + ' ' + n(bx + 8 * sa) + ',' + n(by - 8 * ca) + '" style="fill:' + c + ';stroke:#ffffff;stroke-width:1px"/>'; },
+    seg: function (box, val) { Array.prototype.forEach.call(box.querySelectorAll('button'), function (b) { var on = b.getAttribute('data-v') === String(val); b.classList.toggle('active', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); }); }
+  };
+})();
+</script>
+</head>
+<body>
+        <nav class="topnav" aria-label="Site">
+    <div class="nav-inner">
+        <a class="wordmark" href="index.html">Ramin Anushiravani</a>
+        <div class="nav-links">
+            <a href="tutorial.html" class="active">Tutorials</a>
+            <a href="pubs.html">Publications</a>
+            <a href="index.html">About</a>
+            <a href="work.html">Projects</a>
+        </div>
+        <button class="nav-toggle" id="navToggle" aria-expanded="false" aria-controls="navPanel" aria-label="Menu"><span></span><span></span><span></span></button>
+    </div>
+    <div class="nav-panel" id="navPanel">
+        <div class="nav-panel-inner">
+            <div class="nav-panel-body">
+                <a class="panel-link active" href="tutorial.html">Tutorials</a>
+                <a class="panel-link" href="pubs.html">Publications</a>
+                <a class="panel-link" href="index.html">About</a>
+                <a class="panel-link" href="work.html">Projects</a>
+                <div class="panel-social">
+                    <a href="https://linkedin.com/in/raminanushiravani" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+                    <a href="https://github.com/raminaeye/" target="_blank" rel="noopener noreferrer">GitHub</a>
+                    <a href="https://scholar.google.com/citations?user=kouXx8gAAAAJ&hl=en" target="_blank" rel="noopener noreferrer">Google Scholar</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</nav>
+<p class="crumb"><a href="tutorial.html">&larr; All tutorials</a></p>
+<script src="tutorial-nav.js"></script>
+    <h1 id="gradient-clipping">Gradient Clipping: Capping Exploding Gradients</h1>
+    <p class="dek">Rescale a gradient that suddenly grows too long, so one bad batch cannot throw the weights far away.</p>
+<nav class="sermap" aria-label="The optimizers series">
+  <ol class="sm-series">
+    <li><a href="optimizers.html">SGD, Momentum and Nesterov</a></li>
+    <li><a href="adaptive-optimizers.html">Adaptive Optimizers</a></li>
+    <li><a href="optimizers-in-practice.html">Optimizers in Practice</a></li>
+  </ol>
+  <div class="sm-flow"><ol>
+    <li><a href="adamw.html">AdamW</a></li>
+    <li><a href="sam.html">SAM</a></li>
+    <li><a href="lr-schedules.html">Learning Rate Schedules</a></li>
+    <li><span class="sm-here" aria-current="page">Gradient Clipping</span></li>
+  </ol></div>
+</nav>
+<nav class="prereq" aria-label="Before you start">
+  <span class="prereq-label">Before you start</span>
+  <a class="prereq-chip" href="rnn.html#vanishing-gradients" title="RNN Basics, section 2.1" aria-label="Exploding gradients, taught in RNN Basics, section 2.1">Exploding gradients</a>
+  <a class="prereq-chip" href="linear-algebra.html" title="Vectors and Matrices" aria-label="Vector length, taught in Vectors and Matrices">Vector length</a>
+  <a class="prereq-chip" href="backpropagation.html#walkthrough" title="Backpropagation" aria-label="Backpropagation, taught in Backpropagation">Backpropagation</a>
+</nav>
+    <p class="tabs-label">On this page</p>
+    <div class="tab-strip">
+        <a class="tab-chip" href="#problem"><span class="secnum">1</span> What clipping fixes</a>
+        <a class="tab-chip" href="#two-ways"><span class="secnum">2</span> Norm clipping and value clipping</a>
+        <a class="tab-chip" href="#walkthrough"><span class="secnum">3</span> One clipped step, line by line</a>
+        <a class="tab-chip" href="#clip-tool"><span class="secnum">4</span> Clipping a stream of gradients</a>
+        <a class="tab-chip" href="#threshold"><span class="secnum">5</span> Choosing the threshold</a>
+        <a class="tab-chip" href="#when"><span class="secnum">6</span> When to use it</a>
+        <a class="tab-chip" href="#state"><span class="secnum">7</span> When it runs and what it carries</a>
+        <a class="tab-chip" href="#pytorch"><span class="secnum">8</span> Clipping in PyTorch</a>
+        <a class="tab-chip" href="#multitask"><span class="secnum">9</span> Clipping in a multitask model</a>
+        <a class="tab-chip" href="#failures"><span class="secnum">10</span> Failure modes and tips</a>
+        <a class="tab-chip" href="#references"><span class="secnum">11</span> References</a>
+    </div>
+
+    <h2 id="problem"><span class="secnum">1</span> What clipping fixes</h2>
+<p>An exploding gradient is a gradient that suddenly becomes very long, usually from one unlucky batch or one steep cliff in the loss surface. The optimizer&#8217;s step is proportional to it, so a single such step can throw the weights far from where training was going, and the loss jumps or turns into NaN (not a number).</p>
+<p>Pascanu, Mikolov and Bengio (2013) showed why this happens in recurrent networks: backpropagation through time multiplies the gradient by the recurrent weight matrix once per time step, so it can grow exponentially, and explosion needs the matrix&#8217;s largest singular value to be above one for a tanh network (in general, above one over the activation&#8217;s largest slope) (<a href="rnn.html#vanishing-gradients">RNN Basics, section 2.1</a>). Their fix, rescaling any gradient longer than a threshold, became standard far beyond RNNs: transformers and large language models clip every step; LLaMA clipped at 1.0 (Touvron and others 2023).</p>
+<figure class="figure mtd-fig" id="optClipExplode"><svg role="img" aria-label="Gradient length over training: it stays small and steady, then one step it shoots up far above the rest, an exploding gradient." class="mtd-svg" viewBox="0 0 340 230" style="max-width:480px"><text class="mtd-halo" x="8" y="20" style="font-size:15.5px;font-weight:700;fill:#2c3e50">Gradient length over training</text><line x1="40" y1="196" x2="330" y2="196" style="stroke:#7f8c8d;stroke-width:1.5px"/><line x1="40" y1="30" x2="40" y2="196" style="stroke:#7f8c8d;stroke-width:1.5px"/><polyline points="40.0,172.0 41.5,170.4 42.9,168.9 44.4,167.5 45.8,166.3 47.2,165.3 48.7,164.5 50.1,164.1 51.6,164.0 53.0,164.2 54.5,164.7 56.0,165.5 57.4,166.6 58.9,167.9 60.3,169.3 61.8,170.9 63.2,172.5 64.7,174.0 66.1,175.5 67.5,176.9 69.0,178.1 70.5,179.0 71.9,179.6 73.3,179.9 74.8,180.0 76.2,179.7 77.7,179.1 79.2,178.2 80.6,177.1 82.0,175.7 83.5,174.2 85.0,172.7 86.4,171.1 87.8,169.5 89.3,168.0 90.8,166.7 92.2,165.7 93.7,164.8 95.1,164.3 96.6,164.0 98.0,164.1 99.4,164.5 100.9,165.2 102.3,166.1 103.8,167.3 105.2,168.7 106.7,170.2 108.1,171.8 109.6,173.4 111.0,174.9 112.5,176.4 114.0,177.6 115.4,178.6 116.9,179.4 118.3,179.8 119.8,180.0 121.2,179.8 122.6,179.4 124.1,178.6 125.5,177.5 127.0,176.3 128.4,174.9 129.9,173.3 131.3,171.7 132.8,170.1 134.2,168.6 135.7,167.3 137.2,166.1 138.6,165.1 140.1,164.5 141.5,164.1 142.9,164.0 144.4,164.3 145.8,164.8 147.3,165.7 148.8,166.8 150.2,168.1 151.7,169.6 153.1,171.1 154.6,172.7 156.0,174.3 157.4,175.8 158.9,177.1 160.3,178.2 161.8,179.1 163.2,179.7 164.7,180.0 166.2,179.9 167.6,179.6 169.1,178.9 170.5,178.0 172.0,176.8 173.4,175.5 174.8,174.0 176.3,172.4 177.8,170.8 179.2,169.3 180.7,167.8 182.1,166.5 183.6,165.5 185.0,164.7 186.4,164.2 187.9,164.0 189.3,164.1 190.8,164.6 192.2,165.3 193.7,166.3 195.2,167.5 196.6,168.9 198.1,170.5 199.5,172.1 201.0,173.7 202.4,175.2 203.8,176.6 205.3,177.8 206.8,178.8 208.2,179.5 209.6,179.9 211.1,179.7 212.5,177.9 214.0,170.3 215.4,148.2 216.9,105.4 218.3,55.0 219.8,30.6 221.2,52.0 222.7,99.6 224.2,139.7 225.6,159.4 227.1,165.2 228.5,165.6 230.0,165.0 231.4,164.4 232.9,164.0 234.3,164.0 235.8,164.3 237.2,165.0 238.7,165.9 240.1,167.0 241.5,168.3 243.0,169.8 244.4,171.4 245.9,173.0 247.3,174.6 248.8,176.0 250.2,177.3 251.7,178.4 253.2,179.2 254.6,179.8 256.1,180.0 257.5,179.9 258.9,179.5 260.4,178.8 261.9,177.8 263.3,176.6 264.8,175.2 266.2,173.7 267.6,172.1 269.1,170.5 270.6,169.0 272.0,167.6 273.5,166.4 274.9,165.3 276.4,164.6 277.8,164.1 279.2,164.0 280.7,164.2 282.1,164.7 283.6,165.5 285.0,166.5 286.5,167.8 287.9,169.2 289.4,170.7 290.9,172.3 292.3,173.9 293.8,175.4 295.2,176.8 296.6,178.0 298.1,178.9 299.6,179.6 301.0,179.9 302.4,180.0 303.9,179.7 305.4,179.1 306.8,178.3 308.2,177.1 309.7,175.8 311.2,174.4 312.6,172.8 314.1,171.2 315.5,169.6 316.9,168.2 318.4,166.8 319.8,165.7 321.3,164.9 322.8,164.3 324.2,164.0 325.6,164.1 327.1,164.4 328.6,165.1 330.0,166.0" style="fill:none;stroke:#c0392b;stroke-width:2.6px"/><text class="mtd-halo" x="226" y="56" style="font-size:15.5px;fill:#c0392b">one bad batch</text><text class="mtd-halo" x="330" y="218" text-anchor="end" style="font-size:15.5px;fill:#555">training steps; illustrative</text></svg><figcaption class="caption"><span class="fignum">Figure 1.</span> Without a cap, the step after the spike is as long as the spike.</figcaption></figure>
+    <h2 id="two-ways"><span class="secnum">2</span> Norm clipping and value clipping</h2>
+<div class="eq-card" id="clipEq">
+<div class="eq-what">Two ways to cap a gradient</div>
+<div class="eq-line eq-active" data-eqline="0">\({\displaystyle \htmlStyle{color:#c0392b}{\hat g} \leftarrow \htmlStyle{color:#c0392b}{\hat g}\cdot \min\!\Big(1,\ \frac{\htmlStyle{color:#a04000}{\tau}}{\lVert \htmlStyle{color:#c0392b}{\hat g}\rVert}\Big)}\)</div>
+<div class="eq-why eq-active" data-eqline="0">Norm clipping: if the gradient vector <span class="eqt" style="color:#c0392b"><var>\(\hat g\)</var></span> is longer than the threshold <span class="eqt" style="color:#a04000"><var>\(\tau\)</var></span> (tau), shrink the whole vector so its length is exactly <span class="eqt" style="color:#a04000"><var>\(\tau\)</var></span>; if it is shorter, the minimum picks one and nothing changes. Every coordinate is scaled by the same factor, so the direction is kept and only the length is capped (<a href="linear-algebra.html">Vectors and Matrices</a>).</div>
+<div class="eq-line eq-active" data-eqline="1">\({\displaystyle \htmlStyle{color:#c0392b}{g_i} \leftarrow \operatorname{clip}\big(\htmlStyle{color:#c0392b}{g_i},\ -\htmlStyle{color:#a04000}{\tau},\ \htmlStyle{color:#a04000}{\tau}\big)}\)</div>
+<div class="eq-why eq-active" data-eqline="1">Value clipping: cap each coordinate <span class="eqt" style="color:#c0392b"><var>\(g_i\)</var></span> separately to lie between <span class="eqt" style="color:#a04000"><var>\(-\tau\)</var></span> and <span class="eqt" style="color:#a04000"><var>\(\tau\)</var></span>. Large coordinates are cut while small ones are not, so the vector&#8217;s direction turns toward the corners of a box. It is simpler but changes where the step points.</div>
+<div class="eq-line eq-active" data-eqline="2">\({\displaystyle \lVert \htmlStyle{color:#c0392b}{g}\rVert = \sqrt{\sum_k \lVert \htmlStyle{color:#c0392b}{g^{(k)}}\rVert^{2}}}\)</div>
+<div class="eq-why eq-active" data-eqline="2">The length used for norm clipping is the global norm: the square root of the sum of every parameter tensor&#8217;s squared length, so the whole model&#8217;s gradient is treated as one long vector. Clipping per tensor instead would scale layers differently and again change the direction.</div>
+</div>
+    <h2 id="walkthrough"><span class="secnum">3</span> One clipped step, line by line</h2>
+<p>Step through what <code>clip_grad_norm_</code> does to one exploding gradient.</p>
+<div class="demo" id="clipWalk">
+  <div class="demo-controls">
+    <button type="button" class="bv-btn" id="clipWalkPrev">Prev</button>
+    <button type="button" class="bv-btn" id="clipWalkNext">Next</button>
+    <button type="button" class="bv-btn" id="clipWalkReset">Reset</button>
+    <span class="walk-lbl" id="clipWalkLbl">Step 1</span>
+  </div>
+  <svg id="clipWalkSvg" class="mtd-svg tool-svg" viewBox="0 0 340 250" role="img" aria-label="A gradient arrow longer than the dashed circle of radius tau, then the same arrow scaled to end on the circle, then the step."></svg>
+  <p class="demo-read" id="clipWalkRead" aria-live="polite"></p>
+  <p class="caption"><span class="fignum">Figure 2.</span> Two coordinates of a gradient; shape only.</p>
+<div class="eq-card eq-stepped" id="clipWalkCard">
+<div class="eq-what">This step, line by line</div>
+<div class="eq-line eq-active" data-eqline="0">\({\displaystyle \lVert \htmlStyle{color:#c0392b}{g}\rVert = \sqrt{\sum_k \lVert \htmlStyle{color:#c0392b}{g^{(k)}}\rVert^{2}}}\)</div>
+<div class="eq-why eq-active" data-eqline="0">Measure the length of the whole gradient.</div>
+<div class="eq-line" data-eqline="1">\({\displaystyle \htmlStyle{color:#c0392b}{\hat g} \leftarrow \htmlStyle{color:#c0392b}{\hat g}\cdot \min\!\Big(1,\ \frac{\htmlStyle{color:#a04000}{\tau}}{\lVert \htmlStyle{color:#c0392b}{\hat g}\rVert}\Big)}\)</div>
+<div class="eq-why" data-eqline="1">If it is longer than tau, scale it down to tau; then step.</div>
+</div>
+</div>
+    <h2 id="clip-tool"><span class="secnum">4</span> Clipping a stream of gradients</h2>
+<p>The tool clips a stream of gradients with a few bad batches. Lower the threshold, then switch from norm to value clipping and watch the largest spike&#8217;s arrow.</p>
+<div class="demo" id="optClipFig">
+  <div class="demo-controls">
+    <label for="cgTau">threshold &#964;: <span id="cgTauVal">medium</span></label>
+    <span class="sl-row"><span class="sl-end">low</span><input type="range" id="cgTau" min="0.2" max="1.6" step="0.05" value="0.7" aria-label="Clipping threshold tau, low to high"><span class="sl-end">high</span></span>
+    <span class="seg" id="cgSeg"><button type="button" class="bv-btn" data-v="norm">clip the norm</button><button type="button" class="bv-btn" data-v="value">clip each value</button></span>
+  </div>
+  <svg id="cgSvg" class="mtd-svg tool-svg" viewBox="0 0 340 330" role="img" aria-label="Top: gradient length over training steps with a few spikes, a line at tau and the clipped lengths. Bottom: the largest spike's gradient as an arrow, with the circle or box of size tau and the clipped arrow."></svg>
+  <p class="demo-read" id="cgRead" aria-live="polite"></p>
+  <p class="caption"><span class="fignum">Figure 3.</span> Two-coordinate gradients with occasional bad batches. Illustrative.</p>
+</div>
+    <h2 id="threshold"><span class="secnum">5</span> Choosing the threshold</h2>
+<p>The threshold should sit above the gradient lengths of ordinary batches and below the spikes, so it only acts on the rare bad step. Too high and it never fires; too low and it clips every step, which shortens every step like a smaller learning rate and slows training. Pascanu and others suggest setting <span class="eqt" style="color:#a04000"><var>\(\tau\)</var></span> from the average norm over a large number of updates, and found training not very sensitive to the exact value. In practice, log the global norm, which <code>clip_grad_norm_</code> returns, for a short run and set <span class="eqt" style="color:#a04000"><var>\(\tau\)</var></span> a little above its typical value. Mikolov (2012) had already clipped gradients to train recurrent language models. Large language model recipes commonly use a norm of 1.0 with AdamW.</p>
+    <h2 id="when"><span class="secnum">6</span> When to use it</h2>
+<p>Clip whenever a single bad batch can wreck training: recurrent networks, which explode through time; large transformers and language models, where rare loss spikes are a known risk; reinforcement learning, where targets jump; and mixed-precision runs. It costs almost nothing, so most large-model recipes turn it on by default. It does not fix a learning rate that is too high on every step; if it clips nearly every step, lower the rate instead.</p>
+    <h2 id="state"><span class="secnum">7</span> When it runs and what it carries</h2>
+<p>Clipping sits between <code>backward()</code> and <code>opt.step()</code>, once per training step, and carries no state: it reads the gradients, rescales them in place and is done. With mixed precision the gradients are still multiplied by the loss scale at that point, so they must be unscaled first, or the threshold is compared with the wrong length.</p>
+    <h2 id="pytorch"><span class="secnum">8</span> Clipping in PyTorch</h2>
+<pre class="cs" data-cs="5-9,10-12,13,14"><code class="language-python">import torch
+import torch.nn.functional as F
+from torch.nn.utils import clip_grad_norm_
+from torchvision import datasets, models, transforms
+data = datasets.CIFAR10('.', download=True,
+    transform=transforms.ToTensor())
+loader = torch.utils.data.DataLoader(data, batch_size=128)
+net = models.resnet18(num_classes=10)
+opt = torch.optim.SGD(net.parameters(), lr=0.1)
+x, y = next(iter(loader))
+loss = F.cross_entropy(net(x), y)
+loss.backward()
+clip_grad_norm_(net.parameters(), 1.0)
+opt.step()  # after the clip</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>A ResNet-18 for the ten CIFAR-10 image classes, its optimizer, and batches of 128 images.</li>
+  <li><span class="cs-n">2</span>One batch, its cross-entropy loss (the standard classification loss) and its gradients.</li>
+  <li><span class="cs-n">3</span>Gradient length capped at <span class="eqt" style="color:#a04000"><var>\(\tau\)</var></span>, the norm clipping line.</li>
+  <li><span class="cs-n">4</span>Steps with the clipped gradient.</li>
+</ol>
+<pre class="cs" data-cs="2-3,4,5-9"><code class="language-python">from torch.nn.utils import clip_grad_norm_, clip_grad_value_
+norm = clip_grad_norm_(net.parameters(), max_norm=1.0)  # returns the norm before clipping
+print(f"grad norm {norm.item():.3f}")                    # log it to choose the threshold
+clip_grad_value_(net.parameters(), clip_value=0.5)       # or cap each value instead
+scaler = torch.amp.GradScaler()                          # mixed precision:
+scaler.scale(loss).backward()
+scaler.unscale_(opt)                                     # unscale before measuring
+clip_grad_norm_(net.parameters(), 1.0)
+scaler.step(opt); scaler.update()</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>Norm clipping also returns the length before clipping, the number to log.</li>
+  <li><span class="cs-n">2</span>Value clipping caps each coordinate, the second line of the card.</li>
+  <li><span class="cs-n">3</span>With mixed precision, unscale the gradients before clipping them.</li>
+</ol>
+<table class="datatable knobs tdc-stack">
+  <caption><code>clip_grad_norm_</code> has no default for <code>max_norm</code>.</caption>
+  <thead><tr><th>knob</th><th>raise it</th><th>lower it</th><th>default</th></tr></thead>
+  <tbody>
+    <tr><td><span class="eqt" style="color:#a04000"><var>\(\tau\)</var></span> (<code>max_norm</code>)</td><td data-label="raise it">clips less often; above the largest norm, never</td><td data-label="lower it">shortens more steps, like a smaller rate</td><td data-label="default">none, required; LLaMA used 1.0</td></tr>
+    <tr><td><code>norm_type</code></td><td data-label="raise it">other norms (<code>inf</code> uses the largest coordinate)</td><td data-label="lower it"></td><td data-label="default">2, the length</td></tr>
+  </tbody>
+</table>
+    <h2 id="multitask"><span class="secnum">9</span> Clipping in a multitask model</h2>
+<p>With several task losses, clipping the summed gradient caps the total but lets one exploding task dominate the direction up to the cap; clipping before or after a gradient balancer changes what is capped. That interaction is covered in <a href="multitask-training-loop.html#clipping">Gradient Balancing Inside the Training Loop, section 10</a>, and the through-time case in <a href="rnn.html#clipping-gradients">RNN Basics, section 2.2</a>.</p>
+    <h2 id="failures"><span class="secnum">10</span> Failure modes and tips</h2>
+<table class="datatable tdc-stack">
+  <caption>Clipping fails quietly, so log the norm.</caption>
+  <thead><tr><th>symptom</th><th>cause</th><th>fix</th></tr></thead>
+  <tbody>
+    <tr><td>training is slower than without clipping</td><td data-label="cause"><span class="eqt" style="color:#a04000"><var>\(\tau\)</var></span> below the typical norm, so every step is clipped</td><td data-label="fix">raise <span class="eqt" style="color:#a04000"><var>\(\tau\)</var></span> above the logged typical norm</td></tr>
+    <tr><td>spikes still reach the weights</td><td data-label="cause">clip called after <code>opt.step()</code></td><td data-label="fix">clip between <code>backward()</code> and <code>opt.step()</code> (<a href="optimizers-in-practice.html#tips">Optimizers in Practice: failures in the loop</a>)</td></tr>
+    <tr><td>clipping fires on every step under mixed precision</td><td data-label="cause">gradients still carry the loss scale</td><td data-label="fix">call <code>scaler.unscale_(opt)</code> before clipping</td></tr>
+    <tr><td>steps turn in odd directions</td><td data-label="cause">value clipping, or clipping each tensor separately</td><td data-label="fix">clip the global norm</td></tr>
+    <tr><td>NaN loss despite clipping</td><td data-label="cause">the gradient is already NaN or infinite, which no rescale fixes</td><td data-label="fix">find the source (a log of zero, a large rate); skip that step</td></tr>
+  </tbody>
+</table>
+    <h2 id="references"><span class="secnum">11</span> References</h2>
+<ol class="brefs">
+  <li>Pascanu, R., Mikolov, T., and Bengio, Y. (2013). On the difficulty of training recurrent neural networks. ICML. arXiv:1211.5063.</li>
+  <li>Mikolov, T. (2012). Statistical language models based on neural networks. PhD thesis, Brno University of Technology.</li>
+  <li>Touvron, H., and others (2023). LLaMA: open and efficient foundation language models. arXiv:2302.13971.</li>
+  <li>PyTorch documentation, torch.nn.utils.clip_grad_norm_, clip_grad_value_ and torch.amp.GradScaler.</li>
+</ol>
+<script>
+(function () {
+  var K = window.OPK, CX = 120, CY = 130, R = 60;
+  var g = [150, -62];
+  function draw(s) {
+    var h = '<circle cx="' + CX + '" cy="' + CY + '" r="' + R + '" style="fill:#a04000;fill-opacity:.07;stroke:#a04000;stroke-width:2px;stroke-dasharray:6 4"/>';
+    h += K.tx(CX - R - 4, CY - R + 4, 'length \u03c4', 15.5, 'start', '#a04000', 1);
+    h += K.ci(CX, CY, 4, '#2c3e50');
+    var L = Math.sqrt(g[0] * g[0] + g[1] * g[1]), f = s >= 2 ? R / L : 1;
+    var tx = CX + g[0] * f, ty = CY + g[1] * f;
+    if (s >= 2) h += K.ln(CX, CY, CX + g[0], CY + g[1], '#c0392b', 2, '5 4');
+    h += K.ln(CX, CY, tx, ty, '#c0392b', 3.5) + K.edge(tx, ty, CX, CY, '#c0392b');
+    if (s === 0) h += K.tx(CX + g[0] + 6, CY + g[1] - 6, 'gradient', 15.5, 'start', '#c0392b', 1);
+    if (s === 1) h += K.ln(CX, CY + 40, CX + L, CY + 40, '#2c3e50', 2) + K.tx(CX + L, CY + 62, 'longer than \u03c4', 15.5, 'end', '#2c3e50', 1);
+    if (s >= 2) h += K.tx(tx + 8, ty + 18, 'same direction', 15.5, 'start', '#c0392b', 1);
+    if (s >= 3) h += K.ln(CX, CY, CX - (tx - CX) * 0.9, CY - (ty - CY) * 0.9, '#7d3c98', 3) + K.edge(CX - (tx - CX) * 0.9, CY - (ty - CY) * 0.9, CX, CY, '#7d3c98') + K.tx(CX - (tx - CX) * 0.9 - 6, CY - (ty - CY) * 0.9 - 8, 'step', 15.5, 'end', '#7d3c98', 1);
+    return h;
+  }
+  window.OPWALK('clipWalk', 4, draw, [
+    'After <code>backward()</code>, one bad batch has produced a very long gradient.',
+    'Measure its global length and compare it with \\(\\tau\\): it is longer.',
+    'Scale every coordinate by the same factor, so the arrow ends on the circle of radius \\(\\tau\\). The direction does not change.',
+    'The optimizer steps against the capped gradient, a normal-size step in the same direction.'
+  ], [0, 0, 1, 1]);
+})();
+</script>
+<script>
+(function () {
+  var svg = document.getElementById('cgSvg'); if (!svg) return;
+  var K = window.OPK, sl = document.getElementById('cgTau'), seg = document.getElementById('cgSeg'), rd = document.getElementById('cgRead');
+  var mode = 'norm', N = 120, X0 = 40, X1 = 332;
+  function rng(seed) { var a = seed >>> 0; return function () { a = (a + 0x6D2B79F5) >>> 0; var t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+  var G = (function () { var r = rng(5), o = []; for (var i = 0; i < N; i++) { var big = (i === 31 || i === 77 || i === 98) ? (i === 77 ? 3.4 : 2.4) : 1; var ang = r() * 6.283; var len = (0.35 + 0.35 * r()) * big; if (big > 1) ang = 0.55 + (i === 77 ? -0.25 : 0.7); o.push([len * Math.cos(ang), len * Math.sin(ang)]); } return o; })();
+  function clip(g, tau) {
+    if (mode === 'norm') { var L = Math.hypot(g[0], g[1]), f = Math.min(1, tau / L); return [g[0] * f, g[1] * f]; }
+    return [Math.max(-tau, Math.min(tau, g[0])), Math.max(-tau, Math.min(tau, g[1]))];
+  }
+  function draw() {
+    K.seg(seg, mode);
+    var tau = parseFloat(sl.value), h = K.tx(4, 16, 'gradient length', 15.5, 'start', '#555');
+    var tv = document.getElementById('cgTauVal'); if (tv) tv.textContent = tau < 0.55 ? 'low' : tau < 1.05 ? 'medium' : 'high';
+    function X(t) { return X0 + t / (N - 1) * (X1 - X0); }
+    function Y(l) { return 124 - Math.min(3.6, l) / 3.6 * 100; }
+    h += K.ln(X0, 124, X1, 124, '#7f8c8d', 1.5) + K.ln(X0, 22, X0, 124, '#7f8c8d', 1.5);
+    var a = [], b = [], big = 0;
+    for (var i = 0; i < N; i++) { var L = Math.hypot(G[i][0], G[i][1]), c = clip(G[i], tau); a.push([X(i), Y(L)]); b.push([X(i), Y(Math.hypot(c[0], c[1]))]); if (L > Math.hypot(G[big][0], G[big][1])) big = i; }
+    h += K.pl(a, '#c0392b', 1.6, '4 3', 0.7) + K.pl(b, '#1f618d', 2.6);
+    h += K.ln(X0, Y(tau), X1, Y(tau), '#a04000', 1.5, '6 4') + K.tx(X0 - 4, Y(tau) + 5, '\u03c4', 15.5, 'end', '#a04000', 1);
+    h += K.tx(X1, 144, 'training steps', 15.5, 'end', '#555');
+    /* vector panel for the largest spike */
+    /* zoomed so the threshold always spans R px: the arrows stay long and a turn is easy to see */
+    var CX = 24, CY = 318, R = 100, S = R / tau, g = G[big], c = clip(g, tau);
+    h += K.tx(4, 170, 'largest spike', 15.5, 'start', '#555');
+    h += K.ln(CX, CY, CX + 166, CY, '#d0d4d9', 1) + K.ln(CX, CY, CX, CY - 128, '#d0d4d9', 1);
+    if (mode === 'norm') h += '<path d="M' + CX + ' ' + CY + ' L' + (CX + R) + ' ' + CY + ' A' + R + ' ' + R + ' 0 0 0 ' + CX + ' ' + (CY - R) + ' Z" style="fill:#a04000;fill-opacity:.08;stroke:#a04000;stroke-width:1.5px;stroke-dasharray:5 4"/>';
+    else h += K.rc(CX, CY - R, R, R, 'rgba(160,64,0,.08)', '#a04000');
+    var gl = Math.hypot(g[0], g[1]) * S, gk = Math.min(1, 150 / gl);
+    h += K.ln(CX, CY, CX + g[0] * S * gk, CY - g[1] * S * gk, '#c0392b', 2.4, '6 4') + K.edge(CX + g[0] * S * gk, CY - g[1] * S * gk, CX, CY, '#c0392b');
+    h += K.ln(CX, CY, CX + c[0] * S, CY - c[1] * S, '#1f618d', 4) + K.edge(CX + c[0] * S, CY - c[1] * S, CX, CY, '#1f618d');
+    h += K.ln(196, 192, 218, 192, '#c0392b', 2, '5 4') + K.tx(222, 198, 'raw', 15.5, 'start', '#c0392b');
+    h += K.ln(196, 218, 218, 218, '#1f618d', 3.2) + K.tx(222, 224, 'clipped', 15.5, 'start', '#1f618d');
+    h += K.tx(196, 250, mode === 'norm' ? 'circle: length \u03c4' : 'box: each value \u00b1\u03c4', 15.5, 'start', '#a04000');
+    svg.innerHTML = h;
+    var a1 = Math.atan2(g[1], g[0]), a2 = Math.atan2(c[1], c[0]), turned = Math.abs(a1 - a2) > 0.02;
+    rd.innerHTML = 'Direction kept: <strong>' + (turned ? 'no' : 'yes') + '</strong>.' + (turned ? ' Value clipping cut the larger coordinate more, so the step turned.' : '');
+  }
+  sl.addEventListener('input', draw);
+  Array.prototype.forEach.call(seg.querySelectorAll('button'), function (b) { b.addEventListener('click', function () { mode = b.getAttribute('data-v'); draw(); }); });
+  draw();
+})();
+</script>
+            <script>
+        (function () {
+            var nav = document.querySelector('.topnav');
+            function onNavScroll() {
+                nav.classList.toggle('scrolled', window.scrollY > 4);
+            }
+            window.addEventListener('scroll', onNavScroll, { passive: true });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            window.addEventListener('resize', function () {
+                if (window.innerWidth > 768) {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            onNavScroll();
+            var toggle = document.getElementById('navToggle');
+            var panel = document.getElementById('navPanel');
+            if (toggle && panel) {
+                toggle.addEventListener('click', function () {
+                    var open = panel.classList.toggle('open');
+                    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                });
+                panel.addEventListener('click', function (e) {
+                    if (e.target && e.target.classList && e.target.classList.contains('panel-link')) {
+                        panel.classList.remove('open');
+                        toggle.setAttribute('aria-expanded', 'false');
+                    }
+                });
+            }
+            var links = Array.prototype.slice.call(document.querySelectorAll('.tab-strip a.tab-chip[href^="#"]'));
+            if (!links.length) return;
+            var tabMap = {};
+            links.forEach(function (a) { tabMap[a.getAttribute('href').slice(1)] = a; });
+            var current = null;
+            function centerTab(tab) {
+                var strip = tab.parentElement;
+                if (!strip || !strip.classList.contains('tab-strip')) return;
+                var sr = strip.getBoundingClientRect();
+                var pr = tab.getBoundingClientRect();
+                strip.scrollLeft += (pr.width >= sr.width) ? (pr.left - sr.left) : (pr.left - sr.left) - (sr.width - pr.width) / 2;
+            }
+            function setActive(id) {
+                if (!tabMap[id] || id === current) return;
+                current = id;
+                links.forEach(function (a) {
+                    a.classList.toggle('active', a.getAttribute('href') === '#' + id);
+                });
+                centerTab(tabMap[id]);
+            }
+            links.forEach(function (a) {
+                a.addEventListener('click', function () {
+                    setActive(a.getAttribute('href').slice(1));
+                });
+            });
+            setActive(links[0].getAttribute('href').slice(1));
+            if ('IntersectionObserver' in window) {
+                var obs = new IntersectionObserver(function (entries) {
+                    entries.forEach(function (en) {
+                        if (en.isIntersecting) setActive(en.target.id);
+                    });
+                }, { rootMargin: '-35% 0px -55% 0px' });
+                Object.keys(tabMap).forEach(function (id) {
+                    var el = document.getElementById(id);
+                    if (el) obs.observe(el);
+                });
+                window.addEventListener('scroll', function () {
+                    if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) {
+                        setActive(links[links.length - 1].getAttribute('href').slice(1));
+                    }
+                }, { passive: true });
+            }
+            window.addEventListener('load', function () {
+                var act = document.querySelector('.tab-strip a.active');
+                if (act) centerTab(act);
+            });
+        })();
+    </script>
+<script>
+/* P80 code sections (CODE-SECTIONS.md) */
+(function(){
+  var C=['121,184,255','255,171,112','133,232,157','210,168,255','255,161,152','118,227,234'];
+  function lay(pre){
+    var code=pre.querySelector('code'); if(!code) return;
+    var lh=parseFloat(getComputedStyle(code).lineHeight);
+    var pt=parseFloat(getComputedStyle(pre).paddingTop);
+    var old=pre.querySelectorAll('.cs-g'); for(var j=0;j<old.length;j++) pre.removeChild(old[j]);
+    var imgs=[],sizes=[],pos=[];
+    (pre.getAttribute('data-cs')||'').split(',').forEach(function(r,i){
+      var m=r.trim().match(/^(\d+)(?:-(\d+))?$/); if(!m) return;
+      var a=+m[1],b=+(m[2]||m[1]),c=C[i%C.length],top=pt+(a-1)*lh,h=(b-a+1)*lh;
+      imgs.push('linear-gradient(rgba('+c+',.55),rgba('+c+',.55))','linear-gradient(rgba('+c+',.13),rgba('+c+',.13))');
+      sizes.push('3px '+h+'px','100% '+h+'px'); pos.push('0 '+top+'px','0 '+top+'px');
+      var g=document.createElement('span'); g.className='cs-g'; g.setAttribute('aria-hidden','true');
+      g.setAttribute('data-n',String(i+1)); g.style.top=(top+(lh-11)/2)+'px'; g.style.color='rgb('+c+')';
+      pre.insertBefore(g,code);
+    });
+    pre.style.backgroundImage=imgs.join(','); pre.style.backgroundSize=sizes.join(',');
+    pre.style.backgroundPosition=pos.join(','); pre.style.backgroundRepeat='no-repeat';
+  }
+  function all(){ var p=document.querySelectorAll('pre.cs'); for(var i=0;i<p.length;i++) lay(p[i]); }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',all); else all();
+  window.addEventListener('load',all);
+  window.addEventListener('resize',all);
+  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(all);
+})();
+</script>
+</body>
+</html>
+

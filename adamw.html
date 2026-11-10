@@ -1,0 +1,1234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AdamW: Decoupled Weight Decay for Adam</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem;
+      line-height: 1.6;
+      color: #333;
+    }
+    h1, h2, h3, h4 {
+      color: #2c3e50; /* Darker shade for better contrast */
+      margin-top: 1.5em;
+      margin-bottom: 0.5em;
+    }
+    h1 { font-size: 2.5em; border-bottom: 2px solid #3498db; padding-bottom: 0.3em;}
+    .dek { font-size: 1.15em; color: #555; margin-top: 0.2em; }
+    h2 { font-size: 2em; border-bottom: 1px solid #bdc3c7; padding-bottom: 0.2em;}
+    h3 { font-size: 1.5em; }
+    h4 { font-size: 1.2em; color: #555;}
+
+    /* Keep wide display equations from overflowing on small screens */
+
+    /* Shared site nav (matches index.html topnav) */
+    body { padding-top: calc(64px + 1.5rem); }
+    h1, h2, h3, .demo[id], figure[id] { scroll-margin-top: 84px; }
+    .topnav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        z-index: 1000;
+        background: rgba(255, 255, 255, 0.65);
+        backdrop-filter: blur(18px) saturate(1.5);
+        -webkit-backdrop-filter: blur(18px) saturate(1.5);
+        border-bottom: 1px solid transparent;
+        transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+    .topnav.scrolled {
+        background: rgba(255, 255, 255, 0.88);
+        border-bottom-color: #dee2e6;
+        box-shadow: 0 6px 24px rgba(33, 37, 41, 0.07);
+    }
+    .nav-inner {
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 0 1.5rem;
+        height: 64px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+    .wordmark {
+        font-weight: 700;
+        color: #212529;
+        text-decoration: none;
+        font-size: 1.05rem;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+    }
+    .nav-links {
+        display: flex;
+        gap: 2px;
+        align-items: center;
+    }
+    .nav-links a {
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        font-size: 0.95rem;
+        padding: 8px 14px;
+        border-radius: 999px;
+        transition: color 0.18s ease, background-color 0.18s ease;
+    }
+    .nav-links a:hover {
+        color: #007bff;
+        background-color: #e7f1ff;
+    }
+    .nav-links a.active {
+        color: #007bff;
+        background-color: #e7f1ff;
+        font-weight: 600;
+    }
+    .nav-links a:focus-visible,
+    .wordmark:focus-visible,
+    .nav-toggle:focus-visible,
+    .panel-link:focus-visible,
+    .panel-social a:focus-visible {
+        outline: 2px solid #007bff;
+        outline-offset: 2px;
+    }
+    @media (hover: hover) {
+        .nav-toggle:hover { background-color: #e7f1ff; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .topnav,
+        .nav-links a,
+        .nav-toggle span,
+        .nav-panel,
+        .nav-panel a.panel-link {
+            transition: none;
+        }
+    }
+    @media (hover: hover) {
+        .nav-toggle:hover { background-color: #e7f1ff; }
+    }
+    .nav-toggle {
+        display: none;
+        width: 42px;
+        height: 42px;
+        padding: 0;
+        background: none;
+        border: 0;
+        border-radius: 10px;
+        cursor: pointer;
+        flex: 0 0 auto;
+    }
+    .nav-panel {
+        display: grid;
+        grid-template-rows: 0fr;
+        visibility: hidden;
+        transition: grid-template-rows 0.32s ease, visibility 0s linear 0.32s;
+    }
+    .nav-panel.open {
+        grid-template-rows: 1fr;
+        visibility: visible;
+        transition: grid-template-rows 0.32s ease, visibility 0s;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner {
+        min-height: 0;
+        overflow: hidden;
+    }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link:hover {
+        background-color: #e7f1ff;
+        color: #007bff;
+    }
+    .nav-panel a.panel-link.active {
+        color: #007bff;
+        font-weight: 600;
+        background-color: #e7f1ff;
+    }
+    .panel-social a:hover {
+        border-color: #007bff;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner {
+        min-height: 0;
+        overflow: hidden;
+    }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link:hover {
+        background-color: #e7f1ff;
+        color: #007bff;
+    }
+    .nav-panel a.panel-link.active {
+        color: #007bff;
+        font-weight: 600;
+        background-color: #e7f1ff;
+    }
+    .panel-social a:hover {
+        border-color: #007bff;
+    }
+        .crumb { margin: 0 0 0.8em; }
+        .crumb a {
+            display: inline-block;
+            padding: 4px 14px;
+            border: 1px solid #dee2e6;
+            border-radius: 999px;
+            background: #f8f9fa;
+            color: #0056b3;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+        .crumb a:hover { border-color: #007bff; color: #007bff; }
+    .nav-panel a.panel-link {
+        display: flex;
+        align-items: center;
+        padding: 0.8rem 0.75rem;
+        margin: 0 0.25rem;
+        border-radius: 10px;
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        min-height: 48px;
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+    .panel-social {
+        display: flex;
+        gap: 0.5rem;
+        padding: 0.9rem 1rem 0.25rem;
+        flex-wrap: wrap;
+    }
+    .panel-social a {
+        color: #007bff;
+        text-decoration: none;
+        font-weight: 500;
+        font-size: 0.9rem;
+        padding: 6px 12px;
+        border: 1px solid #dee2e6;
+        border-radius: 999px;
+        transition: border-color 0.15s ease;
+    }
+    @media (max-width: 768px) {
+        .nav-links { display: none; }
+        .nav-toggle { display: block; }
+    }
+
+    /* Section tab strip: one slim row, scrolls sideways when it overflows. */
+    .tabs-label {
+        float: left;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #6c757d;
+        font-weight: 700;
+        line-height: 1.2;
+        margin: 0;
+        padding: 8px 12px 0 0;
+    }
+    .tab-strip {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 2px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        margin: 0 0 1.25rem;
+        max-width: 100%;
+    }
+    .tab-strip::-webkit-scrollbar { display: none; }
+    .tab-strip a.tab-chip,
+    .tab-strip a.tab-link {
+        display: inline-block;
+        flex: 0 0 auto;
+        padding: 6px 10px;
+        border-radius: 999px;
+        color: #495057;
+        text-decoration: none;
+        font-size: 0.82rem;
+        font-weight: 500;
+        line-height: 1.35;
+        white-space: nowrap;
+    }
+    .tab-strip a.tab-chip:hover,
+    .tab-strip a.tab-link:hover { color: #007bff; }
+    .tab-strip a.tab-chip.active,
+    .tab-strip a.tab-link.active { background: #007bff; color: #ffffff; }
+    @media (max-width: 768px) {
+        .tabs-label { display: none; }
+        .tab-strip {
+            width: 100vw;
+            max-width: 100vw;
+            box-sizing: border-box;
+            margin-left: calc((100% - 100vw) / 2);
+            padding-left: calc((100vw - 100%) / 2);
+        }
+        .tab-strip a.tab-chip,
+        .tab-strip a.tab-link { font-size: 0.75rem; padding: 6px 8px; }
+    }
+
+    pre {
+      background: #0d1117;
+      color: #e6edf3;
+      padding: 14px 16px;
+      overflow-x: auto;
+      border-radius: 8px;
+      font-size: 0.9em;
+      margin: 1em 0;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+    }
+    /* P52 canonical inline items in prose: numbers and variables wear the body
+       font at body size and read as part of the sentence (keeps P50's quiet
+       treatment, no pill; code blocks and eq-cards keep the mono treatment). */
+    code {
+        font-family: inherit;
+        font-size: 1em;
+        color: #1a1a1a;
+        background: none;
+        padding: 0 0.08em;
+        overflow-wrap: break-word;
+    }
+    pre code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 1em; }
+    .eq-card code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 0.92em; }
+    pre code { /* Reset for code inside pre, already handled by pre styling */
+        background: none;
+        padding: 0;
+        font-size: 1em; /* Ensure pre's font size is inherited */
+        color: inherit;
+    }
+    ul, ol {
+        padding-left: 20px;
+    }
+    li {
+        margin-bottom: 0.5em;
+    }
+    strong {
+        color: #2980b9;
+    }
+    /* Labeled teaching diagrams: each teaches exactly one idea */
+    .diagram {
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      padding: 1.2rem;
+      margin: 1.75rem 0;
+      background: #fbfcfd;
+    }
+    .diagram svg {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+    .diagram .caption {
+      font-size: 0.9em;
+      color: #555;
+      margin-top: 1rem;
+      line-height: 1.5;
+    }
+    .diagram .caption strong {
+      color: #2c3e50;
+    }
+    /* Rendered result block, not a print() call */
+    .output {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 1rem 1.2rem;
+      border-radius: 6px;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+      font-size: 0.9em;
+      margin: 1em 0;
+      overflow-x: auto;
+      border-left: 4px solid #22c55e;
+      line-height: 1.7;
+    }
+    .output .dim { color: #94a3b8; }
+    .output .good { color: #4ade80; font-weight: bold; }
+    .output .bad { color: #ef4444; font-weight: bold; }
+    .output .src { color: #fbbf24; }
+    /* Stat cards: clean, scannable reference numbers */
+    .stat-title { font-size: 0.85em; font-weight: 700; color: #2c3e50; margin: 0 0 0.2rem; }
+    .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:1.2em 0}
+    .stat-card{border:1px solid #bdc3c7;border-radius:8px;padding:14px 16px;background:#f7f9fb}
+    .stat-num{font-size:1.9em;font-weight:800;color:#2c3e50;line-height:1.15}
+    .stat-unit{font-size:.55em;font-weight:600;color:#7f8c8d}.stat-vs{font-size:max(12px,.55em);font-weight:600;color:#7f8c8d}
+    .stat-label{font-size:.92em;font-weight:600;margin-top:6px;color:#2c3e50}
+    .stat-note{font-size:.82em;color:#7f8c8d;margin-top:3px}
+    /* Numbered walkthrough steps: one computation per step */
+/* Worked-example card (Round 9 template): a calm sage card that sets
+           math walkthrough steps apart from body text. */
+        .worked-example {
+            background: #f1f6ed;
+            border: 1px solid #d9e4d1;
+            border-left: 3px solid #6f9a63;
+            border-radius: 10px;
+            padding: 14px 20px;
+            margin: 1.1em 0;
+            max-width: 680px;
+            color: #2c3e50;
+            line-height: 1.8;
+            overflow-x: auto;
+        }
+        ol.worked-example {
+            list-style: none;
+            counter-reset: wex-step;
+            padding-left: 20px;
+        }
+        ol.worked-example > li {
+            counter-increment: wex-step;
+            position: relative;
+            margin: 0;
+            padding: 8px 0 8px 44px;
+        }
+        ol.worked-example > li + li { border-top: 1px dashed #cbdabf; }
+        ol.worked-example > li::before {
+            content: counter(wex-step);
+            position: absolute;
+            left: 0;
+            top: 9px;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: #6f9a63;
+            color: #ffffff;
+            font-size: 13px;
+            font-weight: 700;
+            line-height: 28px;
+            text-align: center;
+        }
+        @media (max-width: 480px) {
+            .worked-example { padding: 12px; font-size: 15px; }
+            ol.worked-example { padding-left: 12px; }
+            ol.worked-example > li { padding-left: 38px; }
+        }
+    /* Long inline formulas get their own scrollable line on small screens */
+    .math-scroll{display:block;overflow-x:auto;overflow-y:hidden;max-width:100%;padding:.1em 0}
+    /* Interactive demos */
+    .demo {
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      padding: 1.25rem;
+      margin: 1.75rem 0;
+      background: #fbfcfd;
+    }
+    .demo-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem 1rem;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    .demo-controls label { font-weight: bold; color: #2c3e50; white-space: nowrap; }
+    .demo-controls label var sub, .demo-controls label var sup { font-size: max(11px, .72em); }
+    .demo-controls input[type=range] {
+      flex: 1 1 140px;
+      min-width: 0;
+      max-width: 220px;
+      accent-color: #3498db;
+    }
+    #bvCanvas { display: block; width: 100%; height: 320px; max-width: 100%; }
+    .demo-stats {
+      text-align: center;
+      font-size: 1.02em;
+      color: #2c3e50;
+      margin: 1rem 0 0.4rem;
+    }
+    .chart-legend { display: flex; flex-wrap: wrap; gap: 0.4em 1.2em; font-size: 0.9em; color: #555; margin: 0.2rem 0 0.4rem 0; }
+    .chart-legend .lg-sw { display: inline-block; width: 24px; height: 0; border-top: 3px solid; vertical-align: middle; margin-right: 0.4em; }
+    .chart-legend .lg-blue { border-color: #2980b9; }
+    .chart-legend .lg-red { border-color: #c0392b; border-top-style: dashed; }
+    .demo-stats strong { color: #2980b9; }
+    .demo .caption {
+      font-size: 0.9em; color: #555; margin-top: 1rem;
+      border-left: 3px solid #3498db; padding-left: 0.8em;
+    }
+    .dim-note { font-size: 0.8em; color: #888; margin-top: 0.6rem; }
+    /* Bias-variance Play button (mirrors the race widget buttons) */
+    .demo .bv-btn { font: inherit; font-size: 0.92em; padding: 0.35rem 0.8rem; border: 1px solid #bdc3c7; border-radius: 6px; background: #fff; color: #2c3e50; cursor: pointer; }
+    .demo .bv-btn.active { background: #2980b9; border-color: #2980b9; color: #fff; font-weight: bold; }
+    .demo .bv-btn:disabled { opacity: 0.45; cursor: default; }
+    /* Fixed label width so the slider readouts can never change the controls-row wrap (no-scroll-on-Play) */
+    #bvToy #capVal, #bvToy #dataVal { display: inline-block; min-width: 3ch; }
+    .howto { font-size: 0.92em; color: #2c3e50; margin: 0.8rem 0 0.2rem; }
+    /* Caption card standard: white/lightest tint, 1px #e3e8ee border + 3px #2c3e50 left accent */
+    div.howto {
+      background: #fff;
+      border: 1px solid #e3e8ee;
+      border-left: 3px solid #2c3e50;
+      border-radius: 10px;
+      padding: 18px;
+      margin: 14px 0 0;
+      font-size: 15px;
+      line-height: 1.65;
+      color: #2c3e50;
+    }
+    div.howto .howto-head { font-weight: bold; font-size: 15px; margin: 0 0 0.4em; }
+    div.howto ul { list-style: none; margin: 0; padding: 0; }
+    div.howto ul li { position: relative; padding-left: 16px; margin: 7px 0; }
+    div.howto ul li::before {
+      content: ''; position: absolute; left: 0; top: 0.62em;
+      width: 6px; height: 6px; border-radius: 50%; background: #2c3e50;
+    }
+    div.howto ul li.tryit {
+      background: rgba(44,62,80,0.08);
+      padding: 7px 7px 7px 23px;
+      border-radius: 6px;
+    }
+    div.howto ul li.tryit::before { left: 7px; top: calc(0.62em + 7px); }
+    .canvas-wrap { position: relative; }
+    
+    /* Optimizer race widget */
+    #optRace { position: relative; }
+    #optRace .opt-btn { font: inherit; font-size: 0.92em; padding: 0.35rem 0.8rem; border: 1px solid #bdc3c7; border-radius: 6px; background: #fff; color: #2c3e50; cursor: pointer; }
+    #optRace .opt-btn.active { background: #2980b9; border-color: #2980b9; color: #fff; font-weight: bold; }
+    #optRace .gloss { margin: 0 0 0.6rem; padding-left: 1.2rem; color: #2c3e50; }
+    #optRace .gloss li { margin: 0.35rem 0; }
+    #optRace .race-wrap { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-start; }
+    #optRace .race-main { flex: 1 1 330px; min-width: 0; }
+    #optRace .race-side { flex: 1 1 230px; min-width: 0; }
+    #optRace canvas { display: block; width: 100%; height: auto; }
+    #optRace .side-title { text-align: center; font-weight: bold; color: #2c3e50; font-size: 0.92em; margin: 0 0 0.4rem; }
+    #optRace .bad { color: #c0392b; font-weight: bold; }
+    /* Shared walkthrough equation-card contract (verbatim, all pages) */
+    
+    .eq-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+
+      padding:1rem 1.2rem;margin:1.75rem auto;max-width:640px;overflow-x:auto}
+
+    .eq-what{font-size:.95rem;color:#334155;margin:0 0 .6rem;line-height:1.55}
+
+    .eq-line{font-size:1.38rem;line-height:2.0;letter-spacing:.015em;padding:.5rem .6rem;white-space:normal;font-weight:500;opacity:.38;border-left:3px solid transparent}
+
+    .eq-line.eq-active{opacity:1;border-left-color:#2c3e50}
+.eq-line sub,.eq-line sup{font-size:.68em}
+      .eq-why{display:none;visibility:hidden;font-size:1rem;color:#475569;padding:.15rem .35rem .4rem;line-height:1.65}
+      .eq-why.eq-active{display:block;visibility:visible}
+      .eq-card.eq-stepped .eq-line{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-line.eq-active{display:block;opacity:1;visibility:visible}
+      .eq-card.eq-stepped .eq-legend .eq-item{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-legend .eq-item.eq-active{display:block;visibility:visible}
+
+    .eqt{font-weight:600;padding:0 .1em;border-radius:3px}
+
+    .eqt.eqt-active{text-decoration:underline;text-underline-offset:2px}
+
+    .eq-legend{font-size:.85rem;color:#475569;margin-top:.6rem;line-height:1.75}
+
+    .eq-legend .eq-item{display:block}
+
+    .eq-legend .eq-item code{white-space:nowrap}
+
+    .eq-sw{display:inline-block;width:.7em;height:.7em;border-radius:2px;
+
+      margin:0 .25em 0 .6em;vertical-align:baseline}
+
+    @media (max-width:480px){.eq-card{padding:.85rem .9rem}.eq-line{font-size:1.24rem;line-height:1.95}}
+/* P70 inline variables and inline code, one style site-wide (VAR-STYLE.md v2) */
+var,.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic;font-weight:400;font-size:1em;color:#1d4e89;background:#edf3fa;border-radius:3px;padding:0 .18em;white-space:nowrap;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+var sub,var sup,.mvar sub,.mvar sup{font-size:.72em;font-style:normal}
+pre var,code var,.eq-line var{font:inherit;color:inherit;background:none;padding:0}
+svg text.mvar,svg tspan.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic}
+:not(pre)>code:not(.eq-line code){font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,Courier,monospace;font-size:.86em;color:#24292f;background:#f1f3f5;border:1px solid #dfe3e8;border-radius:4px;padding:.06em .32em;white-space:normal;overflow-wrap:anywhere}
+/* P79 numbering (NUMBERING.md) */
+.secnum{font-variant-numeric:tabular-nums;margin-right:.4em;color:inherit;font-weight:inherit}
+.tab-strip .secnum{margin-right:.3em;opacity:.75}
+.fignum{font-weight:600;margin-right:.3em;font-variant-numeric:tabular-nums}
+/* P80 code sections (CODE-SECTIONS.md) */
+pre.cs{position:relative;background-attachment:local;padding-left:20px}
+pre.cs code{display:block;line-height:1.55}
+pre.cs .cs-g{position:absolute;left:3px;width:11px;text-align:center;font:700 11px/1 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;-webkit-user-select:none;user-select:none;pointer-events:none}
+pre.cs .cs-g::before{content:attr(data-n)}
+ol.cs-notes{list-style:none;padding-left:0;margin:-.4em 0 1em}
+ol.cs-notes li{margin:0 0 .3em;padding-left:1.9em;position:relative}
+ol.cs-notes .cs-n{position:absolute;left:0;top:.1em;min-width:1.35em;padding:0 .25em;border-radius:4px;font:700 .8em/1.45 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;text-align:center;color:#0d1117}
+ol.cs-notes li:nth-child(6n+1) .cs-n{background:#79b8ff}
+ol.cs-notes li:nth-child(6n+2) .cs-n{background:#ffab70}
+ol.cs-notes li:nth-child(6n+3) .cs-n{background:#85e89d}
+ol.cs-notes li:nth-child(6n+4) .cs-n{background:#d2a8ff}
+ol.cs-notes li:nth-child(6n+5) .cs-n{background:#ffa198}
+ol.cs-notes li:nth-child(6n+6) .cs-n{background:#76e3ea}
+    /* diagram-side dim/highlight (SVG/DOM). Do NOT use .hl/.dim: taken. */
+    .eq-dim{opacity:.32}
+    .eq-hl{filter:drop-shadow(0 0 3px currentColor)}
+    hr {
+      border: 0;
+      height: 1px;
+      background: #bdc3c7;
+      margin-top: 2em;
+      margin-bottom: 2em;
+    }
+  
+/* canonical spacing: display math */
+    /* Compact phone walkthrough layout (canonical block, every tutorial page):
+       two-column eq legends, tightened demo spacing, and diagrams capped so
+       controls and diagram share the first phone screen. Phone widths only;
+       desktop rendering and equation typography are unchanged. */
+    @media (max-width:480px){
+      .demo{padding:.75rem}
+      .demo>*{margin-top:.6rem;margin-bottom:.6rem}
+      .demo>*:first-child{margin-top:0}
+      .demo .eq-card{margin:1rem auto;padding:.7rem .8rem}
+      .demo .cap-card,.demo .capcard{padding:.85rem .95rem}
+      .eq-legend{display:grid;grid-template-columns:1fr 1fr;column-gap:.9rem;row-gap:.1rem;line-height:1.5}
+      .eq-legend .eq-item:has(> code ~ code){grid-column:1/-1}
+      .demo svg,.demo canvas{max-height:55vh}
+    }
+    /* batch Da shared: tips and data tables, linked-card map (2026-11-02) */
+    .datatable{border-collapse:collapse;margin:1.2em 0;width:100%;max-width:640px;font-size:.95em} .datatable th,.datatable td{border:1px solid #bdc3c7;padding:.45em .6em;text-align:left;vertical-align:top} .datatable th{background:#2c3e50;color:#fff;font-weight:600} .datatable tr:nth-child(even) td{background:#f7f9fb} .datatable caption{text-align:left;padding:.5em 0 0;font-size:.92em;color:#555;caption-side:bottom}
+    @media (max-width:480px){.datatable{font-size:.88em}.datatable th,.datatable td{padding:.35em .4em}}
+    @media (max-width:480px){h2#failures+.datatable{table-layout:fixed}h2#failures+.datatable td,h2#failures+.datatable th{overflow-wrap:anywhere}}
+    .pmap{margin:1.75rem auto;max-width:640px;display:flex;flex-direction:column;align-items:stretch;gap:0}
+    .pmap-row{display:flex;gap:.6rem;justify-content:center;flex-wrap:wrap}
+    .pmap-link{width:2px;height:14px;background:#95a5a6;margin:0 auto}
+    .pmap a.pmap-card{flex:1 1 0;min-width:0;display:block;border:1.5px solid #bdc3c7;border-radius:8px;padding:.45rem .6rem;text-decoration:none;color:#2c3e50;background:#fbfcfd;text-align:center;line-height:1.3}
+    .pmap a.pmap-card:hover{border-color:#2980b9}
+    .pmap .pmap-name{display:block;font-weight:700;font-size:.98rem}
+    .pmap .pmap-fix{display:block;font-size:.85rem;color:#555}
+    .pmap-caption{text-align:center}
+    @media (max-width:480px){.pmap a.pmap-card{padding:.35rem .4rem}.pmap .pmap-name{font-size:.92rem}.pmap .pmap-fix{font-size:.8rem}}
+/* PREV-NEXT-BEGIN */
+nav.tut-seq{display:flex;align-items:center;gap:0 .75rem;margin:0 0 .25rem;font-size:.85rem;white-space:nowrap}
+nav.tut-seq a{position:relative;display:block;flex:0 1 auto;min-width:0;height:44px;line-height:44px;padding:0 2px;overflow:hidden;text-overflow:ellipsis;color:#0056b3;text-decoration:none}
+nav.tut-seq a.seq-home{flex:0 0 auto}
+nav.tut-seq a.seq-next{margin-left:auto}
+nav.tut-seq .seq-w{font-weight:600}
+nav.tut-seq a:hover{text-decoration:underline}
+nav.tut-seq a:focus-visible{outline:2px solid #0056b3;outline-offset:2px}
+@media (max-width:575px){nav.tut-seq .seq-t{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}}
+@media (forced-colors:active){nav.tut-seq a:focus-visible{outline-color:Highlight}}
+@media print{nav.tut-seq{display:none}}
+/* PREV-NEXT-END */
+/* TD-CODE-BEGIN variant D2: words and inline code in table cells break only between words; a table that holds inline code scrolls sideways with a right-edge fade while more is to the right, a pinned first column with an edge line once scrolled, and trimmed phone padding; <wbr> wrap points in table code act at 640 px and below only; a .tdc-stack table stacks per row on phones (VAR-STYLE.md v2 amendment 2026-11-05, D2) */
+td,th,td code:not(pre code),th code:not(pre code){overflow-wrap:normal!important;word-break:normal!important}
+table:has(td code){display:block;max-width:100%;overflow-x:auto}
+:where(table:has(td code)) :where(tr>:first-child){position:sticky;left:-1px;z-index:1;background-color:Canvas;box-shadow:inset -1px 0 0 var(--tdc-s)}
+@property --tdc-f{syntax:'<length>';inherits:false;initial-value:0px}
+@property --tdc-s{syntax:'<color>';inherits:true;initial-value:transparent}
+@keyframes tdc-hint{0%{--tdc-f:3rem;--tdc-s:transparent}3%{--tdc-s:rgba(0,0,0,.28)}85%{--tdc-f:3rem}100%{--tdc-f:0px;--tdc-s:rgba(0,0,0,.28)}}
+@supports (animation-timeline:scroll()){table:has(td code){-webkit-mask-image:linear-gradient(to left,rgba(0,0,0,.15),#000 var(--tdc-f));mask-image:linear-gradient(to left,rgba(0,0,0,.15),#000 var(--tdc-f));animation-name:tdc-hint;animation-duration:1ms;animation-timing-function:linear;animation-fill-mode:both;animation-timeline:scroll(self inline)}}
+@supports not (animation-timeline:scroll()){table:has(td code){background:linear-gradient(to left,Canvas 40%,rgba(255,255,255,0)) 100% 0/2.5rem 100% no-repeat local,radial-gradient(farthest-side at 100% 50%,rgba(0,0,0,.2),rgba(0,0,0,0)) 100% 0/.9rem 100% no-repeat scroll}}
+@media (min-width:641px){td wbr,th wbr{display:none}}
+@media (max-width:400px){table:has(td code) :is(td,th){padding-left:.35em!important;padding-right:.35em!important}}
+@media (max-width:640px){table.tdc-stack,table.tdc-stack :is(tbody,thead,tr,td){display:block;overflow:visible;-webkit-mask-image:none;mask-image:none;animation-name:none}table.tdc-stack tr:has(th){display:none}table.tdc-stack tr+tr{margin-top:.6em}table.tdc-stack td{position:static;box-shadow:none;border-width:0 1px;padding:.3em .6em!important}table.tdc-stack tr>td:first-child{border-top-width:1px;font-weight:700}table.tdc-stack tr>td:last-child{border-bottom-width:1px;padding-bottom:.5em!important}table.tdc-stack td[data-label]::before{content:attr(data-label) ": ";font-weight:600}}
+/* TD-CODE-END */
+/* MATH-BEGIN v1 (P88, site-math.js renders KaTeX; byte-identical on every page) */
+.eq-line{overflow-x:auto;overflow-y:hidden;white-space:normal}
+.eq-line .katex{font-size:1.02em;line-height:1.6}
+.eq-line .katex .base{margin:.15em 0}
+var .katex,p .katex,li .katex,td .katex,th .katex,figcaption .katex,.eq-why .katex,.eq-what .katex,.eq-legend .katex{font-size:1.06em}
+var:has(.katex){font-style:normal}
+.katex-display{margin:.6rem 0;overflow-x:auto;overflow-y:hidden}
+/* MATH-END */
+    /* Slider rows (fix wave 2): label on its own line, slider with both end labels on the next, so value words never move the ends */
+    .demo-controls label[for] { flex: 1 1 100%; white-space: normal; }
+    .demo-controls .sl-row { display: flex; align-items: center; gap: .5rem; flex: 1 1 100%; min-width: 0; max-width: 30rem; }
+    .demo-controls .sl-row input[type=range] { flex: 1 1 auto; min-width: 0; max-width: none; }
+    .demo-controls .sl-end { font-size: .85em; color: #555; white-space: nowrap; flex: 0 0 auto; }
+    /* Stacked phone tables (fix wave 2): the caption spans the full width */
+    @media (max-width:640px){ table.tdc-stack > caption { display: block; width: auto; } }
+</style>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+  <script src="site-math.js" defer></script>
+
+  <style>
+/* Static teaching diagrams (mtd), shared across tutorials, 2026-11-01 */
+.figure.mtd-fig { margin: 1.75rem 0; }
+.mtd-fig > svg.mtd-svg { display: block; width: 100%; height: auto; margin: 0 auto; }
+.mtd-fig .caption { margin-top: 1rem; }
+.mtd-svg text { fill: #2c3e50; font-family: sans-serif; }
+.mtd-svg .mtd-sub { fill: #555; }
+.mtd-svg .mtd-t1 { fill: #1f618d; }
+.mtd-svg .mtd-t2 { fill: #ca6f1e; }
+.mtd-svg .mtd-pu { fill: #7d3c98; }
+.mtd-svg .mtd-red { fill: #c0392b; }
+.mtd-svg .mtd-grn { fill: #148f77; }
+.mtd-svg line, .mtd-svg path, .mtd-svg polyline { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.mtd-svg .mtd-s.mtd-c1 { stroke: #1f618d; } .mtd-svg .mtd-f.mtd-c1 { fill: #1f618d; }
+.mtd-svg .mtd-s.mtd-c2 { stroke: #ca6f1e; } .mtd-svg .mtd-f.mtd-c2 { fill: #ca6f1e; }
+.mtd-svg .mtd-s.mtd-cp { stroke: #7d3c98; } .mtd-svg .mtd-f.mtd-cp { fill: #7d3c98; }
+.mtd-svg .mtd-s.mtd-cr { stroke: #c0392b; } .mtd-svg .mtd-f.mtd-cr { fill: #c0392b; }
+.mtd-svg .mtd-s.mtd-cg { stroke: #2c3e50; } .mtd-svg .mtd-f.mtd-cg { fill: #2c3e50; }
+.mtd-svg .mtd-sep { stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-pic { fill: #fbfcfd; stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-axis { stroke: #7f8c8d; stroke-width: 1.5px; }
+.mtd-svg .mtd-arc { stroke: #2c3e50; stroke-width: 2px; }
+.mtd-svg .mtd-dot { fill: #2c3e50; }
+.mtd-svg .mtd-guide { stroke: #7f8c8d; stroke-width: 1.4px; stroke-dasharray: 4 4; }
+.mtd-svg .mtd-ring { fill: #fbfcfd; stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-pt { fill: #1f618d; opacity: .55; }
+.mtd-svg .mtd-cross { stroke: #2c3e50; stroke-width: 2.2px; }
+.mtd-svg .mtd-barbg { fill: #eef1f4; }
+.mtd-svg .mtd-bar { fill: #7d3c98; }
+.mtd-svg .mtd-cart { fill: #ffffff; stroke: #2c3e50; stroke-width: 2px; }
+.mtd-svg .mtd-zero { stroke: #95a5a6; stroke-width: 1.2px; stroke-dasharray: 4 4; }
+.mtd-svg .mtd-axisl { stroke: #7f8c8d; stroke-width: 2px; }
+.mtd-svg .mtd-norm { stroke: #148f77; stroke-width: 4px; }
+.mtd-svg .mtd-read { fill: #ffffff; stroke: #2c3e50; stroke-width: 2.5px; }
+.mtd-svg .mtd-ball { fill: #7d3c98; fill-opacity: .08; stroke: #7d3c98; stroke-width: 1.6px; stroke-dasharray: 5 4; }
+.mtd-svg .mtd-box { fill: #fbfcfd; stroke: #bdc3c7; stroke-width: 1.4px; }
+.mtd-svg .mtd-crossbg { fill: #ffffff; }
+.mtd-svg .mtd-halo { stroke: #ffffff; stroke-width: 5px; stroke-linejoin: round; paint-order: stroke; }
+.mtd-svg .mtd-box.mtd-note { stroke-dasharray: 5 4; }
+</style>
+<style>
+/* Series and page map (B-TF, 2026-11-02) */
+.sermap { margin: .5rem 0 1.1rem; font-size: .8rem; line-height: 1.3; }
+.sermap ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; row-gap: 5px; }
+.sermap li { display: flex; align-items: center; margin: 0; padding: 0; line-height: 1.25; }
+.sermap li + li::before { content: "\2192"; color: #95a5a6; margin: 0 5px; }
+.sermap a, .sermap .sm-here { display: inline-block; padding: 2px 7px; line-height: 1.25; border-radius: 6px; text-decoration: none; }
+.sermap .sm-series a { padding: 1px 2px; color: #1f618d; text-decoration: underline; text-decoration-color: #a9cce3; text-underline-offset: 2px; }
+.sermap .sm-series .sm-here { padding: 1px 6px; background: #117a65; color: #fff; font-weight: 600; }
+.sermap .sm-series { row-gap: 0; }
+.sermap .sm-series a, .sermap .sm-series .sm-here, .sermap .sm-also a { display: inline-flex; align-items: center; min-height: 44px; box-sizing: border-box; }
+.sermap .sm-flow { margin-top: 6px; padding-left: 8px; border-left: 3px solid #117a65; }
+</style>
+<style>
+nav.prereq{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem .4rem;margin:.6rem 0 1.1rem}
+nav.prereq .prereq-label{font-size:.82rem;font-weight:600;color:#6c757d;margin-right:.15rem}
+nav.prereq a.prereq-chip{display:inline-block;padding:.15rem .6rem;border:1px solid #ced4da;border-radius:999px;font-size:.85rem;line-height:1.4;color:#0056b3;text-decoration:none}
+nav.prereq a.prereq-chip:hover,nav.prereq a.prereq-chip:focus-visible{background:#e7f1ff;border-color:#007bff}
+nav.prereq-sec{margin:.2rem 0 .9rem}
+nav.prereq-sec p{margin:0;font-size:.9rem;line-height:1.5;color:#495057}
+/* Optimizers rewrite 2026-11-05: series map arrows, tools */
+.pmap-step{display:flex;flex-direction:column;align-items:center;margin:0 auto}
+.pmap-step .pmap-link{height:10px;width:3px}
+.pmap-step .pmap-say{font-size:.8rem;color:#555;line-height:1.2;padding:1px 0}
+.pmap-step .pmap-link.pmap-arrow{height:12px;position:relative}
+.pmap-step .pmap-link.pmap-arrow::after{content:"";position:absolute;left:-5.5px;bottom:-8px;border-left:7px solid transparent;border-right:7px solid transparent;border-top:9px solid #95a5a6}
+.pmap-page{font-size:.78rem;font-weight:600;color:#117a65;text-align:center;margin:.5rem 0 .25rem;letter-spacing:.02em}
+.pmap a.pmap-card.pmap-here{border-color:#117a65}
+.seg{display:inline-flex;flex-wrap:wrap;gap:4px}
+.seg .bv-btn{min-height:40px}
+.demo .demo-read{font-size:.95rem;color:#2c3e50;margin:.4rem 0 .2rem;min-height:1.6em}
+#dwRead{min-height:4.7em}
+/* opt-polish (R10 4.1, 4.5): readouts that wrap at phone width reserve their tallest state, so the demo never jumps */
+@media (max-width:480px){#stRead{min-height:3.3em}}
+@media (max-width:389px){#raceRead{min-height:4.9em}}
+.demo svg.tool-svg{display:block;width:100%;height:auto;max-width:520px;margin:.3rem auto}
+.demo svg.tool-svg text{font-family:sans-serif;fill:#2c3e50}
+.knobs{font-size:.95em}
+.datatable td.num,.datatable th.num{text-align:right;font-variant-numeric:tabular-nums}
+@media (max-width:480px){.demo .demo-controls{gap:.4rem .5rem}}
+.diagram .diag-list{font-size:.92em;color:#2c3e50;margin:.6em 0 0;padding-left:1.4rem}
+.diagram .diag-list li{margin:.35em 0}
+ol.brefs{line-height:1.7;margin:1em 0 2em;padding-left:22px}
+ol.brefs li{margin-bottom:.5em}
+/* fix wave 3 (recheck-2 R3 n1): variables in the dark header band read as plain light italic text, no chip */
+.datatable th var{color:#fff;background:none;padding:0;border-radius:0}
+/* fix wave 3 (R3 n7, R4 P3): a hat centred over epsilon, and limits set under max */
+/* fix wave 4 (recheck-3 R6 m1): line-height 1 on the epsilon box, so the hat sits just above the epsilon instead of floating */
+.xh{position:relative;display:inline-block;line-height:1}
+.xh::after{content:"ˆ";position:absolute;left:0;right:0;top:-.05em;text-align:center;font-style:normal;line-height:1;padding-left:.12em}
+.lim{display:inline-flex;flex-direction:column;align-items:center;vertical-align:-.62em;line-height:1.05}
+.lim .lim-sub{font-size:.74em}
+</style>
+<style>
+/* one-topic optimizers split 2026-11-08: series flow row, walkthrough and tool bits */
+.sermap .sm-flow a{border:1px solid #d5dbdb;background:#f8f9fa;color:#2c3e50}
+.sermap .sm-flow .sm-here{background:#117a65;color:#fff;font-weight:600}
+.demo .demo-controls{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .7rem}
+.demo .walk-lbl{font-weight:600;color:#2c3e50}
+.demo .eq-card.eq-stepped .eq-why{display:none}
+.demo .eq-card.eq-stepped .eq-why.eq-active{display:block;visibility:visible}
+.bv-btn[aria-pressed="true"],.bv-btn.active{background:#2c3e50;color:#fff;border-color:#2c3e50}
+.demo input[type=range]{flex:1 1 140px;min-width:120px}
+.demo label{font-size:.95rem}
+.fam-list{padding-left:1.3rem}
+.fam-list li{margin:.35em 0}
+</style>
+<script>
+/* Walkthrough stepper shared by the optimizer pages (2026-11-08): controls, diagram, readout, eq-card last.
+   id+'Prev', 'Next', 'Reset', 'Lbl', 'Svg', 'Read', 'Card'; lines[i] is the eq-card line for step i. */
+window.OPWALK = function (id, n, draw, reads, lines) {
+  var $ = function (s) { return document.getElementById(id + s); };
+  var prev = $('Prev'), next = $('Next'), reset = $('Reset'), lbl = $('Lbl'), svg = $('Svg'), rd = $('Read'), card = $('Card');
+  if (!svg) return;
+  var cur = 0;
+  function show() {
+    svg.innerHTML = draw(cur);
+    rd.innerHTML = reads[cur];
+    if (window.siteMath) window.siteMath.typeset(rd);
+    lbl.textContent = 'Step ' + (cur + 1) + ' of ' + n;
+    if (card) Array.prototype.forEach.call(card.querySelectorAll('.eq-line, .eq-why'), function (e) {
+      e.classList.toggle('eq-active', String(lines[cur]) === e.getAttribute('data-eqline'));
+    });
+    prev.disabled = cur === 0; next.disabled = cur === n - 1;
+  }
+  prev.addEventListener('click', function () { if (cur > 0) { cur--; show(); } });
+  next.addEventListener('click', function () { if (cur < n - 1) { cur++; show(); } });
+  reset.addEventListener('click', function () { cur = 0; show(); });
+  show();
+};
+/* Animate a run: calls frame(k) for k = 1..total over about ms milliseconds; a newer call cancels the older one. */
+window.OPANIM = function (state, total, ms, frame) {
+  state.tok = (state.tok || 0) + 1; var tok = state.tok, t0 = null;
+  function go(ts) {
+    if (tok !== state.tok) return;
+    if (t0 === null) t0 = ts;
+    var k = Math.min(total, Math.max(1, Math.round((ts - t0) / ms * total)));
+    frame(k);
+    if (k < total) requestAnimationFrame(go);
+  }
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) { frame(total); return; }
+  requestAnimationFrame(go);
+};
+</script>
+<script>
+/* Shared SVG string helpers for the optimizer tools (2026-11-05). */
+window.OPK = (function () {
+  function n(v) { return (Math.round(v * 10) / 10).toString(); }
+  return {
+    n: n,
+    ln: function (x1, y1, x2, y2, c, w, d) { return '<line x1="' + n(x1) + '" y1="' + n(y1) + '" x2="' + n(x2) + '" y2="' + n(y2) + '" style="stroke:' + c + ';stroke-width:' + (w || 1.5) + 'px' + (d ? ';stroke-dasharray:' + d : '') + '"/>'; },
+    pl: function (pts, c, w, d, op, clip) { return '<polyline points="' + pts.map(function (p) { return n(p[0]) + ',' + n(p[1]); }).join(' ') + '" style="fill:none;stroke:' + c + ';stroke-width:' + (w || 2.5) + 'px;stroke-linecap:round;stroke-linejoin:round' + (d ? ';stroke-dasharray:' + d : '') + (op != null ? ';opacity:' + op : '') + '"' + (clip ? ' clip-path="url(#' + clip + ')"' : '') + '/>'; },
+    ar: function (pts, c, op) { return '<polygon points="' + pts.map(function (p) { return n(p[0]) + ',' + n(p[1]); }).join(' ') + '" style="fill:' + c + ';fill-opacity:' + (op == null ? 0.2 : op) + ';stroke:none"/>'; },
+    /* baseline text never below 15.5 viewBox px: tool svgs render 270 px wide at 360, so 12 px or more (fix wave 1, review B2 minor 20) */
+    tx: function (x, y, s, sz, anc, c, b) { return '<text class="mtd-halo" x="' + n(x) + '" y="' + n(y) + '" text-anchor="' + (anc || 'start') + '" style="font-size:' + Math.max(sz || 15, 15.5) + 'px;fill:' + (c || '#2c3e50') + (b ? ';font-weight:700' : '') + '">' + s + '</text>'; },
+    rc: function (x, y, w, h, f, s) { return '<rect x="' + n(x) + '" y="' + n(y) + '" width="' + n(Math.max(w, 0)) + '" height="' + n(Math.max(h, 0)) + '" style="fill:' + f + ';stroke:' + (s || 'none') + ';stroke-width:1px"/>'; },
+    ci: function (x, y, r, f) { return '<circle cx="' + n(x) + '" cy="' + n(y) + '" r="' + r + '" style="fill:' + f + ';stroke:#ffffff;stroke-width:1.5px"/>'; },
+    mk: function (x, y, k) { return '<circle cx="' + n(x) + '" cy="' + n(y) + '" r="10" style="fill:#2c3e50;stroke:#ffffff;stroke-width:2px"/><text x="' + n(x) + '" y="' + n(y + 5.5) + '" text-anchor="middle" style="font-size:15.5px;font-weight:700;fill:#ffffff">' + k + '</text>'; },
+    ell: function (X, Y, c, clip) { var pts = []; for (var i = 0; i <= 120; i++) { var t = 2 * Math.PI * i / 120; pts.push([X(Math.sqrt(c / 5) * Math.cos(t)), Y(Math.sqrt(c / 0.2) * Math.sin(t))]); } return this.pl(pts, '#d5dbe1', 1.2, null, null, clip); },
+    /* edge marker: an arrowhead at (x, y), the point where a path leaves the frame, pointing away from (px, py) */
+    edge: function (x, y, px, py, c) { var a = Math.atan2(y - py, x - px), ca = Math.cos(a), sa = Math.sin(a), bx = x - 14 * ca, by = y - 14 * sa; return '<polygon points="' + n(x) + ',' + n(y) + ' ' + n(bx - 8 * sa) + ',' + n(by + 8 * ca) + ' ' + n(bx + 8 * sa) + ',' + n(by - 8 * ca) + '" style="fill:' + c + ';stroke:#ffffff;stroke-width:1px"/>'; },
+    seg: function (box, val) { Array.prototype.forEach.call(box.querySelectorAll('button'), function (b) { var on = b.getAttribute('data-v') === String(val); b.classList.toggle('active', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); }); }
+  };
+})();
+</script>
+</head>
+<body>
+        <nav class="topnav" aria-label="Site">
+    <div class="nav-inner">
+        <a class="wordmark" href="index.html">Ramin Anushiravani</a>
+        <div class="nav-links">
+            <a href="tutorial.html" class="active">Tutorials</a>
+            <a href="pubs.html">Publications</a>
+            <a href="index.html">About</a>
+            <a href="work.html">Projects</a>
+        </div>
+        <button class="nav-toggle" id="navToggle" aria-expanded="false" aria-controls="navPanel" aria-label="Menu"><span></span><span></span><span></span></button>
+    </div>
+    <div class="nav-panel" id="navPanel">
+        <div class="nav-panel-inner">
+            <div class="nav-panel-body">
+                <a class="panel-link active" href="tutorial.html">Tutorials</a>
+                <a class="panel-link" href="pubs.html">Publications</a>
+                <a class="panel-link" href="index.html">About</a>
+                <a class="panel-link" href="work.html">Projects</a>
+                <div class="panel-social">
+                    <a href="https://linkedin.com/in/raminanushiravani" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+                    <a href="https://github.com/raminaeye/" target="_blank" rel="noopener noreferrer">GitHub</a>
+                    <a href="https://scholar.google.com/citations?user=kouXx8gAAAAJ&hl=en" target="_blank" rel="noopener noreferrer">Google Scholar</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</nav>
+<p class="crumb"><a href="tutorial.html">&larr; All tutorials</a></p>
+<script src="tutorial-nav.js"></script>
+    <h1 id="adamw">AdamW: Decoupled Weight Decay for Adam</h1>
+    <p class="dek">Why L2 regularization and weight decay are the same for SGD but not for Adam, and how AdamW decays every weight at the same rate.</p>
+<nav class="sermap" aria-label="The optimizers series">
+  <ol class="sm-series">
+    <li><a href="optimizers.html">SGD, Momentum and Nesterov</a></li>
+    <li><a href="adaptive-optimizers.html">Adaptive Optimizers</a></li>
+    <li><a href="optimizers-in-practice.html">Optimizers in Practice</a></li>
+  </ol>
+  <div class="sm-flow"><ol>
+    <li><span class="sm-here" aria-current="page">AdamW</span></li>
+    <li><a href="sam.html">SAM</a></li>
+    <li><a href="lr-schedules.html">Learning Rate Schedules</a></li>
+    <li><a href="gradient-clipping.html">Gradient Clipping</a></li>
+  </ol></div>
+</nav>
+<nav class="prereq" aria-label="Before you start">
+  <span class="prereq-label">Before you start</span>
+  <a class="prereq-chip" href="regularization.html" title="Regularization and Data Augmentation" aria-label="Regularization, taught in Regularization and Data Augmentation">Regularization</a>
+  <a class="prereq-chip" href="adam.html#step" title="Adam, section 6" aria-label="Adam&#8217;s step, taught in Adam, section 6">Adam&#8217;s step</a>
+  <a class="prereq-chip" href="adam.html#bias" title="Adam, section 5" aria-label="Bias correction, taught in Adam, section 5">Bias correction</a>
+</nav>
+    <p class="tabs-label">On this page</p>
+    <div class="tab-strip">
+        <a class="tab-chip" href="#problem"><span class="secnum">1</span> What AdamW fixes</a>
+        <a class="tab-chip" href="#adam-recap"><span class="secnum">2</span> Adam&#8217;s divide, in one line</a>
+        <a class="tab-chip" href="#two-ways"><span class="secnum">3</span> Two ways to decay, and why they split under Adam</a>
+        <a class="tab-chip" href="#walkthrough"><span class="secnum">4</span> One step with L2 and with AdamW</a>
+        <a class="tab-chip" href="#two-weights"><span class="secnum">5</span> Who gets decayed</a>
+        <a class="tab-chip" href="#decay-tool"><span class="secnum">6</span> Decay over a whole run</a>
+        <a class="tab-chip" href="#schedule"><span class="secnum">7</span> Decay and the schedule</a>
+        <a class="tab-chip" href="#when"><span class="secnum">8</span> When to use it</a>
+        <a class="tab-chip" href="#state"><span class="secnum">9</span> When it runs and what it carries</a>
+        <a class="tab-chip" href="#pytorch"><span class="secnum">10</span> AdamW in PyTorch</a>
+        <a class="tab-chip" href="#failures"><span class="secnum">11</span> Failure modes and tips</a>
+        <a class="tab-chip" href="#references"><span class="secnum">12</span> References</a>
+    </div>
+
+    <h2 id="problem"><span class="secnum">1</span> What AdamW fixes</h2>
+<p>Weight decay (Hanson and Pratt 1988) pulls every weight a little toward zero on each step, a standard way to keep a large model from overfitting (<a href="regularization.html">Regularization and Data Augmentation</a>). For years Adam (Kingma and Ba 2015) implementations did this by adding an L2 penalty to the loss, because for SGD the two are the same thing. Loshchilov and Hutter (2019) showed that under Adam they are not: the penalty passes through Adam&#8217;s per-weight divide, so weights with large gradients are barely regularized. Their fix, decoupled weight decay, is AdamW.</p>
+<p>AdamW is the standard optimizer for training transformers and large language models: LLaMA trains with AdamW and weight decay 0.1 (Touvron and others 2023), and most vision transformers and diffusion models use it too.</p>
+    <h2 id="adam-recap"><span class="secnum">2</span> Adam&#8217;s divide, in one line</h2>
+<div class="eq-card" id="adamRecap">
+<div class="eq-what">Adam&#8217;s step, from <a href="adam.html#step">Adam, section 6</a></div>
+<div class="eq-line eq-active" data-eqline="0">\({\displaystyle \htmlStyle{color:#2c3e50}{\theta_t} = \htmlStyle{color:#2c3e50}{\theta_{t-1}} - \htmlStyle{color:#7d3c98}{\alpha}\,\frac{\htmlStyle{color:#1f618d}{\hat m_t}}{\sqrt{\htmlStyle{color:#0e6b59}{\hat v_t}} + \epsilon}}\)</div>
+<div class="eq-why eq-active" data-eqline="0">Adam divides every weight&#8217;s step by <span class="eqt" style="color:#0e6b59"><var>\(\sqrt{\hat v_t}\)</var></span>, that weight&#8217;s recent typical gradient size. Whatever enters the gradient <span class="eqt" style="color:#c0392b"><var>\(g_t\)</var></span> passes through that divide. <span class="eqt" style="color:#1f618d"><var>\(\hat m_t\)</var></span> is the bias-corrected direction average (<a href="adam.html#bias">Adam, section 5</a>).</div>
+</div>
+    <h2 id="two-ways"><span class="secnum">3</span> Two ways to decay, and why they split under Adam</h2>
+<p>The card walks from the two definitions to the point where Adam separates them.</p>
+<div class="eq-card" id="twoWaysEq">
+<div class="eq-what">Two ways to pull weights toward zero</div>
+<div class="eq-line eq-active" data-eqline="0">\({\displaystyle \begin{aligned} \htmlStyle{color:#2c3e50}{\theta_{t+1}} &= (1-\htmlStyle{color:#a04000}{\lambda})\,\htmlStyle{color:#2c3e50}{\theta_t} \\ &\quad - \htmlStyle{color:#7d3c98}{\alpha}\,\nabla f_t(\htmlStyle{color:#2c3e50}{\theta_t}) \end{aligned}}\)</div>
+<div class="eq-why eq-active" data-eqline="0">Weight decay: every step, shrink each weight by the small fraction <span class="eqt" style="color:#a04000"><var>\(\lambda\)</var></span> (lambda), then take the ordinary gradient step on the loss <var>\(f_t\)</var>. Large weights shrink more in absolute size, so the model is pushed toward small weights, which usually generalize better.</div>
+<div class="eq-line eq-active" data-eqline="1">\({\displaystyle \htmlStyle{color:#c0392b}{g_t} = \nabla f_t(\htmlStyle{color:#2c3e50}{\theta_{t-1}}) + \htmlStyle{color:#a04000}{\lambda'}\,\htmlStyle{color:#2c3e50}{\theta_{t-1}}}\)</div>
+<div class="eq-why eq-active" data-eqline="1">L2 regularization: add <span class="eqt" style="color:#a04000"><var>\(\tfrac{1}{2}\lambda'\lVert\theta\rVert^{2}\)</var></span> to the loss instead. Its gradient is <span class="eqt" style="color:#a04000"><var>\(\lambda'\theta\)</var></span>, so the gradient the optimizer sees is the loss gradient plus a pull toward zero (<a href="regularization.html">Regularization and Data Augmentation</a>).</div>
+<div class="eq-line eq-active" data-eqline="2">\({\displaystyle \begin{aligned} \htmlStyle{color:#2c3e50}{\theta_t} &= \htmlStyle{color:#2c3e50}{\theta_{t-1}} - \htmlStyle{color:#7d3c98}{\alpha}\,\htmlStyle{color:#c0392b}{g_t} \\ &= (1-\htmlStyle{color:#7d3c98}{\alpha}\htmlStyle{color:#a04000}{\lambda'})\,\htmlStyle{color:#2c3e50}{\theta_{t-1}} \\ &\quad - \htmlStyle{color:#7d3c98}{\alpha}\,\nabla f_t(\htmlStyle{color:#2c3e50}{\theta_{t-1}}) \\ \htmlStyle{color:#a04000}{\lambda'} &= \frac{\htmlStyle{color:#a04000}{\lambda}}{\htmlStyle{color:#7d3c98}{\alpha}} \end{aligned}}\)</div>
+<div class="eq-why eq-active" data-eqline="2">For plain SGD the two are the same: multiply out the step and the L2 pull becomes a shrink by <span class="eqt" style="color:#a04000"><var>\(\alpha\lambda'\)</var></span>. Choosing <span class="eqt" style="color:#a04000"><var>\(\lambda'=\lambda/\alpha\)</var></span> gives exactly weight decay. This is why the two names were used for one thing.</div>
+<div class="eq-line eq-active" data-eqline="3">\({\displaystyle \begin{aligned} \htmlStyle{color:#2c3e50}{\theta_t} &= \htmlStyle{color:#2c3e50}{\theta_{t-1}} - \htmlStyle{color:#7d3c98}{\alpha}\,\frac{\htmlStyle{color:#1f618d}{\hat m_t}}{\sqrt{\htmlStyle{color:#0e6b59}{\hat v_t}} + \epsilon} \\ &\text{with } \htmlStyle{color:#a04000}{\lambda'}\htmlStyle{color:#2c3e50}{\theta}\text{ inside } \htmlStyle{color:#c0392b}{g_t} \end{aligned}}\)</div>
+<div class="eq-why eq-active" data-eqline="3">For Adam they differ. The L2 pull is inside <span class="eqt" style="color:#c0392b"><var>\(g_t\)</var></span>, so it is averaged into <span class="eqt" style="color:#1f618d"><var>\(\hat m_t\)</var></span> and then divided by <span class="eqt" style="color:#0e6b59"><var>\(\sqrt{\hat v_t}\)</var></span>: a weight with large gradients gets its pull divided by a large number and is barely decayed, while a weight with small gradients is decayed hard. The regularization now depends on gradient history, not on the weight&#8217;s size.</div>
+<div class="eq-line eq-active" data-eqline="4">\({\displaystyle \begin{aligned} \htmlStyle{color:#2c3e50}{\theta_t} &= \htmlStyle{color:#2c3e50}{\theta_{t-1}} - \eta_t\,\htmlStyle{color:#7d3c98}{\alpha}\,\frac{\htmlStyle{color:#1f618d}{\hat m_t}}{\sqrt{\htmlStyle{color:#0e6b59}{\hat v_t}} + \epsilon} \\ &\quad - \eta_t\,\htmlStyle{color:#a04000}{\lambda}\,\htmlStyle{color:#2c3e50}{\theta_{t-1}} \end{aligned}}\)</div>
+<div class="eq-why eq-active" data-eqline="4">AdamW (Loshchilov and Hutter 2019) takes the decay out of the gradient. Adam steps on the loss alone, and the decay <span class="eqt" style="color:#a04000"><var>\(\lambda\theta\)</var></span> is applied directly, outside the divide, so every weight shrinks at the same rate. <var>\(\eta_t\)</var> (eta) is the learning-rate schedule&#8217;s multiplier, which scales both parts together.</div>
+</div>
+    <h2 id="walkthrough"><span class="secnum">4</span> One step with L2 and with AdamW</h2>
+<p>Two weights of the same size: A has large gradients, B small ones. Step through how much each is pulled toward zero.</p>
+<div class="demo" id="awWalk">
+  <div class="demo-controls">
+    <button type="button" class="bv-btn" id="awWalkPrev">Prev</button>
+    <button type="button" class="bv-btn" id="awWalkNext">Next</button>
+    <button type="button" class="bv-btn" id="awWalkReset">Reset</button>
+    <span class="walk-lbl" id="awWalkLbl">Step 1</span>
+  </div>
+  <svg id="awWalkSvg" class="mtd-svg tool-svg" viewBox="0 0 340 234" role="img" aria-label="Bars for how far the decay pulls weight A and weight B under Adam with L2 and under AdamW; the current line is outlined."></svg>
+  <p class="demo-read" id="awWalkRead" aria-live="polite"></p>
+  <p class="caption"><span class="fignum">Figure 1.</span> Relative lengths only.</p>
+<div class="eq-card eq-stepped" id="awWalkCard">
+<div class="eq-what">This step, line by line</div>
+<div class="eq-line eq-active" data-eqline="0">\({\displaystyle \htmlStyle{color:#c0392b}{g_t} = \nabla f_t(\htmlStyle{color:#2c3e50}{\theta_{t-1}}) + \htmlStyle{color:#a04000}{\lambda'}\,\htmlStyle{color:#2c3e50}{\theta_{t-1}}}\)</div>
+<div class="eq-why eq-active" data-eqline="0">Adam with L2: the pull joins the gradient.</div>
+<div class="eq-line" data-eqline="1">\({\displaystyle \begin{aligned} \htmlStyle{color:#2c3e50}{\theta_t} &= \htmlStyle{color:#2c3e50}{\theta_{t-1}} - \htmlStyle{color:#7d3c98}{\alpha}\,\frac{\htmlStyle{color:#1f618d}{\hat m_t}}{\sqrt{\htmlStyle{color:#0e6b59}{\hat v_t}} + \epsilon} \\ &\text{with } \htmlStyle{color:#a04000}{\lambda'}\htmlStyle{color:#2c3e50}{\theta}\text{ inside } \htmlStyle{color:#c0392b}{g_t} \end{aligned}}\)</div>
+<div class="eq-why" data-eqline="1">Adam with L2: the pull is divided with everything else.</div>
+<div class="eq-line" data-eqline="2">\({\displaystyle \begin{aligned} \htmlStyle{color:#2c3e50}{\theta_t} &= \htmlStyle{color:#2c3e50}{\theta_{t-1}} - \eta_t\,\htmlStyle{color:#7d3c98}{\alpha}\,\frac{\htmlStyle{color:#1f618d}{\hat m_t}}{\sqrt{\htmlStyle{color:#0e6b59}{\hat v_t}} + \epsilon} \\ &\quad - \eta_t\,\htmlStyle{color:#a04000}{\lambda}\,\htmlStyle{color:#2c3e50}{\theta_{t-1}} \end{aligned}}\)</div>
+<div class="eq-why" data-eqline="2">AdamW: Adam on the loss alone, decay applied outside.</div>
+</div>
+</div>
+    <h2 id="two-weights"><span class="secnum">5</span> Who gets decayed</h2>
+<p>Figure 2 puts the two cases side by side for a weight used on every token, A, and a rare token&#8217;s embedding row, B.</p>
+<figure class="figure mtd-fig" id="optDecayBars"><svg role="img" aria-label="How much decay each of two weights gets per step. Under Adam with L2, the weight with large gradients gets a tiny decay and the weight with small gradients a large one. Under AdamW both get the same decay." class="mtd-svg" viewBox="0 0 340 220" style="max-width:480px"><text class="mtd-halo" x="8" y="20" style="font-size:15.5px;font-weight:700;fill:#2c3e50">Decay per step</text><text class="mtd-halo" x="8" y="52" style="font-size:15.5px;fill:#1f618d;font-weight:700">weight A, large gradients</text><text class="mtd-halo" x="8" y="78" style="font-size:15.5px;fill:#2c3e50">Adam + L2</text><rect x="100" y="65" width="26.4" height="16" style="fill:#1f618d;fill-opacity:.45;stroke:#1f618d;stroke-dasharray:5 3"/><text class="mtd-halo" x="8" y="102" style="font-size:15.5px;fill:#2c3e50">AdamW</text><rect x="100" y="89" width="110.0" height="16" style="fill:#1f618d"/><text class="mtd-halo" x="8" y="136" style="font-size:15.5px;fill:#ca6f1e;font-weight:700">weight B, small gradients</text><text class="mtd-halo" x="8" y="162" style="font-size:15.5px;fill:#2c3e50">Adam + L2</text><rect x="100" y="149" width="220.0" height="16" style="fill:#ca6f1e;fill-opacity:.45;stroke:#ca6f1e;stroke-dasharray:5 3"/><text class="mtd-halo" x="8" y="186" style="font-size:15.5px;fill:#2c3e50">AdamW</text><rect x="100" y="173" width="110.0" height="16" style="fill:#ca6f1e"/><text class="mtd-halo" x="8" y="214" style="font-size:15.5px;fill:#555">same weight size; shape only</text></svg><figcaption class="caption"><span class="fignum">Figure 2.</span> Under L2, Adam&#8217;s divide decides how much each weight decays; under AdamW it does not.</figcaption></figure>
+<p>Decay also meets gradient balancing in multitask training (<a href="multitask-training-loop.html#weight-decay">Gradient Balancing Inside the Training Loop, section 9.2</a>).</p>
+    <h2 id="decay-tool"><span class="secnum">6</span> Decay over a whole run</h2>
+<p>The tool runs decay alone on the two weights. Turn the decay up, then make weight A&#8217;s gradients as small as B&#8217;s.</p>
+<div class="demo" id="optDecayTool">
+  <div class="demo-controls">
+    <label for="dwLam">decay strength: <span id="dwLamVal">medium</span></label>
+    <span class="sl-row"><span class="sl-end">very weak</span><input type="range" id="dwLam" min="0" max="1" step="0.05" value="0.5" aria-label="Weight decay strength, weak to strong"><span class="sl-end">strong</span></span>
+  </div>
+  <div class="demo-controls">
+    <label for="dwGs">weight A&#8217;s gradients: <span id="dwGsVal">much larger</span></label>
+    <span class="sl-row"><span class="sl-end">same as B&#8217;s</span><input type="range" id="dwGs" min="0" max="2" step="0.1" value="1.5" aria-label="How much larger weight A's gradients are than weight B's, log scale"><span class="sl-end">far larger</span></span>
+  </div>
+  <svg id="dwSvg" class="mtd-svg tool-svg" viewBox="0 0 340 280" role="img" aria-label="Size of two weights over training under decay alone. Dashed: Adam with L2. Solid: AdamW. Blue: weight A with large gradients. Orange: weight B with small gradients."></svg>
+  <p class="demo-read" id="dwRead" aria-live="polite"></p>
+  <p class="caption"><span class="fignum">Figure 3.</span> Decay alone: the loss&#8217;s own pull is switched off and each weight&#8217;s size average is held fixed. Illustrative.</p>
+</div>
+    <h2 id="schedule"><span class="secnum">7</span> Decay and the schedule</h2>
+<div class="eq-card" id="awSchedEq">
+<div class="eq-what">The decay in PyTorch&#8217;s form, and a decay that does not depend on run length</div>
+<div class="eq-line eq-active" data-eqline="0">\({\displaystyle \begin{aligned} \htmlStyle{color:#2c3e50}{\theta_t} &= \htmlStyle{color:#2c3e50}{\theta_{t-1}} - \htmlStyle{color:#7d3c98}{\alpha_t}\,\htmlStyle{color:#a04000}{\mathrm{wd}}\,\htmlStyle{color:#2c3e50}{\theta_{t-1}} \\ &\quad - \htmlStyle{color:#7d3c98}{\alpha_t}\,\frac{\htmlStyle{color:#1f618d}{\hat m_t}}{\sqrt{\htmlStyle{color:#0e6b59}{\hat v_t}} + \epsilon} \end{aligned}}\)</div>
+<div class="eq-why eq-active" data-eqline="0">PyTorch&#8217;s AdamW multiplies its <code>weight_decay</code> setting, written <span class="eqt" style="color:#a04000"><var>\(\mathrm{wd}\)</var></span> here, by the scheduled learning rate <span class="eqt" style="color:#7d3c98"><var>\(\alpha_t\)</var></span>, so the decay follows the schedule: strong while the rate is high and fading as it decays. This matches the paper&#8217;s <var>\(\eta_t\lambda\)</var>, so <span class="eqt" style="color:#a04000"><var>\(\mathrm{wd}\)</var></span> is the paper&#8217;s <span class="eqt" style="color:#a04000"><var>\(\lambda\)</var></span> divided by the base rate.</div>
+<div class="eq-line eq-active" data-eqline="1">\({\displaystyle \htmlStyle{color:#a04000}{\lambda} = \htmlStyle{color:#a04000}{\lambda_{\text{norm}}}\,\sqrt{\frac{b}{B\,T}}}\)</div>
+<div class="eq-why eq-active" data-eqline="1">Loshchilov and Hutter also propose normalized weight decay: the best <span class="eqt" style="color:#a04000"><var>\(\lambda\)</var></span> gets smaller when a run takes more weight updates, so they set it from a normalized <span class="eqt" style="color:#a04000"><var>\(\lambda_{\text{norm}}\)</var></span> using the batch size <var>\(b\)</var>, the number of training examples <var>\(B\)</var> and the number of epochs <var>\(T\)</var>. Fewer, larger batches mean fewer updates, so each update can decay more.</div>
+</div>
+<p>So PyTorch&#8217;s default <code>weight_decay</code> of 1e-2 gives a per-step shrink of only the learning rate times 1e-2. The practical rule that follows: when you change the learning rate, the decay changes with it, so retune them together (<a href="lr-schedules.html">Learning Rate Schedules</a>).</p>
+    <h2 id="when"><span class="secnum">8</span> When to use it</h2>
+<p>Use AdamW whenever you want weight decay with an adaptive optimizer: transformers, large language models, vision transformers and diffusion models all train this way. Plain Adam with its <code>weight_decay</code> argument is almost never what you want, because that is the L2 penalty of section 3. Without any decay, AdamW and Adam are the same optimizer. For SGD the two forms are equivalent, so the choice only matters for adaptive optimizers.</p>
+    <h2 id="state"><span class="secnum">9</span> When it runs and what it carries</h2>
+<p>AdamW runs once per training step, after <code>backward()</code>, and carries exactly Adam&#8217;s state: <code>exp_avg</code>, <code>exp_avg_sq</code> and <code>step</code> per weight tensor (<a href="adam.html#state">Adam, section 12</a>). The decay itself has no state. Each parameter group can carry its own <code>weight_decay</code>, which is how biases and normalization gains are left undecayed.</p>
+    <h2 id="pytorch"><span class="secnum">10</span> AdamW in PyTorch</h2>
+<p>The two constructors look alike; only where the decay acts differs.</p>
+<pre class="cs" data-cs="4-7,8-9,10-11"><code class="language-python">import torch
+from torch.optim import Adam
+from torch.optim import AdamW
+model = torch.nn.Linear(10, 1)
+p = list(model.parameters())
+lr, wd = 1e-3, 1e-2  # α, wd
+decay = dict(weight_decay=wd)
+# Adam: wd·θ joins the grad
+adam = Adam(p, lr, **decay)
+# AdamW: decay outside it
+adamw = AdamW(p, lr, **decay)</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>A small model, the learning rate <span class="eqt" style="color:#7d3c98"><var>\(\alpha\)</var></span> and the decay setting <span class="eqt" style="color:#a04000"><var>\(\mathrm{wd}\)</var></span>.</li>
+  <li><span class="cs-n">2</span>Adam&#8217;s <code>weight_decay</code> is L2: it adds <span class="eqt" style="color:#a04000"><var>\(\mathrm{wd}\,\theta\)</var></span> to the gradient, the <span class="eqt" style="color:#a04000"><var>\(\lambda'\theta\)</var></span> of the card in section 3, which Adam then divides.</li>
+  <li><span class="cs-n">3</span>AdamW&#8217;s <code>weight_decay</code> is decoupled: the step <span class="eqt" style="color:#a04000"><var>\(\alpha_t\,\mathrm{wd}\,\theta\)</var></span> outside the divide.</li>
+</ol>
+<p>Large-model recipes decay only the weight matrices. The settings here are LLaMA-like settings.</p>
+<pre class="cs" data-cs="2,3-5,6-9"><code class="language-python">import torch
+model = torch.nn.TransformerEncoderLayer(512, 8)
+decay, no_decay = [], []
+for name, p in model.named_parameters():
+    (no_decay if p.ndim &lt; 2 else decay).append(p)   # biases, norm gains
+opt = torch.optim.AdamW(
+    [{"params": decay, "weight_decay": 0.1},
+     {"params": no_decay, "weight_decay": 0.0}],
+    lr=3e-4, betas=(0.9, 0.95))</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>One transformer layer as the model.</li>
+  <li><span class="cs-n">2</span>Split parameters: matrices are decayed; biases and normalization gains, which are vectors, are not.</li>
+  <li><span class="cs-n">3</span>Two parameter groups with their own decay, and LLaMA-like betas.</li>
+</ol>
+<table class="datatable knobs tdc-stack">
+  <caption>AdamW&#8217;s decay knob.</caption>
+  <thead><tr><th>knob</th><th>raise it</th><th>lower it</th><th>default</th></tr></thead>
+  <tbody>
+    <tr><td><code>weight_decay</code> (<span class="eqt" style="color:#a04000"><var>\(\mathrm{wd}\)</var></span>)</td><td data-label="raise it">every weight shrinks faster toward zero</td><td data-label="lower it">weaker pull; zero turns decay off</td><td data-label="default">0.01 in PyTorch AdamW</td></tr>
+  </tbody>
+</table>
+    <h2 id="failures"><span class="secnum">11</span> Failure modes and tips</h2>
+<table class="datatable tdc-stack">
+  <caption>Most AdamW trouble is about where the decay goes and how big it is.</caption>
+  <thead><tr><th>symptom</th><th>cause</th><th>fix</th></tr></thead>
+  <tbody>
+    <tr><td>regularization does nothing on busy weights</td><td data-label="cause"><code>Adam(weight_decay=...)</code> used, which is L2</td><td data-label="fix">switch to <code>AdamW</code></td></tr>
+    <tr><td>the model underfits after a learning-rate change</td><td data-label="cause">PyTorch&#8217;s decay is scaled by the rate, so the effective decay moved too</td><td data-label="fix">retune <code>weight_decay</code> with the rate</td></tr>
+    <tr><td>norm layers or biases drift to zero</td><td data-label="cause">decay applied to every parameter</td><td data-label="fix">put them in a group with <code>weight_decay</code> zero</td></tr>
+    <tr><td>the best decay changes with run length</td><td data-label="cause">more updates compound the same per-step shrink</td><td data-label="fix">scale it with the normalized decay in the card above</td></tr>
+  </tbody>
+</table>
+    <h2 id="references"><span class="secnum">12</span> References</h2>
+<ol class="brefs">
+  <li>Loshchilov, I., and Hutter, F. (2019). Decoupled weight decay regularization. ICLR. arXiv:1711.05101.</li>
+  <li>Kingma, D. P., and Ba, J. (2015). Adam: a method for stochastic optimization. ICLR.</li>
+  <li>Hanson, S. J., and Pratt, L. Y. (1988). Comparing biases for minimal network construction with back-propagation. NeurIPS.</li>
+  <li>Touvron, H., and others (2023). LLaMA: open and efficient foundation language models. arXiv:2302.13971.</li>
+  <li>PyTorch documentation, torch.optim.AdamW and torch.optim.Adam (weight_decay).</li>
+</ol>
+<script>
+(function () {
+  var K = window.OPK;
+  /* weight A: large gradients (large size average); weight B: small gradients. Relative lengths only. */
+  function draw(s) {
+    var h = K.tx(80, 18, 'weight A: large gradients', 15.5, 'start', '#1f618d', 1) + K.tx(80, 120, 'weight B: small gradients', 15.5, 'start', '#ca6f1e', 1);
+    function block(y, col, sv, label) {
+      var o = '';
+      var l2 = 0.5 / sv, aw = 0.5;
+      o += K.tx(4, y + 18, 'L2', 15.5, 'start', '#2c3e50', 1);
+      var bar = s === 0 ? 0.5 : Math.min(1.3, l2);
+      o += '<g style="opacity:' + (s <= 1 ? 1 : 0.35) + '">' + K.rc(80, y + 4, bar * 180, 18, col) + '</g>';
+      o += K.tx(4, y + 52, 'AdamW', 15.5, 'start', '#2c3e50', 1);
+      o += '<g style="opacity:' + (s === 2 ? 1 : 0.28) + '">' + K.rc(80, y + 38, aw * 180, 18, col) + '</g>';
+      return o;
+    }
+    h += block(26, '#1f618d', 4);
+    h += block(128, '#ca6f1e', 0.6);
+    h += K.tx(4, 226, 'bar: how far the decay pulls this step', 15.5, 'start', '#555');
+    var hl = s <= 1 ? [[76, 28], [76, 130]] : [[76, 62], [76, 164]];
+    hl.forEach(function (p) { h += K.rc(p[0], p[1], 260, 24, 'none', '#2c3e50'); });
+    return h;
+  }
+  window.OPWALK('awWalk', 3, draw, [
+    'Adam with L2: the pull toward zero joins each gradient. Before the divide, equal weights get equal pulls.',
+    'The divide by \\(\\sqrt{\\hat v}\\) shrinks weight A&#8217;s pull, because its gradients are large, and stretches weight B&#8217;s.',
+    'AdamW: the decay skips the divide, so both weights are pulled by the same fraction.'
+  ], [0, 1, 2]);
+})();
+</script>
+<script>
+(function () {
+  var svg = document.getElementById('dwSvg'); if (!svg) return;
+  var K = window.OPK, sl = document.getElementById('dwLam'), sg = document.getElementById('dwGs'), rd = document.getElementById('dwRead');
+  var st = {}, N = 400, X0 = 50, X1 = 332, Y0 = 30, Y1 = 230;
+  function X(t) { return X0 + t / N * (X1 - X0); }
+  function Y(w) { return Y1 - w * (Y1 - Y0); }
+  function run() {
+    var lam = 0.02 + 0.6 * parseFloat(sl.value), rA = Math.pow(10, parseFloat(sg.value)), sv = [rA * 0.6, 0.6];
+    var l2 = [1, 1], aw = [1, 1], o = { l2: [[1], [1]], aw: [[1], [1]] };
+    for (var t = 1; t <= N; t++) {
+      for (var i = 0; i < 2; i++) {
+        /* decay only. AdamW shrinks by the same fraction d; Adam + L2 divides the same pull by the weight's fixed size average */
+        var d = 0.012 * lam;
+        l2[i] = l2[i] * (1 - Math.min(0.5, d / sv[i]));
+        aw[i] = aw[i] * (1 - d);
+        o.l2[i].push(l2[i]); o.aw[i].push(aw[i]);
+      }
+    }
+    return o;
+  }
+  var COL = ['#1f618d', '#ca6f1e'];
+  function draw(r, u) {
+    var h = K.tx(4, 18, 'weight size', 15.5, 'start', '#555');
+    h += K.ln(X0, Y1, X1, Y1, '#7f8c8d', 1.5) + K.ln(X0, Y0, X0, Y1, '#7f8c8d', 1.5);
+    h += K.tx(X0 - 6, Y0 + 12, 'start', 15.5, 'end', '#555') + K.tx(X0 - 6, Y1, 'zero', 15.5, 'end', '#555');
+    for (var i = 0; i < 2; i++) {
+      var a = [], b = [];
+      for (var t = 0; t <= u; t += 2) { a.push([X(t), Y(r.l2[i][t])]); b.push([X(t), Y(r.aw[i][t])]); }
+      if (a.length > 1) { h += K.pl(a, COL[i], 2.6, '7 5'); h += K.pl(b, COL[i], i === 0 ? 4.5 : 2.4, null, i === 0 ? 0.5 : 1); }
+    }
+    h += K.tx(X1, 252, 'training steps', 15.5, 'end', '#555');
+    h += K.ln(X0, 270, X0 + 22, 270, '#2c3e50', 2.4, '7 5') + K.tx(X0 + 26, 275, 'Adam + L2', 15.5, 'start', '#2c3e50');
+    h += K.ln(X0 + 120, 270, X0 + 142, 270, '#2c3e50', 2.4) + K.tx(X0 + 146, 275, 'AdamW', 15.5, 'start', '#2c3e50');
+    h += K.tx(X1, Y0 + 12, 'A', 15.5, 'end', COL[0], 1) + K.tx(X1 - 16, Y0 + 12, 'B', 15.5, 'end', COL[1], 1);
+    svg.innerHTML = h;
+  }
+  var lamV = document.getElementById('dwLamVal'), gsV = document.getElementById('dwGsVal');
+  function go() {
+    var lv = parseFloat(sl.value), gv = parseFloat(sg.value);
+    if (lamV) lamV.textContent = lv < 0.2 ? 'very weak' : lv < 0.45 ? 'weak' : lv < 0.75 ? 'medium' : 'strong';
+    if (gsV) gsV.textContent = gv < 0.25 ? 'as small as B\u2019s' : gv < 1 ? 'larger than B\u2019s' : gv < 1.6 ? 'much larger' : 'far larger';
+    var r = run(), same = Math.abs(r.l2[0][N] - r.l2[1][N]) < 0.05;
+    /* words read off the end of each curve, so they always match the picture */
+    function how(f, pl) { var w = f > 0.9 ? ['barely shrinks', 'barely shrink'] : f > 0.6 ? ['shrinks a little', 'shrink a little'] : f > 0.15 ? ['shrinks a lot', 'shrink a lot'] : ['nearly vanishes', 'nearly vanish']; return '<strong>' + w[pl ? 1 : 0] + '</strong>'; }
+    rd.innerHTML = 'AdamW: A and B ' + how(r.aw[0][N], 1) + ', together. Adam + L2: ' + (same ? 'both ' + how(r.l2[0][N], 1) + ', as their gradients are alike.' : 'A ' + how(r.l2[0][N]) + ', B ' + how(r.l2[1][N]) + '.');
+    window.OPANIM(st, N, 2000, function (u) { draw(r, u); });
+  }
+  sl.addEventListener('input', go); sg.addEventListener('input', go);
+  go();
+})();
+</script>
+            <script>
+        (function () {
+            var nav = document.querySelector('.topnav');
+            function onNavScroll() {
+                nav.classList.toggle('scrolled', window.scrollY > 4);
+            }
+            window.addEventListener('scroll', onNavScroll, { passive: true });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            window.addEventListener('resize', function () {
+                if (window.innerWidth > 768) {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            onNavScroll();
+            var toggle = document.getElementById('navToggle');
+            var panel = document.getElementById('navPanel');
+            if (toggle && panel) {
+                toggle.addEventListener('click', function () {
+                    var open = panel.classList.toggle('open');
+                    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                });
+                panel.addEventListener('click', function (e) {
+                    if (e.target && e.target.classList && e.target.classList.contains('panel-link')) {
+                        panel.classList.remove('open');
+                        toggle.setAttribute('aria-expanded', 'false');
+                    }
+                });
+            }
+            var links = Array.prototype.slice.call(document.querySelectorAll('.tab-strip a.tab-chip[href^="#"]'));
+            if (!links.length) return;
+            var tabMap = {};
+            links.forEach(function (a) { tabMap[a.getAttribute('href').slice(1)] = a; });
+            var current = null;
+            function centerTab(tab) {
+                var strip = tab.parentElement;
+                if (!strip || !strip.classList.contains('tab-strip')) return;
+                var sr = strip.getBoundingClientRect();
+                var pr = tab.getBoundingClientRect();
+                strip.scrollLeft += (pr.width >= sr.width) ? (pr.left - sr.left) : (pr.left - sr.left) - (sr.width - pr.width) / 2;
+            }
+            function setActive(id) {
+                if (!tabMap[id] || id === current) return;
+                current = id;
+                links.forEach(function (a) {
+                    a.classList.toggle('active', a.getAttribute('href') === '#' + id);
+                });
+                centerTab(tabMap[id]);
+            }
+            links.forEach(function (a) {
+                a.addEventListener('click', function () {
+                    setActive(a.getAttribute('href').slice(1));
+                });
+            });
+            setActive(links[0].getAttribute('href').slice(1));
+            if ('IntersectionObserver' in window) {
+                var obs = new IntersectionObserver(function (entries) {
+                    entries.forEach(function (en) {
+                        if (en.isIntersecting) setActive(en.target.id);
+                    });
+                }, { rootMargin: '-35% 0px -55% 0px' });
+                Object.keys(tabMap).forEach(function (id) {
+                    var el = document.getElementById(id);
+                    if (el) obs.observe(el);
+                });
+                window.addEventListener('scroll', function () {
+                    if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) {
+                        setActive(links[links.length - 1].getAttribute('href').slice(1));
+                    }
+                }, { passive: true });
+            }
+            window.addEventListener('load', function () {
+                var act = document.querySelector('.tab-strip a.active');
+                if (act) centerTab(act);
+            });
+        })();
+    </script>
+<script>
+/* P80 code sections (CODE-SECTIONS.md) */
+(function(){
+  var C=['121,184,255','255,171,112','133,232,157','210,168,255','255,161,152','118,227,234'];
+  function lay(pre){
+    var code=pre.querySelector('code'); if(!code) return;
+    var lh=parseFloat(getComputedStyle(code).lineHeight);
+    var pt=parseFloat(getComputedStyle(pre).paddingTop);
+    var old=pre.querySelectorAll('.cs-g'); for(var j=0;j<old.length;j++) pre.removeChild(old[j]);
+    var imgs=[],sizes=[],pos=[];
+    (pre.getAttribute('data-cs')||'').split(',').forEach(function(r,i){
+      var m=r.trim().match(/^(\d+)(?:-(\d+))?$/); if(!m) return;
+      var a=+m[1],b=+(m[2]||m[1]),c=C[i%C.length],top=pt+(a-1)*lh,h=(b-a+1)*lh;
+      imgs.push('linear-gradient(rgba('+c+',.55),rgba('+c+',.55))','linear-gradient(rgba('+c+',.13),rgba('+c+',.13))');
+      sizes.push('3px '+h+'px','100% '+h+'px'); pos.push('0 '+top+'px','0 '+top+'px');
+      var g=document.createElement('span'); g.className='cs-g'; g.setAttribute('aria-hidden','true');
+      g.setAttribute('data-n',String(i+1)); g.style.top=(top+(lh-11)/2)+'px'; g.style.color='rgb('+c+')';
+      pre.insertBefore(g,code);
+    });
+    pre.style.backgroundImage=imgs.join(','); pre.style.backgroundSize=sizes.join(',');
+    pre.style.backgroundPosition=pos.join(','); pre.style.backgroundRepeat='no-repeat';
+  }
+  function all(){ var p=document.querySelectorAll('pre.cs'); for(var i=0;i<p.length;i++) lay(p[i]); }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',all); else all();
+  window.addEventListener('load',all);
+  window.addEventListener('resize',all);
+  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(all);
+})();
+</script>
+</body>
+</html>
+

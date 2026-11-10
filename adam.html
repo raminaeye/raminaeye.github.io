@@ -1,0 +1,1285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Adam: Momentum and RMSProp with Bias Correction</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem;
+      line-height: 1.6;
+      color: #333;
+    }
+    h1, h2, h3, h4 {
+      color: #2c3e50; /* Darker shade for better contrast */
+      margin-top: 1.5em;
+      margin-bottom: 0.5em;
+    }
+    h1 { font-size: 2.5em; border-bottom: 2px solid #3498db; padding-bottom: 0.3em;}
+    .dek { font-size: 1.15em; color: #555; margin-top: 0.2em; }
+    h2 { font-size: 2em; border-bottom: 1px solid #bdc3c7; padding-bottom: 0.2em;}
+    h3 { font-size: 1.5em; }
+    h4 { font-size: 1.2em; color: #555;}
+
+    /* Keep wide display equations from overflowing on small screens */
+
+    /* Shared site nav (matches index.html topnav) */
+    body { padding-top: calc(64px + 1.5rem); }
+    h1, h2, h3, .demo[id], figure[id] { scroll-margin-top: 84px; }
+    .topnav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        z-index: 1000;
+        background: rgba(255, 255, 255, 0.65);
+        backdrop-filter: blur(18px) saturate(1.5);
+        -webkit-backdrop-filter: blur(18px) saturate(1.5);
+        border-bottom: 1px solid transparent;
+        transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+    .topnav.scrolled {
+        background: rgba(255, 255, 255, 0.88);
+        border-bottom-color: #dee2e6;
+        box-shadow: 0 6px 24px rgba(33, 37, 41, 0.07);
+    }
+    .nav-inner {
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 0 1.5rem;
+        height: 64px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+    .wordmark {
+        font-weight: 700;
+        color: #212529;
+        text-decoration: none;
+        font-size: 1.05rem;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+    }
+    .nav-links {
+        display: flex;
+        gap: 2px;
+        align-items: center;
+    }
+    .nav-links a {
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        font-size: 0.95rem;
+        padding: 8px 14px;
+        border-radius: 999px;
+        transition: color 0.18s ease, background-color 0.18s ease;
+    }
+    .nav-links a:hover {
+        color: #007bff;
+        background-color: #e7f1ff;
+    }
+    .nav-links a.active {
+        color: #007bff;
+        background-color: #e7f1ff;
+        font-weight: 600;
+    }
+    .nav-links a:focus-visible,
+    .wordmark:focus-visible,
+    .nav-toggle:focus-visible,
+    .panel-link:focus-visible,
+    .panel-social a:focus-visible {
+        outline: 2px solid #007bff;
+        outline-offset: 2px;
+    }
+    @media (hover: hover) {
+        .nav-toggle:hover { background-color: #e7f1ff; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .topnav,
+        .nav-links a,
+        .nav-toggle span,
+        .nav-panel,
+        .nav-panel a.panel-link {
+            transition: none;
+        }
+    }
+    @media (hover: hover) {
+        .nav-toggle:hover { background-color: #e7f1ff; }
+    }
+    .nav-toggle {
+        display: none;
+        width: 42px;
+        height: 42px;
+        padding: 0;
+        background: none;
+        border: 0;
+        border-radius: 10px;
+        cursor: pointer;
+        flex: 0 0 auto;
+    }
+    .nav-panel {
+        display: grid;
+        grid-template-rows: 0fr;
+        visibility: hidden;
+        transition: grid-template-rows 0.32s ease, visibility 0s linear 0.32s;
+    }
+    .nav-panel.open {
+        grid-template-rows: 1fr;
+        visibility: visible;
+        transition: grid-template-rows 0.32s ease, visibility 0s;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner {
+        min-height: 0;
+        overflow: hidden;
+    }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link:hover {
+        background-color: #e7f1ff;
+        color: #007bff;
+    }
+    .nav-panel a.panel-link.active {
+        color: #007bff;
+        font-weight: 600;
+        background-color: #e7f1ff;
+    }
+    .panel-social a:hover {
+        border-color: #007bff;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner {
+        min-height: 0;
+        overflow: hidden;
+    }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link:hover {
+        background-color: #e7f1ff;
+        color: #007bff;
+    }
+    .nav-panel a.panel-link.active {
+        color: #007bff;
+        font-weight: 600;
+        background-color: #e7f1ff;
+    }
+    .panel-social a:hover {
+        border-color: #007bff;
+    }
+        .crumb { margin: 0 0 0.8em; }
+        .crumb a {
+            display: inline-block;
+            padding: 4px 14px;
+            border: 1px solid #dee2e6;
+            border-radius: 999px;
+            background: #f8f9fa;
+            color: #0056b3;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+        .crumb a:hover { border-color: #007bff; color: #007bff; }
+    .nav-panel a.panel-link {
+        display: flex;
+        align-items: center;
+        padding: 0.8rem 0.75rem;
+        margin: 0 0.25rem;
+        border-radius: 10px;
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        min-height: 48px;
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+    .panel-social {
+        display: flex;
+        gap: 0.5rem;
+        padding: 0.9rem 1rem 0.25rem;
+        flex-wrap: wrap;
+    }
+    .panel-social a {
+        color: #007bff;
+        text-decoration: none;
+        font-weight: 500;
+        font-size: 0.9rem;
+        padding: 6px 12px;
+        border: 1px solid #dee2e6;
+        border-radius: 999px;
+        transition: border-color 0.15s ease;
+    }
+    @media (max-width: 768px) {
+        .nav-links { display: none; }
+        .nav-toggle { display: block; }
+    }
+
+    /* Section tab strip: one slim row, scrolls sideways when it overflows. */
+    .tabs-label {
+        float: left;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #6c757d;
+        font-weight: 700;
+        line-height: 1.2;
+        margin: 0;
+        padding: 8px 12px 0 0;
+    }
+    .tab-strip {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 2px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        margin: 0 0 1.25rem;
+        max-width: 100%;
+    }
+    .tab-strip::-webkit-scrollbar { display: none; }
+    .tab-strip a.tab-chip,
+    .tab-strip a.tab-link {
+        display: inline-block;
+        flex: 0 0 auto;
+        padding: 6px 10px;
+        border-radius: 999px;
+        color: #495057;
+        text-decoration: none;
+        font-size: 0.82rem;
+        font-weight: 500;
+        line-height: 1.35;
+        white-space: nowrap;
+    }
+    .tab-strip a.tab-chip:hover,
+    .tab-strip a.tab-link:hover { color: #007bff; }
+    .tab-strip a.tab-chip.active,
+    .tab-strip a.tab-link.active { background: #007bff; color: #ffffff; }
+    @media (max-width: 768px) {
+        .tabs-label { display: none; }
+        .tab-strip {
+            width: 100vw;
+            max-width: 100vw;
+            box-sizing: border-box;
+            margin-left: calc((100% - 100vw) / 2);
+            padding-left: calc((100vw - 100%) / 2);
+        }
+        .tab-strip a.tab-chip,
+        .tab-strip a.tab-link { font-size: 0.75rem; padding: 6px 8px; }
+    }
+
+    pre {
+      background: #0d1117;
+      color: #e6edf3;
+      padding: 14px 16px;
+      overflow-x: auto;
+      border-radius: 8px;
+      font-size: 0.9em;
+      margin: 1em 0;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+    }
+    /* P52 canonical inline items in prose: numbers and variables wear the body
+       font at body size and read as part of the sentence (keeps P50's quiet
+       treatment, no pill; code blocks and eq-cards keep the mono treatment). */
+    code {
+        font-family: inherit;
+        font-size: 1em;
+        color: #1a1a1a;
+        background: none;
+        padding: 0 0.08em;
+        overflow-wrap: break-word;
+    }
+    pre code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 1em; }
+    .eq-card code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 0.92em; }
+    pre code { /* Reset for code inside pre, already handled by pre styling */
+        background: none;
+        padding: 0;
+        font-size: 1em; /* Ensure pre's font size is inherited */
+        color: inherit;
+    }
+    ul, ol {
+        padding-left: 20px;
+    }
+    li {
+        margin-bottom: 0.5em;
+    }
+    strong {
+        color: #2980b9;
+    }
+    /* Labeled teaching diagrams: each teaches exactly one idea */
+    .diagram {
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      padding: 1.2rem;
+      margin: 1.75rem 0;
+      background: #fbfcfd;
+    }
+    .diagram svg {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+    .diagram .caption {
+      font-size: 0.9em;
+      color: #555;
+      margin-top: 1rem;
+      line-height: 1.5;
+    }
+    .diagram .caption strong {
+      color: #2c3e50;
+    }
+    /* Rendered result block, not a print() call */
+    .output {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 1rem 1.2rem;
+      border-radius: 6px;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+      font-size: 0.9em;
+      margin: 1em 0;
+      overflow-x: auto;
+      border-left: 4px solid #22c55e;
+      line-height: 1.7;
+    }
+    .output .dim { color: #94a3b8; }
+    .output .good { color: #4ade80; font-weight: bold; }
+    .output .bad { color: #ef4444; font-weight: bold; }
+    .output .src { color: #fbbf24; }
+    /* Stat cards: clean, scannable reference numbers */
+    .stat-title { font-size: 0.85em; font-weight: 700; color: #2c3e50; margin: 0 0 0.2rem; }
+    .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:1.2em 0}
+    .stat-card{border:1px solid #bdc3c7;border-radius:8px;padding:14px 16px;background:#f7f9fb}
+    .stat-num{font-size:1.9em;font-weight:800;color:#2c3e50;line-height:1.15}
+    .stat-unit{font-size:.55em;font-weight:600;color:#7f8c8d}.stat-vs{font-size:max(12px,.55em);font-weight:600;color:#7f8c8d}
+    .stat-label{font-size:.92em;font-weight:600;margin-top:6px;color:#2c3e50}
+    .stat-note{font-size:.82em;color:#7f8c8d;margin-top:3px}
+    /* Numbered walkthrough steps: one computation per step */
+/* Worked-example card (Round 9 template): a calm sage card that sets
+           math walkthrough steps apart from body text. */
+        .worked-example {
+            background: #f1f6ed;
+            border: 1px solid #d9e4d1;
+            border-left: 3px solid #6f9a63;
+            border-radius: 10px;
+            padding: 14px 20px;
+            margin: 1.1em 0;
+            max-width: 680px;
+            color: #2c3e50;
+            line-height: 1.8;
+            overflow-x: auto;
+        }
+        ol.worked-example {
+            list-style: none;
+            counter-reset: wex-step;
+            padding-left: 20px;
+        }
+        ol.worked-example > li {
+            counter-increment: wex-step;
+            position: relative;
+            margin: 0;
+            padding: 8px 0 8px 44px;
+        }
+        ol.worked-example > li + li { border-top: 1px dashed #cbdabf; }
+        ol.worked-example > li::before {
+            content: counter(wex-step);
+            position: absolute;
+            left: 0;
+            top: 9px;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: #6f9a63;
+            color: #ffffff;
+            font-size: 13px;
+            font-weight: 700;
+            line-height: 28px;
+            text-align: center;
+        }
+        @media (max-width: 480px) {
+            .worked-example { padding: 12px; font-size: 15px; }
+            ol.worked-example { padding-left: 12px; }
+            ol.worked-example > li { padding-left: 38px; }
+        }
+    /* Long inline formulas get their own scrollable line on small screens */
+    .math-scroll{display:block;overflow-x:auto;overflow-y:hidden;max-width:100%;padding:.1em 0}
+    /* Interactive demos */
+    .demo {
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      padding: 1.25rem;
+      margin: 1.75rem 0;
+      background: #fbfcfd;
+    }
+    .demo-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem 1rem;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    .demo-controls label { font-weight: bold; color: #2c3e50; white-space: nowrap; }
+    .demo-controls label var sub, .demo-controls label var sup { font-size: max(11px, .72em); }
+    .demo-controls input[type=range] {
+      flex: 1 1 140px;
+      min-width: 0;
+      max-width: 220px;
+      accent-color: #3498db;
+    }
+    #bvCanvas { display: block; width: 100%; height: 320px; max-width: 100%; }
+    .demo-stats {
+      text-align: center;
+      font-size: 1.02em;
+      color: #2c3e50;
+      margin: 1rem 0 0.4rem;
+    }
+    .chart-legend { display: flex; flex-wrap: wrap; gap: 0.4em 1.2em; font-size: 0.9em; color: #555; margin: 0.2rem 0 0.4rem 0; }
+    .chart-legend .lg-sw { display: inline-block; width: 24px; height: 0; border-top: 3px solid; vertical-align: middle; margin-right: 0.4em; }
+    .chart-legend .lg-blue { border-color: #2980b9; }
+    .chart-legend .lg-red { border-color: #c0392b; border-top-style: dashed; }
+    .demo-stats strong { color: #2980b9; }
+    .demo .caption {
+      font-size: 0.9em; color: #555; margin-top: 1rem;
+      border-left: 3px solid #3498db; padding-left: 0.8em;
+    }
+    .dim-note { font-size: 0.8em; color: #888; margin-top: 0.6rem; }
+    /* Bias-variance Play button (mirrors the race widget buttons) */
+    .demo .bv-btn { font: inherit; font-size: 0.92em; padding: 0.35rem 0.8rem; border: 1px solid #bdc3c7; border-radius: 6px; background: #fff; color: #2c3e50; cursor: pointer; }
+    .demo .bv-btn.active { background: #2980b9; border-color: #2980b9; color: #fff; font-weight: bold; }
+    .demo .bv-btn:disabled { opacity: 0.45; cursor: default; }
+    /* Fixed label width so the slider readouts can never change the controls-row wrap (no-scroll-on-Play) */
+    #bvToy #capVal, #bvToy #dataVal { display: inline-block; min-width: 3ch; }
+    .howto { font-size: 0.92em; color: #2c3e50; margin: 0.8rem 0 0.2rem; }
+    /* Caption card standard: white/lightest tint, 1px #e3e8ee border + 3px #2c3e50 left accent */
+    div.howto {
+      background: #fff;
+      border: 1px solid #e3e8ee;
+      border-left: 3px solid #2c3e50;
+      border-radius: 10px;
+      padding: 18px;
+      margin: 14px 0 0;
+      font-size: 15px;
+      line-height: 1.65;
+      color: #2c3e50;
+    }
+    div.howto .howto-head { font-weight: bold; font-size: 15px; margin: 0 0 0.4em; }
+    div.howto ul { list-style: none; margin: 0; padding: 0; }
+    div.howto ul li { position: relative; padding-left: 16px; margin: 7px 0; }
+    div.howto ul li::before {
+      content: ''; position: absolute; left: 0; top: 0.62em;
+      width: 6px; height: 6px; border-radius: 50%; background: #2c3e50;
+    }
+    div.howto ul li.tryit {
+      background: rgba(44,62,80,0.08);
+      padding: 7px 7px 7px 23px;
+      border-radius: 6px;
+    }
+    div.howto ul li.tryit::before { left: 7px; top: calc(0.62em + 7px); }
+    .canvas-wrap { position: relative; }
+    
+    /* Optimizer race widget */
+    #optRace { position: relative; }
+    #optRace .opt-btn { font: inherit; font-size: 0.92em; padding: 0.35rem 0.8rem; border: 1px solid #bdc3c7; border-radius: 6px; background: #fff; color: #2c3e50; cursor: pointer; }
+    #optRace .opt-btn.active { background: #2980b9; border-color: #2980b9; color: #fff; font-weight: bold; }
+    #optRace .gloss { margin: 0 0 0.6rem; padding-left: 1.2rem; color: #2c3e50; }
+    #optRace .gloss li { margin: 0.35rem 0; }
+    #optRace .race-wrap { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-start; }
+    #optRace .race-main { flex: 1 1 330px; min-width: 0; }
+    #optRace .race-side { flex: 1 1 230px; min-width: 0; }
+    #optRace canvas { display: block; width: 100%; height: auto; }
+    #optRace .side-title { text-align: center; font-weight: bold; color: #2c3e50; font-size: 0.92em; margin: 0 0 0.4rem; }
+    #optRace .bad { color: #c0392b; font-weight: bold; }
+    /* Shared walkthrough equation-card contract (verbatim, all pages) */
+    
+    .eq-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+
+      padding:1rem 1.2rem;margin:1.75rem auto;max-width:640px;overflow-x:auto}
+
+    .eq-what{font-size:.95rem;color:#334155;margin:0 0 .6rem;line-height:1.55}
+
+    .eq-line{font-size:1.38rem;line-height:2.0;letter-spacing:.015em;padding:.5rem .6rem;white-space:normal;font-weight:500;opacity:.38;border-left:3px solid transparent}
+
+    .eq-line.eq-active{opacity:1;border-left-color:#2c3e50}
+.eq-line sub,.eq-line sup{font-size:.68em}
+      .eq-why{display:none;visibility:hidden;font-size:1rem;color:#475569;padding:.15rem .35rem .4rem;line-height:1.65}
+      .eq-why.eq-active{display:block;visibility:visible}
+      .eq-card.eq-stepped .eq-line{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-line.eq-active{display:block;opacity:1;visibility:visible}
+      .eq-card.eq-stepped .eq-legend .eq-item{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-legend .eq-item.eq-active{display:block;visibility:visible}
+
+    .eqt{font-weight:600;padding:0 .1em;border-radius:3px}
+
+    .eqt.eqt-active{text-decoration:underline;text-underline-offset:2px}
+
+    .eq-legend{font-size:.85rem;color:#475569;margin-top:.6rem;line-height:1.75}
+
+    .eq-legend .eq-item{display:block}
+
+    .eq-legend .eq-item code{white-space:nowrap}
+
+    .eq-sw{display:inline-block;width:.7em;height:.7em;border-radius:2px;
+
+      margin:0 .25em 0 .6em;vertical-align:baseline}
+
+    @media (max-width:480px){.eq-card{padding:.85rem .9rem}.eq-line{font-size:1.24rem;line-height:1.95}}
+/* P70 inline variables and inline code, one style site-wide (VAR-STYLE.md v2) */
+var,.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic;font-weight:400;font-size:1em;color:#1d4e89;background:#edf3fa;border-radius:3px;padding:0 .18em;white-space:nowrap;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+var sub,var sup,.mvar sub,.mvar sup{font-size:.72em;font-style:normal}
+pre var,code var,.eq-line var{font:inherit;color:inherit;background:none;padding:0}
+svg text.mvar,svg tspan.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic}
+:not(pre)>code:not(.eq-line code){font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,Courier,monospace;font-size:.86em;color:#24292f;background:#f1f3f5;border:1px solid #dfe3e8;border-radius:4px;padding:.06em .32em;white-space:normal;overflow-wrap:anywhere}
+/* P79 numbering (NUMBERING.md) */
+.secnum{font-variant-numeric:tabular-nums;margin-right:.4em;color:inherit;font-weight:inherit}
+.tab-strip .secnum{margin-right:.3em;opacity:.75}
+.fignum{font-weight:600;margin-right:.3em;font-variant-numeric:tabular-nums}
+/* P80 code sections (CODE-SECTIONS.md) */
+pre.cs{position:relative;background-attachment:local;padding-left:20px}
+pre.cs code{display:block;line-height:1.55}
+pre.cs .cs-g{position:absolute;left:3px;width:11px;text-align:center;font:700 11px/1 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;-webkit-user-select:none;user-select:none;pointer-events:none}
+pre.cs .cs-g::before{content:attr(data-n)}
+ol.cs-notes{list-style:none;padding-left:0;margin:-.4em 0 1em}
+ol.cs-notes li{margin:0 0 .3em;padding-left:1.9em;position:relative}
+ol.cs-notes .cs-n{position:absolute;left:0;top:.1em;min-width:1.35em;padding:0 .25em;border-radius:4px;font:700 .8em/1.45 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;text-align:center;color:#0d1117}
+ol.cs-notes li:nth-child(6n+1) .cs-n{background:#79b8ff}
+ol.cs-notes li:nth-child(6n+2) .cs-n{background:#ffab70}
+ol.cs-notes li:nth-child(6n+3) .cs-n{background:#85e89d}
+ol.cs-notes li:nth-child(6n+4) .cs-n{background:#d2a8ff}
+ol.cs-notes li:nth-child(6n+5) .cs-n{background:#ffa198}
+ol.cs-notes li:nth-child(6n+6) .cs-n{background:#76e3ea}
+    /* diagram-side dim/highlight (SVG/DOM). Do NOT use .hl/.dim: taken. */
+    .eq-dim{opacity:.32}
+    .eq-hl{filter:drop-shadow(0 0 3px currentColor)}
+    hr {
+      border: 0;
+      height: 1px;
+      background: #bdc3c7;
+      margin-top: 2em;
+      margin-bottom: 2em;
+    }
+  
+/* canonical spacing: display math */
+    /* Compact phone walkthrough layout (canonical block, every tutorial page):
+       two-column eq legends, tightened demo spacing, and diagrams capped so
+       controls and diagram share the first phone screen. Phone widths only;
+       desktop rendering and equation typography are unchanged. */
+    @media (max-width:480px){
+      .demo{padding:.75rem}
+      .demo>*{margin-top:.6rem;margin-bottom:.6rem}
+      .demo>*:first-child{margin-top:0}
+      .demo .eq-card{margin:1rem auto;padding:.7rem .8rem}
+      .demo .cap-card,.demo .capcard{padding:.85rem .95rem}
+      .eq-legend{display:grid;grid-template-columns:1fr 1fr;column-gap:.9rem;row-gap:.1rem;line-height:1.5}
+      .eq-legend .eq-item:has(> code ~ code){grid-column:1/-1}
+      .demo svg,.demo canvas{max-height:55vh}
+    }
+    /* batch Da shared: tips and data tables, linked-card map (2026-11-02) */
+    .datatable{border-collapse:collapse;margin:1.2em 0;width:100%;max-width:640px;font-size:.95em} .datatable th,.datatable td{border:1px solid #bdc3c7;padding:.45em .6em;text-align:left;vertical-align:top} .datatable th{background:#2c3e50;color:#fff;font-weight:600} .datatable tr:nth-child(even) td{background:#f7f9fb} .datatable caption{text-align:left;padding:.5em 0 0;font-size:.92em;color:#555;caption-side:bottom}
+    @media (max-width:480px){.datatable{font-size:.88em}.datatable th,.datatable td{padding:.35em .4em}}
+    @media (max-width:480px){h2#failures+.datatable{table-layout:fixed}h2#failures+.datatable td,h2#failures+.datatable th{overflow-wrap:anywhere}}
+    .pmap{margin:1.75rem auto;max-width:640px;display:flex;flex-direction:column;align-items:stretch;gap:0}
+    .pmap-row{display:flex;gap:.6rem;justify-content:center;flex-wrap:wrap}
+    .pmap-link{width:2px;height:14px;background:#95a5a6;margin:0 auto}
+    .pmap a.pmap-card{flex:1 1 0;min-width:0;display:block;border:1.5px solid #bdc3c7;border-radius:8px;padding:.45rem .6rem;text-decoration:none;color:#2c3e50;background:#fbfcfd;text-align:center;line-height:1.3}
+    .pmap a.pmap-card:hover{border-color:#2980b9}
+    .pmap .pmap-name{display:block;font-weight:700;font-size:.98rem}
+    .pmap .pmap-fix{display:block;font-size:.85rem;color:#555}
+    .pmap-caption{text-align:center}
+    @media (max-width:480px){.pmap a.pmap-card{padding:.35rem .4rem}.pmap .pmap-name{font-size:.92rem}.pmap .pmap-fix{font-size:.8rem}}
+/* PREV-NEXT-BEGIN */
+nav.tut-seq{display:flex;align-items:center;gap:0 .75rem;margin:0 0 .25rem;font-size:.85rem;white-space:nowrap}
+nav.tut-seq a{position:relative;display:block;flex:0 1 auto;min-width:0;height:44px;line-height:44px;padding:0 2px;overflow:hidden;text-overflow:ellipsis;color:#0056b3;text-decoration:none}
+nav.tut-seq a.seq-home{flex:0 0 auto}
+nav.tut-seq a.seq-next{margin-left:auto}
+nav.tut-seq .seq-w{font-weight:600}
+nav.tut-seq a:hover{text-decoration:underline}
+nav.tut-seq a:focus-visible{outline:2px solid #0056b3;outline-offset:2px}
+@media (max-width:575px){nav.tut-seq .seq-t{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}}
+@media (forced-colors:active){nav.tut-seq a:focus-visible{outline-color:Highlight}}
+@media print{nav.tut-seq{display:none}}
+/* PREV-NEXT-END */
+/* TD-CODE-BEGIN variant D2: words and inline code in table cells break only between words; a table that holds inline code scrolls sideways with a right-edge fade while more is to the right, a pinned first column with an edge line once scrolled, and trimmed phone padding; <wbr> wrap points in table code act at 640 px and below only; a .tdc-stack table stacks per row on phones (VAR-STYLE.md v2 amendment 2026-11-05, D2) */
+td,th,td code:not(pre code),th code:not(pre code){overflow-wrap:normal!important;word-break:normal!important}
+table:has(td code){display:block;max-width:100%;overflow-x:auto}
+:where(table:has(td code)) :where(tr>:first-child){position:sticky;left:-1px;z-index:1;background-color:Canvas;box-shadow:inset -1px 0 0 var(--tdc-s)}
+@property --tdc-f{syntax:'<length>';inherits:false;initial-value:0px}
+@property --tdc-s{syntax:'<color>';inherits:true;initial-value:transparent}
+@keyframes tdc-hint{0%{--tdc-f:3rem;--tdc-s:transparent}3%{--tdc-s:rgba(0,0,0,.28)}85%{--tdc-f:3rem}100%{--tdc-f:0px;--tdc-s:rgba(0,0,0,.28)}}
+@supports (animation-timeline:scroll()){table:has(td code){-webkit-mask-image:linear-gradient(to left,rgba(0,0,0,.15),#000 var(--tdc-f));mask-image:linear-gradient(to left,rgba(0,0,0,.15),#000 var(--tdc-f));animation-name:tdc-hint;animation-duration:1ms;animation-timing-function:linear;animation-fill-mode:both;animation-timeline:scroll(self inline)}}
+@supports not (animation-timeline:scroll()){table:has(td code){background:linear-gradient(to left,Canvas 40%,rgba(255,255,255,0)) 100% 0/2.5rem 100% no-repeat local,radial-gradient(farthest-side at 100% 50%,rgba(0,0,0,.2),rgba(0,0,0,0)) 100% 0/.9rem 100% no-repeat scroll}}
+@media (min-width:641px){td wbr,th wbr{display:none}}
+@media (max-width:400px){table:has(td code) :is(td,th){padding-left:.35em!important;padding-right:.35em!important}}
+@media (max-width:640px){table.tdc-stack,table.tdc-stack :is(tbody,thead,tr,td){display:block;overflow:visible;-webkit-mask-image:none;mask-image:none;animation-name:none}table.tdc-stack tr:has(th){display:none}table.tdc-stack tr+tr{margin-top:.6em}table.tdc-stack td{position:static;box-shadow:none;border-width:0 1px;padding:.3em .6em!important}table.tdc-stack tr>td:first-child{border-top-width:1px;font-weight:700}table.tdc-stack tr>td:last-child{border-bottom-width:1px;padding-bottom:.5em!important}table.tdc-stack td[data-label]::before{content:attr(data-label) ": ";font-weight:600}}
+/* TD-CODE-END */
+/* MATH-BEGIN v1 (P88, site-math.js renders KaTeX; byte-identical on every page) */
+.eq-line{overflow-x:auto;overflow-y:hidden;white-space:normal}
+.eq-line .katex{font-size:1.02em;line-height:1.6}
+.eq-line .katex .base{margin:.15em 0}
+var .katex,p .katex,li .katex,td .katex,th .katex,figcaption .katex,.eq-why .katex,.eq-what .katex,.eq-legend .katex{font-size:1.06em}
+var:has(.katex){font-style:normal}
+.katex-display{margin:.6rem 0;overflow-x:auto;overflow-y:hidden}
+/* MATH-END */
+    /* Slider rows (fix wave 2): label on its own line, slider with both end labels on the next, so value words never move the ends */
+    .demo-controls label[for] { flex: 1 1 100%; white-space: normal; }
+    .demo-controls .sl-row { display: flex; align-items: center; gap: .5rem; flex: 1 1 100%; min-width: 0; max-width: 30rem; }
+    .demo-controls .sl-row input[type=range] { flex: 1 1 auto; min-width: 0; max-width: none; }
+    .demo-controls .sl-end { font-size: .85em; color: #555; white-space: nowrap; flex: 0 0 auto; }
+    /* Stacked phone tables (fix wave 2): the caption spans the full width */
+    @media (max-width:640px){ table.tdc-stack > caption { display: block; width: auto; } }
+</style>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+  <script src="site-math.js" defer></script>
+
+  <style>
+/* Static teaching diagrams (mtd), shared across tutorials, 2026-11-01 */
+.figure.mtd-fig { margin: 1.75rem 0; }
+.mtd-fig > svg.mtd-svg { display: block; width: 100%; height: auto; margin: 0 auto; }
+.mtd-fig .caption { margin-top: 1rem; }
+.mtd-svg text { fill: #2c3e50; font-family: sans-serif; }
+.mtd-svg .mtd-sub { fill: #555; }
+.mtd-svg .mtd-t1 { fill: #1f618d; }
+.mtd-svg .mtd-t2 { fill: #ca6f1e; }
+.mtd-svg .mtd-pu { fill: #7d3c98; }
+.mtd-svg .mtd-red { fill: #c0392b; }
+.mtd-svg .mtd-grn { fill: #148f77; }
+.mtd-svg line, .mtd-svg path, .mtd-svg polyline { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.mtd-svg .mtd-s.mtd-c1 { stroke: #1f618d; } .mtd-svg .mtd-f.mtd-c1 { fill: #1f618d; }
+.mtd-svg .mtd-s.mtd-c2 { stroke: #ca6f1e; } .mtd-svg .mtd-f.mtd-c2 { fill: #ca6f1e; }
+.mtd-svg .mtd-s.mtd-cp { stroke: #7d3c98; } .mtd-svg .mtd-f.mtd-cp { fill: #7d3c98; }
+.mtd-svg .mtd-s.mtd-cr { stroke: #c0392b; } .mtd-svg .mtd-f.mtd-cr { fill: #c0392b; }
+.mtd-svg .mtd-s.mtd-cg { stroke: #2c3e50; } .mtd-svg .mtd-f.mtd-cg { fill: #2c3e50; }
+.mtd-svg .mtd-sep { stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-pic { fill: #fbfcfd; stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-axis { stroke: #7f8c8d; stroke-width: 1.5px; }
+.mtd-svg .mtd-arc { stroke: #2c3e50; stroke-width: 2px; }
+.mtd-svg .mtd-dot { fill: #2c3e50; }
+.mtd-svg .mtd-guide { stroke: #7f8c8d; stroke-width: 1.4px; stroke-dasharray: 4 4; }
+.mtd-svg .mtd-ring { fill: #fbfcfd; stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-pt { fill: #1f618d; opacity: .55; }
+.mtd-svg .mtd-cross { stroke: #2c3e50; stroke-width: 2.2px; }
+.mtd-svg .mtd-barbg { fill: #eef1f4; }
+.mtd-svg .mtd-bar { fill: #7d3c98; }
+.mtd-svg .mtd-cart { fill: #ffffff; stroke: #2c3e50; stroke-width: 2px; }
+.mtd-svg .mtd-zero { stroke: #95a5a6; stroke-width: 1.2px; stroke-dasharray: 4 4; }
+.mtd-svg .mtd-axisl { stroke: #7f8c8d; stroke-width: 2px; }
+.mtd-svg .mtd-norm { stroke: #148f77; stroke-width: 4px; }
+.mtd-svg .mtd-read { fill: #ffffff; stroke: #2c3e50; stroke-width: 2.5px; }
+.mtd-svg .mtd-ball { fill: #7d3c98; fill-opacity: .08; stroke: #7d3c98; stroke-width: 1.6px; stroke-dasharray: 5 4; }
+.mtd-svg .mtd-box { fill: #fbfcfd; stroke: #bdc3c7; stroke-width: 1.4px; }
+.mtd-svg .mtd-crossbg { fill: #ffffff; }
+.mtd-svg .mtd-halo { stroke: #ffffff; stroke-width: 5px; stroke-linejoin: round; paint-order: stroke; }
+.mtd-svg .mtd-box.mtd-note { stroke-dasharray: 5 4; }
+</style>
+<style>
+/* Series and page map (B-TF, 2026-11-02) */
+.sermap { margin: .5rem 0 1.1rem; font-size: .8rem; line-height: 1.3; }
+.sermap ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; row-gap: 5px; }
+.sermap li { display: flex; align-items: center; margin: 0; padding: 0; line-height: 1.25; }
+.sermap li + li::before { content: "\2192"; color: #95a5a6; margin: 0 5px; }
+.sermap a, .sermap .sm-here { display: inline-block; padding: 2px 7px; line-height: 1.25; border-radius: 6px; text-decoration: none; }
+.sermap .sm-series a { padding: 1px 2px; color: #1f618d; text-decoration: underline; text-decoration-color: #a9cce3; text-underline-offset: 2px; }
+.sermap .sm-series .sm-here { padding: 1px 6px; background: #117a65; color: #fff; font-weight: 600; }
+.sermap .sm-series { row-gap: 0; }
+.sermap .sm-series a, .sermap .sm-series .sm-here, .sermap .sm-also a { display: inline-flex; align-items: center; min-height: 44px; box-sizing: border-box; }
+.sermap .sm-flow { margin-top: 6px; padding-left: 8px; border-left: 3px solid #117a65; }
+</style>
+<style>
+nav.prereq{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem .4rem;margin:.6rem 0 1.1rem}
+nav.prereq .prereq-label{font-size:.82rem;font-weight:600;color:#6c757d;margin-right:.15rem}
+nav.prereq a.prereq-chip{display:inline-block;padding:.15rem .6rem;border:1px solid #ced4da;border-radius:999px;font-size:.85rem;line-height:1.4;color:#0056b3;text-decoration:none}
+nav.prereq a.prereq-chip:hover,nav.prereq a.prereq-chip:focus-visible{background:#e7f1ff;border-color:#007bff}
+nav.prereq-sec{margin:.2rem 0 .9rem}
+nav.prereq-sec p{margin:0;font-size:.9rem;line-height:1.5;color:#495057}
+/* Optimizers rewrite 2026-11-05: series map arrows, tools */
+.pmap-step{display:flex;flex-direction:column;align-items:center;margin:0 auto}
+.pmap-step .pmap-link{height:10px;width:3px}
+.pmap-step .pmap-say{font-size:.8rem;color:#555;line-height:1.2;padding:1px 0}
+.pmap-step .pmap-link.pmap-arrow{height:12px;position:relative}
+.pmap-step .pmap-link.pmap-arrow::after{content:"";position:absolute;left:-5.5px;bottom:-8px;border-left:7px solid transparent;border-right:7px solid transparent;border-top:9px solid #95a5a6}
+.pmap-page{font-size:.78rem;font-weight:600;color:#117a65;text-align:center;margin:.5rem 0 .25rem;letter-spacing:.02em}
+.pmap a.pmap-card.pmap-here{border-color:#117a65}
+.seg{display:inline-flex;flex-wrap:wrap;gap:4px}
+.seg .bv-btn{min-height:40px}
+.demo .demo-read{font-size:.95rem;color:#2c3e50;margin:.4rem 0 .2rem;min-height:1.6em}
+/* opt-polish (R10 4.1, 4.5): readouts that wrap at phone width reserve their tallest state, so the demo never jumps */
+@media (max-width:480px){#stRead{min-height:3.3em}}
+@media (max-width:389px){#raceRead{min-height:4.9em}}
+.demo svg.tool-svg{display:block;width:100%;height:auto;max-width:520px;margin:.3rem auto}
+.demo svg.tool-svg text{font-family:sans-serif;fill:#2c3e50}
+.knobs{font-size:.95em}
+.datatable td.num,.datatable th.num{text-align:right;font-variant-numeric:tabular-nums}
+@media (max-width:480px){.demo .demo-controls{gap:.4rem .5rem}}
+.diagram .diag-list{font-size:.92em;color:#2c3e50;margin:.6em 0 0;padding-left:1.4rem}
+.diagram .diag-list li{margin:.35em 0}
+ol.brefs{line-height:1.7;margin:1em 0 2em;padding-left:22px}
+ol.brefs li{margin-bottom:.5em}
+/* fix wave 3 (recheck-2 R3 n1): variables in the dark header band read as plain light italic text, no chip */
+.datatable th var{color:#fff;background:none;padding:0;border-radius:0}
+/* fix wave 3 (R3 n7, R4 P3): a hat centred over epsilon, and limits set under max */
+/* fix wave 4 (recheck-3 R6 m1): line-height 1 on the epsilon box, so the hat sits just above the epsilon instead of floating */
+.xh{position:relative;display:inline-block;line-height:1}
+.xh::after{content:"ˆ";position:absolute;left:0;right:0;top:-.05em;text-align:center;font-style:normal;line-height:1;padding-left:.12em}
+.lim{display:inline-flex;flex-direction:column;align-items:center;vertical-align:-.62em;line-height:1.05}
+.lim .lim-sub{font-size:.74em}
+</style>
+<style>
+/* one-topic optimizers split 2026-11-08: series flow row, walkthrough and tool bits */
+.sermap .sm-flow a{border:1px solid #d5dbdb;background:#f8f9fa;color:#2c3e50}
+.sermap .sm-flow .sm-here{background:#117a65;color:#fff;font-weight:600}
+.demo .demo-controls{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .7rem}
+.demo .walk-lbl{font-weight:600;color:#2c3e50}
+.demo .eq-card.eq-stepped .eq-why{display:none}
+.demo .eq-card.eq-stepped .eq-why.eq-active{display:block;visibility:visible}
+.bv-btn[aria-pressed="true"],.bv-btn.active{background:#2c3e50;color:#fff;border-color:#2c3e50}
+.demo input[type=range]{flex:1 1 140px;min-width:120px}
+.demo label{font-size:.95rem}
+.fam-list{padding-left:1.3rem}
+.fam-list li{margin:.35em 0}
+</style>
+<script>
+/* Walkthrough stepper shared by the optimizer pages (2026-11-08): controls, diagram, readout, eq-card last.
+   id+'Prev', 'Next', 'Reset', 'Lbl', 'Svg', 'Read', 'Card'; lines[i] is the eq-card line for step i. */
+window.OPWALK = function (id, n, draw, reads, lines) {
+  var $ = function (s) { return document.getElementById(id + s); };
+  var prev = $('Prev'), next = $('Next'), reset = $('Reset'), lbl = $('Lbl'), svg = $('Svg'), rd = $('Read'), card = $('Card');
+  if (!svg) return;
+  var cur = 0;
+  function show() {
+    svg.innerHTML = draw(cur);
+    rd.innerHTML = reads[cur];
+    if (window.siteMath) window.siteMath.typeset(rd);
+    lbl.textContent = 'Step ' + (cur + 1) + ' of ' + n;
+    if (card) Array.prototype.forEach.call(card.querySelectorAll('.eq-line, .eq-why'), function (e) {
+      e.classList.toggle('eq-active', String(lines[cur]) === e.getAttribute('data-eqline'));
+    });
+    prev.disabled = cur === 0; next.disabled = cur === n - 1;
+  }
+  prev.addEventListener('click', function () { if (cur > 0) { cur--; show(); } });
+  next.addEventListener('click', function () { if (cur < n - 1) { cur++; show(); } });
+  reset.addEventListener('click', function () { cur = 0; show(); });
+  show();
+};
+/* Animate a run: calls frame(k) for k = 1..total over about ms milliseconds; a newer call cancels the older one. */
+window.OPANIM = function (state, total, ms, frame) {
+  state.tok = (state.tok || 0) + 1; var tok = state.tok, t0 = null;
+  function go(ts) {
+    if (tok !== state.tok) return;
+    if (t0 === null) t0 = ts;
+    var k = Math.min(total, Math.max(1, Math.round((ts - t0) / ms * total)));
+    frame(k);
+    if (k < total) requestAnimationFrame(go);
+  }
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) { frame(total); return; }
+  requestAnimationFrame(go);
+};
+</script>
+<script>
+/* Shared SVG string helpers for the optimizer tools (2026-11-05). */
+window.OPK = (function () {
+  function n(v) { return (Math.round(v * 10) / 10).toString(); }
+  return {
+    n: n,
+    ln: function (x1, y1, x2, y2, c, w, d) { return '<line x1="' + n(x1) + '" y1="' + n(y1) + '" x2="' + n(x2) + '" y2="' + n(y2) + '" style="stroke:' + c + ';stroke-width:' + (w || 1.5) + 'px' + (d ? ';stroke-dasharray:' + d : '') + '"/>'; },
+    pl: function (pts, c, w, d, op, clip) { return '<polyline points="' + pts.map(function (p) { return n(p[0]) + ',' + n(p[1]); }).join(' ') + '" style="fill:none;stroke:' + c + ';stroke-width:' + (w || 2.5) + 'px;stroke-linecap:round;stroke-linejoin:round' + (d ? ';stroke-dasharray:' + d : '') + (op != null ? ';opacity:' + op : '') + '"' + (clip ? ' clip-path="url(#' + clip + ')"' : '') + '/>'; },
+    ar: function (pts, c, op) { return '<polygon points="' + pts.map(function (p) { return n(p[0]) + ',' + n(p[1]); }).join(' ') + '" style="fill:' + c + ';fill-opacity:' + (op == null ? 0.2 : op) + ';stroke:none"/>'; },
+    /* baseline text never below 15.5 viewBox px: tool svgs render 270 px wide at 360, so 12 px or more (fix wave 1, review B2 minor 20) */
+    tx: function (x, y, s, sz, anc, c, b) { return '<text class="mtd-halo" x="' + n(x) + '" y="' + n(y) + '" text-anchor="' + (anc || 'start') + '" style="font-size:' + Math.max(sz || 15, 15.5) + 'px;fill:' + (c || '#2c3e50') + (b ? ';font-weight:700' : '') + '">' + s + '</text>'; },
+    rc: function (x, y, w, h, f, s) { return '<rect x="' + n(x) + '" y="' + n(y) + '" width="' + n(Math.max(w, 0)) + '" height="' + n(Math.max(h, 0)) + '" style="fill:' + f + ';stroke:' + (s || 'none') + ';stroke-width:1px"/>'; },
+    ci: function (x, y, r, f) { return '<circle cx="' + n(x) + '" cy="' + n(y) + '" r="' + r + '" style="fill:' + f + ';stroke:#ffffff;stroke-width:1.5px"/>'; },
+    mk: function (x, y, k) { return '<circle cx="' + n(x) + '" cy="' + n(y) + '" r="10" style="fill:#2c3e50;stroke:#ffffff;stroke-width:2px"/><text x="' + n(x) + '" y="' + n(y + 5.5) + '" text-anchor="middle" style="font-size:15.5px;font-weight:700;fill:#ffffff">' + k + '</text>'; },
+    ell: function (X, Y, c, clip) { var pts = []; for (var i = 0; i <= 120; i++) { var t = 2 * Math.PI * i / 120; pts.push([X(Math.sqrt(c / 5) * Math.cos(t)), Y(Math.sqrt(c / 0.2) * Math.sin(t))]); } return this.pl(pts, '#d5dbe1', 1.2, null, null, clip); },
+    /* edge marker: an arrowhead at (x, y), the point where a path leaves the frame, pointing away from (px, py) */
+    edge: function (x, y, px, py, c) { var a = Math.atan2(y - py, x - px), ca = Math.cos(a), sa = Math.sin(a), bx = x - 14 * ca, by = y - 14 * sa; return '<polygon points="' + n(x) + ',' + n(y) + ' ' + n(bx - 8 * sa) + ',' + n(by + 8 * ca) + ' ' + n(bx + 8 * sa) + ',' + n(by - 8 * ca) + '" style="fill:' + c + ';stroke:#ffffff;stroke-width:1px"/>'; },
+    seg: function (box, val) { Array.prototype.forEach.call(box.querySelectorAll('button'), function (b) { var on = b.getAttribute('data-v') === String(val); b.classList.toggle('active', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); }); }
+  };
+})();
+</script>
+</head>
+<body>
+        <nav class="topnav" aria-label="Site">
+    <div class="nav-inner">
+        <a class="wordmark" href="index.html">Ramin Anushiravani</a>
+        <div class="nav-links">
+            <a href="tutorial.html" class="active">Tutorials</a>
+            <a href="pubs.html">Publications</a>
+            <a href="index.html">About</a>
+            <a href="work.html">Projects</a>
+        </div>
+        <button class="nav-toggle" id="navToggle" aria-expanded="false" aria-controls="navPanel" aria-label="Menu"><span></span><span></span><span></span></button>
+    </div>
+    <div class="nav-panel" id="navPanel">
+        <div class="nav-panel-inner">
+            <div class="nav-panel-body">
+                <a class="panel-link active" href="tutorial.html">Tutorials</a>
+                <a class="panel-link" href="pubs.html">Publications</a>
+                <a class="panel-link" href="index.html">About</a>
+                <a class="panel-link" href="work.html">Projects</a>
+                <div class="panel-social">
+                    <a href="https://linkedin.com/in/raminanushiravani" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+                    <a href="https://github.com/raminaeye/" target="_blank" rel="noopener noreferrer">GitHub</a>
+                    <a href="https://scholar.google.com/citations?user=kouXx8gAAAAJ&hl=en" target="_blank" rel="noopener noreferrer">Google Scholar</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</nav>
+<p class="crumb"><a href="tutorial.html">&larr; All tutorials</a></p>
+<script src="tutorial-nav.js"></script>
+    <h1 id="adam">Adam: Momentum and RMSProp with Bias Correction</h1>
+    <p class="dek">How Adam&#8217;s two running averages, its betas and its zero-start fix make each weight&#8217;s step about the same length.</p>
+<nav class="sermap" aria-label="The optimizers series">
+  <ol class="sm-series">
+    <li><a href="optimizers.html">SGD, Momentum and Nesterov</a></li>
+    <li><a href="adaptive-optimizers.html">Adaptive Optimizers</a></li>
+    <li><a href="optimizers-in-practice.html">Optimizers in Practice</a></li>
+  </ol>
+  <div class="sm-flow"><ol>
+    <li><a href="adagrad.html">AdaGrad</a></li>
+    <li><a href="rmsprop.html">RMSProp</a></li>
+    <li><span class="sm-here" aria-current="page">Adam</span></li>
+  </ol></div>
+</nav>
+<nav class="prereq" aria-label="Before you start">
+  <span class="prereq-label">Before you start</span>
+  <a class="prereq-chip" href="rmsprop.html#ema" title="RMSProp, section 2" aria-label="Moving average, taught in RMSProp, section 2">Moving average</a>
+  <a class="prereq-chip" href="optimizers.html" title="SGD, Momentum and Nesterov" aria-label="Momentum, taught in SGD, Momentum and Nesterov">Momentum</a>
+  <a class="prereq-chip" href="adaptive-optimizers.html#per-weight" title="Adaptive Optimizers, section 2" aria-label="Per-weight step, taught in Adaptive Optimizers, section 2">Per-weight step</a>
+  <a class="prereq-chip" href="rmsprop.html#how" title="RMSProp, section 4" aria-label="RMSProp step, taught in RMSProp, section 4">RMSProp step</a>
+  <a class="prereq-chip" href="linear-algebra.html#entrywise" title="Vectors and Matrices, section 6.3" aria-label="Entrywise operations, taught in Vectors and Matrices, section 6.3">Entrywise operations</a>
+</nav>
+    <p class="tabs-label">On this page</p>
+    <div class="tab-strip">
+        <a class="tab-chip" href="#problem"><span class="secnum">1</span> What Adam fixes</a>
+        <a class="tab-chip" href="#whole-step"><span class="secnum">2</span> The whole step first</a>
+        <a class="tab-chip" href="#averages"><span class="secnum">3</span> Two running averages</a>
+        <a class="tab-chip" href="#betas"><span class="secnum">4</span> How far back each average looks</a>
+        <a class="tab-chip" href="#bias"><span class="secnum">5</span> Correcting the zero start</a>
+        <a class="tab-chip" href="#step"><span class="secnum">6</span> One Adam step, line by line</a>
+        <a class="tab-chip" href="#inside"><span class="secnum">7</span> Inside Adam: one step size for steep and shallow axes</a>
+        <a class="tab-chip" href="#scale"><span class="secnum">8</span> Why the gradient&#8217;s scale drops out, and where it stops</a>
+        <a class="tab-chip" href="#coast"><span class="secnum">9</span> What momentum carries after the gradient changes</a>
+        <a class="tab-chip" href="#nadam"><span class="secnum">10</span> Nadam</a>
+        <a class="tab-chip" href="#when"><span class="secnum">11</span> When to use it</a>
+        <a class="tab-chip" href="#state"><span class="secnum">12</span> When it runs and what it carries</a>
+        <a class="tab-chip" href="#pytorch"><span class="secnum">13</span> Adam in PyTorch</a>
+        <a class="tab-chip" href="#failures"><span class="secnum">14</span> Failure modes and tips</a>
+        <a class="tab-chip" href="#references"><span class="secnum">15</span> References</a>
+    </div>
+
+    <h2 id="problem"><span class="secnum">1</span> What Adam fixes</h2>
+<p>Momentum smooths the direction of each step but still uses one step size for every weight (<a href="optimizers.html">SGD, Momentum and Nesterov</a>). <a href="rmsprop.html">RMSProp</a> (Tieleman and Hinton 2012) gives every weight its own step size but has no momentum, and its first steps are too long because its average starts at zero. Adam, from Kingma and Ba (2015), keeps both averages and fixes the zero start of each.</p>
+<p>It became the default optimizer of deep learning. Transformers were trained with it from the start (Vaswani and others 2017), and its decoupled form, <a href="adamw.html">AdamW</a>, trains large language models such as LLaMA. Diffusion models and most speech and vision models use it or AdamW too.</p>
+    <h2 id="whole-step"><span class="secnum">2</span> The whole step first</h2>
+<p>Before the parts, the step Adam takes. Everything after this section explains one piece of it.</p>
+<div class="eq-card" id="adamStepEq">
+<div class="eq-what">Adam&#8217;s whole step</div>
+<div class="eq-line eq-active" data-eqline="0">\({\displaystyle \htmlStyle{color:#2c3e50}{\theta_t} = \htmlStyle{color:#2c3e50}{\theta_{t-1}} - \htmlStyle{color:#7d3c98}{\alpha}\,\frac{\htmlStyle{color:#1f618d}{\hat m_t}}{\sqrt{\htmlStyle{color:#0e6b59}{\hat v_t}} + \epsilon}}\)</div>
+<div class="eq-why eq-active" data-eqline="0">Each weight moves by the learning rate <span class="eqt" style="color:#7d3c98"><var>\(\alpha\)</var></span> times a ratio. The top, <span class="eqt" style="color:#1f618d"><var>\(\hat m_t\)</var></span>, is the recent average gradient: which way this weight has been pushed lately, with momentum&#8217;s smoothing. The bottom, <span class="eqt" style="color:#0e6b59"><var>\(\sqrt{\hat v_t}\)</var></span>, is the recent typical gradient size, as in RMSProp; <var>\(\epsilon\)</var> is a tiny constant that keeps the bottom from reaching zero. The ratio is about one when the pushes agree and smaller when they point different ways, so a weight&#8217;s step is about <span class="eqt" style="color:#7d3c98"><var>\(\alpha\)</var></span> long whatever its gradient&#8217;s size. The hats mark averages corrected for their zero start; the next sections build each piece.</div>
+</div>
+    <h2 id="averages"><span class="secnum">3</span> Two running averages</h2>
+<p>Adam keeps two exponential moving averages per weight, one of the gradient and one of its square.</p>
+<div class="eq-card">
+<div class="eq-what">Adam&#8217;s two moving averages</div>
+<div class="eq-line eq-active" data-eqline="0">\({\displaystyle \htmlStyle{color:#1f618d}{m_t} = \beta_1\,\htmlStyle{color:#1f618d}{m_{t-1}} + (1-\beta_1)\,\htmlStyle{color:#c0392b}{g_t}}\)</div>
+<div class="eq-why eq-active" data-eqline="0">The first moment <span class="eqt" style="color:#1f618d"><var>\(m_t\)</var></span> is the moving average of the gradient (the average from <a href="rmsprop.html#ema">RMSProp, section 2</a>): the recent average direction. It is momentum&#8217;s velocity rescaled into an average (<a href="optimizers.html">SGD, Momentum and Nesterov</a>), so noise that flips sign from batch to batch cancels out of it.</div>
+<div class="eq-line eq-active" data-eqline="1">\({\displaystyle \htmlStyle{color:#0e6b59}{v_t} = \beta_2\,\htmlStyle{color:#0e6b59}{v_{t-1}} + (1-\beta_2)\,\htmlStyle{color:#c0392b}{g_t^{2}}}\)</div>
+<div class="eq-why eq-active" data-eqline="1">The second moment <span class="eqt" style="color:#0e6b59"><var>\(v_t\)</var></span> is the moving average of the squared gradient: the recent typical size. This is RMSProp&#8217;s <span class="eqt" style="color:#0e6b59"><var>\(E\)</var></span> renamed; it is not momentum&#8217;s velocity, even though both are often written <var>\(v\)</var>.</div>
+</div>
+    <h2 id="betas"><span class="secnum">4</span> How far back each average looks</h2>
+<p>Each beta sets its average&#8217;s window, about <var>\(\frac{1}{1-\beta}\)</var> steps (<a href="rmsprop.html#ema-weights">RMSProp, section 3</a> draws it). The direction average looks back a short way, so it can turn; the size average looks back much further, so step sizes stay steady.</p>
+<table class="datatable knobs tdc-stack">
+  <caption>Both betas must stay below one: at one an average never updates and its correction divides by zero.</caption>
+  <thead><tr><th>knob</th><th>raise it</th><th>lower it</th><th>default</th></tr></thead>
+  <tbody>
+    <tr><td><var>\(\beta_1\)</var></td><td data-label="raise it">smoother direction, coasts longer, turns slower</td><td data-label="lower it">follows today&#8217;s gradient more closely</td><td data-label="default">0.9</td></tr>
+    <tr><td><var>\(\beta_2\)</var></td><td data-label="raise it">steadier step sizes, slower to notice a change of scale</td><td data-label="lower it">reacts faster, noisier steps; LLaMA used 0.95 (Touvron and others 2023)</td><td data-label="default">0.999</td></tr>
+  </tbody>
+</table>
+    <h2 id="bias"><span class="secnum">5</span> Correcting the zero start</h2>
+<p>Both averages start at zero, so early on they are too small. Adam divides each by the weight it has collected so far.</p>
+<div class="eq-card" id="cbias">
+<div class="eq-what">Bias correction: divide each average by the weight it has collected</div>
+<div class="eq-line eq-active" data-eqline="0">\({\displaystyle \htmlStyle{color:#1f618d}{\hat m_t} = \frac{\htmlStyle{color:#1f618d}{m_t}}{1-\beta_1^{\,t}}}\)</div>
+<div class="eq-why eq-active" data-eqline="0">An average that starts at zero has collected only the weight <var>\(1-\beta_1^{\,t}\)</var> after <var>\(t\)</var> steps; the rest is still on the zero. Dividing by that weight turns <span class="eqt" style="color:#1f618d"><var>\(m_t\)</var></span> into a true average of the gradients seen so far. The factor nears one within a few windows of <var>\(\beta_1\)</var>, so the fix fades on its own.</div>
+<div class="eq-line eq-active" data-eqline="1">\({\displaystyle \htmlStyle{color:#0e6b59}{\hat v_t} = \frac{\htmlStyle{color:#0e6b59}{v_t}}{1-\beta_2^{\,t}}}\)</div>
+<div class="eq-why eq-active" data-eqline="1">The same fix for the size. <var>\(\beta_2\)</var> is much closer to one, so <var>\(1-\beta_2^{\,t}\)</var> grows much more slowly and <span class="eqt" style="color:#0e6b59"><var>\(v\)</var></span> needs its fix far longer than <span class="eqt" style="color:#1f618d"><var>\(m\)</var></span>. Correcting both keeps the ratio in the step line honest from the very first step; correcting only the top would make the early steps far too long.</div>
+</div>
+<figure class="figure mtd-fig" id="optAdamBias"><svg role="img" aria-label="Step length divided by the learning rate for a steady gradient, over training on a log time axis. RMSProp started from zero takes steps far longer than alpha at first and settles to alpha over about a thousand steps; Adam with bias correction takes steps of alpha from the first step." class="mtd-svg" viewBox="0 0 340 250" style="max-width:480px"><defs><clipPath id="cbiasClip"><rect x="50" y="30" width="280" height="172"/></clipPath></defs><text class="mtd-halo" x="8" y="20" style="font-size:15.5px;font-weight:700;fill:#2c3e50">Step length for a steady gradient</text><line x1="50" y1="200" x2="330" y2="200" style="stroke:#7f8c8d;stroke-width:1.5px"/><line x1="50" y1="30" x2="50" y2="200" style="stroke:#7f8c8d;stroke-width:1.5px"/><text class="mtd-halo" x="44" y="199.0" text-anchor="end" style="font-size:15.5px;fill:#7d3c98;font-weight:700">α</text><polyline clip-path="url(#cbiasClip)" points="50.0,44.2 51.8,45.3 53.5,46.4 55.2,47.4 57.0,48.5 58.8,49.6 60.5,50.7 62.2,51.8 64.0,52.9 65.8,54.0 67.5,55.0 69.2,56.1 71.0,57.2 72.8,58.3 74.5,59.4 76.2,60.5 78.0,61.5 79.8,62.6 81.5,63.7 83.2,64.8 85.0,65.9 86.8,67.0 88.5,68.0 90.2,69.1 92.0,70.2 93.8,71.3 95.5,72.4 97.2,73.5 99.0,74.5 100.8,75.6 102.5,76.7 104.2,77.8 106.0,78.9 107.8,80.0 109.5,81.0 111.2,82.1 113.0,83.2 114.8,84.3 116.5,85.4 118.2,86.5 120.0,87.5 121.8,88.6 123.5,89.7 125.2,90.8 127.0,91.9 128.8,92.9 130.5,94.0 132.2,95.1 134.0,96.2 135.8,97.3 137.5,98.3 139.2,99.4 141.0,100.5 142.8,101.6 144.5,102.6 146.2,103.7 148.0,104.8 149.8,105.9 151.5,106.9 153.2,108.0 155.0,109.1 156.8,110.2 158.5,111.2 160.2,112.3 162.0,113.4 163.8,114.5 165.5,115.5 167.2,116.6 169.0,117.7 170.8,118.7 172.5,119.8 174.2,120.9 176.0,121.9 177.8,123.0 179.5,124.1 181.2,125.1 183.0,126.2 184.8,127.3 186.5,128.3 188.2,129.4 190.0,130.4 191.8,131.5 193.5,132.5 195.2,133.6 197.0,134.6 198.8,135.7 200.5,136.7 202.2,137.8 204.0,138.8 205.8,139.9 207.5,140.9 209.2,141.9 211.0,143.0 212.8,144.0 214.5,145.0 216.2,146.1 218.0,147.1 219.8,148.1 221.5,149.1 223.2,150.1 225.0,151.1 226.8,152.1 228.5,153.1 230.2,154.1 232.0,155.1 233.8,156.1 235.5,157.1 237.2,158.1 239.0,159.0 240.8,160.0 242.5,161.0 244.2,161.9 246.0,162.9 247.8,163.8 249.5,164.7 251.2,165.7 253.0,166.6 254.8,167.5 256.5,168.4 258.2,169.3 260.0,170.2 261.8,171.1 263.5,171.9 265.2,172.8 267.0,173.6 268.8,174.5 270.5,175.3 272.2,176.1 274.0,176.9 275.8,177.7 277.5,178.4 279.2,179.2 281.0,179.9 282.8,180.7 284.5,181.4 286.2,182.1 288.0,182.7 289.8,183.4 291.5,184.0 293.2,184.7 295.0,185.3 296.8,185.8 298.5,186.4 300.2,187.0 302.0,187.5 303.8,188.0 305.5,188.5 307.2,188.9 309.0,189.4 310.8,189.8 312.5,190.2 314.2,190.5 316.0,190.9 317.8,191.2 319.5,191.5 321.2,191.8 323.0,192.1 324.8,192.3 326.5,192.5 328.2,192.7 330.0,192.9" style="fill:none;stroke:#ca6f1e;stroke-width:3px;stroke-dasharray:7 5"/><polyline clip-path="url(#cbiasClip)" points="50.0,194.0 51.8,194.0 53.5,194.0 55.2,194.0 57.0,194.0 58.8,194.0 60.5,194.0 62.2,194.0 64.0,194.0 65.8,194.0 67.5,194.0 69.2,194.0 71.0,194.0 72.8,194.0 74.5,194.0 76.2,194.0 78.0,194.0 79.8,194.0 81.5,194.0 83.2,194.0 85.0,194.0 86.8,194.0 88.5,194.0 90.2,194.0 92.0,194.0 93.8,194.0 95.5,194.0 97.2,194.0 99.0,194.0 100.8,194.0 102.5,194.0 104.2,194.0 106.0,194.0 107.8,194.0 109.5,194.0 111.2,194.0 113.0,194.0 114.8,194.0 116.5,194.0 118.2,194.0 120.0,194.0 121.8,194.0 123.5,194.0 125.2,194.0 127.0,194.0 128.8,194.0 130.5,194.0 132.2,194.0 134.0,194.0 135.8,194.0 137.5,194.0 139.2,194.0 141.0,194.0 142.8,194.0 144.5,194.0 146.2,194.0 148.0,194.0 149.8,194.0 151.5,194.0 153.2,194.0 155.0,194.0 156.8,194.0 158.5,194.0 160.2,194.0 162.0,194.0 163.8,194.0 165.5,194.0 167.2,194.0 169.0,194.0 170.8,194.0 172.5,194.0 174.2,194.0 176.0,194.0 177.8,194.0 179.5,194.0 181.2,194.0 183.0,194.0 184.8,194.0 186.5,194.0 188.2,194.0 190.0,194.0 191.8,194.0 193.5,194.0 195.2,194.0 197.0,194.0 198.8,194.0 200.5,194.0 202.2,194.0 204.0,194.0 205.8,194.0 207.5,194.0 209.2,194.0 211.0,194.0 212.8,194.0 214.5,194.0 216.2,194.0 218.0,194.0 219.8,194.0 221.5,194.0 223.2,194.0 225.0,194.0 226.8,194.0 228.5,194.0 230.2,194.0 232.0,194.0 233.8,194.0 235.5,194.0 237.2,194.0 239.0,194.0 240.8,194.0 242.5,194.0 244.2,194.0 246.0,194.0 247.8,194.0 249.5,194.0 251.2,194.0 253.0,194.0 254.8,194.0 256.5,194.0 258.2,194.0 260.0,194.0 261.8,194.0 263.5,194.0 265.2,194.0 267.0,194.0 268.8,194.0 270.5,194.0 272.2,194.0 274.0,194.0 275.8,194.0 277.5,194.0 279.2,194.0 281.0,194.0 282.8,194.0 284.5,194.0 286.2,194.0 288.0,194.0 289.8,194.0 291.5,194.0 293.2,194.0 295.0,194.0 296.8,194.0 298.5,194.0 300.2,194.0 302.0,194.0 303.8,194.0 305.5,194.0 307.2,194.0 309.0,194.0 310.8,194.0 312.5,194.0 314.2,194.0 316.0,194.0 317.8,194.0 319.5,194.0 321.2,194.0 323.0,194.0 324.8,194.0 326.5,194.0 328.2,194.0 330.0,194.0" style="fill:none;stroke:#1f618d;stroke-width:3.5px"/><text class="mtd-halo" x="60" y="56" style="font-size:15.5px;fill:#ca6f1e">RMSProp from zero: too long</text><text class="mtd-halo" x="120" y="184.0" style="font-size:15.5px;fill:#1f618d">Adam corrected: steady</text><text class="mtd-halo" x="330" y="222" text-anchor="end" style="font-size:15.5px;fill:#555">training steps (log scale)</text><text class="mtd-halo" x="8" y="244" style="font-size:15.5px;fill:#555">first step at the left; shape only</text></svg><figcaption class="caption"><span class="fignum">Figure 1.</span> An average that starts at zero is too small at first, so dividing by it makes steps too long; the correction removes that.</figcaption></figure>
+<p>To watch Adam without the correction, switch it off in the tool of <a href="#inside">section 7</a>: the early steps come out too long, grow for a while, and settle only slowly.</p>
+    <h2 id="step"><span class="secnum">6</span> One Adam step, line by line</h2>
+<p>Step through one update for one weight early in training, line by line.</p>
+<div class="demo" id="adamSteps">
+  <div class="demo-controls">
+    <button type="button" class="bv-btn" id="adamStepsPrev">Prev</button>
+    <button type="button" class="bv-btn" id="adamStepsNext">Next</button>
+    <button type="button" class="bv-btn" id="adamStepsReset">Reset</button>
+    <span class="walk-lbl" id="adamStepsLbl">Step 1</span>
+  </div>
+  <svg id="adamStepsSvg" class="mtd-svg tool-svg" viewBox="0 0 340 250" role="img" aria-label="Bars for the gradient, the two averages, their corrected forms and the step; the current line is outlined."></svg>
+  <p class="demo-read" id="adamStepsRead" aria-live="polite"></p>
+  <p class="caption"><span class="fignum">Figure 2.</span> Relative lengths only; outlines show the uncorrected averages.</p>
+<div class="eq-card eq-stepped" id="adamStepsCard">
+<div class="eq-what">This step, line by line</div>
+<div class="eq-line eq-active" data-eqline="0">\({\displaystyle \begin{aligned} \htmlStyle{color:#1f618d}{m_t} &= \beta_1\,\htmlStyle{color:#1f618d}{m_{t-1}} \\ &\quad + (1-\beta_1)\,\htmlStyle{color:#c0392b}{g_t} \end{aligned}}\)</div>
+<div class="eq-why eq-active" data-eqline="0">Mix today&#8217;s gradient into the direction average.</div>
+<div class="eq-line" data-eqline="1">\({\displaystyle \begin{aligned} \htmlStyle{color:#0e6b59}{v_t} &= \beta_2\,\htmlStyle{color:#0e6b59}{v_{t-1}} \\ &\quad + (1-\beta_2)\,\htmlStyle{color:#c0392b}{g_t^{2}} \end{aligned}}\)</div>
+<div class="eq-why" data-eqline="1">Mix today&#8217;s squared gradient into the size average.</div>
+<div class="eq-line" data-eqline="2">\({\displaystyle \htmlStyle{color:#1f618d}{\hat m_t} = \frac{\htmlStyle{color:#1f618d}{m_t}}{1-\beta_1^{\,t}}}\)</div>
+<div class="eq-why" data-eqline="2">Divide out the zero start of the direction average.</div>
+<div class="eq-line" data-eqline="3">\({\displaystyle \htmlStyle{color:#0e6b59}{\hat v_t} = \frac{\htmlStyle{color:#0e6b59}{v_t}}{1-\beta_2^{\,t}}}\)</div>
+<div class="eq-why" data-eqline="3">Divide out the zero start of the size average.</div>
+<div class="eq-line" data-eqline="4">\({\displaystyle \htmlStyle{color:#2c3e50}{\theta_t} = \htmlStyle{color:#2c3e50}{\theta_{t-1}} - \htmlStyle{color:#7d3c98}{\alpha}\,\frac{\htmlStyle{color:#1f618d}{\hat m_t}}{\sqrt{\htmlStyle{color:#0e6b59}{\hat v_t}} + \epsilon}}\)</div>
+<div class="eq-why" data-eqline="4">Divide direction by size and step.</div>
+</div>
+</div>
+<p>The same step in code, one line per card line. In a multitask model the per-weight division is also why a balancer that rescales one task&#8217;s loss sees less effect than it would under SGD (<a href="multitask-training-loop.html#per-axis-scale">Gradient Balancing Inside the Training Loop, section 7</a>, and the tilt in <a href="multitask-training-loop.html#adam-tilt">section 7.2</a>).</p>
+<pre class="cs" data-cs="1-2,3-4,5-6,7"><code class="language-python">import numpy as np
+def adam_step(theta, g, m, v, t, lr=1e-3, b1=0.9, b2=0.999, eps=1e-8):
+    m = b1 * m + (1 - b1) * g          # direction average
+    v = b2 * v + (1 - b2) * g * g      # size average
+    m_hat = m / (1 - b1 ** t)          # zero-start fixes
+    v_hat = v / (1 - b2 ** t)
+    theta = theta - lr * m_hat / (np.sqrt(v_hat) + eps)
+    return theta, m, v</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>One Adam step on NumPy arrays, with the usual defaults.</li>
+  <li><span class="cs-n">2</span>The two averages of the second card.</li>
+  <li><span class="cs-n">3</span>The bias corrections.</li>
+  <li><span class="cs-n">4</span>The divided step of the first card.</li>
+</ol>
+    <h2 id="inside"><span class="secnum">7</span> Inside Adam: one step size for steep and shallow axes</h2>
+<p>Here Adam trains two weights whose gradients differ in size, one on a steep axis and one on a shallow one. Make one axis steeper: SGD&#8217;s step on the shallow axis falls while Adam&#8217;s two steps stay equal. Then switch the bias correction off.</p>
+<div class="demo" id="optAdamInside">
+  <div class="demo-controls">
+    <label for="aiSteep">one axis is: <span id="aiSteepVal">much steeper</span></label>
+    <span class="sl-row"><span class="sl-end">same</span><input type="range" id="aiSteep" min="0" max="3" step="0.1" value="2" aria-label="How much steeper the x axis is than the y axis, log scale"><span class="sl-end">far steeper</span></span>
+    <span class="seg" id="aiSeg"><button type="button" class="bv-btn" data-v="on">correction on</button><button type="button" class="bv-btn" data-v="off">correction off</button></span>
+  </div>
+  <svg id="aiSvg" class="mtd-svg tool-svg" viewBox="0 0 340 330" role="img" aria-label="Top: gradient size on a steep and a shallow axis, on a log scale. Bottom: Adam&#8217;s step length on each axis over training, on a log scale, with a dotted line at alpha and a grey line for SGD&#8217;s shallow-axis step."></svg>
+  <p class="demo-read" id="aiRead" aria-live="polite"></p>
+  <p class="caption"><span class="fignum">Figure 3.</span> Noisy gradients of steady size on each axis, default betas. SGD&#8217;s rate is set so its steep-axis step is \(\alpha\). Illustrative.</p>
+</div>
+    <h2 id="scale"><span class="secnum">8</span> Why the gradient&#8217;s scale drops out, and where it stops</h2>
+<p>Figure 3 showed equal steps for different gradient sizes. The first line of the card says why; the second says where it stops.</p>
+<div class="eq-card" id="adamScaleEq">
+<div class="eq-what">Why Adam ignores the gradient&#8217;s scale, and where that stops</div>
+<div class="eq-line eq-active" data-eqline="0">\({\displaystyle \frac{c\,\htmlStyle{color:#1f618d}{\hat m}}{\sqrt{c^{2}\,\htmlStyle{color:#0e6b59}{\hat v}}} = \frac{\htmlStyle{color:#1f618d}{\hat m}}{\sqrt{\htmlStyle{color:#0e6b59}{\hat v}}}\qquad (c>0)}\)</div>
+<div class="eq-why eq-active" data-eqline="0">Multiply every gradient by a positive number <var>\(c\)</var>: the direction average grows by <var>\(c\)</var> and the size average by <var>\(c^2\)</var>, whose root is <var>\(c\)</var> again, so the ratio is unchanged. This is what Kingma and Ba mean by &#8220;invariant to diagonal rescaling of the gradients&#8221;: summing a loss instead of averaging it scales every gradient by one common factor and changes nothing in Adam&#8217;s step, while SGD&#8217;s step would scale by <var>\(c\)</var>. A balancer that scales all task losses together drops out the same way. Scaling one task&#8217;s loss is different: it changes the mix inside each shared weight&#8217;s gradient, which is not a common factor, so Adam&#8217;s step turns with it (<a href="multitask-training-loop.html#adam-scale">Gradient Balancing Inside the Training Loop, section 7.1</a>, and the tilt in <a href="multitask-training-loop.html#adam-tilt">section 7.2</a>). The line ignores <var>\(\epsilon\)</var>.</div>
+<div class="eq-line eq-active" data-eqline="1">\({\displaystyle \frac{\text{step}}{\htmlStyle{color:#7d3c98}{\alpha}} = \frac{\lvert \htmlStyle{color:#c0392b}{g}\rvert}{\lvert \htmlStyle{color:#c0392b}{g}\rvert + \epsilon}}\)</div>
+<div class="eq-why eq-active" data-eqline="1">For a steady gradient the ratio is <var>\(\lvert g\rvert\)</var> over <var>\(\lvert g\rvert+\epsilon\)</var>. When the gradient is far above <var>\(\epsilon\)</var> it is one, a full step. When the gradient is as small as <var>\(\epsilon\)</var> the step halves, and below that it shrinks with the gradient, as SGD&#8217;s would. Only weights whose gradients are nearly zero, such as a rarely seen token&#8217;s row, feel this.</div>
+</div>
+<figure class="figure mtd-fig" id="optScaleBreaks"><svg role="img" aria-label="Adam step length against gradient size on a log axis. For gradients far above epsilon the step is a full alpha; near epsilon it halves; below epsilon it shrinks with the gradient." class="mtd-svg" viewBox="0 0 340 240" style="max-width:480px"><text class="mtd-halo" x="8" y="20" style="font-size:15.5px;font-weight:700;fill:#2c3e50">Adam&#8217;s step for a steady gradient</text><line x1="40" y1="190" x2="330" y2="190" style="stroke:#7f8c8d;stroke-width:1.5px"/><line x1="40" y1="50" x2="330" y2="50" style="stroke:#7d3c98;stroke-width:1px;stroke-dasharray:3 4"/><text class="mtd-halo" x="34" y="55" text-anchor="end" style="font-size:15.5px;fill:#7d3c98;font-weight:700">α</text><line x1="185.0" y1="38" x2="185.0" y2="190" style="stroke:#a04000;stroke-width:1.5px;stroke-dasharray:4 4"/><text class="mtd-halo" x="191" y="182" style="font-size:15.5px;fill:#a04000;font-weight:700">gradient = ε</text><polyline points="40.0,190.0 41.8,190.0 43.6,190.0 45.4,190.0 47.2,190.0 49.1,190.0 50.9,190.0 52.7,190.0 54.5,190.0 56.3,190.0 58.1,190.0 59.9,190.0 61.8,189.9 63.6,189.9 65.4,189.9 67.2,189.9 69.0,189.9 70.8,189.9 72.6,189.9 74.4,189.9 76.2,189.9 78.1,189.8 79.9,189.8 81.7,189.8 83.5,189.8 85.3,189.8 87.1,189.7 88.9,189.7 90.8,189.6 92.6,189.6 94.4,189.6 96.2,189.5 98.0,189.4 99.8,189.4 101.6,189.3 103.4,189.2 105.2,189.1 107.1,189.0 108.9,188.9 110.7,188.8 112.5,188.6 114.3,188.4 116.1,188.3 117.9,188.0 119.8,187.8 121.6,187.6 123.4,187.3 125.2,186.9 127.0,186.6 128.8,186.2 130.6,185.7 132.4,185.2 134.2,184.6 136.1,184.0 137.9,183.3 139.7,182.5 141.5,181.7 143.3,180.7 145.1,179.7 146.9,178.5 148.8,177.3 150.6,175.9 152.4,174.3 154.2,172.7 156.0,170.8 157.8,168.9 159.6,166.7 161.4,164.4 163.2,161.9 165.1,159.2 166.9,156.4 168.7,153.3 170.5,150.1 172.3,146.8 174.1,143.3 175.9,139.6 177.8,135.8 179.6,132.0 181.4,128.0 183.2,124.0 185.0,120.0 186.8,116.0 188.6,112.0 190.4,108.0 192.2,104.2 194.1,100.4 195.9,96.7 197.7,93.2 199.5,89.9 201.3,86.7 203.1,83.6 204.9,80.8 206.8,78.1 208.6,75.6 210.4,73.3 212.2,71.1 214.0,69.2 215.8,67.3 217.6,65.7 219.4,64.1 221.2,62.7 223.1,61.5 224.9,60.3 226.7,59.3 228.5,58.3 230.3,57.5 232.1,56.7 233.9,56.0 235.8,55.4 237.6,54.8 239.4,54.3 241.2,53.8 243.0,53.4 244.8,53.1 246.6,52.7 248.4,52.4 250.2,52.2 252.1,52.0 253.9,51.7 255.7,51.6 257.5,51.4 259.3,51.2 261.1,51.1 262.9,51.0 264.8,50.9 266.6,50.8 268.4,50.7 270.2,50.6 272.0,50.6 273.8,50.5 275.6,50.4 277.4,50.4 279.2,50.4 281.1,50.3 282.9,50.3 284.7,50.2 286.5,50.2 288.3,50.2 290.1,50.2 291.9,50.2 293.8,50.1 295.6,50.1 297.4,50.1 299.2,50.1 301.0,50.1 302.8,50.1 304.6,50.1 306.4,50.1 308.2,50.1 310.1,50.0 311.9,50.0 313.7,50.0 315.5,50.0 317.3,50.0 319.1,50.0 320.9,50.0 322.8,50.0 324.6,50.0 326.4,50.0 328.2,50.0 330.0,50.0" style="fill:none;stroke:#1f618d;stroke-width:3.5px"/><text class="mtd-halo" x="235.0" y="74" style="font-size:15.5px;fill:#1f618d">full step</text><text class="mtd-halo" x="46" y="178" style="font-size:15.5px;fill:#1f618d">shrinks like SGD</text><text class="mtd-halo" x="40" y="212" style="font-size:15.5px;fill:#555">smaller</text><text class="mtd-halo" x="330" y="212" text-anchor="end" style="font-size:15.5px;fill:#555">larger</text><text class="mtd-halo" x="185" y="232" text-anchor="middle" style="font-size:15.5px;fill:#555">gradient size (log scale)</text></svg><figcaption class="caption"><span class="fignum">Figure 4.</span> The scale-free step holds until the gradient comes down to ε&#8217;s size.</figcaption></figure>
+<p>Invariance also holds only for a steady scale. If the gradient size changes, the size average needs about one <var>\(\beta_2\)</var> window to catch up, and steps are off by the change until it does; RMSProp&#8217;s version of this is the tool in <a href="rmsprop.html#forget">RMSProp, section 6</a>.</p>
+    <h2 id="coast"><span class="secnum">9</span> What momentum carries after the gradient changes</h2>
+<p>When the gradient changes, the two averages react at different speeds.</p>
+<div class="eq-card" id="adamCoastEq">
+<div class="eq-what">What the averages do when the gradient stops</div>
+<div class="eq-line eq-active" data-eqline="0">\({\displaystyle \begin{aligned} \htmlStyle{color:#1f618d}{m_{t+k}} &= \beta_1^{\,k}\,\htmlStyle{color:#1f618d}{m_t} \\ \htmlStyle{color:#0e6b59}{v_{t+k}} &= \beta_2^{\,k}\,\htmlStyle{color:#0e6b59}{v_t} \end{aligned}}\)</div>
+<div class="eq-why eq-active" data-eqline="0">If the gradient drops to nothing for <var>\(k\)</var> steps, each average just keeps its share of itself every step. The direction average fades within about one <var>\(\beta_1\)</var> window; the size average, with its longer memory, has barely moved. Their ratio fades like <span class="eqt" style="color:#1f618d"><var>\(\hat m\)</var></span>, so Adam coasts a short way in the old direction and stops, much like momentum.</div>
+</div>
+<figure class="figure mtd-fig" id="optAdamCoast"><svg role="img" aria-label="After the gradient stops: the direction average fades within a few steps, the size average stays almost unchanged, and the step, their ratio, fades like the direction average." class="mtd-svg" viewBox="0 0 340 236" style="max-width:480px"><text class="mtd-halo" x="8" y="20" style="font-size:15.5px;font-weight:700;fill:#2c3e50">After the gradient stops</text><line x1="40" y1="190" x2="330" y2="190" style="stroke:#7f8c8d;stroke-width:1.5px"/><line x1="40" y1="40" x2="40" y2="190" style="stroke:#7f8c8d;stroke-width:1.5px"/><polyline points="40.0,54.0 42.4,54.0 44.8,54.0 47.2,54.1 49.7,54.1 52.1,54.1 54.5,54.1 56.9,54.2 59.3,54.2 61.8,54.2 64.2,54.2 66.6,54.3 69.0,54.3 71.4,54.3 73.8,54.3 76.2,54.3 78.7,54.4 81.1,54.4 83.5,54.4 85.9,54.4 88.3,54.5 90.8,54.5 93.2,54.5 95.6,54.5 98.0,54.6 100.4,54.6 102.8,54.6 105.2,54.6 107.7,54.7 110.1,54.7 112.5,54.7 114.9,54.7 117.3,54.7 119.8,54.8 122.2,54.8 124.6,54.8 127.0,54.8 129.4,54.9 131.8,54.9 134.2,54.9 136.7,54.9 139.1,55.0 141.5,55.0 143.9,55.0 146.3,55.0 148.8,55.0 151.2,55.1 153.6,55.1 156.0,55.1 158.4,55.1 160.8,55.2 163.2,55.2 165.7,55.2 168.1,55.2 170.5,55.3 172.9,55.3 175.3,55.3 177.8,55.3 180.2,55.3 182.6,55.4 185.0,55.4 187.4,55.4 189.8,55.4 192.2,55.5 194.7,55.5 197.1,55.5 199.5,55.5 201.9,55.6 204.3,55.6 206.8,55.6 209.2,55.6 211.6,55.6 214.0,55.7 216.4,55.7 218.8,55.7 221.2,55.7 223.7,55.8 226.1,55.8 228.5,55.8 230.9,55.8 233.3,55.9 235.8,55.9 238.2,55.9 240.6,55.9 243.0,55.9 245.4,56.0 247.8,56.0 250.2,56.0 252.7,56.0 255.1,56.1 257.5,56.1 259.9,56.1 262.3,56.1 264.8,56.2 267.2,56.2 269.6,56.2 272.0,56.2 274.4,56.2 276.8,56.3 279.2,56.3 281.7,56.3 284.1,56.3 286.5,56.4 288.9,56.4 291.3,56.4 293.8,56.4 296.2,56.5 298.6,56.5 301.0,56.5 303.4,56.5 305.8,56.5 308.2,56.6 310.7,56.6 313.1,56.6 315.5,56.6 317.9,56.7 320.3,56.7 322.8,56.7 325.2,56.7 327.6,56.8 330.0,56.8" style="fill:none;stroke:#0e6b59;stroke-width:3px"/><polyline points="40.0,50.0 42.4,54.8 44.8,59.5 47.2,64.0 49.7,68.3 52.1,72.5 54.5,76.6 56.9,80.5 59.3,84.3 61.8,87.9 64.2,91.5 66.6,94.9 69.0,98.1 71.4,101.3 73.8,104.4 76.2,107.3 78.7,110.2 81.1,112.9 83.5,115.6 85.9,118.2 88.3,120.6 90.8,123.0 93.2,125.3 95.6,127.6 98.0,129.7 100.4,131.8 102.8,133.8 105.2,135.8 107.7,137.6 110.1,139.4 112.5,141.2 114.9,142.9 117.3,144.5 119.8,146.1 122.2,147.6 124.6,149.0 127.0,150.5 129.4,151.8 131.8,153.1 134.2,154.4 136.7,155.6 139.1,156.8 141.5,158.0 143.9,159.1 146.3,160.1 148.8,161.2 151.2,162.2 153.6,163.1 156.0,164.1 158.4,165.0 160.8,165.8 163.2,166.7 165.7,167.5 168.1,168.2 170.5,169.0 172.9,169.7 175.3,170.4 177.8,171.1 180.2,171.7 182.6,172.4 185.0,173.0 187.4,173.6 189.8,174.1 192.2,174.7 194.7,175.2 197.1,175.7 199.5,176.2 201.9,176.7 204.3,177.1 206.8,177.6 209.2,178.0 211.6,178.4 214.0,178.8 216.4,179.2 218.8,179.6 221.2,179.9 223.7,180.3 226.1,180.6 228.5,181.0 230.9,181.3 233.3,181.6 235.8,181.9 238.2,182.1 240.6,182.4 243.0,182.7 245.4,182.9 247.8,183.2 250.2,183.4 252.7,183.6 255.1,183.9 257.5,184.1 259.9,184.3 262.3,184.5 264.8,184.7 267.2,184.8 269.6,185.0 272.0,185.2 274.4,185.4 276.8,185.5 279.2,185.7 281.7,185.8 284.1,186.0 286.5,186.1 288.9,186.2 291.3,186.4 293.8,186.5 296.2,186.6 298.6,186.7 301.0,186.8 303.4,187.0 305.8,187.1 308.2,187.2 310.7,187.3 313.1,187.4 315.5,187.4 317.9,187.5 320.3,187.6 322.8,187.7 325.2,187.8 327.6,187.9 330.0,187.9" style="fill:none;stroke:#1f618d;stroke-width:3px;stroke-dasharray:7 5"/><polyline points="40.0,61.2 42.4,65.6 44.8,69.9 47.2,74.0 49.7,78.0 52.1,81.9 54.5,85.6 56.9,89.2 59.3,92.6 61.8,96.0 64.2,99.2 66.6,102.3 69.0,105.3 71.4,108.2 73.8,111.0 76.2,113.8 78.7,116.4 81.1,118.9 83.5,121.3 85.9,123.7 88.3,126.0 90.8,128.2 93.2,130.3 95.6,132.4 98.0,134.3 100.4,136.2 102.8,138.1 105.2,139.9 107.7,141.6 110.1,143.3 112.5,144.9 114.9,146.4 117.3,147.9 119.8,149.4 122.2,150.8 124.6,152.1 127.0,153.4 129.4,154.7 131.8,155.9 134.2,157.0 136.7,158.2 139.1,159.3 141.5,160.3 143.9,161.3 146.3,162.3 148.8,163.3 151.2,164.2 153.6,165.1 156.0,165.9 158.4,166.8 160.8,167.6 163.2,168.3 165.7,169.1 168.1,169.8 170.5,170.5 172.9,171.2 175.3,171.8 177.8,172.4 180.2,173.0 182.6,173.6 185.0,174.2 187.4,174.7 189.8,175.3 192.2,175.8 194.7,176.2 197.1,176.7 199.5,177.2 201.9,177.6 204.3,178.0 206.8,178.5 209.2,178.8 211.6,179.2 214.0,179.6 216.4,180.0 218.8,180.3 221.2,180.6 223.7,181.0 226.1,181.3 228.5,181.6 230.9,181.9 233.3,182.1 235.8,182.4 238.2,182.7 240.6,182.9 243.0,183.2 245.4,183.4 247.8,183.6 250.2,183.8 252.7,184.1 255.1,184.3 257.5,184.5 259.9,184.6 262.3,184.8 264.8,185.0 267.2,185.2 269.6,185.3 272.0,185.5 274.4,185.7 276.8,185.8 279.2,186.0 281.7,186.1 284.1,186.2 286.5,186.4 288.9,186.5 291.3,186.6 293.8,186.7 296.2,186.8 298.6,186.9 301.0,187.0 303.4,187.1 305.8,187.2 308.2,187.3 310.7,187.4 313.1,187.5 315.5,187.6 317.9,187.7 320.3,187.8 322.8,187.8 325.2,187.9 327.6,188.0 330.0,188.1" style="fill:none;stroke:#7d3c98;stroke-width:2.5px;stroke-dasharray:2 4"/><text class="mtd-halo" x="150" y="42" style="font-size:15.5px;fill:#0e6b59">size: barely moves</text><text class="mtd-halo" x="150" y="128" style="font-size:15.5px;fill:#1f618d">direction: fades fast</text><text class="mtd-halo" x="44" y="186" style="font-size:15.5px;fill:#7d3c98">step: fades too</text><text class="mtd-halo" x="330" y="212" text-anchor="end" style="font-size:15.5px;fill:#555">steps since the gradient stopped</text><text class="mtd-halo" x="8" y="232" style="font-size:15.5px;fill:#555">default betas; shape only</text></svg><figcaption class="caption"><span class="fignum">Figure 5.</span> Adam coasts a few steps on its direction average, then stops.</figcaption></figure>
+<p>After a turn rather than a stop, the long size memory still holds the old axis&#8217;s large gradients, so the divide shrinks the old direction and boosts the new one; a multitask run where one task&#8217;s gradient changes direction shows this (<a href="multitask-training-loop.html#momentum-turn">Gradient Balancing Inside the Training Loop, section 6.1</a>).</p>
+    <h2 id="nadam"><span class="secnum">10</span> Nadam</h2>
+<div class="eq-card" id="nadamEq">
+<div class="eq-what">Nadam: the momentum the next step will use</div>
+<div class="eq-line eq-active" data-eqline="0">\({\displaystyle \begin{aligned} \htmlStyle{color:#1f618d}{\bar m_t} &= \frac{(1-\beta_1)\,\htmlStyle{color:#c0392b}{g_t}}{1-\beta_1^{\,t}} \\ &\quad + \frac{\beta_1\,\htmlStyle{color:#1f618d}{m_t}}{1-\beta_1^{\,t+1}} \end{aligned}}\)</div>
+<div class="eq-why eq-active" data-eqline="0">Nadam (Dozat 2016) adds the Nesterov look-ahead (<a href="optimizers.html">SGD, Momentum and Nesterov</a>) to Adam. Adam&#8217;s next average will be the share <var>\(\beta_1\)</var> of today&#8217;s average plus the share <var>\(1-\beta_1\)</var> of today&#8217;s gradient; Nadam uses that next average now, each part corrected for the zero start it will have. So a change of direction shows up in the step one step sooner.</div>
+<div class="eq-line eq-active" data-eqline="1">\({\displaystyle \htmlStyle{color:#2c3e50}{\theta_t} = \htmlStyle{color:#2c3e50}{\theta_{t-1}} - \htmlStyle{color:#7d3c98}{\alpha}\,\frac{\htmlStyle{color:#1f618d}{\bar m_t}}{\sqrt{\htmlStyle{color:#0e6b59}{\hat v_t}} + \epsilon}}\)</div>
+<div class="eq-why eq-active" data-eqline="1">The step is Adam&#8217;s with <span class="eqt" style="color:#1f618d"><var>\(\bar m_t\)</var></span> on top. The size average is unchanged.</div>
+</div>
+<figure class="figure mtd-fig" id="optNadamPaths"><svg role="img" aria-label="Adam and Nadam paths from the same start on a long valley toward its lowest point at the cross. Both curve in; Adam swings further past the bottom and back, Nadam turns a little sooner and overshoots less." class="mtd-svg" viewBox="0 0 340 250" style="max-width:480px"><text class="mtd-halo" x="8" y="20" style="font-size:15.5px;font-weight:700;fill:#2c3e50">Same start, same settings</text><polyline points="335.8,170.3 335.7,169.5 335.5,168.7 335.0,167.9 334.5,167.1 333.7,166.3 332.8,165.5 331.8,164.7 330.6,163.9 329.2,163.2 327.7,162.5 326.1,161.8 324.3,161.1 322.4,160.5 320.4,159.8 318.2,159.2 315.9,158.7 313.5,158.1 311.0,157.6 308.4,157.2 305.8,156.7 303.0,156.3 300.2,156.0 297.3,155.7 294.3,155.4 291.3,155.2 288.2,155.0 285.1,154.8 282.0,154.7 278.9,154.7 275.8,154.6 272.6,154.7 269.5,154.7 266.4,154.8 263.3,155.0 260.2,155.2 257.2,155.4 254.2,155.7 251.3,156.0 248.5,156.3 245.7,156.7 243.1,157.2 240.5,157.6 238.0,158.1 235.6,158.7 233.3,159.2 231.1,159.8 229.1,160.5 227.2,161.1 225.4,161.8 223.8,162.5 222.3,163.2 220.9,163.9 219.7,164.7 218.7,165.5 217.8,166.3 217.0,167.1 216.5,167.9 216.0,168.7 215.8,169.5 215.7,170.3 215.8,171.2 216.0,172.0 216.5,172.8 217.0,173.6 217.8,174.4 218.7,175.2 219.7,176.0 220.9,176.7 222.3,177.5 223.8,178.2 225.4,178.9 227.2,179.6 229.1,180.2 231.1,180.8 233.3,181.4 235.6,182.0 238.0,182.5 240.5,183.0 243.1,183.5 245.7,183.9 248.5,184.3 251.3,184.7 254.2,185.0 257.2,185.3 260.2,185.5 263.3,185.7 266.4,185.8 269.5,186.0 272.6,186.0 275.8,186.0 278.9,186.0 282.0,186.0 285.1,185.8 288.2,185.7 291.3,185.5 294.3,185.3 297.3,185.0 300.2,184.7 303.0,184.3 305.8,183.9 308.4,183.5 311.0,183.0 313.5,182.5 315.9,182.0 318.2,181.4 320.4,180.8 322.4,180.2 324.3,179.6 326.1,178.9 327.7,178.2 329.2,177.5 330.6,176.7 331.8,176.0 332.8,175.2 333.7,174.4 334.5,173.6 335.0,172.8 335.5,172.0 335.7,171.2 335.8,170.3" style="fill:none;stroke:#d5dbe1;stroke-width:1.2px"/><polyline points="395.8,170.3 395.6,168.7 395.2,167.1 394.3,165.4 393.2,163.8 391.7,162.2 389.9,160.6 387.8,159.1 385.4,157.6 382.7,156.1 379.7,154.6 376.4,153.2 372.9,151.9 369.1,150.6 365.0,149.3 360.6,148.1 356.1,147.0 351.3,145.9 346.3,144.9 341.1,144.0 335.8,143.1 330.3,142.3 324.6,141.6 318.8,141.0 312.9,140.5 306.8,140.0 300.7,139.6 294.5,139.3 288.3,139.1 282.0,139.0 275.8,138.9 269.5,139.0 263.2,139.1 257.0,139.3 250.8,139.6 244.7,140.0 238.6,140.5 232.7,141.0 226.9,141.6 221.2,142.3 215.7,143.1 210.4,144.0 205.2,144.9 200.2,145.9 195.4,147.0 190.9,148.1 186.5,149.3 182.4,150.6 178.6,151.9 175.1,153.2 171.8,154.6 168.8,156.1 166.1,157.6 163.7,159.1 161.6,160.6 159.8,162.2 158.3,163.8 157.2,165.4 156.3,167.1 155.9,168.7 155.7,170.3 155.9,172.0 156.3,173.6 157.2,175.2 158.3,176.9 159.8,178.5 161.6,180.0 163.7,181.6 166.1,183.1 168.8,184.6 171.8,186.0 175.1,187.4 178.6,188.8 182.4,190.1 186.5,191.3 190.9,192.5 195.4,193.7 200.2,194.7 205.2,195.7 210.4,196.7 215.7,197.5 221.2,198.3 226.9,199.0 232.7,199.7 238.6,200.2 244.7,200.7 250.8,201.1 257.0,201.4 263.2,201.6 269.5,201.7 275.7,201.7 282.0,201.7 288.3,201.6 294.5,201.4 300.7,201.1 306.8,200.7 312.9,200.2 318.8,199.7 324.6,199.0 330.3,198.3 335.8,197.5 341.1,196.7 346.3,195.7 351.3,194.7 356.1,193.7 360.6,192.5 365.0,191.3 369.1,190.1 372.9,188.8 376.4,187.4 379.7,186.0 382.7,184.6 385.4,183.1 387.8,181.6 389.9,180.0 391.7,178.5 393.2,176.9 394.3,175.2 395.2,173.6 395.6,172.0 395.8,170.3" style="fill:none;stroke:#d5dbe1;stroke-width:1.2px"/><polyline points="455.8,170.3 455.6,167.9 454.9,165.4 453.6,163.0 451.9,160.5 449.7,158.1 447.0,155.8 443.9,153.4 440.3,151.2 436.2,148.9 431.7,146.8 426.8,144.7 421.4,142.6 415.7,140.7 409.6,138.8 403.1,137.0 396.3,135.3 389.1,133.7 381.6,132.2 373.8,130.8 365.8,129.5 357.5,128.4 349.0,127.3 340.3,126.4 331.4,125.5 322.4,124.8 313.2,124.3 303.9,123.8 294.6,123.5 285.2,123.3 275.8,123.2 266.3,123.3 256.9,123.5 247.6,123.8 238.3,124.3 229.1,124.8 220.1,125.5 211.2,126.4 202.5,127.3 194.0,128.4 185.7,129.5 177.7,130.8 169.9,132.2 162.4,133.7 155.2,135.3 148.4,137.0 141.9,138.8 135.8,140.7 130.1,142.6 124.7,144.7 119.8,146.8 115.3,148.9 111.2,151.2 107.6,153.4 104.5,155.8 101.8,158.1 99.6,160.5 97.9,163.0 96.6,165.4 95.9,167.9 95.7,170.3 95.9,172.8 96.6,175.3 97.9,177.7 99.6,180.1 101.8,182.5 104.5,184.9 107.6,187.2 111.2,189.5 115.3,191.7 119.8,193.9 124.7,196.0 130.1,198.0 135.8,200.0 141.9,201.9 148.4,203.6 155.2,205.3 162.4,206.9 169.9,208.4 177.7,209.8 185.7,211.1 194.0,212.3 202.5,213.4 211.2,214.3 220.1,215.1 229.1,215.8 238.3,216.4 247.6,216.9 256.9,217.2 266.3,217.4 275.7,217.4 285.2,217.4 294.6,217.2 303.9,216.9 313.2,216.4 322.4,215.8 331.4,215.1 340.3,214.3 349.0,213.4 357.5,212.3 365.8,211.1 373.8,209.8 381.6,208.4 389.1,206.9 396.3,205.3 403.1,203.6 409.6,201.9 415.7,200.0 421.4,198.0 426.8,196.0 431.7,193.9 436.2,191.7 440.3,189.5 443.9,187.2 447.0,184.9 449.7,182.5 451.9,180.1 453.6,177.7 454.9,175.3 455.6,172.8 455.8,170.3" style="fill:none;stroke:#d5dbe1;stroke-width:1.2px"/><polyline points="515.9,170.3 515.5,167.0 514.6,163.8 512.9,160.5 510.6,157.3 507.7,154.1 504.1,150.9 499.9,147.8 495.1,144.8 489.7,141.8 483.7,138.9 477.1,136.1 470.0,133.4 462.4,130.8 454.2,128.3 445.5,125.9 436.4,123.7 426.9,121.5 416.9,119.5 406.5,117.7 395.8,115.9 384.8,114.4 373.4,112.9 361.8,111.7 350.0,110.6 337.9,109.7 325.7,108.9 313.3,108.3 300.8,107.9 288.3,107.6 275.8,107.5 263.2,107.6 250.7,107.9 238.2,108.3 225.8,108.9 213.6,109.7 201.5,110.6 189.7,111.7 178.1,112.9 166.7,114.4 155.7,115.9 145.0,117.7 134.6,119.5 124.6,121.5 115.1,123.7 106.0,125.9 97.3,128.3 89.1,130.8 81.5,133.4 74.4,136.1 67.8,138.9 61.8,141.8 56.4,144.8 51.6,147.8 47.4,150.9 43.8,154.1 40.9,157.3 38.6,160.5 36.9,163.8 36.0,167.0 35.6,170.3 36.0,173.6 36.9,176.9 38.6,180.2 40.9,183.4 43.8,186.6 47.4,189.7 51.6,192.8 56.4,195.9 61.8,198.9 67.8,201.7 74.4,204.5 81.5,207.3 89.1,209.9 97.3,212.4 106.0,214.8 115.1,217.0 124.6,219.2 134.6,221.2 145.0,223.0 155.7,224.7 166.7,226.3 178.1,227.7 189.7,229.0 201.5,230.1 213.6,231.0 225.8,231.8 238.2,232.4 250.7,232.8 263.2,233.1 275.7,233.1 288.3,233.1 300.8,232.8 313.3,232.4 325.7,231.8 337.9,231.0 350.0,230.1 361.8,229.0 373.4,227.7 384.8,226.3 395.8,224.7 406.5,223.0 416.9,221.2 426.9,219.2 436.4,217.0 445.5,214.8 454.2,212.4 462.4,209.9 470.0,207.3 477.1,204.5 483.7,201.7 489.7,198.9 495.1,195.9 499.9,192.8 504.1,189.7 507.7,186.6 510.6,183.4 512.9,180.2 514.6,176.9 515.5,173.6 515.9,170.3" style="fill:none;stroke:#d5dbe1;stroke-width:1.2px"/><polyline points="43.2,57.0 54.9,65.5 66.5,74.0 78.1,82.4 89.6,90.8 101.0,99.1 112.4,107.2 123.7,115.3 134.8,123.1 145.8,130.7 156.6,138.1 167.3,145.2 177.7,151.9 187.9,158.3 197.8,164.2 207.4,169.7 216.6,174.6 225.5,179.1 234.1,182.9 242.2,186.2 249.9,189.0 257.1,191.1 263.9,192.7 270.2,193.8 275.9,194.4 281.2,194.4 285.9,194.1 290.1,193.3 293.8,192.3 297.0,190.9 299.6,189.2 301.8,187.4 303.5,185.4 304.7,183.3 305.5,181.1 305.9,179.0 306.0,176.8 305.6,174.7 305.0,172.8 304.1,170.9 302.9,169.2 301.5,167.7 300.0,166.4 298.3,165.2 296.4,164.3 294.5,163.6 292.5,163.1 290.5,162.8 288.5,162.7 286.5,162.8 284.6,163.1 282.7,163.5 280.9,164.0 279.2,164.6 277.6,165.3 276.1,166.0 274.7,166.8 273.5,167.6 272.5,168.4 271.5,169.2 270.8,169.9 270.1,170.6 269.6,171.2 269.3,171.7 269.0,172.1 268.9,172.5 268.9,172.7 269.0,172.9 269.2,173.0 269.5,173.0 269.9,173.0" style="fill:none;stroke:#ca6f1e;stroke-width:3px;stroke-dasharray:7 5"/><polyline points="43.2,57.0 60.4,69.5 73.6,79.1 85.8,87.8 97.5,96.2 109.0,104.3 120.2,112.2 131.2,119.9 142.1,127.3 152.7,134.4 163.1,141.2 173.3,147.7 183.3,153.8 192.9,159.5 202.3,164.8 211.3,169.6 220.0,173.8 228.3,177.6 236.2,180.9 243.7,183.6 250.8,185.8 257.4,187.5 263.5,188.7 269.2,189.4 274.4,189.7 279.1,189.6 283.3,189.2 287.0,188.5 290.2,187.4 292.9,186.2 295.2,184.8 297.1,183.3 298.5,181.6 299.5,180.0 300.2,178.3 300.5,176.6 300.5,175.0 300.2,173.4 299.6,172.0 298.8,170.6 297.8,169.5 296.7,168.4 295.4,167.5 293.9,166.8 292.4,166.3 290.9,165.9 289.3,165.6 287.6,165.5 286.0,165.5 284.5,165.6 282.9,165.9 281.4,166.2 280.0,166.6 278.7,167.0 277.5,167.4 276.4,167.9 275.4,168.4 274.5,168.9 273.7,169.4 273.0,169.8 272.5,170.2 272.0,170.6 271.7,170.9 271.4,171.1 271.3,171.3 271.2,171.5 271.2,171.6 271.3,171.6 271.4,171.7 271.6,171.6 271.9,171.6" style="fill:none;stroke:#1f618d;stroke-width:3px;"/><text x="275.8" y="176.3" text-anchor="middle" style="font-size:18px;fill:#2c3e50;font-weight:700">+</text><circle cx="43.2" cy="57.0" r="5" style="fill:#2c3e50"/><text class="mtd-halo" x="51.2" y="61.0" style="font-size:15.5px;fill:#2c3e50">start</text><text class="mtd-halo" x="130" y="64" style="font-size:15.5px;fill:#ca6f1e">Adam: swings further</text><text class="mtd-halo" x="130" y="84" style="font-size:15.5px;fill:#1f618d">Nadam: turns sooner</text><text class="mtd-halo" x="8" y="242" style="font-size:15.5px;fill:#555">lowest at the cross; illustrative</text></svg><figcaption class="caption"><span class="fignum">Figure 6.</span> Looking one average ahead damps the swing past the bottom a little.</figcaption></figure>
+<p>PyTorch ships it as <code>torch.optim.NAdam</code>, which also warms the momentum weight up over the first tens of thousands of steps.</p>
+    <h2 id="when"><span class="secnum">11</span> When to use it</h2>
+<p>Adam is the default for most deep networks: transformers, diffusion models, speech and vision models, and any model whose weights get gradients of very different sizes, such as an embedding table next to dense layers. Its defaults need little tuning. When the model is regularized with weight decay, as large language models are, use <a href="adamw.html">AdamW</a> instead. On some image classifiers, such as ResNets, SGD with momentum is still common and can generalize a little better (Wilson and others 2017), and it keeps half the optimizer state.</p>
+    <h2 id="state"><span class="secnum">12</span> When it runs and what it carries</h2>
+<p>Adam runs once per training step, after <code>backward()</code>. Per weight tensor it carries two tensors the size of the weights, the direction average <span class="eqt" style="color:#1f618d"><var>\(m\)</var></span> and the size average <span class="eqt" style="color:#0e6b59"><var>\(v\)</var></span>, plus the step count <var>\(t\)</var> that the corrections need. That is twice the model&#8217;s size in extra memory, a real cost for large models; <code>opt.state_dict()</code> must be saved with the model, or a resumed run restarts both averages at zero and repeats the corrected start.</p>
+    <h2 id="pytorch"><span class="secnum">13</span> Adam in PyTorch</h2>
+<pre class="cs" data-cs="2-3,4-5,6-7,8"><code class="language-python">import torch
+model = torch.nn.Linear(16, 4)
+opt = torch.optim.Adam(model.parameters(), lr=1e-3, betas=(0.9, 0.999), eps=1e-8)
+loss = model(torch.randn(8, 16)).pow(2).mean()
+opt.zero_grad(); loss.backward(); opt.step()
+s = opt.state[model.weight]
+m, v, t = s["exp_avg"], s["exp_avg_sq"], s["step"]
+nadam = torch.optim.NAdam(model.parameters(), lr=2e-3)</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>Adam with its defaults written out: the learning rate <span class="eqt" style="color:#7d3c98"><var>\(\alpha\)</var></span>, the two betas and <var>\(\epsilon\)</var>.</li>
+  <li><span class="cs-n">2</span>One step after each backward pass.</li>
+  <li><span class="cs-n">3</span>The state: <span class="eqt" style="color:#1f618d"><var>\(m\)</var></span> as <code>exp_avg</code>, <span class="eqt" style="color:#0e6b59"><var>\(v\)</var></span> as <code>exp_avg_sq</code>, and the step count.</li>
+  <li><span class="cs-n">4</span>Nadam is a one-line swap.</li>
+</ol>
+    <h2 id="failures"><span class="secnum">14</span> Failure modes and tips</h2>
+<table class="datatable tdc-stack">
+  <caption>Most Adam trouble traces back to <var>\(\epsilon\)</var>, <var>\(\beta_2\)</var>, the bias correction or the decay.</caption>
+  <thead><tr><th>symptom</th><th>cause</th><th>fix</th></tr></thead>
+  <tbody>
+    <tr><td>some weights never move</td><td data-label="cause">their gradients are far below <var>\(\epsilon\)</var></td><td data-label="fix">lower <code>eps</code>, or rescale the loss</td></tr>
+    <tr><td>huge first steps and an early loss spike</td><td data-label="cause">bias correction missing in a hand-written Adam</td><td data-label="fix">divide each average by <var>\(1-\beta^{t}\)</var></td></tr>
+    <tr><td>noisy, jumpy steps</td><td data-label="cause"><var>\(\beta_2\)</var> lowered too far</td><td data-label="fix">raise <var>\(\beta_2\)</var> back toward its default</td></tr>
+    <tr><td>steps tiny long after the loss settled</td><td data-label="cause">the size average still remembers large old gradients</td><td data-label="fix">wait one window, or lower <var>\(\beta_2\)</var></td></tr>
+    <tr><td>regularization weaker than expected on large weights</td><td data-label="cause">L2 added to the loss passes through Adam&#8217;s divide</td><td data-label="fix">use <a href="adamw.html#two-ways">AdamW&#8217;s decoupled decay</a></td></tr>
+    <tr><td>sudden loss spikes late in a long large-model run</td><td data-label="cause">the size average lags a sudden gradient change with <var>\(\beta_2\)</var> near one</td><td data-label="fix">lower <var>\(\beta_2\)</var> (LLaMA used 0.95), and clip gradients (<a href="gradient-clipping.html">Gradient Clipping</a>)</td></tr>
+  </tbody>
+</table>
+    <h2 id="references"><span class="secnum">15</span> References</h2>
+<ol class="brefs">
+  <li>Kingma, D. P., and Ba, J. (2015). Adam: a method for stochastic optimization. ICLR. arXiv:1412.6980.</li>
+  <li>Dozat, T. (2016). Incorporating Nesterov momentum into Adam. ICLR workshop.</li>
+  <li>Tieleman, T., and Hinton, G. (2012). Lecture 6.5, rmsprop. COURSERA: Neural Networks for Machine Learning.</li>
+  <li>Vaswani, A., and others (2017). Attention is all you need. NeurIPS.</li>
+  <li>Touvron, H., and others (2023). LLaMA: open and efficient foundation language models. arXiv:2302.13971.</li>
+  <li>Wilson, A. C., Roelofs, R., Stern, M., Srebro, N., and Recht, B. (2017). The marginal value of adaptive gradient methods in machine learning. NeurIPS. arXiv:1705.08292.</li>
+  <li>PyTorch documentation, torch.optim.Adam and torch.optim.NAdam (defaults and state).</li>
+</ol>
+<script>
+(function () {
+  var K = window.OPK;
+  /* one weight early in training, gradients mostly one way: relative lengths only */
+  function draw(s) {
+    var rows = [
+      ['m', 'direction average', 0.42, '#1f618d', 0],
+      ['v', 'size average', 0.12, '#0e6b59', 1],
+      ['m\u0302', 'direction, corrected', 0.9, '#1f618d', 2],
+      ['v\u0302', 'size, corrected', 0.95, '#0e6b59', 3],
+      ['step', 'direction over size', 0.93, '#7d3c98', 4]];
+    var h = K.tx(4, 18, 'today\u2019s gradient', 15.5, 'start', '#c0392b', 1) + K.rc(150, 6, 170, 16, '#c0392b');
+    rows.forEach(function (r, j) {
+      var y = 30 + j * 44;
+      h += '<g style="opacity:' + (j <= s ? 1 : 0.28) + '">';
+      h += K.tx(4, y + 16, r[0], 15.5, 'start', '#2c3e50', 1) + K.tx(56, y + 16, r[1], 15.5, 'start', '#555');
+      h += K.rc(56, y + 22, r[2] * 260, 16, r[3]);
+      if (j === 2 || j === 3) h += K.rc(56, y + 22, rows[j - 2][2] * 260, 16, 'none', '#2c3e50');
+      if (j === s) h += K.rc(52, y + 2, 284, 40, 'none', '#2c3e50');
+      h += '</g>';
+    });
+    return h;
+  }
+  window.OPWALK('adamSteps', 5, draw, [
+    'Mix today&#8217;s gradient into the direction average \\(m\\). Early on it is small: most of its weight sits on its zero start.',
+    'Mix the squared gradient into the size average \\(v\\). Its memory is longer, so it is even further behind.',
+    'Divide \\(m\\) by the weight it has collected. The outline shows the uncorrected average.',
+    'Divide \\(v\\) the same way; its correction is much larger.',
+    'Divide direction by the root of size and step. The step is about \\(\\alpha\\) long, even this early.'
+  ], [0, 1, 2, 3, 4]);
+})();
+</script>
+<script>
+(function () {
+  var svg = document.getElementById('aiSvg'); if (!svg) return;
+  var K = window.OPK, sl = document.getElementById('aiSteep'), seg = document.getElementById('aiSeg'), rd = document.getElementById('aiRead');
+  var mode = 'on', st = {}, N = 3000, b1 = 0.9, b2 = 0.999, X0 = 64, X1 = 332;
+  function rng(seed) { var a = seed >>> 0; return function () { a = (a + 0x6D2B79F5) >>> 0; var t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+  var NZ = (function () { var r = rng(7), o = []; for (var i = 0; i < 2 * N; i++) o.push(r() - 0.5); return o; })();
+  function X(t) { return X0 + Math.log(t) / Math.log(N) * (X1 - X0); }
+  function Yg(l) { return 92 - (l + 0.4) / 3.8 * 66; }      /* log10 gradient size, -0.4..3.4 */
+  function Ys(r) { var l = Math.max(-3.2, Math.min(1.2, Math.log(r) / Math.LN10)); return 282 - (l + 3.2) / 4.4 * 150; }
+  function steepWord(s) { return s < 0.3 ? 'same' : s < 1.3 ? 'steeper' : s < 2.3 ? 'much steeper' : 'far steeper'; }
+  var lblV = document.getElementById('aiSteepVal');
+  function run(s) {
+    var size = [Math.pow(10, s), 1], m = [0, 0], v = [0, 0], out = { g: [[], []], st: [[], []] };
+    for (var t = 1; t <= N; t++) {
+      for (var i = 0; i < 2; i++) {
+        var g = size[i] * (1 + 0.6 * NZ[2 * t - 2 + i]);
+        m[i] = b1 * m[i] + (1 - b1) * g; v[i] = b2 * v[i] + (1 - b2) * g * g;
+        var r = mode === 'on' ? (m[i] / (1 - Math.pow(b1, t))) / Math.sqrt(v[i] / (1 - Math.pow(b2, t))) : m[i] / Math.sqrt(v[i]);
+        out.g[i].push(Math.log(Math.abs(g)) / Math.LN10); out.st[i].push(Math.abs(r));
+      }
+    }
+    return out;
+  }
+  var COL = ['#c0392b', '#1f618d'], NAME = ['steep axis', 'shallow axis'];
+  function draw(r, upto) {
+    var h = K.tx(4, 16, 'gradient size', 15.5, 'start', '#555');
+    h += K.ln(X0, 94, X1, 94, '#e1e4e8', 1);
+    for (var i = 0; i < 2; i++) {
+      var p = []; for (var t = 1; t <= upto; t += (t < 50 ? 1 : 8)) p.push([X(t), Yg(r.g[i][t - 1])]);
+      if (p.length > 1) h += K.pl(p, COL[i], 1.6, null, 0.8);
+      h += K.tx(X1, (i === 0 ? Yg(r.g[0][N - 1]) - 8 : Yg(0) + 18), NAME[i], 15.5, 'end', COL[i], 1);
+    }
+    h += K.tx(4, 122, 'Adam&#8217;s step length', 15.5, 'start', '#555');
+    h += K.ln(X0, 282, X1, 282, '#7f8c8d', 1.5) + K.ln(X0, 130, X0, 282, '#7f8c8d', 1.5);
+    h += K.ln(X0, Ys(1), X1, Ys(1), '#7d3c98', 1, '2 4') + K.tx(X0 - 6, Ys(1) + 5, '\u03b1', 15.5, 'end', '#7d3c98', 1);
+    h += K.tx(X0 - 6, 146, 'longer', 15.5, 'end', '#555') + K.tx(X0 - 6, 278, 'shorter', 15.5, 'end', '#555');
+    if (mode === 'off') {
+      var f = []; for (var t = 1; t <= upto; t += (t < 50 ? 1 : 8)) f.push([X(t), Ys((1 - Math.pow(b1, t)) / Math.sqrt(1 - Math.pow(b2, t)))]);
+      if (f.length > 1) h += K.pl(f, '#7f8c8d', 5, null, 0.35);
+    }
+    /* SGD with its rate set so the steep axis steps alpha: the shallow axis steps alpha over the steepness ratio */
+    var ys = Ys(1 / r.ratio);
+    h += K.ln(X0, ys, X1, ys, '#7f8c8d', 3.5, '2 5');
+    h += K.tx(X1, ys + (ys > 262 ? -8 : 20), 'SGD, shallow axis', 15.5, 'end', '#5d6d7e', 1);
+    for (var i = 1; i >= 0; i--) {
+      var q = []; for (var t = 1; t <= upto; t += (t < 50 ? 1 : 8)) q.push([X(t), Ys(r.st[i][t - 1])]);
+      if (q.length > 1) h += K.pl(q, COL[i], 2.2, i === 1 ? '6 4' : null);
+    }
+    h += K.tx(X1, 304, 'training steps (log scale)', 15.5, 'end', '#555');
+    h += K.ln(X0, 320, X0 + 22, 320, '#c0392b', 2.2) + K.tx(X0 + 26, 325, 'steep', 15.5, 'start', '#c0392b');
+    h += K.ln(X0 + 88, 320, X0 + 110, 320, '#1f618d', 2.2, '6 4') + K.tx(X0 + 114, 325, 'shallow', 15.5, 'start', '#1f618d');
+    h += K.ln(X0 + 186, 320, X0 + 208, 320, '#7f8c8d', 3.5, '2 5') + K.tx(X0 + 212, 325, 'SGD', 15.5, 'start', '#5d6d7e');
+    svg.innerHTML = h;
+  }
+  function go() {
+    K.seg(seg, mode);
+    var s = parseFloat(sl.value);
+    if (lblV) lblV.textContent = steepWord(s);
+    var r = run(s); r.ratio = Math.pow(10, s);
+    var sgd = s < 0.3 ? 'about as long' : s < 1.3 ? 'shorter' : s < 2.3 ? 'much shorter' : 'far shorter';
+    rd.innerHTML = (mode === 'on' ? 'Adam&#8217;s steps: <strong>equal on both axes</strong>, about \\(\\alpha\\) from the first step.' : 'Adam&#8217;s steps: equal on both axes, but <strong>too long at the start</strong>.') + ' SGD&#8217;s shallow-axis step: <strong>' + sgd + '</strong>.';
+    if (window.siteMath) window.siteMath.typeset(rd);
+    window.OPANIM(st, N, 2200, function (u) { draw(r, u); });
+  }
+  sl.addEventListener('input', go);
+  Array.prototype.forEach.call(seg.querySelectorAll('button'), function (b) { b.addEventListener('click', function () { mode = b.getAttribute('data-v'); go(); }); });
+  go();
+})();
+</script>
+            <script>
+        (function () {
+            var nav = document.querySelector('.topnav');
+            function onNavScroll() {
+                nav.classList.toggle('scrolled', window.scrollY > 4);
+            }
+            window.addEventListener('scroll', onNavScroll, { passive: true });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            window.addEventListener('resize', function () {
+                if (window.innerWidth > 768) {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            onNavScroll();
+            var toggle = document.getElementById('navToggle');
+            var panel = document.getElementById('navPanel');
+            if (toggle && panel) {
+                toggle.addEventListener('click', function () {
+                    var open = panel.classList.toggle('open');
+                    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                });
+                panel.addEventListener('click', function (e) {
+                    if (e.target && e.target.classList && e.target.classList.contains('panel-link')) {
+                        panel.classList.remove('open');
+                        toggle.setAttribute('aria-expanded', 'false');
+                    }
+                });
+            }
+            var links = Array.prototype.slice.call(document.querySelectorAll('.tab-strip a.tab-chip[href^="#"]'));
+            if (!links.length) return;
+            var tabMap = {};
+            links.forEach(function (a) { tabMap[a.getAttribute('href').slice(1)] = a; });
+            var current = null;
+            function centerTab(tab) {
+                var strip = tab.parentElement;
+                if (!strip || !strip.classList.contains('tab-strip')) return;
+                var sr = strip.getBoundingClientRect();
+                var pr = tab.getBoundingClientRect();
+                strip.scrollLeft += (pr.width >= sr.width) ? (pr.left - sr.left) : (pr.left - sr.left) - (sr.width - pr.width) / 2;
+            }
+            function setActive(id) {
+                if (!tabMap[id] || id === current) return;
+                current = id;
+                links.forEach(function (a) {
+                    a.classList.toggle('active', a.getAttribute('href') === '#' + id);
+                });
+                centerTab(tabMap[id]);
+            }
+            links.forEach(function (a) {
+                a.addEventListener('click', function () {
+                    setActive(a.getAttribute('href').slice(1));
+                });
+            });
+            setActive(links[0].getAttribute('href').slice(1));
+            if ('IntersectionObserver' in window) {
+                var obs = new IntersectionObserver(function (entries) {
+                    entries.forEach(function (en) {
+                        if (en.isIntersecting) setActive(en.target.id);
+                    });
+                }, { rootMargin: '-35% 0px -55% 0px' });
+                Object.keys(tabMap).forEach(function (id) {
+                    var el = document.getElementById(id);
+                    if (el) obs.observe(el);
+                });
+                window.addEventListener('scroll', function () {
+                    if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) {
+                        setActive(links[links.length - 1].getAttribute('href').slice(1));
+                    }
+                }, { passive: true });
+            }
+            window.addEventListener('load', function () {
+                var act = document.querySelector('.tab-strip a.active');
+                if (act) centerTab(act);
+            });
+        })();
+    </script>
+<script>
+/* P80 code sections (CODE-SECTIONS.md) */
+(function(){
+  var C=['121,184,255','255,171,112','133,232,157','210,168,255','255,161,152','118,227,234'];
+  function lay(pre){
+    var code=pre.querySelector('code'); if(!code) return;
+    var lh=parseFloat(getComputedStyle(code).lineHeight);
+    var pt=parseFloat(getComputedStyle(pre).paddingTop);
+    var old=pre.querySelectorAll('.cs-g'); for(var j=0;j<old.length;j++) pre.removeChild(old[j]);
+    var imgs=[],sizes=[],pos=[];
+    (pre.getAttribute('data-cs')||'').split(',').forEach(function(r,i){
+      var m=r.trim().match(/^(\d+)(?:-(\d+))?$/); if(!m) return;
+      var a=+m[1],b=+(m[2]||m[1]),c=C[i%C.length],top=pt+(a-1)*lh,h=(b-a+1)*lh;
+      imgs.push('linear-gradient(rgba('+c+',.55),rgba('+c+',.55))','linear-gradient(rgba('+c+',.13),rgba('+c+',.13))');
+      sizes.push('3px '+h+'px','100% '+h+'px'); pos.push('0 '+top+'px','0 '+top+'px');
+      var g=document.createElement('span'); g.className='cs-g'; g.setAttribute('aria-hidden','true');
+      g.setAttribute('data-n',String(i+1)); g.style.top=(top+(lh-11)/2)+'px'; g.style.color='rgb('+c+')';
+      pre.insertBefore(g,code);
+    });
+    pre.style.backgroundImage=imgs.join(','); pre.style.backgroundSize=sizes.join(',');
+    pre.style.backgroundPosition=pos.join(','); pre.style.backgroundRepeat='no-repeat';
+  }
+  function all(){ var p=document.querySelectorAll('pre.cs'); for(var i=0;i<p.length;i++) lay(p[i]); }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',all); else all();
+  window.addEventListener('load',all);
+  window.addEventListener('resize',all);
+  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(all);
+})();
+</script>
+</body>
+</html>
+

@@ -1,0 +1,1212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sharpness-Aware Minimization (SAM): Training Toward Flat Minima</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem;
+      line-height: 1.6;
+      color: #333;
+    }
+    h1, h2, h3, h4 {
+      color: #2c3e50; /* Darker shade for better contrast */
+      margin-top: 1.5em;
+      margin-bottom: 0.5em;
+    }
+    h1 { font-size: 2.5em; border-bottom: 2px solid #3498db; padding-bottom: 0.3em;}
+    .dek { font-size: 1.15em; color: #555; margin-top: 0.2em; }
+    h2 { font-size: 2em; border-bottom: 1px solid #bdc3c7; padding-bottom: 0.2em;}
+    h3 { font-size: 1.5em; }
+    h4 { font-size: 1.2em; color: #555;}
+
+    /* Keep wide display equations from overflowing on small screens */
+
+    /* Shared site nav (matches index.html topnav) */
+    body { padding-top: calc(64px + 1.5rem); }
+    h1, h2, h3, .demo[id], figure[id] { scroll-margin-top: 84px; }
+    .topnav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        z-index: 1000;
+        background: rgba(255, 255, 255, 0.65);
+        backdrop-filter: blur(18px) saturate(1.5);
+        -webkit-backdrop-filter: blur(18px) saturate(1.5);
+        border-bottom: 1px solid transparent;
+        transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+    .topnav.scrolled {
+        background: rgba(255, 255, 255, 0.88);
+        border-bottom-color: #dee2e6;
+        box-shadow: 0 6px 24px rgba(33, 37, 41, 0.07);
+    }
+    .nav-inner {
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 0 1.5rem;
+        height: 64px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+    .wordmark {
+        font-weight: 700;
+        color: #212529;
+        text-decoration: none;
+        font-size: 1.05rem;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+    }
+    .nav-links {
+        display: flex;
+        gap: 2px;
+        align-items: center;
+    }
+    .nav-links a {
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        font-size: 0.95rem;
+        padding: 8px 14px;
+        border-radius: 999px;
+        transition: color 0.18s ease, background-color 0.18s ease;
+    }
+    .nav-links a:hover {
+        color: #007bff;
+        background-color: #e7f1ff;
+    }
+    .nav-links a.active {
+        color: #007bff;
+        background-color: #e7f1ff;
+        font-weight: 600;
+    }
+    .nav-links a:focus-visible,
+    .wordmark:focus-visible,
+    .nav-toggle:focus-visible,
+    .panel-link:focus-visible,
+    .panel-social a:focus-visible {
+        outline: 2px solid #007bff;
+        outline-offset: 2px;
+    }
+    @media (hover: hover) {
+        .nav-toggle:hover { background-color: #e7f1ff; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .topnav,
+        .nav-links a,
+        .nav-toggle span,
+        .nav-panel,
+        .nav-panel a.panel-link {
+            transition: none;
+        }
+    }
+    @media (hover: hover) {
+        .nav-toggle:hover { background-color: #e7f1ff; }
+    }
+    .nav-toggle {
+        display: none;
+        width: 42px;
+        height: 42px;
+        padding: 0;
+        background: none;
+        border: 0;
+        border-radius: 10px;
+        cursor: pointer;
+        flex: 0 0 auto;
+    }
+    .nav-panel {
+        display: grid;
+        grid-template-rows: 0fr;
+        visibility: hidden;
+        transition: grid-template-rows 0.32s ease, visibility 0s linear 0.32s;
+    }
+    .nav-panel.open {
+        grid-template-rows: 1fr;
+        visibility: visible;
+        transition: grid-template-rows 0.32s ease, visibility 0s;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner {
+        min-height: 0;
+        overflow: hidden;
+    }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link:hover {
+        background-color: #e7f1ff;
+        color: #007bff;
+    }
+    .nav-panel a.panel-link.active {
+        color: #007bff;
+        font-weight: 600;
+        background-color: #e7f1ff;
+    }
+    .panel-social a:hover {
+        border-color: #007bff;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner {
+        min-height: 0;
+        overflow: hidden;
+    }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link:hover {
+        background-color: #e7f1ff;
+        color: #007bff;
+    }
+    .nav-panel a.panel-link.active {
+        color: #007bff;
+        font-weight: 600;
+        background-color: #e7f1ff;
+    }
+    .panel-social a:hover {
+        border-color: #007bff;
+    }
+        .crumb { margin: 0 0 0.8em; }
+        .crumb a {
+            display: inline-block;
+            padding: 4px 14px;
+            border: 1px solid #dee2e6;
+            border-radius: 999px;
+            background: #f8f9fa;
+            color: #0056b3;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+        .crumb a:hover { border-color: #007bff; color: #007bff; }
+    .nav-panel a.panel-link {
+        display: flex;
+        align-items: center;
+        padding: 0.8rem 0.75rem;
+        margin: 0 0.25rem;
+        border-radius: 10px;
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        min-height: 48px;
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+    .panel-social {
+        display: flex;
+        gap: 0.5rem;
+        padding: 0.9rem 1rem 0.25rem;
+        flex-wrap: wrap;
+    }
+    .panel-social a {
+        color: #007bff;
+        text-decoration: none;
+        font-weight: 500;
+        font-size: 0.9rem;
+        padding: 6px 12px;
+        border: 1px solid #dee2e6;
+        border-radius: 999px;
+        transition: border-color 0.15s ease;
+    }
+    @media (max-width: 768px) {
+        .nav-links { display: none; }
+        .nav-toggle { display: block; }
+    }
+
+    /* Section tab strip: one slim row, scrolls sideways when it overflows. */
+    .tabs-label {
+        float: left;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #6c757d;
+        font-weight: 700;
+        line-height: 1.2;
+        margin: 0;
+        padding: 8px 12px 0 0;
+    }
+    .tab-strip {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 2px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        margin: 0 0 1.25rem;
+        max-width: 100%;
+    }
+    .tab-strip::-webkit-scrollbar { display: none; }
+    .tab-strip a.tab-chip,
+    .tab-strip a.tab-link {
+        display: inline-block;
+        flex: 0 0 auto;
+        padding: 6px 10px;
+        border-radius: 999px;
+        color: #495057;
+        text-decoration: none;
+        font-size: 0.82rem;
+        font-weight: 500;
+        line-height: 1.35;
+        white-space: nowrap;
+    }
+    .tab-strip a.tab-chip:hover,
+    .tab-strip a.tab-link:hover { color: #007bff; }
+    .tab-strip a.tab-chip.active,
+    .tab-strip a.tab-link.active { background: #007bff; color: #ffffff; }
+    @media (max-width: 768px) {
+        .tabs-label { display: none; }
+        .tab-strip {
+            width: 100vw;
+            max-width: 100vw;
+            box-sizing: border-box;
+            margin-left: calc((100% - 100vw) / 2);
+            padding-left: calc((100vw - 100%) / 2);
+        }
+        .tab-strip a.tab-chip,
+        .tab-strip a.tab-link { font-size: 0.75rem; padding: 6px 8px; }
+    }
+
+    pre {
+      background: #0d1117;
+      color: #e6edf3;
+      padding: 14px 16px;
+      overflow-x: auto;
+      border-radius: 8px;
+      font-size: 0.9em;
+      margin: 1em 0;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+    }
+    /* P52 canonical inline items in prose: numbers and variables wear the body
+       font at body size and read as part of the sentence (keeps P50's quiet
+       treatment, no pill; code blocks and eq-cards keep the mono treatment). */
+    code {
+        font-family: inherit;
+        font-size: 1em;
+        color: #1a1a1a;
+        background: none;
+        padding: 0 0.08em;
+        overflow-wrap: break-word;
+    }
+    pre code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 1em; }
+    .eq-card code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 0.92em; }
+    pre code { /* Reset for code inside pre, already handled by pre styling */
+        background: none;
+        padding: 0;
+        font-size: 1em; /* Ensure pre's font size is inherited */
+        color: inherit;
+    }
+    ul, ol {
+        padding-left: 20px;
+    }
+    li {
+        margin-bottom: 0.5em;
+    }
+    strong {
+        color: #2980b9;
+    }
+    /* Labeled teaching diagrams: each teaches exactly one idea */
+    .diagram {
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      padding: 1.2rem;
+      margin: 1.75rem 0;
+      background: #fbfcfd;
+    }
+    .diagram svg {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+    .diagram .caption {
+      font-size: 0.9em;
+      color: #555;
+      margin-top: 1rem;
+      line-height: 1.5;
+    }
+    .diagram .caption strong {
+      color: #2c3e50;
+    }
+    /* Rendered result block, not a print() call */
+    .output {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 1rem 1.2rem;
+      border-radius: 6px;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+      font-size: 0.9em;
+      margin: 1em 0;
+      overflow-x: auto;
+      border-left: 4px solid #22c55e;
+      line-height: 1.7;
+    }
+    .output .dim { color: #94a3b8; }
+    .output .good { color: #4ade80; font-weight: bold; }
+    .output .bad { color: #ef4444; font-weight: bold; }
+    .output .src { color: #fbbf24; }
+    /* Stat cards: clean, scannable reference numbers */
+    .stat-title { font-size: 0.85em; font-weight: 700; color: #2c3e50; margin: 0 0 0.2rem; }
+    .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:1.2em 0}
+    .stat-card{border:1px solid #bdc3c7;border-radius:8px;padding:14px 16px;background:#f7f9fb}
+    .stat-num{font-size:1.9em;font-weight:800;color:#2c3e50;line-height:1.15}
+    .stat-unit{font-size:.55em;font-weight:600;color:#7f8c8d}.stat-vs{font-size:max(12px,.55em);font-weight:600;color:#7f8c8d}
+    .stat-label{font-size:.92em;font-weight:600;margin-top:6px;color:#2c3e50}
+    .stat-note{font-size:.82em;color:#7f8c8d;margin-top:3px}
+    /* Numbered walkthrough steps: one computation per step */
+/* Worked-example card (Round 9 template): a calm sage card that sets
+           math walkthrough steps apart from body text. */
+        .worked-example {
+            background: #f1f6ed;
+            border: 1px solid #d9e4d1;
+            border-left: 3px solid #6f9a63;
+            border-radius: 10px;
+            padding: 14px 20px;
+            margin: 1.1em 0;
+            max-width: 680px;
+            color: #2c3e50;
+            line-height: 1.8;
+            overflow-x: auto;
+        }
+        ol.worked-example {
+            list-style: none;
+            counter-reset: wex-step;
+            padding-left: 20px;
+        }
+        ol.worked-example > li {
+            counter-increment: wex-step;
+            position: relative;
+            margin: 0;
+            padding: 8px 0 8px 44px;
+        }
+        ol.worked-example > li + li { border-top: 1px dashed #cbdabf; }
+        ol.worked-example > li::before {
+            content: counter(wex-step);
+            position: absolute;
+            left: 0;
+            top: 9px;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: #6f9a63;
+            color: #ffffff;
+            font-size: 13px;
+            font-weight: 700;
+            line-height: 28px;
+            text-align: center;
+        }
+        @media (max-width: 480px) {
+            .worked-example { padding: 12px; font-size: 15px; }
+            ol.worked-example { padding-left: 12px; }
+            ol.worked-example > li { padding-left: 38px; }
+        }
+    /* Long inline formulas get their own scrollable line on small screens */
+    .math-scroll{display:block;overflow-x:auto;overflow-y:hidden;max-width:100%;padding:.1em 0}
+    /* Interactive demos */
+    .demo {
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      padding: 1.25rem;
+      margin: 1.75rem 0;
+      background: #fbfcfd;
+    }
+    .demo-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem 1rem;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    .demo-controls label { font-weight: bold; color: #2c3e50; white-space: nowrap; }
+    .demo-controls label var sub, .demo-controls label var sup { font-size: max(11px, .72em); }
+    .demo-controls input[type=range] {
+      flex: 1 1 140px;
+      min-width: 0;
+      max-width: 220px;
+      accent-color: #3498db;
+    }
+    #bvCanvas { display: block; width: 100%; height: 320px; max-width: 100%; }
+    .demo-stats {
+      text-align: center;
+      font-size: 1.02em;
+      color: #2c3e50;
+      margin: 1rem 0 0.4rem;
+    }
+    .chart-legend { display: flex; flex-wrap: wrap; gap: 0.4em 1.2em; font-size: 0.9em; color: #555; margin: 0.2rem 0 0.4rem 0; }
+    .chart-legend .lg-sw { display: inline-block; width: 24px; height: 0; border-top: 3px solid; vertical-align: middle; margin-right: 0.4em; }
+    .chart-legend .lg-blue { border-color: #2980b9; }
+    .chart-legend .lg-red { border-color: #c0392b; border-top-style: dashed; }
+    .demo-stats strong { color: #2980b9; }
+    .demo .caption {
+      font-size: 0.9em; color: #555; margin-top: 1rem;
+      border-left: 3px solid #3498db; padding-left: 0.8em;
+    }
+    .dim-note { font-size: 0.8em; color: #888; margin-top: 0.6rem; }
+    /* Bias-variance Play button (mirrors the race widget buttons) */
+    .demo .bv-btn { font: inherit; font-size: 0.92em; padding: 0.35rem 0.8rem; border: 1px solid #bdc3c7; border-radius: 6px; background: #fff; color: #2c3e50; cursor: pointer; }
+    .demo .bv-btn.active { background: #2980b9; border-color: #2980b9; color: #fff; font-weight: bold; }
+    .demo .bv-btn:disabled { opacity: 0.45; cursor: default; }
+    /* Fixed label width so the slider readouts can never change the controls-row wrap (no-scroll-on-Play) */
+    #bvToy #capVal, #bvToy #dataVal { display: inline-block; min-width: 3ch; }
+    .howto { font-size: 0.92em; color: #2c3e50; margin: 0.8rem 0 0.2rem; }
+    /* Caption card standard: white/lightest tint, 1px #e3e8ee border + 3px #2c3e50 left accent */
+    div.howto {
+      background: #fff;
+      border: 1px solid #e3e8ee;
+      border-left: 3px solid #2c3e50;
+      border-radius: 10px;
+      padding: 18px;
+      margin: 14px 0 0;
+      font-size: 15px;
+      line-height: 1.65;
+      color: #2c3e50;
+    }
+    div.howto .howto-head { font-weight: bold; font-size: 15px; margin: 0 0 0.4em; }
+    div.howto ul { list-style: none; margin: 0; padding: 0; }
+    div.howto ul li { position: relative; padding-left: 16px; margin: 7px 0; }
+    div.howto ul li::before {
+      content: ''; position: absolute; left: 0; top: 0.62em;
+      width: 6px; height: 6px; border-radius: 50%; background: #2c3e50;
+    }
+    div.howto ul li.tryit {
+      background: rgba(44,62,80,0.08);
+      padding: 7px 7px 7px 23px;
+      border-radius: 6px;
+    }
+    div.howto ul li.tryit::before { left: 7px; top: calc(0.62em + 7px); }
+    .canvas-wrap { position: relative; }
+    
+    /* Optimizer race widget */
+    #optRace { position: relative; }
+    #optRace .opt-btn { font: inherit; font-size: 0.92em; padding: 0.35rem 0.8rem; border: 1px solid #bdc3c7; border-radius: 6px; background: #fff; color: #2c3e50; cursor: pointer; }
+    #optRace .opt-btn.active { background: #2980b9; border-color: #2980b9; color: #fff; font-weight: bold; }
+    #optRace .gloss { margin: 0 0 0.6rem; padding-left: 1.2rem; color: #2c3e50; }
+    #optRace .gloss li { margin: 0.35rem 0; }
+    #optRace .race-wrap { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-start; }
+    #optRace .race-main { flex: 1 1 330px; min-width: 0; }
+    #optRace .race-side { flex: 1 1 230px; min-width: 0; }
+    #optRace canvas { display: block; width: 100%; height: auto; }
+    #optRace .side-title { text-align: center; font-weight: bold; color: #2c3e50; font-size: 0.92em; margin: 0 0 0.4rem; }
+    #optRace .bad { color: #c0392b; font-weight: bold; }
+    /* Shared walkthrough equation-card contract (verbatim, all pages) */
+    
+    .eq-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+
+      padding:1rem 1.2rem;margin:1.75rem auto;max-width:640px;overflow-x:auto}
+
+    .eq-what{font-size:.95rem;color:#334155;margin:0 0 .6rem;line-height:1.55}
+
+    .eq-line{font-size:1.38rem;line-height:2.0;letter-spacing:.015em;padding:.5rem .6rem;white-space:normal;font-weight:500;opacity:.38;border-left:3px solid transparent}
+
+    .eq-line.eq-active{opacity:1;border-left-color:#2c3e50}
+.eq-line sub,.eq-line sup{font-size:.68em}
+      .eq-why{display:none;visibility:hidden;font-size:1rem;color:#475569;padding:.15rem .35rem .4rem;line-height:1.65}
+      .eq-why.eq-active{display:block;visibility:visible}
+      .eq-card.eq-stepped .eq-line{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-line.eq-active{display:block;opacity:1;visibility:visible}
+      .eq-card.eq-stepped .eq-legend .eq-item{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-legend .eq-item.eq-active{display:block;visibility:visible}
+
+    .eqt{font-weight:600;padding:0 .1em;border-radius:3px}
+
+    .eqt.eqt-active{text-decoration:underline;text-underline-offset:2px}
+
+    .eq-legend{font-size:.85rem;color:#475569;margin-top:.6rem;line-height:1.75}
+
+    .eq-legend .eq-item{display:block}
+
+    .eq-legend .eq-item code{white-space:nowrap}
+
+    .eq-sw{display:inline-block;width:.7em;height:.7em;border-radius:2px;
+
+      margin:0 .25em 0 .6em;vertical-align:baseline}
+
+    @media (max-width:480px){.eq-card{padding:.85rem .9rem}.eq-line{font-size:1.24rem;line-height:1.95}}
+/* P70 inline variables and inline code, one style site-wide (VAR-STYLE.md v2) */
+var,.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic;font-weight:400;font-size:1em;color:#1d4e89;background:#edf3fa;border-radius:3px;padding:0 .18em;white-space:nowrap;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+var sub,var sup,.mvar sub,.mvar sup{font-size:.72em;font-style:normal}
+pre var,code var,.eq-line var{font:inherit;color:inherit;background:none;padding:0}
+svg text.mvar,svg tspan.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic}
+:not(pre)>code:not(.eq-line code){font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,Courier,monospace;font-size:.86em;color:#24292f;background:#f1f3f5;border:1px solid #dfe3e8;border-radius:4px;padding:.06em .32em;white-space:normal;overflow-wrap:anywhere}
+/* P79 numbering (NUMBERING.md) */
+.secnum{font-variant-numeric:tabular-nums;margin-right:.4em;color:inherit;font-weight:inherit}
+.tab-strip .secnum{margin-right:.3em;opacity:.75}
+.fignum{font-weight:600;margin-right:.3em;font-variant-numeric:tabular-nums}
+/* P80 code sections (CODE-SECTIONS.md) */
+pre.cs{position:relative;background-attachment:local;padding-left:20px}
+pre.cs code{display:block;line-height:1.55}
+pre.cs .cs-g{position:absolute;left:3px;width:11px;text-align:center;font:700 11px/1 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;-webkit-user-select:none;user-select:none;pointer-events:none}
+pre.cs .cs-g::before{content:attr(data-n)}
+ol.cs-notes{list-style:none;padding-left:0;margin:-.4em 0 1em}
+ol.cs-notes li{margin:0 0 .3em;padding-left:1.9em;position:relative}
+ol.cs-notes .cs-n{position:absolute;left:0;top:.1em;min-width:1.35em;padding:0 .25em;border-radius:4px;font:700 .8em/1.45 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;text-align:center;color:#0d1117}
+ol.cs-notes li:nth-child(6n+1) .cs-n{background:#79b8ff}
+ol.cs-notes li:nth-child(6n+2) .cs-n{background:#ffab70}
+ol.cs-notes li:nth-child(6n+3) .cs-n{background:#85e89d}
+ol.cs-notes li:nth-child(6n+4) .cs-n{background:#d2a8ff}
+ol.cs-notes li:nth-child(6n+5) .cs-n{background:#ffa198}
+ol.cs-notes li:nth-child(6n+6) .cs-n{background:#76e3ea}
+    /* diagram-side dim/highlight (SVG/DOM). Do NOT use .hl/.dim: taken. */
+    .eq-dim{opacity:.32}
+    .eq-hl{filter:drop-shadow(0 0 3px currentColor)}
+    hr {
+      border: 0;
+      height: 1px;
+      background: #bdc3c7;
+      margin-top: 2em;
+      margin-bottom: 2em;
+    }
+  
+/* canonical spacing: display math */
+    /* Compact phone walkthrough layout (canonical block, every tutorial page):
+       two-column eq legends, tightened demo spacing, and diagrams capped so
+       controls and diagram share the first phone screen. Phone widths only;
+       desktop rendering and equation typography are unchanged. */
+    @media (max-width:480px){
+      .demo{padding:.75rem}
+      .demo>*{margin-top:.6rem;margin-bottom:.6rem}
+      .demo>*:first-child{margin-top:0}
+      .demo .eq-card{margin:1rem auto;padding:.7rem .8rem}
+      .demo .cap-card,.demo .capcard{padding:.85rem .95rem}
+      .eq-legend{display:grid;grid-template-columns:1fr 1fr;column-gap:.9rem;row-gap:.1rem;line-height:1.5}
+      .eq-legend .eq-item:has(> code ~ code){grid-column:1/-1}
+      .demo svg,.demo canvas{max-height:55vh}
+    }
+    /* batch Da shared: tips and data tables, linked-card map (2026-11-02) */
+    .datatable{border-collapse:collapse;margin:1.2em 0;width:100%;max-width:640px;font-size:.95em} .datatable th,.datatable td{border:1px solid #bdc3c7;padding:.45em .6em;text-align:left;vertical-align:top} .datatable th{background:#2c3e50;color:#fff;font-weight:600} .datatable tr:nth-child(even) td{background:#f7f9fb} .datatable caption{text-align:left;padding:.5em 0 0;font-size:.92em;color:#555;caption-side:bottom}
+    @media (max-width:480px){.datatable{font-size:.88em}.datatable th,.datatable td{padding:.35em .4em}}
+    @media (max-width:480px){h2#failures+.datatable{table-layout:fixed}h2#failures+.datatable td,h2#failures+.datatable th{overflow-wrap:anywhere}}
+    .pmap{margin:1.75rem auto;max-width:640px;display:flex;flex-direction:column;align-items:stretch;gap:0}
+    .pmap-row{display:flex;gap:.6rem;justify-content:center;flex-wrap:wrap}
+    .pmap-link{width:2px;height:14px;background:#95a5a6;margin:0 auto}
+    .pmap a.pmap-card{flex:1 1 0;min-width:0;display:block;border:1.5px solid #bdc3c7;border-radius:8px;padding:.45rem .6rem;text-decoration:none;color:#2c3e50;background:#fbfcfd;text-align:center;line-height:1.3}
+    .pmap a.pmap-card:hover{border-color:#2980b9}
+    .pmap .pmap-name{display:block;font-weight:700;font-size:.98rem}
+    .pmap .pmap-fix{display:block;font-size:.85rem;color:#555}
+    .pmap-caption{text-align:center}
+    @media (max-width:480px){.pmap a.pmap-card{padding:.35rem .4rem}.pmap .pmap-name{font-size:.92rem}.pmap .pmap-fix{font-size:.8rem}}
+/* PREV-NEXT-BEGIN */
+nav.tut-seq{display:flex;align-items:center;gap:0 .75rem;margin:0 0 .25rem;font-size:.85rem;white-space:nowrap}
+nav.tut-seq a{position:relative;display:block;flex:0 1 auto;min-width:0;height:44px;line-height:44px;padding:0 2px;overflow:hidden;text-overflow:ellipsis;color:#0056b3;text-decoration:none}
+nav.tut-seq a.seq-home{flex:0 0 auto}
+nav.tut-seq a.seq-next{margin-left:auto}
+nav.tut-seq .seq-w{font-weight:600}
+nav.tut-seq a:hover{text-decoration:underline}
+nav.tut-seq a:focus-visible{outline:2px solid #0056b3;outline-offset:2px}
+@media (max-width:575px){nav.tut-seq .seq-t{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}}
+@media (forced-colors:active){nav.tut-seq a:focus-visible{outline-color:Highlight}}
+@media print{nav.tut-seq{display:none}}
+/* PREV-NEXT-END */
+/* TD-CODE-BEGIN variant D2: words and inline code in table cells break only between words; a table that holds inline code scrolls sideways with a right-edge fade while more is to the right, a pinned first column with an edge line once scrolled, and trimmed phone padding; <wbr> wrap points in table code act at 640 px and below only; a .tdc-stack table stacks per row on phones (VAR-STYLE.md v2 amendment 2026-11-05, D2) */
+td,th,td code:not(pre code),th code:not(pre code){overflow-wrap:normal!important;word-break:normal!important}
+table:has(td code){display:block;max-width:100%;overflow-x:auto}
+:where(table:has(td code)) :where(tr>:first-child){position:sticky;left:-1px;z-index:1;background-color:Canvas;box-shadow:inset -1px 0 0 var(--tdc-s)}
+@property --tdc-f{syntax:'<length>';inherits:false;initial-value:0px}
+@property --tdc-s{syntax:'<color>';inherits:true;initial-value:transparent}
+@keyframes tdc-hint{0%{--tdc-f:3rem;--tdc-s:transparent}3%{--tdc-s:rgba(0,0,0,.28)}85%{--tdc-f:3rem}100%{--tdc-f:0px;--tdc-s:rgba(0,0,0,.28)}}
+@supports (animation-timeline:scroll()){table:has(td code){-webkit-mask-image:linear-gradient(to left,rgba(0,0,0,.15),#000 var(--tdc-f));mask-image:linear-gradient(to left,rgba(0,0,0,.15),#000 var(--tdc-f));animation-name:tdc-hint;animation-duration:1ms;animation-timing-function:linear;animation-fill-mode:both;animation-timeline:scroll(self inline)}}
+@supports not (animation-timeline:scroll()){table:has(td code){background:linear-gradient(to left,Canvas 40%,rgba(255,255,255,0)) 100% 0/2.5rem 100% no-repeat local,radial-gradient(farthest-side at 100% 50%,rgba(0,0,0,.2),rgba(0,0,0,0)) 100% 0/.9rem 100% no-repeat scroll}}
+@media (min-width:641px){td wbr,th wbr{display:none}}
+@media (max-width:400px){table:has(td code) :is(td,th){padding-left:.35em!important;padding-right:.35em!important}}
+@media (max-width:640px){table.tdc-stack,table.tdc-stack :is(tbody,thead,tr,td){display:block;overflow:visible;-webkit-mask-image:none;mask-image:none;animation-name:none}table.tdc-stack tr:has(th){display:none}table.tdc-stack tr+tr{margin-top:.6em}table.tdc-stack td{position:static;box-shadow:none;border-width:0 1px;padding:.3em .6em!important}table.tdc-stack tr>td:first-child{border-top-width:1px;font-weight:700}table.tdc-stack tr>td:last-child{border-bottom-width:1px;padding-bottom:.5em!important}table.tdc-stack td[data-label]::before{content:attr(data-label) ": ";font-weight:600}}
+/* TD-CODE-END */
+/* MATH-BEGIN v1 (P88, site-math.js renders KaTeX; byte-identical on every page) */
+.eq-line{overflow-x:auto;overflow-y:hidden;white-space:normal}
+.eq-line .katex{font-size:1.02em;line-height:1.6}
+.eq-line .katex .base{margin:.15em 0}
+var .katex,p .katex,li .katex,td .katex,th .katex,figcaption .katex,.eq-why .katex,.eq-what .katex,.eq-legend .katex{font-size:1.06em}
+var:has(.katex){font-style:normal}
+.katex-display{margin:.6rem 0;overflow-x:auto;overflow-y:hidden}
+/* MATH-END */
+    /* Slider rows (fix wave 2): label on its own line, slider with both end labels on the next, so value words never move the ends */
+    .demo-controls label[for] { flex: 1 1 100%; white-space: normal; }
+    .demo-controls .sl-row { display: flex; align-items: center; gap: .5rem; flex: 1 1 100%; min-width: 0; max-width: 30rem; }
+    .demo-controls .sl-row input[type=range] { flex: 1 1 auto; min-width: 0; max-width: none; }
+    .demo-controls .sl-end { font-size: .85em; color: #555; white-space: nowrap; flex: 0 0 auto; }
+    /* Stacked phone tables (fix wave 2): the caption spans the full width */
+    @media (max-width:640px){ table.tdc-stack > caption { display: block; width: auto; } }
+</style>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+  <script src="site-math.js" defer></script>
+
+  <style>
+/* Static teaching diagrams (mtd), shared across tutorials, 2026-11-01 */
+.figure.mtd-fig { margin: 1.75rem 0; }
+.mtd-fig > svg.mtd-svg { display: block; width: 100%; height: auto; margin: 0 auto; }
+.mtd-fig .caption { margin-top: 1rem; }
+.mtd-svg text { fill: #2c3e50; font-family: sans-serif; }
+.mtd-svg .mtd-sub { fill: #555; }
+.mtd-svg .mtd-t1 { fill: #1f618d; }
+.mtd-svg .mtd-t2 { fill: #ca6f1e; }
+.mtd-svg .mtd-pu { fill: #7d3c98; }
+.mtd-svg .mtd-red { fill: #c0392b; }
+.mtd-svg .mtd-grn { fill: #148f77; }
+.mtd-svg line, .mtd-svg path, .mtd-svg polyline { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.mtd-svg .mtd-s.mtd-c1 { stroke: #1f618d; } .mtd-svg .mtd-f.mtd-c1 { fill: #1f618d; }
+.mtd-svg .mtd-s.mtd-c2 { stroke: #ca6f1e; } .mtd-svg .mtd-f.mtd-c2 { fill: #ca6f1e; }
+.mtd-svg .mtd-s.mtd-cp { stroke: #7d3c98; } .mtd-svg .mtd-f.mtd-cp { fill: #7d3c98; }
+.mtd-svg .mtd-s.mtd-cr { stroke: #c0392b; } .mtd-svg .mtd-f.mtd-cr { fill: #c0392b; }
+.mtd-svg .mtd-s.mtd-cg { stroke: #2c3e50; } .mtd-svg .mtd-f.mtd-cg { fill: #2c3e50; }
+.mtd-svg .mtd-sep { stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-pic { fill: #fbfcfd; stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-axis { stroke: #7f8c8d; stroke-width: 1.5px; }
+.mtd-svg .mtd-arc { stroke: #2c3e50; stroke-width: 2px; }
+.mtd-svg .mtd-dot { fill: #2c3e50; }
+.mtd-svg .mtd-guide { stroke: #7f8c8d; stroke-width: 1.4px; stroke-dasharray: 4 4; }
+.mtd-svg .mtd-ring { fill: #fbfcfd; stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-pt { fill: #1f618d; opacity: .55; }
+.mtd-svg .mtd-cross { stroke: #2c3e50; stroke-width: 2.2px; }
+.mtd-svg .mtd-barbg { fill: #eef1f4; }
+.mtd-svg .mtd-bar { fill: #7d3c98; }
+.mtd-svg .mtd-cart { fill: #ffffff; stroke: #2c3e50; stroke-width: 2px; }
+.mtd-svg .mtd-zero { stroke: #95a5a6; stroke-width: 1.2px; stroke-dasharray: 4 4; }
+.mtd-svg .mtd-axisl { stroke: #7f8c8d; stroke-width: 2px; }
+.mtd-svg .mtd-norm { stroke: #148f77; stroke-width: 4px; }
+.mtd-svg .mtd-read { fill: #ffffff; stroke: #2c3e50; stroke-width: 2.5px; }
+.mtd-svg .mtd-ball { fill: #7d3c98; fill-opacity: .08; stroke: #7d3c98; stroke-width: 1.6px; stroke-dasharray: 5 4; }
+.mtd-svg .mtd-box { fill: #fbfcfd; stroke: #bdc3c7; stroke-width: 1.4px; }
+.mtd-svg .mtd-crossbg { fill: #ffffff; }
+.mtd-svg .mtd-halo { stroke: #ffffff; stroke-width: 5px; stroke-linejoin: round; paint-order: stroke; }
+.mtd-svg .mtd-box.mtd-note { stroke-dasharray: 5 4; }
+</style>
+<style>
+/* Series and page map (B-TF, 2026-11-02) */
+.sermap { margin: .5rem 0 1.1rem; font-size: .8rem; line-height: 1.3; }
+.sermap ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; row-gap: 5px; }
+.sermap li { display: flex; align-items: center; margin: 0; padding: 0; line-height: 1.25; }
+.sermap li + li::before { content: "\2192"; color: #95a5a6; margin: 0 5px; }
+.sermap a, .sermap .sm-here { display: inline-block; padding: 2px 7px; line-height: 1.25; border-radius: 6px; text-decoration: none; }
+.sermap .sm-series a { padding: 1px 2px; color: #1f618d; text-decoration: underline; text-decoration-color: #a9cce3; text-underline-offset: 2px; }
+.sermap .sm-series .sm-here { padding: 1px 6px; background: #117a65; color: #fff; font-weight: 600; }
+.sermap .sm-series { row-gap: 0; }
+.sermap .sm-series a, .sermap .sm-series .sm-here, .sermap .sm-also a { display: inline-flex; align-items: center; min-height: 44px; box-sizing: border-box; }
+.sermap .sm-flow { margin-top: 6px; padding-left: 8px; border-left: 3px solid #117a65; }
+</style>
+<style>
+nav.prereq{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem .4rem;margin:.6rem 0 1.1rem}
+nav.prereq .prereq-label{font-size:.82rem;font-weight:600;color:#6c757d;margin-right:.15rem}
+nav.prereq a.prereq-chip{display:inline-block;padding:.15rem .6rem;border:1px solid #ced4da;border-radius:999px;font-size:.85rem;line-height:1.4;color:#0056b3;text-decoration:none}
+nav.prereq a.prereq-chip:hover,nav.prereq a.prereq-chip:focus-visible{background:#e7f1ff;border-color:#007bff}
+nav.prereq-sec{margin:.2rem 0 .9rem}
+nav.prereq-sec p{margin:0;font-size:.9rem;line-height:1.5;color:#495057}
+/* Optimizers rewrite 2026-11-05: series map arrows, tools */
+.pmap-step{display:flex;flex-direction:column;align-items:center;margin:0 auto}
+.pmap-step .pmap-link{height:10px;width:3px}
+.pmap-step .pmap-say{font-size:.8rem;color:#555;line-height:1.2;padding:1px 0}
+.pmap-step .pmap-link.pmap-arrow{height:12px;position:relative}
+.pmap-step .pmap-link.pmap-arrow::after{content:"";position:absolute;left:-5.5px;bottom:-8px;border-left:7px solid transparent;border-right:7px solid transparent;border-top:9px solid #95a5a6}
+.pmap-page{font-size:.78rem;font-weight:600;color:#117a65;text-align:center;margin:.5rem 0 .25rem;letter-spacing:.02em}
+.pmap a.pmap-card.pmap-here{border-color:#117a65}
+.seg{display:inline-flex;flex-wrap:wrap;gap:4px}
+.seg .bv-btn{min-height:40px}
+.demo .demo-read{font-size:.95rem;color:#2c3e50;margin:.4rem 0 .2rem;min-height:1.6em}
+/* opt-polish (R10 4.1, 4.5): readouts that wrap at phone width reserve their tallest state, so the demo never jumps */
+@media (max-width:480px){#stRead{min-height:3.3em}}
+@media (max-width:389px){#raceRead{min-height:4.9em}}
+.demo svg.tool-svg{display:block;width:100%;height:auto;max-width:520px;margin:.3rem auto}
+.demo svg.tool-svg text{font-family:sans-serif;fill:#2c3e50}
+.knobs{font-size:.95em}
+.datatable td.num,.datatable th.num{text-align:right;font-variant-numeric:tabular-nums}
+@media (max-width:480px){.demo .demo-controls{gap:.4rem .5rem}}
+.diagram .diag-list{font-size:.92em;color:#2c3e50;margin:.6em 0 0;padding-left:1.4rem}
+.diagram .diag-list li{margin:.35em 0}
+ol.brefs{line-height:1.7;margin:1em 0 2em;padding-left:22px}
+ol.brefs li{margin-bottom:.5em}
+/* fix wave 3 (recheck-2 R3 n1): variables in the dark header band read as plain light italic text, no chip */
+.datatable th var{color:#fff;background:none;padding:0;border-radius:0}
+/* fix wave 3 (R3 n7, R4 P3): a hat centred over epsilon, and limits set under max */
+/* fix wave 4 (recheck-3 R6 m1): line-height 1 on the epsilon box, so the hat sits just above the epsilon instead of floating */
+.xh{position:relative;display:inline-block;line-height:1}
+.xh::after{content:"ˆ";position:absolute;left:0;right:0;top:-.05em;text-align:center;font-style:normal;line-height:1;padding-left:.12em}
+.lim{display:inline-flex;flex-direction:column;align-items:center;vertical-align:-.62em;line-height:1.05}
+.lim .lim-sub{font-size:.74em}
+</style>
+<style>
+/* one-topic optimizers split 2026-11-08: series flow row, walkthrough and tool bits */
+.sermap .sm-flow a{border:1px solid #d5dbdb;background:#f8f9fa;color:#2c3e50}
+.sermap .sm-flow .sm-here{background:#117a65;color:#fff;font-weight:600}
+.demo .demo-controls{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .7rem}
+.demo .walk-lbl{font-weight:600;color:#2c3e50}
+.demo .eq-card.eq-stepped .eq-why{display:none}
+.demo .eq-card.eq-stepped .eq-why.eq-active{display:block;visibility:visible}
+.bv-btn[aria-pressed="true"],.bv-btn.active{background:#2c3e50;color:#fff;border-color:#2c3e50}
+.demo input[type=range]{flex:1 1 140px;min-width:120px}
+.demo label{font-size:.95rem}
+.fam-list{padding-left:1.3rem}
+.fam-list li{margin:.35em 0}
+</style>
+<script>
+/* Walkthrough stepper shared by the optimizer pages (2026-11-08): controls, diagram, readout, eq-card last.
+   id+'Prev', 'Next', 'Reset', 'Lbl', 'Svg', 'Read', 'Card'; lines[i] is the eq-card line for step i. */
+window.OPWALK = function (id, n, draw, reads, lines) {
+  var $ = function (s) { return document.getElementById(id + s); };
+  var prev = $('Prev'), next = $('Next'), reset = $('Reset'), lbl = $('Lbl'), svg = $('Svg'), rd = $('Read'), card = $('Card');
+  if (!svg) return;
+  var cur = 0;
+  function show() {
+    svg.innerHTML = draw(cur);
+    rd.innerHTML = reads[cur];
+    if (window.siteMath) window.siteMath.typeset(rd);
+    lbl.textContent = 'Step ' + (cur + 1) + ' of ' + n;
+    if (card) Array.prototype.forEach.call(card.querySelectorAll('.eq-line, .eq-why'), function (e) {
+      e.classList.toggle('eq-active', String(lines[cur]) === e.getAttribute('data-eqline'));
+    });
+    prev.disabled = cur === 0; next.disabled = cur === n - 1;
+  }
+  prev.addEventListener('click', function () { if (cur > 0) { cur--; show(); } });
+  next.addEventListener('click', function () { if (cur < n - 1) { cur++; show(); } });
+  reset.addEventListener('click', function () { cur = 0; show(); });
+  show();
+};
+/* Animate a run: calls frame(k) for k = 1..total over about ms milliseconds; a newer call cancels the older one. */
+window.OPANIM = function (state, total, ms, frame) {
+  state.tok = (state.tok || 0) + 1; var tok = state.tok, t0 = null;
+  function go(ts) {
+    if (tok !== state.tok) return;
+    if (t0 === null) t0 = ts;
+    var k = Math.min(total, Math.max(1, Math.round((ts - t0) / ms * total)));
+    frame(k);
+    if (k < total) requestAnimationFrame(go);
+  }
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) { frame(total); return; }
+  requestAnimationFrame(go);
+};
+</script>
+<script>
+/* Shared SVG string helpers for the optimizer tools (2026-11-05). */
+window.OPK = (function () {
+  function n(v) { return (Math.round(v * 10) / 10).toString(); }
+  return {
+    n: n,
+    ln: function (x1, y1, x2, y2, c, w, d) { return '<line x1="' + n(x1) + '" y1="' + n(y1) + '" x2="' + n(x2) + '" y2="' + n(y2) + '" style="stroke:' + c + ';stroke-width:' + (w || 1.5) + 'px' + (d ? ';stroke-dasharray:' + d : '') + '"/>'; },
+    pl: function (pts, c, w, d, op, clip) { return '<polyline points="' + pts.map(function (p) { return n(p[0]) + ',' + n(p[1]); }).join(' ') + '" style="fill:none;stroke:' + c + ';stroke-width:' + (w || 2.5) + 'px;stroke-linecap:round;stroke-linejoin:round' + (d ? ';stroke-dasharray:' + d : '') + (op != null ? ';opacity:' + op : '') + '"' + (clip ? ' clip-path="url(#' + clip + ')"' : '') + '/>'; },
+    ar: function (pts, c, op) { return '<polygon points="' + pts.map(function (p) { return n(p[0]) + ',' + n(p[1]); }).join(' ') + '" style="fill:' + c + ';fill-opacity:' + (op == null ? 0.2 : op) + ';stroke:none"/>'; },
+    /* baseline text never below 15.5 viewBox px: tool svgs render 270 px wide at 360, so 12 px or more (fix wave 1, review B2 minor 20) */
+    tx: function (x, y, s, sz, anc, c, b) { return '<text class="mtd-halo" x="' + n(x) + '" y="' + n(y) + '" text-anchor="' + (anc || 'start') + '" style="font-size:' + Math.max(sz || 15, 15.5) + 'px;fill:' + (c || '#2c3e50') + (b ? ';font-weight:700' : '') + '">' + s + '</text>'; },
+    rc: function (x, y, w, h, f, s) { return '<rect x="' + n(x) + '" y="' + n(y) + '" width="' + n(Math.max(w, 0)) + '" height="' + n(Math.max(h, 0)) + '" style="fill:' + f + ';stroke:' + (s || 'none') + ';stroke-width:1px"/>'; },
+    ci: function (x, y, r, f) { return '<circle cx="' + n(x) + '" cy="' + n(y) + '" r="' + r + '" style="fill:' + f + ';stroke:#ffffff;stroke-width:1.5px"/>'; },
+    mk: function (x, y, k) { return '<circle cx="' + n(x) + '" cy="' + n(y) + '" r="10" style="fill:#2c3e50;stroke:#ffffff;stroke-width:2px"/><text x="' + n(x) + '" y="' + n(y + 5.5) + '" text-anchor="middle" style="font-size:15.5px;font-weight:700;fill:#ffffff">' + k + '</text>'; },
+    ell: function (X, Y, c, clip) { var pts = []; for (var i = 0; i <= 120; i++) { var t = 2 * Math.PI * i / 120; pts.push([X(Math.sqrt(c / 5) * Math.cos(t)), Y(Math.sqrt(c / 0.2) * Math.sin(t))]); } return this.pl(pts, '#d5dbe1', 1.2, null, null, clip); },
+    /* edge marker: an arrowhead at (x, y), the point where a path leaves the frame, pointing away from (px, py) */
+    edge: function (x, y, px, py, c) { var a = Math.atan2(y - py, x - px), ca = Math.cos(a), sa = Math.sin(a), bx = x - 14 * ca, by = y - 14 * sa; return '<polygon points="' + n(x) + ',' + n(y) + ' ' + n(bx - 8 * sa) + ',' + n(by + 8 * ca) + ' ' + n(bx + 8 * sa) + ',' + n(by - 8 * ca) + '" style="fill:' + c + ';stroke:#ffffff;stroke-width:1px"/>'; },
+    seg: function (box, val) { Array.prototype.forEach.call(box.querySelectorAll('button'), function (b) { var on = b.getAttribute('data-v') === String(val); b.classList.toggle('active', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); }); }
+  };
+})();
+</script>
+</head>
+<body>
+        <nav class="topnav" aria-label="Site">
+    <div class="nav-inner">
+        <a class="wordmark" href="index.html">Ramin Anushiravani</a>
+        <div class="nav-links">
+            <a href="tutorial.html" class="active">Tutorials</a>
+            <a href="pubs.html">Publications</a>
+            <a href="index.html">About</a>
+            <a href="work.html">Projects</a>
+        </div>
+        <button class="nav-toggle" id="navToggle" aria-expanded="false" aria-controls="navPanel" aria-label="Menu"><span></span><span></span><span></span></button>
+    </div>
+    <div class="nav-panel" id="navPanel">
+        <div class="nav-panel-inner">
+            <div class="nav-panel-body">
+                <a class="panel-link active" href="tutorial.html">Tutorials</a>
+                <a class="panel-link" href="pubs.html">Publications</a>
+                <a class="panel-link" href="index.html">About</a>
+                <a class="panel-link" href="work.html">Projects</a>
+                <div class="panel-social">
+                    <a href="https://linkedin.com/in/raminanushiravani" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+                    <a href="https://github.com/raminaeye/" target="_blank" rel="noopener noreferrer">GitHub</a>
+                    <a href="https://scholar.google.com/citations?user=kouXx8gAAAAJ&hl=en" target="_blank" rel="noopener noreferrer">Google Scholar</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</nav>
+<p class="crumb"><a href="tutorial.html">&larr; All tutorials</a></p>
+<script src="tutorial-nav.js"></script>
+    <h1 id="sam">Sharpness-Aware Minimization (SAM): Training Toward Flat Minima</h1>
+    <p class="dek">Score each point by the worst loss a small step away, and let a second gradient pass steer training into flat minima.</p>
+<nav class="sermap" aria-label="The optimizers series">
+  <ol class="sm-series">
+    <li><a href="optimizers.html">SGD, Momentum and Nesterov</a></li>
+    <li><a href="adaptive-optimizers.html">Adaptive Optimizers</a></li>
+    <li><a href="optimizers-in-practice.html">Optimizers in Practice</a></li>
+  </ol>
+  <div class="sm-flow"><ol>
+    <li><a href="adamw.html">AdamW</a></li>
+    <li><span class="sm-here" aria-current="page">SAM</span></li>
+    <li><a href="lr-schedules.html">Learning Rate Schedules</a></li>
+    <li><a href="gradient-clipping.html">Gradient Clipping</a></li>
+  </ol></div>
+</nav>
+<nav class="prereq" aria-label="Before you start">
+  <span class="prereq-label">Before you start</span>
+  <a class="prereq-chip" href="errors.html" title="Understanding Model Errors" aria-label="Model errors, taught in Understanding Model Errors">Model errors</a>
+  <a class="prereq-chip" href="linear-algebra.html" title="Vectors and Matrices" aria-label="Vector length, taught in Vectors and Matrices">Vector length</a>
+  <a class="prereq-chip" href="gradient-descent.html#three-moves" title="Gradient Descent, section 1.1" aria-label="Gradient descent update, taught in Gradient Descent, section 1.1">Gradient descent update</a>
+</nav>
+    <p class="tabs-label">On this page</p>
+    <div class="tab-strip">
+        <a class="tab-chip" href="#problem"><span class="secnum">1</span> What SAM fixes</a>
+        <a class="tab-chip" href="#objective"><span class="secnum">2</span> Score each point by its worst neighbour</a>
+        <a class="tab-chip" href="#one-gradient"><span class="secnum">3</span> Finding the worst neighbour with one gradient</a>
+        <a class="tab-chip" href="#walkthrough"><span class="secnum">4</span> One SAM step, line by line</a>
+        <a class="tab-chip" href="#sam-tool"><span class="secnum">5</span> Sharp and flat basins under SAM&#8217;s score</a>
+        <a class="tab-chip" href="#two-pass"><span class="secnum">6</span> SAM in PyTorch: perturb, then step</a>
+        <a class="tab-chip" href="#when"><span class="secnum">7</span> When to use it</a>
+        <a class="tab-chip" href="#state"><span class="secnum">8</span> When it runs and what it carries</a>
+        <a class="tab-chip" href="#failures"><span class="secnum">9</span> Failure modes and tips</a>
+        <a class="tab-chip" href="#references"><span class="secnum">10</span> References</a>
+    </div>
+
+    <h2 id="problem"><span class="secnum">1</span> What SAM fixes</h2>
+<p>Gradient descent looks only at the loss where the weights are, so it settles in whichever basin it rolls into, narrow or wide. Two minima with the same training loss can generalize very differently: in a narrow, sharp minimum a slight shift between training and test data raises the loss a lot; in a wide, flat one it barely matters (Keskar and others 2017 tied the sharp minima of large-batch training to worse test accuracy). Sharpness-Aware Minimization (SAM), from Foret and others (2021), changes what training minimizes so that flat minima win.</p>
+<p>SAM improved image classifiers on CIFAR and ImageNet and made them more robust to noisy labels. Its biggest effect was on models with weak built-in assumptions: Chen, Hsieh and Gong (2022) found that vision transformers and MLP-Mixers trained from scratch on ImageNet with SAM beat ResNets of similar size without large-scale pretraining or strong augmentation, and that SAM made their loss landscapes much smoother.</p>
+    <h2 id="objective"><span class="secnum">2</span> Score each point by its worst neighbour</h2>
+<p>On this page <var>\(\epsilon\)</var> is SAM&#8217;s perturbation, a small move of the weights; it is unrelated to Adam&#8217;s <var>\(\epsilon\)</var>, the tiny constant that keeps a divide away from zero.</p>
+<figure class="figure mtd-fig" id="optSamWorst"><svg role="img" aria-label="A loss curve with a sharp deep basin and a flat shallow basin. Around each basin bottom a window of width two rho is shaded; in the sharp basin the worst point in the window is far above the bottom, in the flat basin it is barely above." class="mtd-svg" viewBox="0 0 340 240" style="max-width:480px"><text class="mtd-halo" x="8" y="20" style="font-size:15.5px;font-weight:700;fill:#2c3e50">The worst loss within ρ of each bottom</text><rect x="74.2" y="40" width="46.5" height="160" style="fill:#a04000;fill-opacity:.10"/><line x1="97.5" y1="197.1" x2="97.5" y2="131.6" style="stroke:#a04000;stroke-width:2.5px"/><rect x="237.0" y="40" width="46.5" height="160" style="fill:#a04000;fill-opacity:.10"/><line x1="260.2" y1="182.5" x2="260.2" y2="181.0" style="stroke:#a04000;stroke-width:2.5px"/><text class="mtd-halo" x="260.2" y="173.0" text-anchor="middle" style="font-size:15.5px;fill:#a04000;font-weight:700">small rise</text><polyline points="20.0,40.0 21.6,40.0 23.1,40.0 24.7,40.0 26.2,40.0 27.8,40.0 29.3,40.0 30.9,40.0 32.4,40.0 33.9,40.0 35.5,40.0 37.0,40.0 38.6,40.0 40.2,41.8 41.7,43.7 43.2,45.7 44.8,47.6 46.4,49.6 47.9,51.5 49.4,53.4 51.0,55.3 52.5,57.2 54.1,59.0 55.6,60.9 57.2,62.7 58.8,64.6 60.3,66.4 61.9,68.2 63.4,70.5 65.0,74.5 66.5,82.2 68.1,92.4 69.6,102.9 71.2,113.0 72.7,122.6 74.2,131.6 75.8,140.1 77.3,147.9 78.9,155.2 80.5,161.9 82.0,168.0 83.5,173.5 85.1,178.5 86.6,182.8 88.2,186.6 89.8,189.8 91.3,192.4 92.8,194.5 94.4,195.9 96.0,196.8 97.5,197.1 99.0,196.8 100.6,195.9 102.2,194.5 103.7,192.4 105.2,189.8 106.8,186.6 108.3,182.8 109.9,178.5 111.4,173.5 113.0,168.0 114.5,161.9 116.1,155.2 117.7,148.0 119.2,140.5 120.8,133.5 122.3,129.4 123.9,128.9 125.4,129.8 126.9,130.9 128.5,132.1 130.1,133.3 131.6,134.4 133.1,135.6 134.7,136.7 136.2,137.9 137.8,139.0 139.4,140.1 140.9,141.2 142.4,142.2 144.0,143.3 145.6,144.3 147.1,145.3 148.7,146.4 150.2,147.4 151.8,148.3 153.3,149.3 154.8,150.3 156.4,151.2 157.9,152.1 159.5,153.0 161.1,153.9 162.6,154.8 164.2,155.7 165.7,156.6 167.2,157.4 168.8,158.2 170.3,159.1 171.9,159.9 173.4,160.7 175.0,161.4 176.6,162.2 178.1,162.9 179.7,163.7 181.2,164.4 182.8,165.1 184.3,165.8 185.9,166.5 187.4,167.1 189.0,167.8 190.5,168.4 192.1,169.0 193.6,169.6 195.1,170.2 196.7,170.8 198.2,171.4 199.8,171.9 201.3,172.5 202.9,173.0 204.4,173.5 206.0,174.0 207.5,174.5 209.1,174.9 210.7,175.4 212.2,175.8 213.8,176.3 215.3,176.7 216.8,177.1 218.4,177.5 220.0,177.8 221.5,178.2 223.1,178.5 224.6,178.9 226.2,179.2 227.7,179.5 229.2,179.8 230.8,180.0 232.4,180.3 233.9,180.5 235.4,180.8 237.0,181.0 238.5,181.2 240.1,181.4 241.6,181.5 243.2,181.7 244.8,181.8 246.3,182.0 247.8,182.1 249.4,182.2 250.9,182.3 252.5,182.4 254.1,182.4 255.6,182.5 257.1,182.5 258.7,182.5 260.2,182.5 261.8,182.5 263.4,182.5 264.9,182.5 266.5,182.4 268.0,182.4 269.6,182.3 271.1,182.2 272.6,182.1 274.2,182.0 275.8,181.8 277.3,181.7 278.8,181.5 280.4,181.4 281.9,181.2 283.5,181.0 285.1,180.8 286.6,180.5 288.1,180.3 289.7,180.0 291.2,179.8 292.8,179.5 294.4,179.2 295.9,178.9 297.4,178.5 299.0,178.2 300.6,177.8 302.1,177.5 303.7,177.1 305.2,176.7 306.8,176.3 308.3,175.8 309.9,175.4 311.4,174.9 312.9,174.5 314.5,174.0 316.1,173.5 317.6,173.0 319.1,172.5 320.7,171.9 322.2,171.4 323.8,170.8 325.4,170.2 326.9,169.6 328.4,169.0 330.0,168.4" style="fill:none;stroke:#2c3e50;stroke-width:3px"/><text class="mtd-halo" x="97.5" y="224" text-anchor="middle" style="font-size:15.5px;fill:#555">sharp basin</text><text class="mtd-halo" x="124" y="108" style="font-size:15.5px;fill:#a04000;font-weight:700">big rise</text><text class="mtd-halo" x="260.2" y="224" text-anchor="middle" style="font-size:15.5px;fill:#555">flat basin</text></svg><figcaption class="caption"><span class="fignum">Figure 1.</span> The sharp basin is lower at its bottom, but a small move costs far more there. Shape only.</figcaption></figure>
+<div class="eq-card" id="samObjEq">
+<div class="eq-what">SAM&#8217;s objective: the worst loss a small step away</div>
+<div class="eq-line eq-active" data-eqline="0">\({\displaystyle \begin{aligned} &\min_{\htmlStyle{color:#2c3e50}{w}}\; L^{\text{SAM}}(\htmlStyle{color:#2c3e50}{w}) \\ L^{\text{SAM}}(\htmlStyle{color:#2c3e50}{w}) &= \max_{\lVert\epsilon\rVert \le \htmlStyle{color:#a04000}{\rho}} L(\htmlStyle{color:#2c3e50}{w} + \epsilon) \end{aligned}}\)</div>
+<div class="eq-why eq-active" data-eqline="0">Instead of the loss at the weights <span class="eqt" style="color:#2c3e50"><var>\(w\)</var></span>, SAM minimizes the largest loss found anywhere within a distance <span class="eqt" style="color:#a04000"><var>\(\rho\)</var></span> (rho) of them. <var>\(\epsilon\)</var> here is a small move of the weights, and <var>\(\lVert\epsilon\rVert\)</var> its length (<a href="linear-algebra.html">Vectors and Matrices</a>). A point at the bottom of a narrow basin scores badly, because a small move climbs a steep wall; a point in a wide basin scores well, because every small move stays low.</div>
+<div class="eq-line eq-active" data-eqline="1">\({\displaystyle \begin{aligned} L^{\text{SAM}}(\htmlStyle{color:#2c3e50}{w}) &= L(\htmlStyle{color:#2c3e50}{w}) \\ &\quad + \text{sharp}(\htmlStyle{color:#2c3e50}{w}) \\ \text{sharp}(\htmlStyle{color:#2c3e50}{w}) &= \max_{\lVert\epsilon\rVert \le \htmlStyle{color:#a04000}{\rho}} L(\htmlStyle{color:#2c3e50}{w}+\epsilon) \\ &\quad - L(\htmlStyle{color:#2c3e50}{w}) \end{aligned}}\)</div>
+<div class="eq-why eq-active" data-eqline="1">The same score split in two: the ordinary loss, plus the sharpness, how much the loss can rise within <span class="eqt" style="color:#a04000"><var>\(\rho\)</var></span> of the weights. Minimizing both asks for weights that fit the data and sit where the loss is flat. Flat regions tend to generalize better, because test data shifts the loss surface slightly and a flat minimum stays low under the shift (<a href="errors.html">Understanding Model Errors</a>).</div>
+</div>
+    <h2 id="one-gradient"><span class="secnum">3</span> Finding the worst neighbour with one gradient</h2>
+<p>The objective needs the worst point within <span class="eqt" style="color:#a04000"><var>\(\rho\)</var></span>. SAM estimates it from the gradient it already has.</p>
+<div class="eq-card" id="samGradEq">
+<div class="eq-what">One gradient instead of a search</div>
+<div class="eq-line eq-active" data-eqline="0">\({\displaystyle \htmlStyle{color:#1f618d}{\hat\epsilon}(\htmlStyle{color:#2c3e50}{w}) = \htmlStyle{color:#a04000}{\rho}\,\frac{\htmlStyle{color:#c0392b}{\nabla L(w)}}{\lVert \htmlStyle{color:#c0392b}{\nabla L(w)}\rVert}}\)</div>
+<div class="eq-why eq-active" data-eqline="0">Searching every move within <span class="eqt" style="color:#a04000"><var>\(\rho\)</var></span> is too expensive, so SAM takes one guess: the steepest uphill direction, which is the gradient. It scales the gradient to length <span class="eqt" style="color:#a04000"><var>\(\rho\)</var></span>; the hat marks this one-step estimate of the worst move.</div>
+<div class="eq-line eq-active" data-eqline="1">\({\displaystyle \htmlStyle{color:#c0392b}{g_{\text{SAM}}} = \nabla L(w)\,\Big|_{\,\htmlStyle{color:#2c3e50}{w} + \htmlStyle{color:#1f618d}{\hat\epsilon}}}\)</div>
+<div class="eq-why eq-active" data-eqline="1">Then it reads the gradient again at the moved point <span class="eqt" style="color:#1f618d"><var>\(w+\hat\epsilon\)</var></span>. This second gradient points downhill from the worst nearby spot, so it carries the information about the walls around <span class="eqt" style="color:#2c3e50"><var>\(w\)</var></span>.</div>
+<div class="eq-line eq-active" data-eqline="2">\({\displaystyle \htmlStyle{color:#2c3e50}{w} \leftarrow \htmlStyle{color:#2c3e50}{w} - \htmlStyle{color:#7d3c98}{\alpha}\,\htmlStyle{color:#c0392b}{g_{\text{SAM}}}}\)</div>
+<div class="eq-why eq-active" data-eqline="2">Finally SAM goes back to <span class="eqt" style="color:#2c3e50"><var>\(w\)</var></span> and lets the base optimizer, SGD or Adam, step with that second gradient. Each SAM step therefore costs two forward and backward passes.</div>
+</div>
+    <h2 id="walkthrough"><span class="secnum">4</span> One SAM step, line by line</h2>
+<p>The weights sit on the wall of the sharp basin. Step through one SAM update.</p>
+<div class="demo" id="samWalk">
+  <div class="demo-controls">
+    <button type="button" class="bv-btn" id="samWalkPrev">Prev</button>
+    <button type="button" class="bv-btn" id="samWalkNext">Next</button>
+    <button type="button" class="bv-btn" id="samWalkReset">Reset</button>
+    <span class="walk-lbl" id="samWalkLbl">Step 1</span>
+  </div>
+  <svg id="samWalkSvg" class="mtd-svg tool-svg" viewBox="0 0 340 250" role="img" aria-label="A loss curve with the weights w, the gradient there, the moved point w plus epsilon hat, the gradient there, and the final step; arrows appear one step at a time."></svg>
+  <p class="demo-read" id="samWalkRead" aria-live="polite"></p>
+  <p class="caption"><span class="fignum">Figure 2.</span> The loss curve of Figure 1; shape only.</p>
+<div class="eq-card eq-stepped" id="samWalkCard">
+<div class="eq-what">This step, line by line</div>
+<div class="eq-line eq-active" data-eqline="0">\({\displaystyle \htmlStyle{color:#1f618d}{\hat\epsilon}(\htmlStyle{color:#2c3e50}{w}) = \htmlStyle{color:#a04000}{\rho}\,\frac{\htmlStyle{color:#c0392b}{\nabla L(w)}}{\lVert \htmlStyle{color:#c0392b}{\nabla L(w)}\rVert}}\)</div>
+<div class="eq-why eq-active" data-eqline="0">Scale the gradient at the weights to length rho.</div>
+<div class="eq-line" data-eqline="1">\({\displaystyle \htmlStyle{color:#c0392b}{g_{\text{SAM}}} = \nabla L(w)\,\Big|_{\,\htmlStyle{color:#2c3e50}{w} + \htmlStyle{color:#1f618d}{\hat\epsilon}}}\)</div>
+<div class="eq-why" data-eqline="1">Read the gradient at the moved point.</div>
+<div class="eq-line" data-eqline="2">\({\displaystyle \htmlStyle{color:#2c3e50}{w} \leftarrow \htmlStyle{color:#2c3e50}{w} - \htmlStyle{color:#7d3c98}{\alpha}\,\htmlStyle{color:#c0392b}{g_{\text{SAM}}}}\)</div>
+<div class="eq-why" data-eqline="2">Step from the original weights with that gradient.</div>
+</div>
+</div>
+    <h2 id="sam-tool"><span class="secnum">5</span> Sharp and flat basins under SAM&#8217;s score</h2>
+<p>The tool draws SAM&#8217;s score over the loss. Grow the radius and watch which basin has the lowest score, then drag the dot to see the window and its worst point anywhere on the curve.</p>
+<div class="demo" id="optSamTool">
+  <div class="demo-controls">
+    <label for="smRho">SAM&#8217;s radius &#961;: <span id="smRhoVal">medium</span></label>
+    <span class="sl-row"><span class="sl-end">none</span><input type="range" id="smRho" min="0" max="0.5" step="0.01" value="0.3" aria-label="SAM's radius rho, from none to large"><span class="sl-end">large</span></span>
+    <span class="walk-lbl">drag the dot</span>
+  </div>
+  <svg id="smSvg" class="mtd-svg tool-svg" viewBox="0 0 340 280" role="img" aria-label="A loss curve with a deep sharp basin on the left and a shallower flat basin on the right. A dashed curve shows SAM's score, the worst loss within rho of each point. A draggable dot shows its window and the worst point inside it." style="touch-action:none"></svg>
+  <p class="demo-read" id="smRead" aria-live="polite"></p>
+  <p class="caption"><span class="fignum">Figure 3.</span> Solid: the loss. Dashed: SAM&#8217;s score, the worst loss within &#961;. The resting radius is illustrative.</p>
+</div>
+<p>The tool draws the objective SAM aims at, not the path its steps take. On this toy, SAM&#8217;s one-gradient steps started on the sharp basin&#8217;s wall stall there and do not climb out: the estimate of section 3 only sees the walls close by, which is the gap between the objective and what one step can do.</p>
+    <h2 id="two-pass"><span class="secnum">6</span> SAM in PyTorch: perturb, then step</h2>
+<p>In code, <code>perturb</code> is the first pass; <code>closure</code> returns the minibatch loss. SAM&#8217;s official code is in JAX, Google&#8217;s array library (google-research/sam); this is the same algorithm in PyTorch.</p>
+<pre class="cs" data-cs="4-5,6-8,9-12"><code class="language-python">import torch
+from torch import stack
+def perturb(ps, closure, rho):
+    closure().backward()
+    gs = [p.grad for p in ps]
+    ns = [g.norm() for g in gs]
+    k = rho / stack(ns).norm()
+    ds = [k * g for g in gs]
+    with torch.no_grad():
+        for p, d in zip(ps, ds):
+            p.add_(d)  # θ + ε̂
+    return ds</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>Reads the gradient at <span class="eqt" style="color:#2c3e50"><var>\(\theta\)</var></span>.</li>
+  <li><span class="cs-n">2</span>Scales it to length <span class="eqt" style="color:#a04000"><var>\(\rho\)</var></span>, which is <span class="eqt" style="color:#1f618d"><var>\(\hat\epsilon\)</var></span>, the first line of the card.</li>
+  <li><span class="cs-n">3</span>Moves every weight to <var>\(\theta+\hat\epsilon\)</var> and returns <span class="eqt" style="color:#1f618d"><var>\(\hat\epsilon\)</var></span>.</li>
+</ol>
+<pre class="cs" data-cs="1,2-3,4-6,7"><code class="language-python">ds = perturb(ps, closure, rho)
+opt.zero_grad()
+closure().backward()  # θ + ε̂
+with torch.no_grad():
+    for p, d in zip(ps, ds):
+        p.sub_(d)  # back to θ
+opt.step()  # steps with g_SAM</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>Moves to <var>\(\theta+\hat\epsilon\)</var> with <code>perturb</code>.</li>
+  <li><span class="cs-n">2</span>Reads the gradient there, <span class="eqt" style="color:#c0392b"><var>\(g_{\text{SAM}}\)</var></span>, the second line.</li>
+  <li><span class="cs-n">3</span>Moves the weights back to <span class="eqt" style="color:#2c3e50"><var>\(\theta\)</var></span>.</li>
+  <li><span class="cs-n">4</span>Lets the base optimizer step with <span class="eqt" style="color:#c0392b"><var>\(g_{\text{SAM}}\)</var></span>.</li>
+</ol>
+<table class="datatable knobs tdc-stack">
+  <caption>SAM&#8217;s one knob.</caption>
+  <thead><tr><th>knob</th><th>raise it</th><th>lower it</th><th>default</th></tr></thead>
+  <tbody>
+    <tr><td><span class="eqt" style="color:#a04000"><var>\(\rho\)</var></span> (rho)</td><td data-label="raise it">looks farther, prefers flatter regions, can slow convergence</td><td data-label="lower it">closer to the base optimizer, which is <var>\(\rho=0\)</var></td><td data-label="default">0.05, the paper&#8217;s setting</td></tr>
+  </tbody>
+</table>
+    <h2 id="when"><span class="secnum">7</span> When to use it</h2>
+<p>SAM pays off when generalization, not training loss, is the bottleneck: image classifiers trained from scratch, vision transformers and MLP-Mixers without large-scale pretraining, and training on noisy labels. It doubles the cost of every step, so it fits best when compute allows it and the base optimizer already trains well. For large language models trained on huge datasets, where the model rarely overfits, it is not part of the usual recipe.</p>
+    <h2 id="state"><span class="secnum">8</span> When it runs and what it carries</h2>
+<p>SAM wraps the base optimizer and runs on every training step: two forward and backward passes, then one base-optimizer step. Between the passes it holds the move <span class="eqt" style="color:#1f618d"><var>\(\hat\epsilon\)</var></span>, one extra copy of the weights&#8217; size, on top of the base optimizer&#8217;s own state (for example Adam&#8217;s two averages). Nothing of SAM&#8217;s own carries over between steps, so a checkpoint only needs the base optimizer&#8217;s state.</p>
+    <h2 id="failures"><span class="secnum">9</span> Failure modes and tips</h2>
+<table class="datatable tdc-stack">
+  <caption>SAM&#8217;s trouble comes from its second pass and its radius.</caption>
+  <thead><tr><th>symptom</th><th>cause</th><th>fix</th></tr></thead>
+  <tbody>
+    <tr><td>training takes about twice as long</td><td data-label="cause">every step runs two forward and backward passes</td><td data-label="fix">budget for it, or apply SAM only on some steps</td></tr>
+    <tr><td>batch-norm statistics drift</td><td data-label="cause">running statistics updated on both passes, once at the moved weights</td><td data-label="fix">update them on the first pass only and freeze them for the second, as common PyTorch SAM wrappers do (<a href="normalization.html">Normalization Layers</a>)</td></tr>
+    <tr><td>the loss stalls high</td><td data-label="cause"><span class="eqt" style="color:#a04000"><var>\(\rho\)</var></span> too large, so the score is dominated by far-away walls</td><td data-label="fix">lower <span class="eqt" style="color:#a04000"><var>\(\rho\)</var></span> toward the paper&#8217;s setting</td></tr>
+    <tr><td>results change with the number of GPUs</td><td data-label="cause">each device computes its own <span class="eqt" style="color:#1f618d"><var>\(\hat\epsilon\)</var></span> on its slice of the batch, so the effective sharpness (the paper&#8217;s m-sharpness) changes with slice size</td><td data-label="fix">keep the per-device batch fixed when you scale out</td></tr>
+    <tr><td>clipping or gradient accumulation seems to do nothing</td><td data-label="cause">applied to the first-pass gradient, which SAM throws away</td><td data-label="fix">clip and accumulate <span class="eqt" style="color:#c0392b"><var>\(g_{\text{SAM}}\)</var></span> from the second pass (<a href="gradient-clipping.html">Gradient Clipping</a>)</td></tr>
+  </tbody>
+</table>
+    <h2 id="references"><span class="secnum">10</span> References</h2>
+<ol class="brefs">
+  <li>Foret, P., Kleiner, A., Mobahi, H., and Neyshabur, B. (2021). Sharpness-aware minimization for efficiently improving generalization. ICLR. arXiv:2010.01412.</li>
+  <li>Chen, X., Hsieh, C.-J., and Gong, B. (2022). When vision transformers outperform ResNets without pre-training or strong data augmentations. ICLR. arXiv:2106.01548.</li>
+  <li>google-research/sam (official JAX implementation), GitHub.</li>
+  <li>Keskar, N. S., and others (2017). On large-batch training for deep learning: generalization gap and sharp minima. ICLR.</li>
+</ol>
+<script>
+(function () {
+  var K = window.OPK;
+  function Lx(x) { var a = 0.02 + 5 * (x + 1) * (x + 1), b = 0.12 + 0.12 * (x - 1.1) * (x - 1.1), m = Math.min(a, b), T = 0.04;
+    return m - T * Math.log(Math.exp(-(a - m) / T) + Math.exp(-(b - m) / T)); }
+  function dL(x) { return (Lx(x + 1e-4) - Lx(x - 1e-4)) / 2e-4; }
+
+  var X0 = 20, X1 = 330, Y0 = 30, Y1 = 220;
+  function X(x) { return X0 + (x + 2) / 4 * (X1 - X0); }
+  function Y(l) { return Y1 - Math.min(1.1, l) / 1.1 * (Y1 - Y0); }
+  var w = -0.92, rho = 0.18, g = dL(w), e = rho * (g > 0 ? 1 : -1), gs = dL(w + e), wn = w - 0.06 * gs;
+  function draw(s) {
+    var p = []; for (var i = 0; i <= 200; i++) { var x = -2 + 4 * i / 200; p.push([X(x), Y(Lx(x))]); }
+    var h = K.pl(p, '#7f8c8d', 2.5);
+    h += K.tx(X(-1), Y1 + 22, 'sharp basin', 15.5, 'middle', '#555') + K.tx(X(1.1), Y1 + 22, 'flat basin', 15.5, 'middle', '#555');
+    h += K.ci(X(w), Y(Lx(w)), 7, '#2c3e50') + K.tx(X(w) - 10, Y(Lx(w)) + 4, 'w', 15.5, 'end', '#2c3e50', 1);
+    function arrow(x1, y1, x2, y2, c) { return K.ln(x1, y1, x2, y2, c, 3) + K.edge(x2, y2, x1, y1, c); }
+    if (s >= 0) h += arrow(X(w), Y(Lx(w)) - 14, X(w) + (g > 0 ? -40 : 40), Y(Lx(w)) - 14, '#c0392b');
+    if (s >= 1) { h += K.ln(X(w), Y(Lx(w)), X(w + e), Y(Lx(w + e)), '#1f618d', 2.5, '5 4') + K.ci(X(w + e), Y(Lx(w + e)), 7, '#1f618d'); h += K.tx(X(w + e) + 10, Y(Lx(w + e)) + 4, 'w + \u03b5\u0302', 15.5, 'start', '#1f618d', 1); }
+    if (s >= 2) h += arrow(X(w + e), Y(Lx(w + e)) - 14, X(w + e) + (gs > 0 ? -50 : 50), Y(Lx(w + e)) - 14, '#c0392b');
+    if (s >= 3) h += K.ci(X(w), Y(Lx(w)), 10, 'none') + K.rc(X(w) - 12, Y(Lx(w)) - 12, 24, 24, 'none', '#2c3e50');
+    if (s >= 4) { h += arrow(X(w), Y(Lx(w)) + 16, X(wn), Y(Lx(w)) + 16, '#7d3c98'); }
+    return h;
+  }
+  window.OPWALK('samWalk', 5, draw, [
+    'At the weights \\(w\\), read the gradient (red arrow, pointing downhill).',
+    'Move a distance \\(\\rho\\) uphill, against the gradient&#8217;s downhill direction, to the estimated worst nearby point.',
+    'Read the gradient again there. On the steep wall it is much stronger.',
+    'Go back to \\(w\\). The weights themselves have not moved yet; only the gradient changed.',
+    'Step from \\(w\\) with the second gradient. In a sharp basin it is a big kick, so SAM rarely settles there.'
+  ], [0, 0, 1, 1, 2]);
+})();
+</script>
+<script>
+(function () {
+  var svg = document.getElementById('smSvg'); if (!svg) return;
+  var K = window.OPK, sl = document.getElementById('smRho'), rd = document.getElementById('smRead');
+  function Lx(x) { var a = 0.02 + 5 * (x + 1) * (x + 1), b = 0.12 + 0.12 * (x - 1.1) * (x - 1.1), m = Math.min(a, b), T = 0.04;
+    return m - T * Math.log(Math.exp(-(a - m) / T) + Math.exp(-(b - m) / T)); }
+  function dL(x) { return (Lx(x + 1e-4) - Lx(x - 1e-4)) / 2e-4; }
+
+  var X0 = 20, X1 = 330, Y0 = 20, Y1 = 230, w = -0.75;
+  function X(x) { return X0 + (x + 2) / 4 * (X1 - X0); }
+  function iX(px) { return (px - X0) / (X1 - X0) * 4 - 2; }
+  function Y(l) { return Y1 - Math.min(1.15, l) / 1.15 * (Y1 - Y0); }
+  function score(x, r) { var best = Lx(x), bx = x; for (var k = 0; k <= 40; k++) { var z = x - r + 2 * r * k / 40, l = Lx(z); if (l > best) { best = l; bx = z; } } return [best, bx]; }
+  function draw() {
+    var r = parseFloat(sl.value), h = '', p = [], q = [], minS = [1e9, 0], minL = [1e9, 0];
+    var rv = document.getElementById('smRhoVal'); if (rv) rv.textContent = r < 0.02 ? 'none' : r < 0.15 ? 'small' : r < 0.35 ? 'medium' : 'large';
+    for (var i = 0; i <= 160; i++) {
+      var x = -2 + 4 * i / 160, l = Lx(x), s = score(x, r)[0];
+      p.push([X(x), Y(l)]); q.push([X(x), Y(s)]);
+      if (s < minS[0]) minS = [s, x]; if (l < minL[0]) minL = [l, x];
+    }
+    var sc = score(w, r);
+    h += '<rect x="' + K.n(X(w - r)) + '" y="' + Y0 + '" width="' + K.n(Math.max(1, X(w + r) - X(w - r))) + '" height="' + (Y1 - Y0) + '" style="fill:#a04000;fill-opacity:.10;stroke:none"/>';
+    h += K.pl(p, '#2c3e50', 3) + K.pl(q, '#a04000', 2.6, '7 5');
+    h += K.ln(X(w - r), Y(sc[0]), X(w + r), Y(sc[0]), '#a04000', 2);
+    h += K.ci(X(sc[1]), Y(sc[0]), 6, '#a04000');
+    h += '<circle cx="' + K.n(X(w)) + '" cy="' + K.n(Y(Lx(w))) + '" r="11" style="fill:#1f618d;stroke:#fff;stroke-width:2px;cursor:grab"/>';
+    h += K.tx(X(-1), Y1 + 22, 'sharp basin', 15.5, 'middle', '#555') + K.tx(X(1.1), Y1 + 22, 'flat basin', 15.5, 'middle', '#555');
+    h += K.ln(X0, 262, X0 + 22, 262, '#2c3e50', 3) + K.tx(X0 + 26, 267, 'loss', 15.5, 'start', '#2c3e50');
+    h += K.ln(X0 + 80, 262, X0 + 102, 262, '#a04000', 2.6, '7 5') + K.tx(X0 + 106, 267, 'SAM&#8217;s score', 15.5, 'start', '#a04000');
+    svg.innerHTML = h;
+    var where = minS[1] > 0 ? 'the flat basin' : 'the sharp basin';
+    rd.innerHTML = 'SAM&#8217;s score is lowest in: <strong>' + where + '</strong>. The plain loss is lowest in the sharp basin.';
+  }
+  var drag = false;
+  function at(ev) { var b = svg.getBoundingClientRect(), px = (ev.clientX - b.left) / b.width * 340; w = Math.max(-1.9, Math.min(1.9, iX(px))); draw(); }
+  svg.addEventListener('pointerdown', function (ev) { drag = true; svg.setPointerCapture && svg.setPointerCapture(ev.pointerId); at(ev); });
+  svg.addEventListener('pointermove', function (ev) { if (drag) at(ev); });
+  svg.addEventListener('pointerup', function () { drag = false; });
+  svg.addEventListener('pointercancel', function () { drag = false; });
+  svg.setAttribute('tabindex', '0');
+  svg.addEventListener('keydown', function (ev) { if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight') { w = Math.max(-1.9, Math.min(1.9, w + (ev.key === 'ArrowRight' ? 0.05 : -0.05))); draw(); ev.preventDefault(); } });
+  sl.addEventListener('input', draw);
+  draw();
+})();
+</script>
+            <script>
+        (function () {
+            var nav = document.querySelector('.topnav');
+            function onNavScroll() {
+                nav.classList.toggle('scrolled', window.scrollY > 4);
+            }
+            window.addEventListener('scroll', onNavScroll, { passive: true });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            window.addEventListener('resize', function () {
+                if (window.innerWidth > 768) {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            onNavScroll();
+            var toggle = document.getElementById('navToggle');
+            var panel = document.getElementById('navPanel');
+            if (toggle && panel) {
+                toggle.addEventListener('click', function () {
+                    var open = panel.classList.toggle('open');
+                    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                });
+                panel.addEventListener('click', function (e) {
+                    if (e.target && e.target.classList && e.target.classList.contains('panel-link')) {
+                        panel.classList.remove('open');
+                        toggle.setAttribute('aria-expanded', 'false');
+                    }
+                });
+            }
+            var links = Array.prototype.slice.call(document.querySelectorAll('.tab-strip a.tab-chip[href^="#"]'));
+            if (!links.length) return;
+            var tabMap = {};
+            links.forEach(function (a) { tabMap[a.getAttribute('href').slice(1)] = a; });
+            var current = null;
+            function centerTab(tab) {
+                var strip = tab.parentElement;
+                if (!strip || !strip.classList.contains('tab-strip')) return;
+                var sr = strip.getBoundingClientRect();
+                var pr = tab.getBoundingClientRect();
+                strip.scrollLeft += (pr.width >= sr.width) ? (pr.left - sr.left) : (pr.left - sr.left) - (sr.width - pr.width) / 2;
+            }
+            function setActive(id) {
+                if (!tabMap[id] || id === current) return;
+                current = id;
+                links.forEach(function (a) {
+                    a.classList.toggle('active', a.getAttribute('href') === '#' + id);
+                });
+                centerTab(tabMap[id]);
+            }
+            links.forEach(function (a) {
+                a.addEventListener('click', function () {
+                    setActive(a.getAttribute('href').slice(1));
+                });
+            });
+            setActive(links[0].getAttribute('href').slice(1));
+            if ('IntersectionObserver' in window) {
+                var obs = new IntersectionObserver(function (entries) {
+                    entries.forEach(function (en) {
+                        if (en.isIntersecting) setActive(en.target.id);
+                    });
+                }, { rootMargin: '-35% 0px -55% 0px' });
+                Object.keys(tabMap).forEach(function (id) {
+                    var el = document.getElementById(id);
+                    if (el) obs.observe(el);
+                });
+                window.addEventListener('scroll', function () {
+                    if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) {
+                        setActive(links[links.length - 1].getAttribute('href').slice(1));
+                    }
+                }, { passive: true });
+            }
+            window.addEventListener('load', function () {
+                var act = document.querySelector('.tab-strip a.active');
+                if (act) centerTab(act);
+            });
+        })();
+    </script>
+<script>
+/* P80 code sections (CODE-SECTIONS.md) */
+(function(){
+  var C=['121,184,255','255,171,112','133,232,157','210,168,255','255,161,152','118,227,234'];
+  function lay(pre){
+    var code=pre.querySelector('code'); if(!code) return;
+    var lh=parseFloat(getComputedStyle(code).lineHeight);
+    var pt=parseFloat(getComputedStyle(pre).paddingTop);
+    var old=pre.querySelectorAll('.cs-g'); for(var j=0;j<old.length;j++) pre.removeChild(old[j]);
+    var imgs=[],sizes=[],pos=[];
+    (pre.getAttribute('data-cs')||'').split(',').forEach(function(r,i){
+      var m=r.trim().match(/^(\d+)(?:-(\d+))?$/); if(!m) return;
+      var a=+m[1],b=+(m[2]||m[1]),c=C[i%C.length],top=pt+(a-1)*lh,h=(b-a+1)*lh;
+      imgs.push('linear-gradient(rgba('+c+',.55),rgba('+c+',.55))','linear-gradient(rgba('+c+',.13),rgba('+c+',.13))');
+      sizes.push('3px '+h+'px','100% '+h+'px'); pos.push('0 '+top+'px','0 '+top+'px');
+      var g=document.createElement('span'); g.className='cs-g'; g.setAttribute('aria-hidden','true');
+      g.setAttribute('data-n',String(i+1)); g.style.top=(top+(lh-11)/2)+'px'; g.style.color='rgb('+c+')';
+      pre.insertBefore(g,code);
+    });
+    pre.style.backgroundImage=imgs.join(','); pre.style.backgroundSize=sizes.join(',');
+    pre.style.backgroundPosition=pos.join(','); pre.style.backgroundRepeat='no-repeat';
+  }
+  function all(){ var p=document.querySelectorAll('pre.cs'); for(var i=0;i<p.length;i++) lay(p[i]); }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',all); else all();
+  window.addEventListener('load',all);
+  window.addEventListener('resize',all);
+  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(all);
+})();
+</script>
+</body>
+</html>
+

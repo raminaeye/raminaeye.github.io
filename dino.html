@@ -1,0 +1,1261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DINO: Self-Distillation with No Labels</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem;
+      line-height: 1.6;
+      color: #333;
+    }
+        /* Shared walkthrough equation-card contract (verbatim, all pages) */
+        
+        .eq-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+
+          padding:1rem 1.2rem;margin:1.75rem auto;max-width:640px;overflow-x:auto}
+
+        .eq-what{font-size:.95rem;color:#334155;margin:0 0 .6rem;line-height:1.55}
+
+        .eq-line{font-size:1.38rem;line-height:2.0;letter-spacing:.015em;padding:.5rem .6rem;white-space:normal;font-weight:500;opacity:.38;border-left:3px solid transparent}
+
+        .eq-line.eq-active{opacity:1;border-left-color:#2c3e50}
+      .eq-why{display:none;visibility:hidden;font-size:1rem;color:#475569;padding:.15rem .35rem .4rem;line-height:1.65}
+      .eq-why.eq-active{display:block;visibility:visible}
+      .eq-card.eq-stepped .eq-line{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-line.eq-active{display:block;opacity:1;visibility:visible}
+      .eq-card.eq-stepped .eq-legend .eq-item{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-legend .eq-item.eq-active{display:block;visibility:visible}
+
+        .eqt{font-weight:600;padding:0 .1em;border-radius:3px}
+
+        .eqt.eqt-active{background:rgba(241,196,15,.15);box-shadow:0 0 0 2px rgba(217,119,6,.65)}
+
+        .eq-legend{font-size:.85rem;color:#475569;margin-top:.6rem;line-height:1.75}
+
+        .eq-legend .eq-item{display:block}
+
+        .eq-legend .eq-item code{white-space:nowrap}
+
+        .eq-sw{display:inline-block;width:.7em;height:.7em;border-radius:2px;
+
+          margin:0 .25em 0 .6em;vertical-align:baseline}
+
+        @media (max-width:480px){.eq-card{padding:.85rem .9rem}.eq-line{font-size:1.24rem;line-height:1.95}}
+/* P70 inline variables and inline code, one style site-wide (VAR-STYLE.md v2) */
+var,.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic;font-weight:400;font-size:1em;color:#1d4e89;background:#edf3fa;border-radius:3px;padding:0 .18em;white-space:nowrap;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+var sub,var sup,.mvar sub,.mvar sup{font-size:.72em;font-style:normal}
+pre var,code var,.eq-line var{font:inherit;color:inherit;background:none;padding:0}
+svg text.mvar,svg tspan.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic}
+:not(pre)>code:not(.eq-line code){font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,Courier,monospace;font-size:.86em;color:#24292f;background:#f1f3f5;border:1px solid #dfe3e8;border-radius:4px;padding:.06em .32em;white-space:normal;overflow-wrap:anywhere}
+/* SYM-COLOURS-BEGIN v3: one colour per shared symbol meaning, site-wide, plus the listed page variants (symbol-colours/TABLE.md rev 3). Variables only; a changed element uses inline style="color:var(--sym-...)", style="fill:var(--sym-...)" or style="stroke:var(--sym-...)". Copy byte-identical; never edit on a page. */
+:root{--sym-theta:#2c3e50;--sym-angle:#a04000;--sym-grad:#c0392b;--sym-task1:#1f618d;--sym-task2:#a04000;--sym-m1:#1f618d;--sym-m2:#117a65;--sym-alpha:#2c3e50;--sym-eta:#5d6d7e;--sym-adambeta:#2c3e50;--sym-eps:#a04000;--sym-lambda:#8e44ad;--sym-loss:#2c3e50;--sym-exloss:#c0392b;--sym-prob:#a5571a;--sym-logit:#196f3d;--sym-embed:#1f618d;--sym-target:#5d6d7e;--sym-layerout:#117a65;--sym-pred:#1f618d;--sym-xent:#c0392b;--sym-entropy:#196f3d;--sym-kl:#1f618d;--sym-temp:#8e44ad;--sym-sim:#1f6fa8;--sym-x:#1f618d;--sym-xint:#7d3c98;--sym-xhat:#a04000;--sym-qscale:#196f3d;--sym-w:#117a65;--sym-wmat:#196f3d;--sym-bias:#a3520f;--sym-hidden:#8e44ad;--sym-kernel:#a04000;--sym-mean:#196f3d;--sym-sigma:#a04000;--sym-normaffine:#7d3c98;--sym-query:#7d3c98;--sym-key:#a04000;--sym-value:#196f3d;--sym-attnw:#117a65;--sym-scores:#1f618d;--sym-tokens:#1f618d;--sym-state:#555555;--sym-action:#7d3c98;--sym-reward:#7d6608;--sym-discount:#2c3e50;--sym-return:#117864;--sym-qvalue:#c0392b;--sym-targetnet:#196f3d;--sym-statevalue:#1f618d;--sym-tderror:#a04000;--sym-advantage:#7d3c98;--sym-policy:#1f618d;--sym-actor:#196f3d;--sym-objective:#a04000;--sym-velocity:#7d3c98;--sym-explore:#a04000;--sym-kl-reverse:#7d3c98;--sym-tderror-dqn:#b03060;--sym-targetnet-actor:#1f618d}
+/* SYM-COLOURS-END */
+/* P79 numbering (NUMBERING.md) */
+.secnum{font-variant-numeric:tabular-nums;margin-right:.4em;color:inherit;font-weight:inherit}
+.tab-strip .secnum{margin-right:.3em;opacity:.75}
+.fignum{font-weight:600;margin-right:.3em;font-variant-numeric:tabular-nums}
+/* P80 code sections (CODE-SECTIONS.md) */
+pre.cs{position:relative;background-attachment:local;padding-left:20px}
+pre.cs code{display:block;line-height:1.55}
+pre.cs .cs-g{position:absolute;left:3px;width:11px;text-align:center;font:700 11px/1 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;-webkit-user-select:none;user-select:none;pointer-events:none}
+pre.cs .cs-g::before{content:attr(data-n)}
+ol.cs-notes{list-style:none;padding-left:0;margin:-.4em 0 1em}
+ol.cs-notes li{margin:0 0 .3em;padding-left:1.9em;position:relative}
+ol.cs-notes .cs-n{position:absolute;left:0;top:.1em;min-width:1.35em;padding:0 .25em;border-radius:4px;font:700 .8em/1.45 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;text-align:center;color:#0d1117}
+ol.cs-notes li:nth-child(6n+1) .cs-n{background:#79b8ff}
+ol.cs-notes li:nth-child(6n+2) .cs-n{background:#ffab70}
+ol.cs-notes li:nth-child(6n+3) .cs-n{background:#85e89d}
+ol.cs-notes li:nth-child(6n+4) .cs-n{background:#d2a8ff}
+ol.cs-notes li:nth-child(6n+5) .cs-n{background:#ffa198}
+ol.cs-notes li:nth-child(6n+6) .cs-n{background:#76e3ea}
+/* page: variables inside buttons take the button ink */
+button var{color:inherit;background:none}
+        /* diagram-side dim/highlight (SVG/DOM). Do NOT use .hl/.dim: taken. */
+        .eq-dim{opacity:.32}
+        .eq-hl{filter:drop-shadow(0 0 3px currentColor)}
+    h1, h2, h3, h4 {
+      color: #2c3e50;
+      margin-top: 1.5em;
+      margin-bottom: 0.5em;
+    }
+    h1 { font-size: 2.5em; border-bottom: 2px solid #3498db; padding-bottom: 0.3em;}
+    h2 { font-size: 2em; border-bottom: 1px solid #bdc3c7; padding-bottom: 0.2em;}
+    h3 { font-size: 1.5em; }
+    h4 { font-size: 1.2em; color: #555;}
+
+    /* Shared site nav (matches index.html topnav) */
+    body { padding-top: calc(64px + 1.5rem); }
+    h1, h2, h3 { scroll-margin-top: 84px; }
+    .topnav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        z-index: 1000;
+        background: rgba(255, 255, 255, 0.65);
+        backdrop-filter: blur(18px) saturate(1.5);
+        -webkit-backdrop-filter: blur(18px) saturate(1.5);
+        border-bottom: 1px solid transparent;
+        transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+    .topnav.scrolled {
+        background: rgba(255, 255, 255, 0.88);
+        border-bottom-color: #dee2e6;
+        box-shadow: 0 6px 24px rgba(33, 37, 41, 0.07);
+    }
+    .nav-inner {
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 0 1.5rem;
+        height: 64px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+    .wordmark {
+        font-weight: 700;
+        color: #212529;
+        text-decoration: none;
+        font-size: 1.05rem;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+    }
+    .nav-links {
+        display: flex;
+        gap: 2px;
+        align-items: center;
+    }
+    .nav-links a {
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        font-size: 0.95rem;
+        padding: 8px 14px;
+        border-radius: 999px;
+        transition: color 0.18s ease, background-color 0.18s ease;
+    }
+    .nav-links a:hover {
+        color: #007bff;
+        background-color: #e7f1ff;
+    }
+    .nav-links a.active {
+        color: #007bff;
+        background-color: #e7f1ff;
+        font-weight: 600;
+    }
+    .nav-links a:focus-visible,
+    .wordmark:focus-visible,
+    .nav-toggle:focus-visible,
+    .panel-link:focus-visible,
+    .panel-social a:focus-visible {
+        outline: 2px solid #007bff;
+        outline-offset: 2px;
+    }
+    @media (hover: hover) {
+        .nav-toggle:hover { background-color: #e7f1ff; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .topnav,
+        .nav-links a,
+        .nav-toggle span,
+        .nav-panel,
+        .nav-panel a.panel-link {
+            transition: none;
+        }
+    }
+    @media (hover: hover) {
+        .nav-toggle:hover { background-color: #e7f1ff; }
+    }
+    .nav-toggle {
+        display: none;
+        width: 42px;
+        height: 42px;
+        padding: 0;
+        background: none;
+        border: 0;
+        border-radius: 10px;
+        cursor: pointer;
+        flex: 0 0 auto;
+    }
+    .nav-panel {
+        display: grid;
+        grid-template-rows: 0fr;
+        visibility: hidden;
+        transition: grid-template-rows 0.32s ease, visibility 0s linear 0.32s;
+    }
+    .nav-panel.open {
+        grid-template-rows: 1fr;
+        visibility: visible;
+        transition: grid-template-rows 0.32s ease, visibility 0s;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner {
+        min-height: 0;
+        overflow: hidden;
+    }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link:hover {
+        background-color: #e7f1ff;
+        color: #007bff;
+    }
+    .nav-panel a.panel-link.active {
+        color: #007bff;
+        font-weight: 600;
+        background-color: #e7f1ff;
+    }
+    .panel-social a:hover {
+        border-color: #007bff;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner {
+        min-height: 0;
+        overflow: hidden;
+    }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link:hover {
+        background-color: #e7f1ff;
+        color: #007bff;
+    }
+    .nav-panel a.panel-link.active {
+        color: #007bff;
+        font-weight: 600;
+        background-color: #e7f1ff;
+    }
+    .panel-social a:hover {
+        border-color: #007bff;
+    }
+        .crumb { margin: 0 0 0.8em; }
+        .crumb a {
+            display: inline-block;
+            padding: 4px 14px;
+            border: 1px solid #dee2e6;
+            border-radius: 999px;
+            background: #f8f9fa;
+            color: #0056b3;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+        .crumb a:hover { border-color: #007bff; color: #007bff; }
+    /* Section tab strip: one slim row, scrolls sideways when it overflows. */
+    .tabs-label {
+        float: left;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #6c757d;
+        font-weight: 700;
+        line-height: 1.2;
+        margin: 0;
+        padding: 8px 12px 0 0;
+    }
+    .tab-strip {
+        position: relative;
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 2px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        margin: 0 0 1.25rem;
+        max-width: 100%;
+    }
+    .tab-strip::-webkit-scrollbar { display: none; }
+    .tab-strip a.tab-chip,
+    .tab-strip a.tab-link {
+        display: inline-block;
+        flex: 0 0 auto;
+        padding: 6px 10px;
+        border-radius: 999px;
+        color: #495057;
+        text-decoration: none;
+        font-size: 0.82rem;
+        font-weight: 500;
+        line-height: 1.35;
+        white-space: nowrap;
+    }
+    .tab-strip a.tab-chip:hover,
+    .tab-strip a.tab-link:hover { color: #007bff; }
+    .tab-strip a.tab-chip.active,
+    .tab-strip a.tab-link.active { background: #007bff; color: #ffffff; }
+    @media (max-width: 768px) {
+        .tabs-label { display: none; }
+        .tab-strip {
+            width: 100vw;
+            max-width: 100vw;
+            box-sizing: border-box;
+            margin-left: calc((100% - 100vw) / 2);
+            padding-left: calc((100vw - 100%) / 2);
+        }
+        .tab-strip a.tab-chip,
+        .tab-strip a.tab-link { font-size: 0.75rem; padding: 6px 8px; }
+    }
+    .nav-panel a.panel-link {
+        display: flex;
+        align-items: center;
+        padding: 0.8rem 0.75rem;
+        margin: 0 0.25rem;
+        border-radius: 10px;
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        min-height: 48px;
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+    .panel-social {
+        display: flex;
+        gap: 0.5rem;
+        padding: 0.9rem 1rem 0.25rem;
+        flex-wrap: wrap;
+    }
+    .panel-social a {
+        color: #007bff;
+        text-decoration: none;
+        font-weight: 500;
+        font-size: 0.9rem;
+        padding: 6px 12px;
+        border: 1px solid #dee2e6;
+        border-radius: 999px;
+        transition: border-color 0.15s ease;
+    }
+    @media (max-width: 768px) {
+        .nav-links { display: none; }
+        .nav-toggle { display: block; }
+    }
+
+    pre {
+      background: #0d1117;
+      color: #e6edf3;
+      padding: 14px 16px;
+      overflow-x: auto;
+      border-radius: 8px;
+      font-size: 0.9em;
+      margin: 1em 0;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+    }
+    /* P52 canonical inline items in prose: numbers and variables wear the body
+       font at body size and read as part of the sentence (keeps P50's quiet
+       treatment, no pill; code blocks and eq-cards keep the mono treatment). */
+    code {
+        font-family: inherit;
+        font-size: 1em;
+        color: #1a1a1a;
+        background: none;
+        padding: 0 0.08em;
+        overflow-wrap: break-word;
+    }
+    pre code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 1em; }
+    .eq-card code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 0.92em; }
+    pre code {
+      background: none;
+      padding: 0;
+      font-size: 1em;
+      color: inherit;
+    }
+    ul, ol {
+      padding-left: 20px;
+    }
+    li {
+      margin-bottom: 0.5em;
+    }
+    strong {
+      color: #1f6fa8;
+    }
+    .math-display {
+            font-size: 1.38rem;
+      text-align: center;
+      margin: 1.4rem 0;
+      overflow-x: auto;
+      max-width: 100%;
+    }
+    .output {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 1rem 1.2rem;
+      border-radius: 6px;
+      border-left: 4px solid #22c55e;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+      font-size: 0.9em;
+      margin: 1rem 0;
+      overflow-x: auto;
+      line-height: 1.8;
+    }
+    .output .label { color: #94a3b8; }
+    .output .good { color: #4ade80; font-weight: bold; }
+    .diagram {
+      background: #f8f9f9;
+      border: 1px solid #e1e4e8;
+      border-radius: 6px;
+      padding: 1.2rem;
+      margin: 1.75rem 0;
+      text-align: center;
+    }
+    .diagram .caption {
+      font-size: 0.9em;
+      color: #555;
+      margin-top: 1rem;
+      text-align: left;
+    }
+    .diagram .caption strong {
+      color: #1f6fa8;
+    }
+    .diagram svg {
+      max-width: 100%;
+      height: auto;
+    }
+    .warning {
+      background: #fef9e7;
+      border-left: 4px solid #f39c12;
+      padding: 0.8rem 1.2rem;
+      border-radius: 4px;
+      margin: 1rem 0;
+    }
+    .demo {
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      padding: 1.25rem;
+      margin: 1.75rem 0;
+      background: #fbfcfd;
+    }
+    .demo-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    .demo-controls label { font-weight: bold; color: #2c3e50; }
+    .demo-controls input[type=range] { width: 220px; accent-color: #3498db; }
+    .demo canvas { display: block; margin: 0 auto; max-width: 100%; }
+    .demo-stats {
+      text-align: center; margin-top: 1rem; font-size: 0.95em; color: #2c3e50;
+    }
+    .demo-stats strong { color: #1f6fa8; }
+    .viz-legend { display:flex; flex-wrap:wrap; gap:1.2rem; justify-content:center; margin:0.4rem 0 0.8rem; font-size:0.9em; color:#555; }
+    .viz-legend .sw { display:inline-block; width:13px; height:13px; border-radius:50%; margin-right:0.35em; vertical-align:-1px; }
+    /* Map key: one plain-words line naming the dots, the circle, and the
+       motion, visible at rest above the canvas. Answers "what are those
+       circles" before the reader has to ask. */
+    .map-key { max-width: 660px; margin: 0 auto 0.7rem; font-size: 0.9em; color: #444; text-align: center; line-height: 1.6; }
+    .map-key strong { color: #2c3e50; }
+    .eq-anatomy { display:flex; flex-wrap:wrap; align-items:stretch; gap:0.5rem; justify-content:center; margin:1.2rem 0; }
+    .eq-part { background:#f8f9f9; border:1px solid #e1e4e8; border-radius:6px; padding:0.7rem 0.9rem; text-align:center; min-width:110px; flex:1 1 120px; }
+    .eq-name { font-size:0.75em; text-transform:uppercase; letter-spacing:0.06em; color:#616a6b; font-weight:bold; }
+    .eq-val { font-size:1.0em; font-weight:bold; color:#2c3e50; margin:0.35em 0; }
+    .eq-arrow { align-self:center; font-size:1.3em; color:#1f6fa8; font-weight:bold; }
+    .demo-controls .soft-label { font-weight:normal; }
+    .caption {
+      font-size: 0.9em; color: #555; margin-top: 1rem;
+      border-left: 3px solid #3498db; padding-left: 0.8em;
+    }
+    .playhint {
+      font-size: 0.9em; color: #555; margin-top: 0.8rem;
+    }
+    .playhint strong { color: #2c3e50; }
+    /* Caption card, shared by every widget. */
+    .cap-card {
+      font-size: 15px;
+      line-height: 1.65;
+      color: #2c3e50;
+      background: #ffffff;
+      border: 1px solid #e3e8ee;
+      border-left: 3px solid #2c3e50;
+      border-radius: 10px;
+      padding: 18px;
+      margin: 14px 0 0;
+    }
+    .cap-card > strong { display: block; font-size: 15px; margin-bottom: 6px; }
+    .cap-card ul { list-style: none; margin: 0; padding: 0; }
+    .cap-card li { position: relative; padding-left: 18px; margin: 7px 0; }
+    .cap-card li::before {
+      content: ""; position: absolute; left: 0; top: 9px;
+      width: 6px; height: 6px; border-radius: 50%; background: #2c3e50;
+    }
+    .canvas-wrap { position: relative; }
+
+    /* SimCLR step-through on the paper's Figure 2. */
+    .sw-fig { position: relative; max-width: 640px; margin: 0 auto; }
+    .sw-fig img { width: 100%; height: auto; display: block; }
+    .sw-veil { position: absolute; inset: 0; pointer-events: none; }
+    .sw-pane { position: absolute; background: rgba(255,255,255,0.62); }
+    .sw-edge { position: absolute; background: #e74c3c; }
+    .sw-badge {
+      position: absolute; padding: 4px 14px; border-radius: 999px;
+      background: #2c3e50; color: #ffffff; font-weight: bold; font-size: 14px;
+      line-height: 1.4; text-align: center; transform: translate(-50%, -50%);
+      white-space: nowrap;
+    }
+    /* The badge names the outlined region in a row above the figure, so it
+       never covers the figure's own labels. */
+    /* the verdict length changes with strength; hold the readout steady */
+    .sw-badge-row { text-align: center; min-height: 30px; margin: 0.2rem 0 0.4rem; }
+    .sw-badge-row .sw-badge { position: static; display: inline-block; width: auto; transform: none; left: auto !important; top: auto !important; }
+    .sw-bench-note { text-align: center; font-size: 0.85em; color: #777777; margin-top: 0.3rem; }
+    .sw-chrome { justify-content: center; }
+    .sw-dots { display: inline-flex; gap: 0.5rem; align-items: center; }
+    .sw-legend { font-size: 0.85rem; color: #555; margin: 0.4rem 0 0; }
+    .sw-dot {
+      width: 30px; height: 30px; border-radius: 50%; padding: 0; cursor: pointer;
+      border: 2px solid #95a5a6; background: #ffffff;
+      font-size: 13px; font-weight: 700; color: #2c3e50;
+    }
+    .sw-dot[aria-current="true"] { background: #e74c3c; border-color: #e74c3c; color: #ffffff; }
+    .sw-dot.coda { border-radius: 3px; }
+    .sw-narr { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #e5e8ec; }
+    .reflist { line-height: 1.7; color: #2c3e50; }
+    .reflist li { margin: 0.4rem 0; }
+    
+    @media (max-width: 480px){
+    }
+    .datatable{border-collapse:collapse;margin:1.2em 0;width:100%;max-width:560px;font-size:.95em} .datatable th,.datatable td{border:1px solid #bdc3c7;padding:.45em .6em;text-align:center} .datatable th{background:#2c3e50;color:#fff;font-weight:600} .datatable tr:nth-child(even) td{background:#f7f9fb} .datatable caption{text-align:left;padding:.5em 0 0;font-size:.92em;color:#555;caption-side:bottom}
+/* Worked-example card (Round 9 template): a calm sage card that sets
+           math walkthrough steps apart from body text. Body font throughout,
+           all math in LaTeX, one computation per line, generous spacing. */
+        .worked-example {
+            background: #f1f6ed;
+            border: 1px solid #d9e4d1;
+            border-left: 3px solid #6f9a63;
+            border-radius: 10px;
+            padding: 14px 20px;
+            margin: 1.1em 0;
+            max-width: 680px;
+            color: #2c3e50;
+            line-height: 1.8;
+            overflow-x: auto;
+        }
+        ol.worked-example {
+            list-style: none;
+            counter-reset: wex-step;
+            padding-left: 20px;
+        }
+        ol.worked-example > li {
+            counter-increment: wex-step;
+            position: relative;
+            margin: 0;
+            padding: 8px 0 8px 44px;
+        }
+        ol.worked-example > li + li { border-top: 1px dashed #cbdabf; }
+        ol.worked-example > li::before {
+            content: counter(wex-step);
+            position: absolute;
+            left: 0;
+            top: 9px;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: #6f9a63;
+            color: #ffffff;
+            font-size: 13px;
+            font-weight: 700;
+            line-height: 28px;
+            text-align: center;
+        }
+        @media (max-width: 480px) {
+            .worked-example { padding: 12px; font-size: 15px; }
+            ol.worked-example { padding-left: 12px; }
+            ol.worked-example > li { padding-left: 38px; }
+        }
+    /* Static paper-figure citation */
+    .fig-cite { border-left: 3px solid #bdc3c7; margin: 1em 0; padding: 0.4em 0 0.4em 1em; color: #555; font-size: 0.9em; overflow-wrap: anywhere; }
+  
+/* canonical spacing: display math */
+    /* Compact phone walkthrough layout (canonical block, every tutorial page):
+       two-column eq legends, tightened demo spacing, and diagrams capped so
+       controls and diagram share the first phone screen. Phone widths only;
+       desktop rendering and equation typography are unchanged. */
+    @media (max-width:480px){
+      .demo{padding:.75rem}
+      .demo>*{margin-top:.6rem;margin-bottom:.6rem}
+      .demo>*:first-child{margin-top:0}
+      .demo .eq-card{margin:1rem auto;padding:.7rem .8rem}
+      .demo .cap-card,.demo .capcard{padding:.85rem .95rem}
+      .eq-legend{display:grid;grid-template-columns:1fr 1fr;column-gap:.9rem;row-gap:.1rem;line-height:1.5}
+      .eq-legend .eq-item:has(> code ~ code),.eq-legend .eq-item:has(> var ~ var){grid-column:1/-1}
+      .demo svg,.demo canvas{max-height:55vh}
+    }
+  .cadence,.knobs{width:100%;max-width:36rem;margin:1rem auto;table-layout:fixed;font-size:.9rem}
+  .cadence th,.cadence td,.knobs th,.knobs td{vertical-align:top;text-align:left;overflow-wrap:anywhere;padding:.35rem .4rem}
+  .cadence tbody th{width:5.2rem}
+  #dinoStats{min-height:3.4em}
+/* PREV-NEXT-BEGIN */
+nav.tut-seq{display:flex;align-items:center;gap:0 .75rem;margin:0 0 .25rem;font-size:.85rem;white-space:nowrap}
+nav.tut-seq a{position:relative;display:block;flex:0 1 auto;min-width:0;height:44px;line-height:44px;padding:0 2px;overflow:hidden;text-overflow:ellipsis;color:#0056b3;text-decoration:none}
+nav.tut-seq a.seq-home{flex:0 0 auto}
+nav.tut-seq a.seq-next{margin-left:auto}
+nav.tut-seq .seq-w{font-weight:600}
+nav.tut-seq a:hover{text-decoration:underline}
+nav.tut-seq a:focus-visible{outline:2px solid #0056b3;outline-offset:2px}
+@media (max-width:575px){nav.tut-seq .seq-t{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}}
+@media (forced-colors:active){nav.tut-seq a:focus-visible{outline-color:Highlight}}
+@media print{nav.tut-seq{display:none}}
+/* PREV-NEXT-END */
+
+/* MATH-BEGIN v1 (P88, site-math.js renders KaTeX; byte-identical on every page) */
+.eq-line{overflow-x:auto;overflow-y:hidden;white-space:normal}
+.eq-line .katex{font-size:1.02em;line-height:1.6}
+.eq-line .katex .base{margin:.15em 0}
+var .katex,p .katex,li .katex,td .katex,th .katex,figcaption .katex,.eq-why .katex,.eq-what .katex,.eq-legend .katex{font-size:1.06em}
+var:has(.katex){font-style:normal}
+.katex-display{margin:.6rem 0;overflow-x:auto;overflow-y:hidden}
+/* MATH-END */
+</style>
+<style>
+<style>
+    /* Collapse tool buttons: same pill style as the other SSL tools. */
+    #dinoCenter { border: 1px solid #bdc3c7; background: #fff; padding: .45em 1em; border-radius: 6px;
+      cursor: pointer; font-size: .9em; color: #2c3e50; white-space: nowrap; font-family: inherit; }
+</style>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>if (typeof hljs !== 'undefined') hljs.highlightAll();</script>
+<style>
+/* Static teaching diagrams (mtd), shared across tutorials, 2026-11-01 */
+.figure.mtd-fig { margin: 1.75rem 0; }
+.mtd-fig > svg.mtd-svg { display: block; width: 100%; height: auto; margin: 0 auto; }
+.mtd-fig .caption { margin-top: 1rem; border-left: 0; padding-left: 0; }
+.mtd-svg text { fill: #2c3e50; font-family: sans-serif; }
+.mtd-svg .mtd-sub { fill: #555; }
+.mtd-svg .mtd-t1 { fill: #1f618d; }
+.mtd-svg .mtd-t2 { fill: #a3520f; }
+.mtd-svg .mtd-pu { fill: #7d3c98; }
+.mtd-svg .mtd-red { fill: #c0392b; }
+.mtd-svg .mtd-grn { fill: #117a65; }
+.mtd-svg line, .mtd-svg path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.mtd-svg .mtd-s.mtd-c1 { stroke: #1f618d; } .mtd-svg .mtd-f.mtd-c1 { fill: #1f618d; }
+.mtd-svg .mtd-s.mtd-c2 { stroke: #ca6f1e; } .mtd-svg .mtd-f.mtd-c2 { fill: #ca6f1e; }
+.mtd-svg .mtd-s.mtd-cp { stroke: #7d3c98; } .mtd-svg .mtd-f.mtd-cp { fill: #7d3c98; }
+.mtd-svg .mtd-s.mtd-cr { stroke: #c0392b; } .mtd-svg .mtd-f.mtd-cr { fill: #c0392b; }
+.mtd-svg .mtd-s.mtd-cg { stroke: #2c3e50; } .mtd-svg .mtd-f.mtd-cg { fill: #2c3e50; }
+.mtd-svg .mtd-sep { stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-pic { fill: #fbfcfd; stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-axis { stroke: #7f8c8d; stroke-width: 1.5px; }
+.mtd-svg .mtd-arc { stroke: #2c3e50; stroke-width: 2px; }
+.mtd-svg .mtd-dot { fill: #2c3e50; }
+.mtd-svg .mtd-guide { stroke: #7f8c8d; stroke-width: 1.4px; stroke-dasharray: 4 4; }
+.mtd-svg .mtd-ring { fill: #fbfcfd; stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-pt { fill: #1f618d; opacity: .55; }
+.mtd-svg .mtd-cross { stroke: #2c3e50; stroke-width: 2.2px; }
+.mtd-svg .mtd-barbg { fill: #eef1f4; }
+.mtd-svg .mtd-bar { fill: #7d3c98; }
+.mtd-svg .mtd-cart { fill: #ffffff; stroke: #2c3e50; stroke-width: 2px; }
+.mtd-svg .mtd-zero { stroke: #95a5a6; stroke-width: 1.2px; stroke-dasharray: 4 4; }
+.mtd-svg .mtd-axisl { stroke: #7f8c8d; stroke-width: 2px; }
+.mtd-svg .mtd-norm { stroke: #148f77; stroke-width: 4px; }
+.mtd-svg .mtd-read { fill: #ffffff; stroke: #2c3e50; stroke-width: 2.5px; }
+.mtd-svg .mtd-ball { fill: #7d3c98; fill-opacity: .08; stroke: #7d3c98; stroke-width: 1.6px; stroke-dasharray: 5 4; }
+.mtd-svg .mtd-box { fill: #fbfcfd; stroke: #bdc3c7; stroke-width: 1.4px; }
+.mtd-svg .mtd-crossbg { fill: #ffffff; }
+.mtd-svg .mtd-halo { stroke: #ffffff; stroke-width: 5px; stroke-linejoin: round; paint-order: stroke; }
+.mtd-svg .mtd-box.mtd-note { stroke-dasharray: 5 4; }
+</style>
+<style>#dinoCenter[aria-pressed="true"]{background:#117a65;color:#fff;border-color:#117a65}</style>
+<style>
+/* 12 px floor for subscripts, superscripts and nested exponents (owner ruling 2026-11-03, as audio fix wave 11).
+   Same em sizes as the canonical rules, never under 12 px; html raises specificity by one type.
+   The canonical eq-card block is not edited. */
+html sub,html sup{font-size:max(12px,.83em)}
+html var sub,html var sup,html .mvar sub,html .mvar sup{font-size:max(12px,.72em)}
+</style>
+  <script src="site-math.js" defer></script>
+
+<style>
+/* Prerequisites row ("Before you start"), same pill style as the On this page chips. */
+.prereq{display:flex;flex-wrap:wrap;gap:2px;align-items:center;margin:0 0 1.25rem}
+.prereq-label{font-size:.75rem;text-transform:uppercase;letter-spacing:.12em;color:#6c757d;font-weight:700;padding:8px 12px 0 0}
+a.prereq-chip{display:inline-block;padding:6px 10px;border-radius:999px;color:#495057;text-decoration:none;font-size:.82rem;font-weight:500;line-height:1.35}
+a.prereq-chip:hover{color:#007bff}
+/* Walkthrough steppers (Prev/Next/Play/Reset, dots, per-step panels). */
+.btn.sec{background:#ecf0f1;color:#2c3e50;border:1px solid #bdc3c7;font-weight:normal;padding:.45em 1em;border-radius:6px;cursor:pointer;font-size:.9em;font-family:inherit}
+.btn.sec:hover{background:#dfe6e9}
+.btn.sec:disabled{opacity:.45;cursor:default}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.wk-dots{display:flex;gap:12px;justify-content:center;margin:0 0 .9rem}
+.wk-dot{width:22px;height:22px;border-radius:50%;border:2px solid #2a7fbf;background:#fff;cursor:pointer;padding:0}
+.wk-dot.active{background:#2a7fbf}
+.wk-dot.current{outline:3px solid #f1c40f;outline-offset:2px}
+.wk-dot:focus-visible{outline:2px solid #2c3e50;outline-offset:2px}
+.wk-step-title{text-align:center;font-weight:bold;color:#2c3e50;margin:0 0 .5rem;font-size:1.05em}
+.wk-readout{margin:.5rem 0 0}
+.wk-panel[hidden]{display:none}
+.dek{font-size:1.15em;color:#555;margin-top:.2em}
+#dinoPlay{min-width:5.5em;text-align:center}
+</style>
+</head>
+<body>
+<script>/* page: canvas text takes the darker text shades so it reaches 4.5:1 (fills keep the palette) */
+(function(){var M={'#ca6f1e':'#a3520f','#148f77':'#117a65','#7f8c8d':'#616a6b','#e67e22':'#a3520f','#2980b9':'#1f6fa8','#2a7fbf':'#1f6fa8','#3498db':'#1f6fa8','#d35400':'#a84300','#95a5a6':'#616a6b','#5dade2':'#1f6fa8'};if(!window.CanvasRenderingContext2D)return;var P=CanvasRenderingContext2D.prototype,f=P.fillText;P.fillText=function(){var s=this.fillStyle,d=typeof s==='string'&&M[s.toLowerCase()];if(d)this.fillStyle=d;var r=f.apply(this,arguments);if(d)this.fillStyle=s;return r;};})();</script>
+      <nav class="topnav" aria-label="Site">
+    <div class="nav-inner">
+        <a class="wordmark" href="index.html">Ramin Anushiravani</a>
+        <div class="nav-links">
+            <a href="tutorial.html" class="active">Tutorials</a>
+            <a href="pubs.html">Publications</a>
+            <a href="index.html">About</a>
+            <a href="work.html">Projects</a>
+        </div>
+        <button class="nav-toggle" id="navToggle" aria-expanded="false" aria-controls="navPanel" aria-label="Menu"><span></span><span></span><span></span></button>
+    </div>
+    <div class="nav-panel" id="navPanel">
+        <div class="nav-panel-inner">
+            <div class="nav-panel-body">
+                <a class="panel-link active" href="tutorial.html">Tutorials</a>
+                <a class="panel-link" href="pubs.html">Publications</a>
+                <a class="panel-link" href="index.html">About</a>
+                <a class="panel-link" href="work.html">Projects</a>
+                <div class="panel-social">
+                    <a href="https://linkedin.com/in/raminanushiravani" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+                    <a href="https://github.com/raminaeye/" target="_blank" rel="noopener noreferrer">GitHub</a>
+                    <a href="https://scholar.google.com/citations?user=kouXx8gAAAAJ&hl=en" target="_blank" rel="noopener noreferrer">Google Scholar</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</nav>
+
+    <p class="crumb"><a href="tutorial.html">&larr; All tutorials</a></p>
+    <script src="tutorial-nav.js"></script>
+
+
+  <h1>DINO: Self-Distillation with No Labels</h1>
+
+  <p class="dek">A student learns from a teacher built from itself, whose outputs are centered and sharpened so no single output wins for every image.</p>
+
+<nav class="prereq" aria-label="Before you start">
+  <span class="prereq-label">Before you start</span>
+  <a class="prereq-chip" href="ssl.html#three-families">Self-Supervised Learning</a>
+  <a class="prereq-chip" href="non-contrastive-ssl.html#collapse-without-negatives">BYOL: the collapse problem</a>
+  <a class="prereq-chip" href="non-contrastive-ssl.html#byol">BYOL: the momentum encoder</a>
+  <a class="prereq-chip" href="kd.html#soft-predictions-what-the-teacher-really-knows">Knowledge Distillation: temperature and teacher shares</a>
+</nav>
+
+  <p class="tabs-label">On this page</p>
+  <div class="tab-strip">
+    <a class="tab-chip" href="#collapse-recap"><span class="secnum">1</span> The collapse problem, in one page</a>
+    <a class="tab-chip" href="#dino"><span class="secnum">2</span> DINO matches a student to a centered, sharpened teacher</a>
+    <a class="tab-chip" href="#dino-in-practice"><span class="secnum">3</span> One DINO training step, in code</a>
+    <a class="tab-chip" href="#when-to-use"><span class="secnum">4</span> When to use DINO</a>
+    <a class="tab-chip" href="#failure-modes"><span class="secnum">5</span> Failure modes and tips</a>
+    <a class="tab-chip" href="#references"><span class="secnum">6</span> References</a>
+  </div>
+
+  <h2 id="collapse-recap"><span class="secnum">1</span> The collapse problem, in one page</h2>
+
+  <p>With no negatives to push against, one output for every image matches every pair and says nothing: that is collapse. In a subtler <a href="ssl-failure-modes.html#collapse">dimensional collapse</a>, the embeddings spread along only a few directions of the space and stay flat along the rest; <a href="ssl-failure-modes.html#specDemo">Failure Modes and Checks</a> plots it.</p>
+
+  <p>The full collapse story is on <a href="non-contrastive-ssl.html#collapse-without-negatives">BYOL: Bootstrap Your Own Latent</a>, which also states the pattern all three methods share: every target side sits behind a stop-gradient.</p>
+
+  <h2 id="dino"><span class="secnum">2</span> DINO matches a student to a centered, sharpened teacher</h2>
+
+  <p>DINO (self-distillation with no labels, Caron et al. 2021; the student learns from a teacher built from itself) trains a <strong>student</strong> network to copy a <strong>teacher</strong>, a momentum encoder of the student (<a href="contrastive-learning.html">MoCo&#8217;s momentum rule</a>). Two edits to the teacher&#8217;s output, centering and sharpening, stop collapse. Each network has <var>\(K\)</var> outputs, 65,536 in DINO. A <strong>softmax</strong> turns them into shares that sum to 1, and dividing by a <strong>temperature</strong> first sets how peaked the shares are, as in <a href="kd.html#soft-predictions-what-the-teacher-really-knows">Knowledge Distillation</a> but set low for the teacher. The student matches the teacher&#8217;s shares by cross entropy, which penalises the student when its shares differ from the teacher&#8217;s.</p>
+
+  <div class="demo" id="dinoWalk">
+    <div class="demo-controls">
+      <button type="button" class="btn sec" id="dinoPrev">Prev step</button>
+      <button type="button" class="btn sec" id="dinoNext">Next step</button>
+      <button type="button" class="btn sec" id="dinoPlay">Play</button>
+      <button type="button" class="btn sec" id="dinoReset">Reset</button>
+    </div>
+    <div class="wk-dots" role="group" aria-label="dino walkthrough steps">
+            <button type="button" class="wk-dot active current" data-step="dinoS1"><span class="sr-only">First step: the student and the teacher see the two views</span></button>
+            <button type="button" class="wk-dot" data-step="dinoS2"><span class="sr-only">Second step: center the teacher</span></button>
+            <button type="button" class="wk-dot" data-step="dinoS3"><span class="sr-only">Third step: sharpen with the low temperature</span></button>
+            <button type="button" class="wk-dot" data-step="dinoS4"><span class="sr-only">Fourth step: the student matches the shares</span></button>
+    </div>
+  <figure class="figure mtd-fig" id="fig-1"><svg class="mtd-svg" viewBox="0 0 300 230" style="max-width:300px" role="img" aria-label="In DINO, view 1 goes through the student; view 2 through the teacher, a moving-average copy of the student, whose output is centered and sharpened behind a stop-gradient; the student is matched to the teacher"><g data-eqk="views"><text class="" x="150" y="20" text-anchor="middle" style="font-size:17px;font-weight:700">DINO</text></g><g data-eqk="views"><rect class="mtd-box" x="4" y="32" width="100" height="28" rx="7"/></g><g data-eqk="views"><text class="" x="54.0" y="51" text-anchor="middle" style="font-size:15px;font-weight:600">view 1</text></g><g data-eqk="views"><rect class="mtd-box" x="196" y="32" width="100" height="28" rx="7"/></g><g data-eqk="views"><text class="" x="246.0" y="51" text-anchor="middle" style="font-size:15px;font-weight:600">view 2</text></g><g data-eqk="views"><line class="mtd-s mtd-c2" x1="54.0" y1="60.0" x2="54.0" y2="68.0" style="stroke-width:2.5px"/></g><g data-eqk="views"><polygon class="mtd-f mtd-c2" points="54.0,76.0 49.6,68.0 58.4,68.0"/></g><g data-eqk="views"><line class="mtd-s mtd-c1" x1="246.0" y1="60.0" x2="246.0" y2="68.0" style="stroke-width:2.5px"/></g><g data-eqk="views"><polygon class="mtd-f mtd-c1" points="246.0,76.0 241.6,68.0 250.4,68.0"/></g><g data-eqk="student"><rect class="mtd-box" x="4" y="76" width="100" height="34" rx="7" style="stroke:#ca6f1e"/></g><g data-eqk="student"><text class="" x="54.0" y="98" text-anchor="middle" style="font-size:15px;font-weight:600">student</text></g><g data-eqk="teacher"><rect class="mtd-box" x="196" y="76" width="100" height="34" rx="7" style="stroke:#1f618d"/></g><g data-eqk="teacher"><text class="" x="246.0" y="98" text-anchor="middle" style="font-size:15px;font-weight:600">teacher</text></g><g data-eqk="ema"><line class="mtd-s mtd-cg" x1="106.0" y1="100.0" x2="187.0" y2="100.0" style="stroke-width:2px;stroke-dasharray:5 4"/></g><g data-eqk="ema"><polygon class="mtd-f mtd-cg" points="194.0,100.0 187.0,103.8 187.0,96.2"/></g><g data-eqk="ema"><text class="mtd-sub" x="150" y="88" text-anchor="middle" style="font-size:14px;font-weight:600">EMA copy</text></g><g data-eqk="student"><line class="mtd-s mtd-c2" x1="54.0" y1="110.0" x2="54.0" y2="184.0" style="stroke-width:2.5px"/></g><g data-eqk="student"><polygon class="mtd-f mtd-c2" points="54.0,192.0 49.6,184.0 58.4,184.0"/></g><g data-eqk="teacher"><line class="mtd-s mtd-c1" x1="246.0" y1="110.0" x2="246.0" y2="118.0" style="stroke-width:2.5px"/></g><g data-eqk="teacher"><polygon class="mtd-f mtd-c1" points="246.0,126.0 241.6,118.0 250.4,118.0"/></g><g data-eqk="teacher"><rect class="mtd-box" x="160" y="126" width="140" height="30" rx="7" style="stroke:#1f618d"/></g><g data-eqk="teacher"><text class="" x="230.0" y="146" text-anchor="middle" style="font-size:15px;font-weight:600">center, sharpen</text></g><g data-eqk="teacher"><line class="mtd-s mtd-c1" x1="246.0" y1="156.0" x2="246.0" y2="184.0" style="stroke-width:2.5px"/></g><g data-eqk="teacher"><polygon class="mtd-f mtd-c1" points="246.0,192.0 241.6,184.0 250.4,184.0"/></g><g data-eqk="sg"><rect class="mtd-f mtd-cr" x="214.0" y="168" width="64" height="8" rx="2"/></g><g data-eqk="sg"><text class="mtd-red" x="208.0" y="177" text-anchor="end" style="font-size:14px;font-weight:600">stop-gradient</text></g><g data-eqk="match"><rect class="mtd-box" x="40" y="194" width="220" height="30" rx="7"/></g><g data-eqk="match"><text class="" x="150" y="214" text-anchor="middle" style="font-size:15px;font-weight:600">match the teacher</text></g></svg><figcaption class="caption"><span class="fignum">Figure 1.</span> The student learns from a teacher; the teacher&#8217;s output is centered and sharpened behind a stop-gradient.</figcaption></figure>
+  <div class="wk-panel" id="dinoS1" data-next="dinoS2" data-prev="dinoS1" data-eqlines="0" data-eqterms="">
+    <p class="wk-step-title">The student and the teacher see the two views</p>
+    <p class="wk-readout">The student reads one view and the teacher reads the other. The teacher is a slow copy of the student.</p>
+  </div>
+  <div class="wk-panel" id="dinoS2" data-next="dinoS3" data-prev="dinoS1" data-eqlines="0" data-eqterms="c" hidden>
+    <p class="wk-step-title">Center the teacher</p>
+    <p class="wk-readout">Subtract the center, the running average of the teacher’s outputs. What every image shares is taken out, so no single output can win for every image.</p>
+  </div>
+  <div class="wk-panel" id="dinoS3" data-next="dinoS4" data-prev="dinoS2" data-eqlines="0" data-eqterms="tau_t" hidden>
+    <p class="wk-step-title">Sharpen with the low temperature</p>
+    <p class="wk-readout">Divide by the small teacher temperature. The remaining gaps stretch out, so each image’s top output stands out.</p>
+  </div>
+  <div class="wk-panel" id="dinoS4" data-next="dinoS4" data-prev="dinoS3" data-eqlines="0" data-eqterms="Pt" hidden>
+    <p class="wk-step-title">The student matches the shares</p>
+    <p class="wk-readout">The student copies the teacher’s shares. Then the teacher follows the student by EMA and the center moves toward the batch mean.</p>
+  </div>
+<div class="eq-card" id="dinoEq">
+<div class="eq-what">The teacher turns an image into target shares that the student learns to match; it subtracts a running center, then sharpens with a low temperature.</div>
+<div class="eq-line eq-active" data-eqline="0">\(\displaystyle \htmlClass{eqt}{\htmlData{k=Pt}{\htmlStyle{color:#7d6608}{P_{t}}}}(x) = \operatorname{softmax}(\frac{\htmlStyle{color:#1f618d}{g_{t}}(x) - \htmlClass{eqt}{\htmlData{k=c}{\htmlStyle{color:#117a65}{c}}}}{\htmlClass{eqt}{\htmlData{k=tau_t}{\htmlStyle{color:var(--sym-temp)}{\tau _{t}}}}})\)</div>
+<div class="eq-why eq-active" data-eqline="0">The teacher&#8217;s targets are its outputs, centered and then sharpened. For one image <var>\(x\)</var>, <var>\(g_{t}(x)\)</var> is the teacher&#8217;s <var>\(K\)</var> raw outputs. The center <var>\(c\)</var> is a running average of the teacher&#8217;s outputs over recent batches. <var>\(\tau _{t}\)</var> is the teacher&#8217;s small temperature. <var>\(P_{t}\)</var> is the softmax of the result, the teacher&#8217;s shares. Subtracting <var>\(c\)</var> (<strong>centering</strong>) removes what every image has in common, so no single output can win for every image; on its own it pushes the shares toward flat. Dividing by the small <var>\(\tau _{t}\)</var> (<strong>sharpening</strong>) stretches the remaining gaps, so each image&#8217;s top output stands out; on its own it lets one output win everywhere. Together they leave each image its own peak, which the student copies. The student uses its own, higher temperature and no centering.</div>
+</div>
+  </div>
+
+<script>
+(function(){
+  function $(id){return document.getElementById(id);}
+  var order=['dinoS1', 'dinoS2', 'dinoS3', 'dinoS4'];
+  var prev=$('dinoPrev'),next=$('dinoNext'),playBtn=$('dinoPlay'),resetBtn=$('dinoReset');
+  if(!prev||!next||!playBtn||!resetBtn)return;
+  var dots=Array.prototype.slice.call(document.querySelectorAll('#dinoWalk .wk-dot'));
+  if(dots.length!==order.length)return;
+  var cur=order[0],timer=null,dwellMs=2300;
+  function panelEl(id){return $(id);}
+  function syncEq(cardId,lines,terms){
+    var card=document.getElementById(cardId); if(!card)return;
+    lines=lines||[]; terms=terms||[];
+    var stepped=lines.length>0;
+    card.classList.toggle('eq-stepped',stepped);
+    var ls=card.querySelectorAll('.eq-line');
+    for(var i=0;i<ls.length;i++)
+      ls[i].classList.toggle('eq-active',!stepped||lines.indexOf(i)>=0);
+    var ws=card.querySelectorAll('.eq-why');
+    for(var i=0;i<ws.length;i++){
+      var ln=parseInt(ws[i].getAttribute('data-eqline'),10);
+      ws[i].classList.toggle('eq-active',!stepped||lines.indexOf(ln)>=0);
+    }
+    var ts=card.querySelectorAll('.eqt');
+    for(var j=0;j<ts.length;j++){
+      var kEl=ts[j].hasAttribute('data-k')?ts[j]:ts[j].querySelector('[data-k]');
+      ts[j].classList.toggle('eqt-active',
+        !!kEl&&terms.indexOf(kEl.getAttribute('data-k'))>=0);
+    }
+  }
+  var DGMAP={dinoS1: ['views','student','teacher'],dinoS2: ['teacher'],dinoS3: ['teacher'],dinoS4: ['match','ema']};
+  function syncStep(id){
+    var p=panelEl(id); if(!p)return;
+    var lines=(p.getAttribute('data-eqlines')||'').split(',').filter(function(s){return s!=='';}).map(function(s){return parseInt(s,10);});
+    var terms=(p.getAttribute('data-eqterms')||'').split(',').filter(function(s){return s!=='';});
+    syncEq('dinoEq',lines,terms);
+    var dg=DGMAP[id]||[];
+    var parts=document.querySelectorAll('#dinoWalk [data-eqk]');
+    for(var i=0;i<parts.length;i++)
+      parts[i].classList.toggle('eq-dim',dg.indexOf(parts[i].getAttribute('data-eqk'))<0);
+  }
+  function show(id){
+    var p=panelEl(id); if(!p)return;
+    cur=id;
+    order.forEach(function(oid){var el=panelEl(oid); if(el)el.hidden=(oid!==id);});
+    var at=order.indexOf(id);
+    dots.forEach(function(d,k){
+      d.classList.toggle('active',k<=at);
+      d.classList.toggle('current',d.getAttribute('data-step')===id);
+    });
+    syncStep(id);
+    prev.disabled=(at===0); prev.style.opacity=(at===0)?'0.45':'';
+    next.disabled=(at===order.length-1); next.style.opacity=(at===order.length-1)?'0.45':'';
+  }
+  function stop(){if(timer){clearInterval(timer);timer=null;} playBtn.textContent='Play';}
+  function isLast(){return cur===order[order.length-1];}
+  function tick(){if(isLast()){stop();return;} show(order[order.indexOf(cur)+1]); if(isLast())stop();}
+  prev.addEventListener('click',function(){stop(); show(order[Math.max(0,order.indexOf(cur)-1)]);});
+  next.addEventListener('click',function(){stop(); show(order[Math.min(order.length-1,order.indexOf(cur)+1)]);});
+  playBtn.addEventListener('click',function(){
+    if(timer){stop();return;}
+    if(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches){show(order[order.length-1]);return;}
+    var restart=isLast();
+    playBtn.textContent='Pause';
+    timer=setInterval(tick,dwellMs);
+    if(restart)show(order[0]);
+  });
+  resetBtn.addEventListener('click',function(){stop(); show(order[0]);});
+  dots.forEach(function(d){d.addEventListener('click',function(){stop(); show(d.getAttribute('data-step'));});});
+  show(order[0]);
+})();
+</script>
+
+  <div class="demo" id="dinoDemo">
+    <div class="demo-controls">
+      <button type="button" class="demo-btn" id="dinoCenter" aria-pressed="true">Centering on</button>
+      <label for="dinoTau">Teacher temperature, soft to sharp</label>
+      <input type="range" id="dinoTau" min="0" max="100" value="100" step="1">
+    </div>
+    <svg class="mtd-svg" id="dinoSvg" viewBox="0 0 300 300" style="max-width:420px" role="img" aria-label="Teacher output shares for three toy images, eight outputs each"></svg>
+    <p class="caption"><span class="fignum">Figure 2.</span> Three toy images, <var>\(K = 8\)</var> outputs; the center is their mean.</p>
+    <div class="demo-stats" id="dinoStats"></div>
+
+  </div>
+
+
+  <script>
+  (function(){
+    var K = 8, OWN = [3, 5, 7], SHARED = 1, BIAS = 1.5;
+    var svg = document.getElementById('dinoSvg');
+    var btn = document.getElementById('dinoCenter');
+    var sl = document.getElementById('dinoTau');
+    var stats = document.getElementById('dinoStats');
+    var NS = 'http://www.w3.org/2000/svg';
+    function el(tag, attrs, text){
+      var e = document.createElementNS(NS, tag);
+      for (var k in attrs) e.setAttribute(k, attrs[k]);
+      if (text) e.textContent = text;
+      svg.appendChild(e); return e;
+    }
+    function logits(){
+      return OWN.map(function(o){
+        var g = []; for (var k = 0; k < K; k++) g.push((k === o ? 1 : 0) + (k === SHARED ? BIAS : 0));
+        return g;
+      });
+    }
+    function draw(){
+      var on = btn.getAttribute('aria-pressed') === 'true';
+      /* Linear in tau, 1.0 soft to 0.04 sharp, so the bars keep moving
+         across the whole slider; the old log map saturated above 75. */
+      var tau = 1 - 0.96 * sl.value / 100;
+      var G = logits(), c = [];
+      for (var k = 0; k < K; k++) c.push(on ? (G[0][k] + G[1][k] + G[2][k]) / 3 : 0);
+      while (svg.firstChild) svg.removeChild(svg.firstChild);
+      var tops = [], ownTop = 0, sharedTop = 0;
+      G.forEach(function(g, r){
+        var z = g.map(function(v, k){ return (v - c[k]) / tau; });
+        var m = Math.max.apply(null, z), e = z.map(function(v){ return Math.exp(v - m); });
+        var t = e.reduce(function(a, b){ return a + b; }, 0), p = e.map(function(v){ return v / t; });
+        var arg = p.indexOf(Math.max.apply(null, p)); tops.push(p[arg]);
+        if (arg === OWN[r]) ownTop++; if (arg === SHARED) sharedTop++;
+        var y0 = 10 + r * 92;
+        el('text', {x: 2, y: y0 + 14, style: 'font-size:15px;font-weight:700;fill:#2c3e50'}, 'image ' + 'ABC'[r]);
+        el('line', {x1: 2, y1: y0 + 86, x2: 298, y2: y0 + 86, style: 'stroke:#bdc3c7;stroke-width:1px'});
+        for (var k = 0; k < K; k++){
+          var h = p[k] * 64, col = k === SHARED ? '#ca6f1e' : (k === OWN[r] ? '#1f618d' : '#bdc3c7');
+          el('rect', {x: 4 + k * 37, y: (y0 + 86 - Math.max(h, 1)).toFixed(1), width: 29, height: Math.max(h, 1).toFixed(1), rx: 2, style: 'fill:' + col});
+        }
+      });
+      /* Fix wave 2: a color legend with swatches, not axis-end labels. */
+      el('rect', {x: 2, y: 284, width: 13, height: 13, rx: 2, style: 'fill:#ca6f1e'});
+      el('text', {x: 20, y: 296, style: 'font-size:15px;font-weight:600;fill:#a3520f'}, 'shared output');
+      el('rect', {x: 150, y: 284, width: 13, height: 13, rx: 2, style: 'fill:#1f618d'});
+      el('text', {x: 168, y: 296, style: 'font-size:15px;font-weight:600;fill:#1f618d'}, 'each image\u2019s own');
+      var minTop = Math.min.apply(null, tops), msg;
+      var ORG = '<span style="color:#a3520f">orange shared output</span>', BLU = '<span style="color:#1f618d">blue peak</span>';
+      if (sharedTop === 3) msg = minTop < 0.4 ? 'All three give the most weight to the ' + ORG : 'Every image puts nearly all its weight on the ' + ORG;
+      else if (minTop < 0.4) msg = 'Every image is nearly flat';
+      else if (ownTop === 3) msg = 'Each image gets its own ' + BLU;
+      else msg = 'Some images share a peak and others do not';
+      stats.innerHTML = msg + '.';
+    }
+    btn.addEventListener('click', function(){
+      var on = btn.getAttribute('aria-pressed') !== 'true';
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      btn.textContent = on ? 'Centering on' : 'Centering off';
+      draw();
+    });
+    sl.addEventListener('input', draw);
+    draw();
+  })();
+  </script>
+
+<figure class="figure mtd-fig" id="fig-9"><svg class="mtd-svg" viewBox="0 0 360 104" style="max-width:460px" role="img" aria-label="A DINO ViT-S/16 reaches 77.0 percent ImageNet top-1 with a linear probe and 74.5 percent with a 20-neighbor weighted vote">
+    <text x="4" y="18" style="font-size:16px;font-weight:bold">ImageNet top-1 (%), DINO ViT-S/16</text>
+    <text x="150" y="51" text-anchor="end" style="font-size:16px">linear probe</text>
+    <rect x="156" y="37" width="154" height="20" style="fill:#1f618d"/>
+    <text x="315" y="52" style="font-size:16px;font-weight:bold">77.0</text>
+    <text x="150" y="85" text-anchor="end" style="font-size:16px">k-NN vote</text>
+    <rect x="156" y="71" width="149" height="20" style="fill:#117a65"/>
+    <text x="310" y="86" style="font-size:16px;font-weight:bold">74.5</text>
+  </svg><figcaption class="caption"><span class="fignum">Figure 3.</span> A small vision transformer on 16 px patches; <a href="knn.html#how">k-NN</a> is a 20-nearest-neighbor vote (DINO Table 2).</figcaption></figure>
+
+  <h2 id="dino-in-practice"><span class="secnum">3</span> One DINO training step, in code</h2>
+
+  <p>A DINO step trains the student, then moves the teacher toward it by EMA and the center <var>\(c\)</var> toward the batch mean.</p>
+<pre class="cs" data-cs="6-9,11-19,21-25,26-28,30-31,32"><code class="language-python">import copy, math
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+def dino_loss(s_out, t_out, c, tau_s=0.1, tau_t=0.04):
+    P_t = F.softmax((t_out - c) / tau_t, dim=-1)     # center, sharpen
+    log_P_s = F.log_softmax(s_out / tau_s, dim=-1)
+    return -(P_t * log_P_s).sum(dim=-1).mean()
+
+K_OUT, LAM_BASE, M_C = 1024, 0.996, 0.9   # toy K; DINO uses 65,536
+WD_START, WD_END = 0.04, 0.4
+k, K_STEPS = 0, 1000                      # step k
+lam = 1 - (1 - LAM_BASE) * (math.cos(math.pi * k / K_STEPS) + 1) / 2
+wd = WD_END - (WD_END - WD_START) * (math.cos(math.pi * k / K_STEPS) + 1) / 2
+student = nn.Sequential(nn.Flatten(), nn.Linear(3 * 32 * 32, K_OUT))
+teacher = copy.deepcopy(student).requires_grad_(False)
+c = torch.zeros(K_OUT)
+opt = torch.optim.AdamW(student.parameters(), lr=5e-4, weight_decay=wd)
+
+x1, x2 = torch.rand(64, 3, 32, 32), torch.rand(64, 3, 32, 32)
+s1, s2 = student(x1), student(x2)
+with torch.no_grad():
+    t1, t2 = teacher(x1), teacher(x2)
+L = (dino_loss(s1, t2, c) + dino_loss(s2, t1, c)) / 2
+opt.zero_grad()
+L.backward()
+opt.step()
+with torch.no_grad():
+    for p_t, p_s in zip(teacher.parameters(), student.parameters()):
+        p_t.mul_(lam).add_(p_s, alpha=1 - lam)
+    c = M_C * c + (1 - M_C) * torch.cat([t1, t2]).mean(dim=0)</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>Loss with centered, sharpened teacher shares, <a href="#dino">Section 2</a> eq line 1.</li>
+  <li><span class="cs-n">2</span>Student, teacher copy, center <var>\(c\)</var> and optimizer (AdamW, an optimizer that applies weight decay separately from the gradient step), the DINO panel of <a href="#dinoWalk">Figure 1</a>; DINO raises the weight decay <code>wd</code> from 0.04 to 0.4 on a cosine schedule.</li>
+  <li><span class="cs-n">3</span>Toy views, both networks on both views, then the loss on the shares of <a href="#dino">Section 2</a> eq line 1.</li>
+  <li><span class="cs-n">4</span>Updates the student only; the teacher sits behind the stop-gradient in <a href="#dinoWalk">Figure 1</a>.</li>
+  <li><span class="cs-n">5</span>Teacher EMA with rate <var>\(\lambda\)</var>, which rises from 0.996 to 1 on a cosine schedule, the EMA copy in <a href="#dinoWalk">Figure 1</a>.</li>
+  <li><span class="cs-n">6</span>Moves <var>\(c\)</var>, the center in the eq-card, a small step toward the batch mean of teacher outputs.</li>
+</ol>
+
+  <p>Multi-crop sends 2 global views to both networks, plus local views to the student only. The local views teach the student to match the teacher&#8217;s global view from a small part.</p>
+
+  <h3 id="dino-at-a-glance"><span class="secnum">3.1</span> DINO at a glance</h3>
+  <table class="datatable cadence">
+    <thead><tr><th></th><th>DINO</th></tr></thead>
+    <tbody>
+      <tr><th>Acts</th><td>every step; teacher EMA and center after it</td></tr>
+      <tr><th>Keeps</th><td>teacher and center <var>\(c\)</var></td></tr>
+      <tr><th>Settings</th><td>batch 1024, AdamW; 2 global 224 px views to both networks, plus local 96 px views to the student only (multi-crop); <var>\(K = 65{,}536\)</var></td></tr>
+      <tr><th>Cost</th><td>ViT-S/16, 300 epochs on two 8-GPU machines, about 46 hours with the 2 global views only and about 73 hours with 10 extra local views (Table 8)</td></tr>
+      <tr><th>Code</th><td><a href="https://github.com/facebookresearch/dino">facebookresearch/dino</a></td></tr>
+      <tr><th>Gotchas</th><td>a center rate of 0.999 collapses; drop centering or sharpening and it collapses</td></tr>
+    </tbody>
+  </table>
+
+  <table class="datatable knobs">
+    <thead><tr><th>Knob, default</th><th>Raise it</th><th>Lower it</th></tr></thead>
+    <tbody>
+      <tr><td>DINO&#8217;s <var>\(\lambda\)</var>, the teacher blend; 0.996 rising to 1</td><td>a slower target, steadier; the same trade-off as <a href="non-contrastive-ssl.html">BYOL&#8217;s target blend</a></td><td>a faster target; copying the student each step (lambda 0) fails to converge (DINO sec. 5.2)</td></tr>
+      <tr><td>Center rate for <var>\(c\)</var>; 0.9 in the official code</td><td>the center lags; 0.999 collapses (k-NN 0.1%)</td><td>the center follows each batch; 0 gives 69.1% against 69.7%</td></tr>
+      <tr><td><var>\(\tau _{t}\)</var> divides <var>\(g_{t}(x) - c\)</var>; 0.04 raised to 0.07 over the first 30 epochs (warm-up)</td><td>flatter teacher shares; above 0.06 without warm-up it collapses</td><td>sharper shares, a peak per image; at 0, k-NN falls to 43.9%</td></tr>
+      <tr><td><var>\(\tau _{s}\)</var> divides the student&#8217;s outputs; 0.1</td><td>flatter student shares; very high, they go flat and can no longer match a peaked teacher, so the loss stays high</td><td>sharper student shares that commit to one output; near 0, the student puts all its share on its top output</td></tr>
+    </tbody>
+  </table>
+
+  <p class="caption">From the DINO paper and <code>main_dino.py</code>.</p>
+
+  <h2 id="when-to-use"><span class="secnum">4</span> When to use DINO</h2>
+
+  <p>Use DINO to pretrain a vision transformer when labels are scarce, and for any job that reuses the learned features without a trained head.</p>
+
+  <p>The learned ViT features carry explicit semantic segmentation information, so they suit segmentation-style reuse. The features are also excellent k-NN classifiers, so plain nearest-neighbor voting over the frozen features (<a href="#fig-9">Figure 3</a>) is a real use, not a toy check.</p>
+
+  <p>DINO runs every training step. It carries a teacher network and a center alongside the student, and updates the teacher by EMA and the center toward the batch mean after each step.</p>
+
+  <h2 id="failure-modes"><span class="secnum">5</span> Failure modes and tips</h2>
+
+  <p><strong>Center rate too high.</strong> Cause: the center rate is 0.999, so the center lags too far behind the teacher. Symptom: k-NN falls to 0.1%, collapsed. Fix: keep the center rate at 0.9.</p>
+
+  <p><strong>No centering or no sharpening.</strong> Cause: one of the two teacher edits is dropped. Symptom: collapse. Fix: keep both edits on.</p>
+
+  <p><strong>Teacher temperature too high, no warm-up.</strong> Cause: <var>\(\tau _{t}\)</var> goes above 0.06 without warm-up. Symptom: collapse. Fix: warm <var>\(\tau _{t}\)</var> up from 0.04 to 0.07 over the first 30 epochs.</p>
+
+  <p><strong>Teacher temperature at 0.</strong> Cause: <var>\(\tau _{t}\)</var> is 0, so the teacher shares are all-or-nothing. Symptom: k-NN falls to 43.9%. Fix: keep <var>\(\tau _{t}\)</var> above 0; warm it up from 0.04.</p>
+
+  <p><strong>Teacher copied every step (lambda 0, the fastest update).</strong> Cause: the teacher is replaced by the student each step. Symptom: training fails to converge. Fix: keep lambda high, so the teacher follows slowly.</p>
+
+  <p><strong>Tips.</strong> Warm <var>\(\tau _{t}\)</var> up from 0.04 to 0.07 over the first 30 epochs. Keep the center rate at 0.9. Keep the student temperature higher than the teacher&#8217;s.</p>
+
+  <p><a href="masked-image-modeling.html">Masked Image Modeling</a> comes next, which hides most of an image and rebuilds it.</p>
+
+  <h2 id="references"><span class="secnum">6</span> References</h2>
+
+  <ul class="reflist">
+    <li>Caron, M., et al. (2021). Emerging Properties in Self-Supervised Vision Transformers. ICCV 2021. <a href="https://arxiv.org/abs/2104.14294">arXiv:2104.14294</a>.</li>
+    <li>He, K., et al. (2020). Momentum Contrast for Unsupervised Visual Representation Learning. CVPR 2020. <a href="https://arxiv.org/abs/1911.05722">arXiv:1911.05722</a>.</li>
+  </ul>
+
+<script>
+        (function () {
+            var nav = document.querySelector('.topnav');
+            function onNavScroll() {
+                nav.classList.toggle('scrolled', window.scrollY > 4);
+            }
+            window.addEventListener('scroll', onNavScroll, { passive: true });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            window.addEventListener('resize', function () {
+                if (window.innerWidth > 768) {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            onNavScroll();
+            var toggle = document.getElementById('navToggle');
+            var panel = document.getElementById('navPanel');
+            if (toggle && panel) {
+                toggle.addEventListener('click', function () {
+                    var open = panel.classList.toggle('open');
+                    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                });
+                panel.addEventListener('click', function (e) {
+                    if (e.target && e.target.classList && e.target.classList.contains('panel-link')) {
+                        panel.classList.remove('open');
+                        toggle.setAttribute('aria-expanded', 'false');
+                    }
+                });
+            }
+            var links = Array.prototype.slice.call(document.querySelectorAll('.tab-strip a.tab-chip[href^="#"]'));
+            if (!links.length) return;
+            var tabEls = {};
+            links.forEach(function (a) { tabEls[a.getAttribute('href').slice(1)] = a; });
+            var current = null;
+            function centerTab(tab) {
+                var strip = tab.parentElement;
+                if (!strip || !strip.classList.contains('tab-strip')) return;
+                var sr = strip.getBoundingClientRect();
+                var pr = tab.getBoundingClientRect();
+                strip.scrollLeft += (pr.width >= sr.width) ? (pr.left - sr.left) : (pr.left - sr.left) - (sr.width - pr.width) / 2;
+            }
+            function setActive(id) {
+                if (!tabEls[id] || id === current) return;
+                current = id;
+                links.forEach(function (a) {
+                    a.classList.toggle('active', a.getAttribute('href') === '#' + id);
+                });
+                centerTab(tabEls[id]);
+            }
+            links.forEach(function (a) {
+                a.addEventListener('click', function () {
+                    setActive(a.getAttribute('href').slice(1));
+                });
+            });
+            setActive(links[0].getAttribute('href').slice(1));
+            if ('IntersectionObserver' in window) {
+                var obs = new IntersectionObserver(function (entries) {
+                    entries.forEach(function (en) {
+                        if (en.isIntersecting) setActive(en.target.id);
+                    });
+                }, { rootMargin: '-35% 0px -55% 0px' });
+                Object.keys(tabEls).forEach(function (id) {
+                    var el = document.getElementById(id);
+                    if (el) obs.observe(el);
+                });
+                window.addEventListener('scroll', function () {
+                    if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) {
+                        setActive(links[links.length - 1].getAttribute('href').slice(1));
+                    }
+                }, { passive: true });
+            }
+            window.addEventListener('load', function () {
+                var act = document.querySelector('.tab-strip a.active');
+                if (act) centerTab(act);
+            });
+        })();
+    </script>
+  <script>
+  /* Shared Play helper: no-yank scrolling (no scroll when the canvas is
+     already in view, else smooth-scroll it to the viewport center). */
+  function playScrollEnsure(el) {
+    /* Disabled 2026-10-06: user hates scroll-on-Play. No scrolling. */
+    return;
+  }
+  </script>
+  <script> /* r7reflow-reserve */
+  /* Scroll-stability (2026-10-09, Round 7 reflow sweep): Play-button label swaps
+     ("Play"/"Pause"/"Stop", "Playing...") widened or narrowed these buttons and
+     shifted their Reset siblings (up to 13px; 71px on streamPlay; 168px on obPlay).
+     Reserve each button's width to its widest label variant so the control rows
+     never reflow. Buttons are border-box in this UA stylesheet, so minWidth floors
+     the measured border-box width directly. Follows the r4scroll reserve pattern. */
+  (function () {
+    var sets = {
+    };
+    Object.keys(sets).forEach(function (id) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      var prev = btn.textContent, max = 0;
+      sets[id].forEach(function (t) {
+        btn.textContent = t;
+        var w = btn.getBoundingClientRect().width;
+        if (w > max) max = w;
+      });
+      btn.textContent = prev;
+      btn.style.minWidth = Math.ceil(max) + 'px';
+    });
+    /* Readout reserves: pressing Play resets a slider, so the value readout in the
+       same control row shrinks or grows and shifts the buttons (e.g. ppStepsVal
+       0->200 moved Reset). Pin each readout to its widest value. Readout
+       spans are inline, so they need inline-block for min-width to apply. */
+    function reserveReadout(id, lo, hi) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      var prev = el.textContent, max = 0;
+      for (var v = lo; v <= hi; v++) {
+        el.textContent = String(v);
+        var w = el.getBoundingClientRect().width;
+        if (w > max) max = w;
+      }
+      el.textContent = prev;
+      el.style.display = 'inline-block';
+      el.style.minWidth = Math.ceil(max) + 'px';
+      /* Right-aligned so the reserved space sits before the number,
+         never as a gap between the number and its unit. */
+      el.style.textAlign = 'right';
+      el.style.fontVariantNumeric = 'tabular-nums';
+    }
+    reserveReadout('colStepsVal', 0, 100);
+  })();
+  </script>
+<script>
+/* P80 code sections (CODE-SECTIONS.md) */
+(function(){
+  var C=['121,184,255','255,171,112','133,232,157','210,168,255','255,161,152','118,227,234'];
+  function lay(pre){
+    var code=pre.querySelector('code'); if(!code) return;
+    var lh=parseFloat(getComputedStyle(code).lineHeight);
+    var pt=parseFloat(getComputedStyle(pre).paddingTop);
+    var old=pre.querySelectorAll('.cs-g'); for(var j=0;j<old.length;j++) pre.removeChild(old[j]);
+    var imgs=[],sizes=[],pos=[];
+    (pre.getAttribute('data-cs')||'').split(',').forEach(function(r,i){
+      var m=r.trim().match(/^(\d+)(?:-(\d+))?$/); if(!m) return;
+      var a=+m[1],b=+(m[2]||m[1]),c=C[i%C.length],top=pt+(a-1)*lh,h=(b-a+1)*lh;
+      imgs.push('linear-gradient(rgba('+c+',.55),rgba('+c+',.55))','linear-gradient(rgba('+c+',.13),rgba('+c+',.13))');
+      sizes.push('3px '+h+'px','100% '+h+'px'); pos.push('0 '+top+'px','0 '+top+'px');
+      var g=document.createElement('span'); g.className='cs-g'; g.setAttribute('aria-hidden','true');
+      g.setAttribute('data-n',String(i+1)); g.style.top=(top+(lh-11)/2)+'px'; g.style.color='rgb('+c+')';
+      pre.insertBefore(g,code);
+    });
+    pre.style.backgroundImage=imgs.join(','); pre.style.backgroundSize=sizes.join(',');
+    pre.style.backgroundPosition=pos.join(','); pre.style.backgroundRepeat='no-repeat';
+  }
+  function all(){ var p=document.querySelectorAll('pre.cs'); for(var i=0;i<p.length;i++) lay(p[i]); }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',all); else all();
+  window.addEventListener('load',all);
+  window.addEventListener('resize',all);
+  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(all);
+})();
+</script>
+</body>
+</html>

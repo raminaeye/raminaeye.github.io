@@ -4,6 +4,20 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Mixture of Experts Designs</title>
+  <meta name="description" content="How real MoE models choose how many experts, how many per token, how big, and which are always on, from Switch and Mixtral to DeepSeek-V3.">
+  <script>
+  /* Old ids from before the 2026-11-08 split: each moved section keeps its id on its new page. */
+  (function () {
+    var MOVED = {'bias-balance': 'moe-bias-balancing.html#bias-balance', 'moeBiasStepFig': 'moe-bias-balancing.html#moeBiasStepFig', 'moeBiasEq': 'moe-bias-balancing.html#moeBiasEq', 'moeBias': 'moe-bias-balancing.html#moeBias', 'code': 'moe-bias-balancing.html#code', 'moeLogFig': 'moe-bias-balancing.html#moeLogFig', 'moeTimelineFig': 'moe-bias-balancing.html#moeTimelineFig', 'knobs': 'moe-bias-balancing.html#knobs', 'expert-parallel': 'moe-expert-parallelism.html#expert-parallel', 'moeA2AFig': 'moe-expert-parallelism.html#moeA2AFig', 'memory': 'moe-expert-parallelism.html#memory', 'moeMemFig': 'moe-expert-parallelism.html#moeMemFig', 'batch': 'moe-expert-parallelism.html#batch', 'moeBatchFig': 'moe-expert-parallelism.html#moeBatchFig', 'fine-tuning': 'moe-fine-tuning.html#fine-tuning', 'moeFinetuneFig': 'moe-fine-tuning.html#moeFinetuneFig', 'moeMapBFig': 'mixture-of-experts-designs.html'};
+    function go() {
+      var id;
+      try { id = decodeURIComponent(location.hash.slice(1)); } catch (e) { return; }
+      if (Object.prototype.hasOwnProperty.call(MOVED, id)) location.replace(MOVED[id]);
+    }
+    go();
+    window.addEventListener('hashchange', go);
+  })();
+  </script>
   <style>
     body {
       font-family: sans-serif;
@@ -814,22 +828,16 @@ nav.tut-seq a:focus-visible{outline:2px solid #0056b3;outline-offset:2px}
 @media (forced-colors:active){nav.tut-seq a:focus-visible{outline-color:Highlight}}
 @media print{nav.tut-seq{display:none}}
 /* PREV-NEXT-END */
+/* MATH-BEGIN v1 (P88, site-math.js renders KaTeX; byte-identical on every page) */
+.eq-line{overflow-x:auto;overflow-y:hidden;white-space:normal}
+.eq-line .katex{font-size:1.02em;line-height:1.6}
+.eq-line .katex .base{margin:.15em 0}
+var .katex,p .katex,li .katex,td .katex,th .katex,figcaption .katex,.eq-why .katex,.eq-what .katex,.eq-legend .katex{font-size:1.06em}
+var:has(.katex){font-style:normal}
+.katex-display{margin:.6rem 0;overflow-x:auto;overflow-y:hidden}
+/* MATH-END */
 </style>
 
-  <script type="text/javascript" async
-    src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML">
-  </script>
-  <script type="text/x-mathjax-config">
-    MathJax.Hub.Config({
-      tex2jax: {
-        inlineMath: [['$','$'], ['\\(','\\)']],
-        displayMath: [['$$','$$'], ['\\[','\\]']],
-        processEscapes: true
-      },
-      showProcessingMessages: false,
-      messageStyle: "none"
-    });
-  </script>
 
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
@@ -948,7 +956,10 @@ nav.prereq-sec p { margin: 0; font-size: .9rem; line-height: 1.5; color: #495057
   .mo-stack td { border: 0; padding: .06rem .2rem; }
   .mo-stack td::before { content: attr(data-h) " "; font-weight: 700; color: #4a5568; }
   .mo-stack td:first-child::before { content: none; }
-  .mo-stack td:first-child { font-size: 1rem; }
+  .mo-stack td:first-child { font-size: 1rem; white-space: normal; }
+  .mo-stack td[data-h]:first-child::before { content: attr(data-h) " "; }
+  .mo-stack td.mo-in { display: inline-block; margin-right: .7rem; }
+  .mo-stack td.mo-ph-hide { display: none; }
 }
 .mo-fails { margin: .8rem 0 1rem; padding-left: 1.2rem; }
 .mo-fails li { margin: .4rem 0; line-height: 1.55; }
@@ -1012,6 +1023,61 @@ html sub,html sup{font-size:max(12px,.83em)}
 html .eq-line sub,html .eq-line sup{font-size:max(12px,.68em)}
 html var sub,html var sup,html .mvar sub,html .mvar sup{font-size:max(12px,.72em)}
 </style>
+<style>
+.eq-line .eq-n { float: right; margin-left: .6rem; color: #7f8c8d; font-size: .9rem; line-height: 2.2; }
+
+/* One-topic split, moe-decoding family (2026-11-08): shared page styles */
+.dek { font-size: 1.15em; color: #555; margin-top: 0.2em; }
+.md-svg { display: block; width: 100%; height: auto; margin: 0 auto; max-width: 560px; }
+.md-svg text { font-family: sans-serif; fill: #2c3e50; font-size: 13px; }
+.md-svg .t-s { font-size: 11.5px; fill: #566573; }
+.md-svg .t-b { font-weight: 700; }
+.wt-controls { display: flex; align-items: center; gap: .4rem; flex-wrap: nowrap; margin: 0 0 .7rem; }
+.wt-controls .play-btn { min-width: 44px; min-height: 44px; padding: 0 .7em; flex: none; }
+.wt-dots { display: flex; gap: .3rem; flex-wrap: nowrap; flex: 1 1 auto; justify-content: center; min-width: 0; }
+.wt-dot { border: 1px solid #bdc3c7; background: #fff; border-radius: 999px; min-width: 40px; min-height: 44px; padding: 0 .5em; font-size: .9em; color: #2c3e50; cursor: pointer; }
+@media (max-width: 480px) { .wt-dot { min-width: 26px; min-height: 36px; padding: 0; } .wt-dots { gap: 2px; flex-wrap: wrap; row-gap: 4px; } .wt-controls .play-btn { min-width: 40px; padding: 0 .4em; } }
+.wt-dot.active { background: #1f618d; border-color: #1f618d; color: #fff; font-weight: bold; }
+.play-btn:disabled { opacity: .45; cursor: default; }
+.wt-readout, .tool-readout { margin: .6rem 0 0; min-height: 3.2em; color: #2c3e50; line-height: 1.5; }
+.tool-row { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin: 0 0 .5rem; }
+.tool-row label { font-size: .92rem; color: #2c3e50; font-weight: 600; }
+.tool-row input[type=range] { flex: 1 1 140px; min-width: 120px; min-height: 44px; }
+.tool-ends { display: flex; justify-content: space-between; font-size: .82rem; color: #566573; margin: -.5rem 0 .3rem; }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid #bdc3c7; border-radius: 6px; overflow: hidden; }
+.seg button { border: none; background: #fff; min-height: 44px; padding: 0 .75em; cursor: pointer; font-size: .9rem; color: #2c3e50; font-family: inherit; }
+.seg button + button { border-left: 1px solid #bdc3c7; }
+.seg button.active { background: #1f618d; color: #fff; font-weight: 600; }
+.tool-btn { min-height: 44px; padding: 0 .9em; border: 1px solid #1f618d; border-radius: 6px; background: #fff; color: #1f618d; font-family: inherit; font-size: .9rem; cursor: pointer; }
+.wt-part { transition: opacity .25s; }
+.wt-part.eq-dim { opacity: .25; }
+.md-anim { transition: all .35s ease; }
+@media (prefers-reduced-motion: reduce) { .wt-part, .md-anim { transition: none; } }
+.fx-table td:first-child { white-space: normal; }
+.md-jobs td, .md-jobs th { vertical-align: top; }
+li a { overflow-wrap: anywhere; }
+
+/* mixture-of-experts-designs.html: knob board, expert tiles */
+.dz-svg { display: block; width: 100%; max-width: 520px; margin: 0 auto; height: auto; }
+.dz-svg text { font-family: sans-serif; font-size: 13px; fill: #2c3e50; }
+.dz-svg .dz-s { font-size: 11.5px; fill: #566573; }
+.dz-svg .dz-b { font-weight: 700; }
+.dz-svg .dz-card { fill: #f8f9f9; stroke: #d5dbdb; stroke-width: 1.2px; }
+.dz-svg .dz-t { fill: #e8f6f3; stroke: #a2d9ce; stroke-width: 1px; transition: fill .3s; }
+.dz-svg .dz-t.dz-on { fill: #117864; stroke: #0b5345; }
+.dz-svg .dz-t.dz-sh { fill: #7d3c98; stroke: #5b2c6f; }
+.dz-svg .dz-dense { fill: #117864; stroke: #0b5345; }
+.dz-svg .dz-tok { fill: #fdebd0; stroke: #a85a14; stroke-width: 1.2px; }
+.dz-svg .dz-router { fill: #eaf2f8; stroke: #1f6aa5; stroke-width: 1.2px; }
+.dz-svg .dz-ar { stroke: #7f8c8d; stroke-width: 1.4px; fill: none; }
+.dz-svg .dz-bar0 { fill: #f1f4f7; }
+.dz-svg .dz-bw { fill: #117864; transition: width .35s; }
+.dz-svg .dz-bs { fill: #95a5a6; transition: width .35s; }
+.dz-svg .dz-bc { fill: #1f6aa5; transition: width .35s; }
+.mo-table td, .mo-table th { vertical-align: top; }
+
+</style>
+  <script src="site-math.js" defer></script>
 </head>
 <body>
       <nav class="topnav" aria-label="Site">
@@ -1044,276 +1110,333 @@ html var sub,html var sup,html .mvar sub,html .mvar sup{font-size:max(12px,.72em
 
     <p class="crumb"><a href="tutorial.html">&larr; All tutorials</a></p>
     <script src="tutorial-nav.js"></script>
-    <!-- prev-next: generator pending -->
 
   <h1>Mixture of Experts Designs</h1>
-  <p class="dek">GPUs, memory and failures</p>
+  <p class="dek">How real MoE models choose their experts: how many, how big, how many per token, and whether some are always on, from Switch to Mixtral and DeepSeek-V3.</p>
 
-  <nav class="sermap" aria-label="The Mixture of Experts series"><ol class="sm-series"><li><a href="mixture-of-experts.html">Mixture of Experts (MoE)</a></li><li><span class="sm-here" aria-current="page">Mixture of Experts Designs</span></li></ol></nav>
+  <nav class="sermap" aria-label="The Mixture of Experts series"><ol class="sm-series"><li><a href="mixture-of-experts.html">Mixture of Experts (MoE)</a></li><li><span class="sm-here" aria-current="page">MoE Designs</span></li><li><a href="moe-bias-balancing.html">Bias Balancing</a></li><li><a href="moe-expert-parallelism.html">Expert Parallelism</a></li><li><a href="moe-fine-tuning.html">MoE Fine-Tuning</a></li></ol></nav>
 
-  <nav class="prereq" aria-label="Before you start"><span class="prereq-label">Before you start</span><a class="prereq-chip" href="logistic.html#idea" title="Logistic Regression, section 2" aria-label="Sigmoid and logits, taught in Logistic Regression, section 2">Sigmoid and logits</a><a class="prereq-chip" href="mixture-of-experts.html#router" title="Mixture of Experts (MoE), section 2" aria-label="Router and top-k, taught in Mixture of Experts (MoE), section 2">Router and top-k</a><a class="prereq-chip" href="mixture-of-experts.html#balance-loss" title="Mixture of Experts (MoE), section 3" aria-label="Balance loss, taught in Mixture of Experts (MoE), section 3">Balance loss</a><a class="prereq-chip" href="mixture-of-experts.html#capacity" title="Capacity and dropped tokens, Mixture of Experts (MoE), section 4" aria-label="Capacity and dropped tokens, taught in Mixture of Experts (MoE), section 4">Capacity</a></nav>
+  <nav class="prereq" aria-label="Before you start"><span class="prereq-label">Before you start</span><a class="prereq-chip" href="mixture-of-experts.html#big-picture" title="Mixture of Experts (MoE), the store vs use section" aria-label="Store vs use, taught in Mixture of Experts (MoE), the store vs use section">Store vs use</a><a class="prereq-chip" href="mixture-of-experts.html#top-k" title="Mixture of Experts (MoE), the router and top-k section" aria-label="Router and top-k, taught in Mixture of Experts (MoE), the router and top-k section">Router and top-k</a><a class="prereq-chip" href="transformer-block.html" title="The Transformer Block, the FFN section" aria-label="The FFN, taught in The Transformer Block, the FFN section">The FFN</a></nav>
 
   <p class="tabs-label">On this page</p>
   <div class="tab-strip">
-    <a class="tab-chip" href="#bias-balance"><span class="secnum">1</span> Balancing with a bias instead of a loss</a>
-    <a class="tab-chip" href="#designs"><span class="secnum">2</span> How the main designs differ</a>
-    <a class="tab-chip" href="#expert-parallel"><span class="secnum">3</span> Experts across GPUs</a>
-    <a class="tab-chip" href="#memory"><span class="secnum">4</span> Memory versus compute</a>
-    <a class="tab-chip" href="#batch"><span class="secnum">5</span> Batch size and expert load</a>
-    <a class="tab-chip" href="#fine-tuning"><span class="secnum">6</span> Fine-tuning an MoE model</a>
-    <a class="tab-chip" href="#code"><span class="secnum">7</span> Bias routing and logging in PyTorch</a>
-    <a class="tab-chip" href="#knobs"><span class="secnum">8</span> MoE routing and balancing settings</a>
-    <a class="tab-chip" href="#failures"><span class="secnum">9</span> MoE failures, symptoms and fixes</a>
-    <a class="tab-chip" href="#references"><span class="secnum">10</span> References</a>
+    <a class="tab-chip" href="#design-choices"><span class="secnum">1</span> Four choices shape every MoE layer</a>
+    <a class="tab-chip" href="#designs"><span class="secnum">2</span> How many experts per token</a>
+    <a class="tab-chip" href="#fine-grained"><span class="secnum">3</span> Many small experts</a>
+    <a class="tab-chip" href="#shared"><span class="secnum">4</span> Always-on shared experts</a>
+    <a class="tab-chip" href="#designWalk"><span class="secnum">5</span> Walkthrough: four designs on one layer</a>
+    <a class="tab-chip" href="#design-tool"><span class="secnum">6</span> The tool: split the experts</a>
+    <a class="tab-chip" href="#compare"><span class="secnum">7</span> How the designs compare</a>
+    <a class="tab-chip" href="#mmoe"><span class="secnum">8</span> Experts beyond language models</a>
+    <a class="tab-chip" href="#designs-practice"><span class="secnum">9</span> Choosing a design in practice</a>
+    <a class="tab-chip" href="#failures"><span class="secnum">10</span> What goes wrong</a>
+    <a class="tab-chip" href="#references"><span class="secnum">11</span> References</a>
   </div>
 
+
+  <h2 id="design-choices"><span class="secnum">1</span> Four choices shape every MoE layer</h2>
   <p>
-    One MoE layer, as built in <a href="mixture-of-experts.html">Mixture of Experts (MoE)</a>, is the starting point.
-    Real models add balancing without a loss, choices of how many experts and how big, and a way to spread the experts over many GPUs.
+    A dense feed-forward layer spends all of its weights on every token (<a href="mixture-of-experts.html#big-picture">Mixture of Experts, store vs use</a>). A mixture of experts replaces it with many experts and a router that sends each token to a few of them; how the router scores and picks is taught in <a href="mixture-of-experts.html#top-k">Mixture of Experts, the router and top-k</a>.
+    Every real MoE model then makes four choices: how many experts each layer has, how many each token visits, how big each expert is, and whether some experts run for every token.
   </p>
-  <figure class="figure mtd-fig" id="moeMapBFig">
-<svg class="mtd-svg mo-svg" viewBox="0 0 360 300" role="img" aria-label="One MoE layer: a token, a router with a bias, eight experts on two GPUs, two of them chosen, and their outputs added. Markers 1 to 5 point at the sections of this page."><rect class="mo-chip" x="150" y="6" width="60" height="26" rx="13"/><text class="mo-sm mo-b c-x" x="180" y="24" text-anchor="middle">token</text><line class="mo-ar" x1="180.0" y1="32.0" x2="180.0" y2="47.0"/><polygon class="mo-ah" points="180.0,56.0 175.0,47.0 185.0,47.0"/><rect class="mo-rbox" x="100" y="56" width="120" height="34" rx="6"/><text class="mo-b c-z" x="160" y="78" text-anchor="middle">router</text><rect class="mo-biasr" x="226" y="60" width="58" height="26" rx="5"/><text class="mo-sm mo-b c-g" x="255" y="78" text-anchor="middle">+ bias</text><circle class="mo-mkc" cx="304" cy="73" r="10"/><text class="mo-mkt" x="304" y="78" text-anchor="middle" aria-hidden="true">1</text><rect class="mo-gpuf" x="34" y="118" width="132" height="74" rx="6"/><text class="mo-sm mo-s" x="160" y="134" text-anchor="end">GPU 1</text><rect class="mo-elit" x="40" y="142" width="27" height="40" rx="4"/><text class="mo-sm c-e mo-b" x="53.5" y="167" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">1</tspan></text><rect class="mo-edim" x="71" y="142" width="27" height="40" rx="4"/><text class="mo-sm c-mut" x="84.5" y="167" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">2</tspan></text><rect class="mo-edim" x="102" y="142" width="27" height="40" rx="4"/><text class="mo-sm c-mut" x="115.5" y="167" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">3</tspan></text><rect class="mo-edim" x="133" y="142" width="27" height="40" rx="4"/><text class="mo-sm c-mut" x="146.5" y="167" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">4</tspan></text><rect class="mo-gpuf" x="194" y="118" width="132" height="74" rx="6"/><text class="mo-sm mo-s" x="320" y="134" text-anchor="end">GPU 2</text><rect class="mo-edim" x="200" y="142" width="27" height="40" rx="4"/><text class="mo-sm c-mut" x="213.5" y="167" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">5</tspan></text><rect class="mo-elit" x="231" y="142" width="27" height="40" rx="4"/><text class="mo-sm c-e mo-b" x="244.5" y="167" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">6</tspan></text><rect class="mo-edim" x="262" y="142" width="27" height="40" rx="4"/><text class="mo-sm c-mut" x="275.5" y="167" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">7</tspan></text><rect class="mo-edim" x="293" y="142" width="27" height="40" rx="4"/><text class="mo-sm c-mut" x="306.5" y="167" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">8</tspan></text><line class="mo-ar" x1="150.0" y1="90.0" x2="61.0" y2="135.9"/><polygon class="mo-ah" points="53.0,140.0 58.7,131.4 63.3,140.3"/><line class="mo-ar" x1="170.0" y1="90.0" x2="236.5" y2="135.0"/><polygon class="mo-ah" points="244.0,140.0 233.7,139.1 239.3,130.8"/><circle class="mo-mkc" cx="16" cy="162" r="10"/><text class="mo-mkt" x="16" y="167" text-anchor="middle" aria-hidden="true">2</text><circle class="mo-mkc" cx="344" cy="128" r="10"/><text class="mo-mkt" x="344" y="133" text-anchor="middle" aria-hidden="true">3</text><circle class="mo-mkc" cx="344" cy="168" r="10"/><text class="mo-mkt" x="344" y="173" text-anchor="middle" aria-hidden="true">4</text><line class="mo-ar" x1="53.0" y1="182.0" x2="161.5" y2="219.1"/><polygon class="mo-ah" points="170.0,222.0 159.9,223.8 163.1,214.4"/><line class="mo-ar" x1="244.0" y1="182.0" x2="197.2" y2="216.6"/><polygon class="mo-ah" points="190.0,222.0 194.3,212.6 200.2,220.7"/><circle class="mo-sumc" cx="180" cy="230" r="11"/><text class="mo-b" x="180" y="235" text-anchor="middle">+</text><line class="mo-ar" x1="180.0" y1="241.0" x2="180.0" y2="261.0"/><polygon class="mo-ah" points="180.0,270.0 175.0,261.0 185.0,261.0"/><text class="mo-s" x="180" y="288" text-anchor="middle">output</text><circle class="mo-mkc" cx="232" cy="283" r="10"/><text class="mo-mkt" x="232" y="288" text-anchor="middle" aria-hidden="true">5</text></svg>
-    <figcaption class="caption"><span class="fignum">Figure 1.</span> <span class="mo-mk">1</span> bias, <span class="mo-mk">2</span> designs, <span class="mo-mk">3</span> GPUs, <span class="mo-mk">4</span> memory to fine-tuning, <span class="mo-mk">5</span> failures.</figcaption>
+  <figure class="figure mtd-fig" id="designBoardFig">
+<svg class="dz-svg" viewBox="0 0 360 214" role="img" aria-label="Four cards: number of experts, experts per token, expert size, and shared experts. Each card shows a small row of expert tiles."><rect class="dz-card" x="8" y="10" width="168" height="94" rx="8"/><text class="dz-b" x="18" y="30">how many experts</text><text class="dz-s" x="18" y="94">more experts, more weights stored</text><rect class="dz-t" x="18.0" y="44" width="16.0" height="30" rx="2"/><rect class="dz-t" x="36.5" y="44" width="16.0" height="30" rx="2"/><rect class="dz-t" x="55.0" y="44" width="16.0" height="30" rx="2"/><rect class="dz-t" x="73.5" y="44" width="16.0" height="30" rx="2"/><rect class="dz-t" x="92.0" y="44" width="16.0" height="30" rx="2"/><rect class="dz-t" x="110.5" y="44" width="16.0" height="30" rx="2"/><rect class="dz-t" x="129.0" y="44" width="16.0" height="30" rx="2"/><rect class="dz-t" x="147.5" y="44" width="16.0" height="30" rx="2"/><rect class="dz-card" x="184" y="10" width="168" height="94" rx="8"/><text class="dz-b" x="194" y="30">experts per token</text><text class="dz-s" x="194" y="94">more picked, more work per token</text><rect class="dz-t" x="194.0" y="44" width="16.0" height="30" rx="2"/><rect class="dz-t" x="212.5" y="44" width="16.0" height="30" rx="2"/><rect class="dz-t dz-on" x="231.0" y="44" width="16.0" height="30" rx="2"/><rect class="dz-t" x="249.5" y="44" width="16.0" height="30" rx="2"/><rect class="dz-t" x="268.0" y="44" width="16.0" height="30" rx="2"/><rect class="dz-t dz-on" x="286.5" y="44" width="16.0" height="30" rx="2"/><rect class="dz-t" x="305.0" y="44" width="16.0" height="30" rx="2"/><rect class="dz-t" x="323.5" y="44" width="16.0" height="30" rx="2"/><rect class="dz-card" x="8" y="112" width="168" height="94" rx="8"/><text class="dz-b" x="18" y="132">how big each expert is</text><text class="dz-s" x="18" y="196">smaller experts, more of them</text><rect class="dz-t" x="18.0" y="146" width="10.5" height="30" rx="2"/><rect class="dz-t" x="31.0" y="146" width="10.5" height="30" rx="2"/><rect class="dz-t" x="44.0" y="146" width="10.5" height="30" rx="2"/><rect class="dz-t" x="57.0" y="146" width="10.5" height="30" rx="2"/><rect class="dz-t" x="70.0" y="146" width="10.5" height="30" rx="2"/><rect class="dz-t" x="83.0" y="146" width="10.5" height="30" rx="2"/><rect class="dz-t" x="96.0" y="146" width="10.5" height="30" rx="2"/><rect class="dz-t" x="109.0" y="146" width="10.5" height="30" rx="2"/><rect class="dz-t" x="122.0" y="146" width="10.5" height="30" rx="2"/><rect class="dz-t" x="135.0" y="146" width="10.5" height="30" rx="2"/><rect class="dz-t" x="148.0" y="146" width="10.5" height="30" rx="2"/><rect class="dz-t" x="161.0" y="146" width="10.5" height="30" rx="2"/><rect class="dz-card" x="184" y="112" width="168" height="94" rx="8"/><text class="dz-b" x="194" y="132">always-on shared experts</text><text class="dz-s" x="194" y="196">common knowledge for every token</text><rect class="dz-t dz-sh" x="194.0" y="146" width="16.0" height="30" rx="2"/><rect class="dz-t" x="212.5" y="146" width="16.0" height="30" rx="2"/><rect class="dz-t" x="231.0" y="146" width="16.0" height="30" rx="2"/><rect class="dz-t" x="249.5" y="146" width="16.0" height="30" rx="2"/><rect class="dz-t" x="268.0" y="146" width="16.0" height="30" rx="2"/><rect class="dz-t" x="286.5" y="146" width="16.0" height="30" rx="2"/><rect class="dz-t" x="305.0" y="146" width="16.0" height="30" rx="2"/><rect class="dz-t" x="323.5" y="146" width="16.0" height="30" rx="2"/></svg>
+    <figcaption class="caption"><span class="fignum">Figure 1.</span> The four design choices of an MoE layer. Green: picked for one token; purple: always on.</figcaption>
   </figure>
-
-  <h2 id="bias-balance"><span class="secnum">1</span> Balancing with a bias instead of a loss</h2>
-
   <p>
-    The balance loss pulls against the task loss: too small a weight leaves the load uneven, and too large a weight hurts quality (Wang et al. 2024, their Fig. 2).
-    DeepSeek-V3 (DeepSeek-AI, 2024) instead keeps a per-expert offset that is used only for picking, so nothing pulls on the task loss.
-    It also scores experts with a sigmoid instead of a softmax: the illustrative scores of <a href="mixture-of-experts.html#router">Mixture of Experts, section 2</a> become 0.77, 0.73, 0.45 and 0.50 for &ldquo;cat&rdquo;.
+    The design is fixed before pretraining and sets the memory, the compute per token and the traffic between GPUs for the life of the model. What a dense block costs, for comparison, is in <a href="transformer-cost.html">Transformer Cost and Efficiency</a>.
   </p>
-  <figure class="figure mtd-fig" id="moeBiasStepFig">
-<svg class="mtd-svg mo-svg" viewBox="0 0 360 356" role="img" aria-label="Step 1: E1 holds the, cat and has, E4 holds 3, loads 3, 0, 0, 1, MaxVio 2.0. After biases minus 0.1 on E1 and plus 0.1 on E2 and E3, step 2 sends one token to each expert, MaxVio 0."><text class="mo-b" x="11" y="18">Step 1: every bias 0</text><rect class="mo-ebox" x="11" y="28" width="80" height="88" rx="6"/><text class="mo-b c-e" x="19" y="46">E<tspan baseline-shift="sub" font-size="15">1</tspan></text><rect class="mo-chip" x="15" y="62" width="34" height="22" rx="11"/><text class="mo-sm mo-b c-x" x="32" y="78" text-anchor="middle">the</text><rect class="mo-chip" x="53" y="62" width="34" height="22" rx="11"/><text class="mo-sm mo-b c-x" x="70" y="78" text-anchor="middle">cat</text><rect class="mo-chip" x="15" y="88" width="34" height="22" rx="11"/><text class="mo-sm mo-b c-x" x="32" y="104" text-anchor="middle">has</text><rect class="mo-edim" x="97" y="28" width="80" height="88" rx="6"/><text class="mo-b c-mut" x="105" y="46">E<tspan baseline-shift="sub" font-size="15">2</tspan></text><rect class="mo-edim" x="183" y="28" width="80" height="88" rx="6"/><text class="mo-b c-mut" x="191" y="46">E<tspan baseline-shift="sub" font-size="15">3</tspan></text><rect class="mo-ebox" x="269" y="28" width="80" height="88" rx="6"/><text class="mo-b c-e" x="277" y="46">E<tspan baseline-shift="sub" font-size="15">4</tspan></text><rect class="mo-chip" x="273" y="62" width="34" height="22" rx="11"/><text class="mo-sm mo-b c-x" x="290" y="78" text-anchor="middle">3</text><text class="mo-sm mo-s" x="11" y="136">loads 3, 0, 0, 1 against a mean of 1; MaxVio 2.0</text><text class="mo-b" x="11" y="166">Step 2: biases after one update</text><rect class="mo-ebox" x="11" y="176" width="80" height="88" rx="6"/><text class="mo-b c-e" x="19" y="194">E<tspan baseline-shift="sub" font-size="15">1</tspan></text><line class="mo-gar" stroke-width="2.2" x1="49.0" y1="180.0" x2="49.0" y2="190.0"/><polygon class="mo-gah" points="49.0,196.0 45.0,190.0 53.0,190.0"/><text class="mo-sm mo-b c-g" x="87" y="194" text-anchor="end">−0.1</text><rect class="mo-chip" x="15" y="210" width="34" height="22" rx="11"/><text class="mo-sm mo-b c-x" x="32" y="226" text-anchor="middle">the</text><rect class="mo-ebox" x="97" y="176" width="80" height="88" rx="6"/><text class="mo-b c-e" x="105" y="194">E<tspan baseline-shift="sub" font-size="15">2</tspan></text><line class="mo-gar" stroke-width="2.2" x1="135.0" y1="196.0" x2="135.0" y2="186.0"/><polygon class="mo-gah" points="135.0,180.0 139.0,186.0 131.0,186.0"/><text class="mo-sm mo-b c-g" x="173" y="194" text-anchor="end">+0.1</text><rect class="mo-ring" x="101" y="210" width="34" height="22" rx="11"/><text class="mo-sm mo-b c-x" x="118" y="226" text-anchor="middle">cat</text><rect class="mo-ebox" x="183" y="176" width="80" height="88" rx="6"/><text class="mo-b c-e" x="191" y="194">E<tspan baseline-shift="sub" font-size="15">3</tspan></text><line class="mo-gar" stroke-width="2.2" x1="221.0" y1="196.0" x2="221.0" y2="186.0"/><polygon class="mo-gah" points="221.0,180.0 225.0,186.0 217.0,186.0"/><text class="mo-sm mo-b c-g" x="259" y="194" text-anchor="end">+0.1</text><rect class="mo-ring" x="187" y="210" width="34" height="22" rx="11"/><text class="mo-sm mo-b c-x" x="204" y="226" text-anchor="middle">has</text><rect class="mo-ebox" x="269" y="176" width="80" height="88" rx="6"/><text class="mo-b c-e" x="277" y="194">E<tspan baseline-shift="sub" font-size="15">4</tspan></text><text class="mo-sm mo-b c-g" x="345" y="194" text-anchor="end">0</text><rect class="mo-chip" x="273" y="210" width="34" height="22" rx="11"/><text class="mo-sm mo-b c-x" x="290" y="226" text-anchor="middle">3</text><text class="mo-sm mo-s" x="11" y="284">loads 1, 1, 1, 1; MaxVio 0</text><text class="mo-sm" x="11" y="314">cat: 0.67 against 0.83, moves to E<tspan baseline-shift="sub" font-size="15">2</tspan></text><text class="mo-sm" x="11" y="342">has: 0.72 against 0.79, moves to E<tspan baseline-shift="sub" font-size="15">3</tspan></text></svg>
-    <figcaption class="caption"><span class="fignum">Figure 2.</span> Illustrative: one bias update moves the two near-tie tokens to idle experts.</figcaption>
-  </figure>
-
-  <p>
-    At step 1 every bias is 0. E<sub>1</sub> takes 3 tokens and E<sub>2</sub> and E<sub>3</sub> none, so MaxVio, how far the busiest expert sits above the mean, is 2.0.
-    One update with an illustrative step <var>&gamma;</var> = 0.1 (DeepSeek-V3 uses 0.001) sets the biases to &minus;0.1, +0.1, +0.1 and 0, and at step 2 every expert gets one token.
-    Keep a small offset per expert that only changes who gets picked; after each step, lower it for busy experts and raise it for idle ones.
-  </p>
-
-  <div class="eq-card" id="moeBiasEq">
-    <p class="eq-what">Sigmoid scores, a bias that only picks, and the bias update after each step.</p>
-    <div class="eq-line eq-active"><span style="white-space:nowrap"><span style="color:#117a65">s<sub>i</sub></span> =</span> <span style="white-space:nowrap"><span class="frac"><span class="top">1</span><span class="bot">1 + e<sup>&minus;<span style="color:#1f6aa5">z<sub>i</sub></span></sup></span></span></span></div>
-    <div class="eq-line eq-active"><span style="white-space:nowrap"><var>S</var> = top-<var>k</var> indices of</span> <span style="white-space:nowrap"><span style="color:#117a65">s<sub>i</sub></span> + <span style="color:#a85a14">b<sub>i</sub></span></span></div>
-    <div class="eq-line eq-active"><span style="white-space:nowrap"><var>g</var><sub>i</sub> =</span> <span style="white-space:nowrap"><span class="frac"><span class="top"><span style="color:#117a65">s<sub>i</sub></span></span><span class="bot">&Sigma;<sub>j&isin;S</sub> <span style="color:#117a65">s<sub>j</sub></span></span></span></span></div>
-    <div class="eq-line eq-active"><span style="white-space:nowrap"><span style="color:#a85a14">b<sub>i</sub></span> &larr;</span> <span style="white-space:nowrap"><span style="color:#a85a14">b<sub>i</sub></span> + <var>&gamma;</var> sign(<span style="color:#c0392b;text-decoration:overline"><var>&ell;</var></span> &minus; <span style="color:#c0392b"><var>&ell;</var><sub>i</sub></span>)</span></div>
-    <div class="eq-line eq-active"><span style="white-space:nowrap">MaxVio =</span> <span style="white-space:nowrap"><span class="frac"><span class="top">max<sub>i</sub> <span style="color:#c0392b"><var>&ell;</var><sub>i</sub></span> &minus; <span style="color:#c0392b;text-decoration:overline"><var>&ell;</var></span></span><span class="bot"><span style="color:#c0392b;text-decoration:overline"><var>&ell;</var></span></span></span></span></div>
-    <div class="eq-why eq-active">Line 1: <var>z</var><sub>i</sub> is the router&rsquo;s score for expert <var>i</var>, and <var>s</var><sub>i</sub> squashes it between 0 and 1 on its own, the sigmoid of <a href="logistic.html#idea">Logistic Regression, section 2</a>. The scores no longer add to 1, which is why line 3 divides by the chosen scores&rsquo; sum.</div>
-    <div class="eq-why eq-active">Line 2: <var>S</var> is the chosen set of <var>k</var> experts, and the bias <var>b</var><sub>i</sub> enters only here. Line 3&rsquo;s gates <var>g</var><sub>i</sub> use <var>s</var> alone, so the output weights stay what the router learned. With <var>k</var> = 1 the gate is 1 whatever the bias, so the router gets no gradient from the output. DeepSeek-V3 uses <var>k</var> = 8; the example uses <var>k</var> = 1 only to show the picks.</div>
-    <div class="eq-why eq-active">Line 4: <var>&ell;</var><sub>i</sub> is how many tokens expert <var>i</var> got this step, and the mean <span style="text-decoration:overline"><var>&ell;</var></span> is <var>k</var><var>T</var>/<var>N</var> for <var>T</var> tokens and <var>N</var> experts. sign(&hellip;) is +1 for an idle expert, &minus;1 for a busy one and 0 at the mean; <var>&gamma;</var> is how far one step moves the bias, and &larr; means replace after each step.</div>
-    <div class="eq-why eq-active">Line 5: how far the busiest expert sits above the mean, as a fraction of the mean; 0 is perfect balance.</div>
-    <div class="eq-why eq-active">The balance pressure therefore no longer comes through gradients, and it does not pull against the task loss.</div>
-    <div class="eq-why eq-active mo-eqlink">Line 2 is <a href="mixture-of-experts.html#moeGateEq">the gate card</a> of Mixture of Experts with <var>s</var> + <var>b</var> in place of <var>p</var>, and the bias replaces the <var>&alpha;</var> term of <a href="mixture-of-experts.html#moeZEq">its total loss</a>. <a href="#code">Section 7</a> codes lines 1 to 5.</div>
-    <div class="eq-why eq-active mo-eqsrc">Source: DeepSeek-V3 eqs. 12 to 16, section 2.1.2; Wang et al. Algorithm 1 and eq. 4.</div>
+  <div class="eq-card" id="moeDesignEq">
+    <p class="eq-what">An MoE layer adds its picked routed experts and all of its shared experts; compute follows the experts a token visits, memory follows every expert kept.</p>
+    <div class="eq-line eq-active" data-eqline="0"><span class="eq-n">(1)</span>\(\displaystyle {\begin{aligned}&y = \sum_{i \in \mathcal{T}(x)} \htmlClass{eqt sym-g}{\htmlStyle{color:#1f6aa5}{g_i(x)}}\, \htmlClass{eqt sym-r}{\htmlStyle{color:#117864}{E_i(x)}} \\ &\quad + \sum_{j=1}^{\htmlClass{eqt sym-s}{\htmlStyle{color:#7d3c98}{K_s}}} \htmlClass{eqt sym-s}{\htmlStyle{color:#7d3c98}{E^{s}_{j}(x)}}\end{aligned}}\)</div>
+    <div class="eq-why eq-active" data-eqline="0">The output mixes the few routed experts the router picked, each weighted by the router, plus every shared expert. <var>\(\mathcal{T}(x)\)</var> is the set of picked experts and <var>\(g_i\)</var> the router&rsquo;s weight for expert <var>\(i\)</var>, computed as in <a href="mixture-of-experts.html#top-k">Mixture of Experts, the router and top-k</a>. <var>\(E_i\)</var> is a routed expert; <var>\(E^{s}_{j}\)</var> is a shared expert that every token uses, and <var>\(K_s\)</var> counts them (zero for Switch and Mixtral). The shared experts add a fixed cost to every token; the routed ones add a chosen one.</div>
+    <div class="eq-line eq-active" data-eqline="1"><span class="eq-n">(2)</span>\(\displaystyle {\begin{aligned}&\text{active per token} \\ &\quad \propto (\htmlClass{eqt sym-r}{\htmlStyle{color:#117864}{k}} + \htmlClass{eqt sym-s}{\htmlStyle{color:#7d3c98}{K_s}})\, \htmlClass{eqt sym-x}{\htmlStyle{color:#a85a14}{d_{\text{expert}}}} \\ &\text{stored} \\ &\quad \propto (\htmlClass{eqt sym-r}{\htmlStyle{color:#117864}{N}} + \htmlClass{eqt sym-s}{\htmlStyle{color:#7d3c98}{K_s}})\, \htmlClass{eqt sym-x}{\htmlStyle{color:#a85a14}{d_{\text{expert}}}}\end{aligned}}\)</div>
+    <div class="eq-why eq-active" data-eqline="1">Compute follows the experts a token visits, memory follows every expert kept. <var>\(k\)</var> and <var>\(N\)</var> count the routed experts a token picks and the routed experts stored, and <var>\(d_{\text{expert}}\)</var> is the size of one expert. The idea is the store-versus-use split of <a href="mixture-of-experts.html#big-picture">Mixture of Experts</a>; this line only adds the shared term, which sits in both brackets.</div>
+    <div class="eq-legend"><span class="eq-item"><span class="eq-sw" style="background:#117864"></span>routed experts</span><span class="eq-item"><span class="eq-sw" style="background:#7d3c98"></span>shared experts</span><span class="eq-item"><span class="eq-sw" style="background:#1f6aa5"></span>router weight</span><span class="eq-item"><span class="eq-sw" style="background:#a85a14"></span>expert size</span></div>
   </div>
 
+  <h2 id="designs"><span class="secnum">2</span> How many experts per token</h2>
   <p>
-    The toy runs this rule with 8 experts, top&#8209;2, 512 tokens a step and a frozen router that prefers E<sub>1</sub>; a token counts once for each of its 2 experts, so an even share is 2&middot;512/8 = 128 tokens per expert.
+    The router and its weighted sum are on <a href="mixture-of-experts.html#top-k">Mixture of Experts, the router and top-k</a>. What changes between designs is how many experts each token visits.
+    Visiting more experts per token costs more compute and more traffic between GPUs for every token, and it gives the router more combinations to choose from.
   </p>
-  <figure class="figure demo mo-tool" id="moeBias">
-    <div class="mo-ctl mo-range"><label class="mo-lab" for="mbsG">bias step <var>&gamma;</var> = <span id="mbsGv">0.005</span></label>
-      <input type="range" id="mbsG" min="0" max="8" step="1" value="3" aria-valuetext="bias step 0.005"></div>
-    <div class="mo-ctl mo-range"><label class="mo-lab" for="mbsT">training step = <span id="mbsTv">60</span></label>
-      <input type="range" id="mbsT" min="0" max="60" step="1" value="60" aria-valuetext="training step 60 of 60"></div>
-    <svg id="mbsSvg" class="mo-svg" viewBox="0 0 360 430" role="img" aria-label="MaxVio over 60 steps at bias step 0.005, with the larger step 0.08 dashed; tokens per expert and each bias minus the average at the chosen step."></svg>
-    <p class="demo-stats" id="mbsRead" aria-live="polite"></p>
-    <figcaption class="caption"><span class="fignum">Figure 3.</span> Illustrative toy: <span class="mo-mk">1</span> MaxVio now, <span class="mo-mk">2</span> busiest expert, if any.</figcaption>
-  </figure>
-
   <p>
-    Too small a step balances late, too large a step keeps swinging, and in between it settles; the bottom row shows each bias minus the average, since only the differences between biases change a pick.
-    Each step moves a bias by only <var>&gamma;</var>, so a run of tens of thousands of steps can afford a far smaller <var>&gamma;</var> than this 60-step toy: Wang et al. tried 0.0001, 0.001 and 0.01 over 40k steps, saw the smallest balance late and the largest swing late, and chose 0.001 (their Fig. 4).
-    DeepSeek-V3 runs this on 256 experts with <var>&gamma;</var> = 0.001.
+    Switch Transformer (Fedus et al. 2021) sends each token to one expert, for simplicity and the cheapest communication. GShard (Lepikhin et al. 2020) sends each token to two, for translation between many languages. Mixtral 8x7B (Jiang et al. 2024) sends each token to two of the eight experts in each layer.
+    ST-MoE (Zoph et al. 2022) recommends two experts per token, a training capacity factor of 1.25, and at most one expert per accelerator core.
   </p>
 
+  <h2 id="fine-grained"><span class="secnum">3</span> Many small experts</h2>
   <p>
-    The bias is carried between steps and updated once per step, after the batch&rsquo;s loads are counted.
-    DeepSeek-V3 also keeps a tiny balance loss computed per sequence instead of per batch, with weight <var>&alpha;</var> = 0.0001, so no single sequence piles onto one expert.
+    DeepSeekMoE (Dai et al. 2024) cuts each expert into <var>\(m\)</var> smaller ones by cutting its inner hidden size, and activates <var>\(m\)</var> times as many. The compute per token stays the same, while the number of different expert groups a token can reach grows very fast.
+    Narrow experts can each learn something specific, instead of one big expert mixing many kinds of knowledge.
   </p>
+  <div class="eq-card" id="moeSplitEq">
+    <p class="eq-what">Splitting every expert into smaller pieces keeps compute and memory and multiplies the choices.</p>
+    <div class="eq-line eq-active" data-eqline="0"><span class="eq-n">(3)</span>\(\displaystyle {\begin{aligned}&\htmlClass{eqt sym-r}{\htmlStyle{color:#117864}{N}} \to m\htmlClass{eqt sym-r}{\htmlStyle{color:#117864}{N}} \\ &\htmlClass{eqt sym-r}{\htmlStyle{color:#117864}{k}} \to m\htmlClass{eqt sym-r}{\htmlStyle{color:#117864}{k}} \\ &\htmlClass{eqt sym-x}{\htmlStyle{color:#a85a14}{d_{\text{expert}}}} \to \frac{\htmlClass{eqt sym-x}{\htmlStyle{color:#a85a14}{d_{\text{expert}}}}}{m}\end{aligned}}\)</div>
+    <div class="eq-why eq-active" data-eqline="0">Cut every expert into <var>\(m\)</var> pieces and pick <var>\(m\)</var> times as many. Both brackets of equation (2) grow by <var>\(m\)</var> while the expert size shrinks by <var>\(m\)</var>, so compute and memory stay where they were.</div>
+    <div class="eq-legend"><span class="eq-item"><span class="eq-sw" style="background:#117864"></span>routed experts</span><span class="eq-item"><span class="eq-sw" style="background:#7d3c98"></span>shared experts</span><span class="eq-item"><span class="eq-sw" style="background:#1f6aa5"></span>router weight</span><span class="eq-item"><span class="eq-sw" style="background:#a85a14"></span>expert size</span></div>
+  </div>
 
-  <h2 id="designs"><span class="secnum">2</span> How the main designs differ</h2>
-
+  <h2 id="shared"><span class="secnum">4</span> Always-on shared experts</h2>
   <p>
-    Designs differ in how many experts run per token, how small they are, and whether some always run.
+    DeepSeekMoE also keeps a few <strong>shared experts</strong> that every token uses. They hold the common knowledge, so the routed experts do not each have to learn it again and can specialize.
+    When <var>\(K_s\)</var> shared experts are added, the routed experts picked per token drop by the same number, so the compute stays the same (equation (4)).
+    DeepSeek-V3 (DeepSeek-AI 2024) has one shared expert and 256 routed experts in each MoE layer and activates eight routed experts per token.
   </p>
-  <figure class="figure mtd-fig" id="moeDesignFig">
-<svg class="mtd-svg mo-svg" viewBox="0 0 360 430" role="img" aria-label="Five MoE designs as rows of expert squares: Switch picks 1 of 16, GShard 2 of 16, Mixtral 2 of 8, DeepSeekMoE one shared expert plus 7 of 32 small ones, DeepSeek-V3 one shared plus 8 of 256."><text class="mo-sm mo-s" x="0" y="14">MoE layer at: every other FFN (Switch, GShard),</text><text class="mo-sm mo-s" x="0" y="30">every fourth (ST-MoE), every block (Mixtral),</text><text class="mo-sm mo-s" x="0" y="46">all but the first 3 (DeepSeek-V3)</text><text class="mo-sm" x="0" y="66"><tspan class="mo-b">Switch</tspan> <tspan class="mo-s">1 of N</tspan></text><rect class="mo-full" x="0.0" y="74.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-full" x="22.2" y="74.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-full" x="44.5" y="74.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-full" x="66.8" y="74.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-full" x="89.0" y="74.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-act" x="111.2" y="74.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-full" x="133.5" y="74.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-full" x="155.8" y="74.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-full" x="178.0" y="74.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-full" x="200.2" y="74.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-full" x="222.5" y="74.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-full" x="244.8" y="74.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-full" x="267.0" y="74.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-full" x="289.2" y="74.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-full" x="311.5" y="74.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-full" x="333.8" y="74.0" width="19.2" height="20.0" rx="1.5"/><text class="mo-sm mo-s" x="0" y="112">One expert per token: least compute and traffic.</text><text class="mo-sm" x="0" y="136"><tspan class="mo-b">GShard</tspan> <tspan class="mo-s">2 of N</tspan></text><rect class="mo-full" x="0.0" y="144.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-full" x="22.2" y="144.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-full" x="44.5" y="144.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-full" x="66.8" y="144.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-full" x="89.0" y="144.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-act" x="111.2" y="144.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-full" x="133.5" y="144.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-full" x="155.8" y="144.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-full" x="178.0" y="144.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-full" x="200.2" y="144.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-full" x="222.5" y="144.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-act" x="244.8" y="144.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-full" x="267.0" y="144.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-full" x="289.2" y="144.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-full" x="311.5" y="144.0" width="19.2" height="20.0" rx="1.5"/><rect class="mo-full" x="333.8" y="144.0" width="19.2" height="20.0" rx="1.5"/><text class="mo-sm mo-s" x="0" y="182">A second expert, gates renormalized to add to 1.</text><text class="mo-sm" x="0" y="206"><tspan class="mo-b">Mixtral</tspan> <tspan class="mo-s">2 of 8 SwiGLU experts</tspan></text><rect class="mo-full" x="0.0" y="214.0" width="41.5" height="20.0" rx="1.5"/><rect class="mo-full" x="44.5" y="214.0" width="41.5" height="20.0" rx="1.5"/><rect class="mo-act" x="89.0" y="214.0" width="41.5" height="20.0" rx="1.5"/><rect class="mo-full" x="133.5" y="214.0" width="41.5" height="20.0" rx="1.5"/><rect class="mo-full" x="178.0" y="214.0" width="41.5" height="20.0" rx="1.5"/><rect class="mo-full" x="222.5" y="214.0" width="41.5" height="20.0" rx="1.5"/><rect class="mo-act" x="267.0" y="214.0" width="41.5" height="20.0" rx="1.5"/><rect class="mo-full" x="311.5" y="214.0" width="41.5" height="20.0" rx="1.5"/><text class="mo-sm mo-s" x="0" y="252">8 large experts: 13B of 47B used per token.</text><text class="mo-sm" x="0" y="276"><tspan class="mo-b">DeepSeekMoE</tspan> <tspan class="mo-s">fine-grained plus shared</tspan></text><rect class="mo-shared" x="0.0" y="284.0" width="30.0" height="20.0" rx="1.5"/><rect class="mo-full" x="38.0" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-act" x="47.9" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-full" x="57.9" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-full" x="67.8" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-full" x="77.8" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-full" x="87.7" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-act" x="97.6" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-full" x="107.6" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-full" x="117.5" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-act" x="127.4" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-full" x="137.4" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-full" x="147.3" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-full" x="157.2" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-full" x="167.2" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-full" x="177.1" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-full" x="187.1" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-full" x="197.0" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-act" x="206.9" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-full" x="216.9" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-full" x="226.8" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-full" x="236.8" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-full" x="246.7" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-act" x="256.6" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-full" x="266.6" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-full" x="276.5" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-full" x="286.4" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-full" x="296.4" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-full" x="306.3" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-act" x="316.2" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-full" x="326.2" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-act" x="336.1" y="284.0" width="7.9" height="20.0" rx="1.5"/><rect class="mo-full" x="346.1" y="284.0" width="7.9" height="20.0" rx="1.5"/><text class="mo-sm mo-s" x="0" y="322">Smaller experts, same weights and compute.</text><text class="mo-sm" x="0" y="346"><tspan class="mo-b">DeepSeek-V3</tspan> <tspan class="mo-s">1 shared + 8 of 256</tspan></text><rect class="mo-shared" x="0.0" y="354.0" width="30.0" height="47.0" rx="1.5"/><rect class="mo-full" x="38.0" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="47.9" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="57.8" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-act" x="67.7" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="77.6" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="87.5" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="97.4" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="107.3" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="117.2" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="127.1" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="137.0" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="146.9" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="156.8" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="166.7" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="176.6" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="186.5" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="196.4" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="206.3" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="216.2" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="226.1" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="236.0" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="245.9" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="255.8" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="265.7" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="275.6" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="285.5" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="295.4" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="305.3" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="315.2" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="325.1" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="335.0" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="344.9" y="354.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="38.0" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="47.9" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="57.8" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="67.7" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="77.6" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="87.5" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="97.4" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="107.3" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="117.2" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-act" x="127.1" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="137.0" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="146.9" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="156.8" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="166.7" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="176.6" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="186.5" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="196.4" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="206.3" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="216.2" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="226.1" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="236.0" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="245.9" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="255.8" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="265.7" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="275.6" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="285.5" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="295.4" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="305.3" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="315.2" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="325.1" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="335.0" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="344.9" y="360.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="38.0" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="47.9" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="57.8" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="67.7" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="77.6" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="87.5" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="97.4" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="107.3" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="117.2" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="127.1" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="137.0" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="146.9" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="156.8" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-act" x="166.7" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="176.6" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="186.5" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="196.4" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="206.3" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="216.2" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="226.1" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="236.0" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="245.9" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="255.8" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="265.7" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="275.6" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="285.5" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="295.4" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="305.3" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="315.2" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="325.1" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="335.0" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="344.9" y="366.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="38.0" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="47.9" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="57.8" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="67.7" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="77.6" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="87.5" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="97.4" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="107.3" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="117.2" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="127.1" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="137.0" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="146.9" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="156.8" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="166.7" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-act" x="176.6" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="186.5" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="196.4" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="206.3" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="216.2" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="226.1" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="236.0" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="245.9" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="255.8" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="265.7" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="275.6" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="285.5" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="295.4" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="305.3" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="315.2" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="325.1" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="335.0" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="344.9" y="372.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="38.0" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="47.9" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="57.8" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="67.7" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="77.6" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="87.5" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="97.4" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="107.3" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="117.2" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="127.1" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="137.0" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="146.9" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="156.8" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="166.7" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="176.6" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="186.5" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="196.4" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="206.3" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="216.2" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="226.1" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="236.0" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="245.9" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-act" x="255.8" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="265.7" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="275.6" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="285.5" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="295.4" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="305.3" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="315.2" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="325.1" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="335.0" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="344.9" y="378.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="38.0" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="47.9" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="57.8" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="67.7" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="77.6" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="87.5" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="97.4" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="107.3" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="117.2" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="127.1" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="137.0" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="146.9" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="156.8" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="166.7" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="176.6" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="186.5" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="196.4" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="206.3" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="216.2" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="226.1" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="236.0" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-act" x="245.9" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="255.8" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="265.7" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="275.6" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="285.5" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="295.4" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="305.3" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="315.2" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="325.1" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="335.0" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="344.9" y="384.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="38.0" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="47.9" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="57.8" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="67.7" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="77.6" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="87.5" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="97.4" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="107.3" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="117.2" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="127.1" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="137.0" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="146.9" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="156.8" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="166.7" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="176.6" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="186.5" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="196.4" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="206.3" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="216.2" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="226.1" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="236.0" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-act" x="245.9" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="255.8" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="265.7" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="275.6" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="285.5" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="295.4" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="305.3" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="315.2" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="325.1" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="335.0" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="344.9" y="390.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="38.0" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="47.9" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="57.8" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="67.7" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="77.6" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="87.5" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="97.4" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="107.3" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="117.2" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="127.1" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="137.0" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="146.9" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="156.8" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="166.7" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="176.6" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="186.5" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="196.4" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="206.3" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="216.2" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="226.1" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="236.0" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="245.9" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-act" x="255.8" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="265.7" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="275.6" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="285.5" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="295.4" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="305.3" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="315.2" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="325.1" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="335.0" y="396.0" width="8.0" height="4.6" rx="1.5"/><rect class="mo-full" x="344.9" y="396.0" width="8.0" height="4.6" rx="1.5"/><text class="mo-sm mo-s" x="0" y="420">Many tiny experts, balanced by a bias (section 1).</text><text class="mo-sm mo-b c-e" x="294" y="46" text-anchor="end">chosen</text><text class="mo-sm mo-b c-x" x="356" y="46" text-anchor="end">shared</text></svg>
-    <figcaption class="caption"><span class="fignum">Figure 4.</span> Green: the experts one token uses; purple: shared, run for every token.</figcaption>
-  </figure>
-
-  <p>
-    Switch (Fedus et al., 2021) sends each token to 1 expert, and GShard (Lepikhin et al., 2020) to 2 with renormalized gates; <a href="#moeDesignFig">Figure 4</a> draws both with an illustrative 16 experts.
-    Mixtral (Jiang et al., 2024) has 8 experts per layer and uses 2 per token.
-    DeepSeekMoE (Dai et al., 2024) splits each expert into smaller ones and adds shared experts that every token uses. At the same weights and compute, 16 experts choosing 2 give 120 combinations, while 64 choosing 8 give 4,426,165,368.
-    DeepSeek-V3 uses 1 shared and 8 of 256 routed experts, balanced by the bias of section 1.
-    ST-MoE (Zoph et al., 2022) puts an MoE layer in every fourth block, the setting behind the fine-tuning results of section 6.
-  </p>
-  <p>
-    Each Mixtral expert is a SwiGLU FFN: three weight matrices instead of two. One branch passes through SiLU, a smooth curve shaped like ReLU, and multiplies a second branch element by element before the output matrix.
-    One expert holds 176.2M weights, three matrices of 4,096 by 14,336.
-  </p>
-  <p>
-    DeepSeekMoE draws the shared experts in its own figure. It numbers experts 1 to 2<var>N</var> because it splits each of <var>N</var> experts in two, and its <var>K</var> = 3 is this page&rsquo;s <var>k</var>.
-  </p>
+  <div class="eq-card" id="moeSharedEq">
+    <p class="eq-what">Shared experts are carved out of the routed picks, so the work per token does not grow.</p>
+    <div class="eq-line eq-active" data-eqline="0"><span class="eq-n">(4)</span>\(\displaystyle {\begin{aligned}&\text{routed picked per token} \\ &\quad = m\htmlClass{eqt sym-r}{\htmlStyle{color:#117864}{k}} - \htmlClass{eqt sym-s}{\htmlStyle{color:#7d3c98}{K_s}} \\ &\text{routed experts} \\ &\quad = m\htmlClass{eqt sym-r}{\htmlStyle{color:#117864}{N}} - \htmlClass{eqt sym-s}{\htmlStyle{color:#7d3c98}{K_s}}\end{aligned}}\)</div>
+    <div class="eq-why eq-active" data-eqline="0">Turning <var>\(K_s\)</var> of the pieces into always-on shared experts removes the same number from the routed picks, so the work per token does not grow. From this line on, <var>\(N\)</var> and <var>\(k\)</var> are the counts from before the split, so <var>\(mN\)</var> and <var>\(mk\)</var> are the split counts.</div>
+    <div class="eq-line eq-active" data-eqline="1"><span class="eq-n">(5)</span>\(\displaystyle {\begin{aligned}&\#\,\text{expert groups} \\ &\quad = \binom{m\htmlClass{eqt sym-r}{\htmlStyle{color:#117864}{N}} - \htmlClass{eqt sym-s}{\htmlStyle{color:#7d3c98}{K_s}}}{m\htmlClass{eqt sym-r}{\htmlStyle{color:#117864}{k}} - \htmlClass{eqt sym-s}{\htmlStyle{color:#7d3c98}{K_s}}}\end{aligned}}\)</div>
+    <div class="eq-why eq-active" data-eqline="1">How many different groups of routed experts a token can be sent to: choose the routed picks out of the routed experts. It grows very fast as <var>\(m\)</var> grows, which is why fine-grained experts can each learn something narrow.</div>
+    <div class="eq-legend"><span class="eq-item"><span class="eq-sw" style="background:#117864"></span>routed experts</span><span class="eq-item"><span class="eq-sw" style="background:#7d3c98"></span>shared experts</span><span class="eq-item"><span class="eq-sw" style="background:#1f6aa5"></span>router weight</span><span class="eq-item"><span class="eq-sw" style="background:#a85a14"></span>expert size</span></div>
+  </div>
   <figure class="figure mo-imgfig" id="moeShared">
     <div class="mo-imgwrap"><img src="figures/papers/deepseekmoe-fig2c-shared.png" alt="From the DeepSeekMoE paper: an input hidden vector goes to a router over routed experts 2 to 2N and to one shared expert, expert 1, which always runs; the router keeps the top K = 3 routed experts, and their outputs and the shared expert's are added to the input to give the output hidden vector." width="506" height="660"></div>
-    <figcaption class="caption"><span class="fignum">Figure 5.</span> From the DeepSeekMoE paper (their Fig. 2): &ldquo;&hellip;(c) demonstrates the integration of the shared expert isolation strategy&hellip;&rdquo;</figcaption>
-  </figure>
-  <p>
-    MMoE (Ma et al., 2018) uses the same gate idea for multitask learning rather than scale: shared experts with one gate per task.
-    It is the hard-sharing setup of <a href="multitask-intro.html#hard-sharing">Introduction to Multitask Learning, section 3</a>, with a learned mix per task.
-  </p>
-
-  <h2 id="expert-parallel"><span class="secnum">3</span> Experts across GPUs</h2>
-
-  <p>
-    Big MoE models use <strong>expert parallelism</strong>: different experts sit on different GPUs, so tokens travel to their experts.
-    In an all-to-all exchange, every GPU sends a different slice of its tokens to every other GPU. Each MoE layer needs two in the forward pass: dispatch and combine (Switch, section 5.4).
-  </p>
-  <figure class="figure mtd-fig" id="moeA2AFig">
-<svg class="mtd-svg mo-svg" viewBox="0 0 360 344" role="img" aria-label="Four GPUs, drawn three times. Dispatch: every GPU sends a slice of its tokens to every GPU, where their experts sit, two experts per GPU. Combine: every GPU sends the outputs back to the GPU each token came from."><text class="mo-sm mo-b c-x" x="45" y="14" text-anchor="middle">tokens</text><text class="mo-sm mo-b c-e" x="180" y="14" text-anchor="middle">experts</text><text class="mo-sm mo-b c-x" x="315" y="14" text-anchor="middle">tokens back</text><text class="mo-sm mo-b c-z" x="112" y="32" text-anchor="middle">dispatch</text><text class="mo-sm mo-b c-e" x="248" y="32" text-anchor="middle">combine</text><line class="mo-disp" x1="90.0" y1="60.0" x2="129.0" y2="60.0"/><polygon class="mo-disph" points="135.0,60.0 129.0,63.0 129.0,57.0"/><line class="mo-comb" x1="225.0" y1="60.0" x2="264.0" y2="60.0"/><polygon class="mo-combh" points="270.0,60.0 264.0,63.0 264.0,57.0"/><line class="mo-disp" x1="90.0" y1="68.0" x2="131.5" y2="125.1"/><polygon class="mo-disph" points="135.0,130.0 129.0,126.9 133.9,123.4"/><line class="mo-comb" x1="225.0" y1="68.0" x2="266.5" y2="125.1"/><polygon class="mo-combh" points="270.0,130.0 264.0,126.9 268.9,123.4"/><line class="mo-disp" x1="90.0" y1="76.0" x2="133.0" y2="194.4"/><polygon class="mo-disph" points="135.0,200.0 130.1,195.4 135.8,193.3"/><line class="mo-comb" x1="225.0" y1="76.0" x2="268.0" y2="194.4"/><polygon class="mo-combh" points="270.0,200.0 265.1,195.4 270.8,193.3"/><line class="mo-disp" x1="90.0" y1="84.0" x2="133.6" y2="264.2"/><polygon class="mo-disph" points="135.0,270.0 130.7,264.9 136.5,263.5"/><line class="mo-comb" x1="225.0" y1="84.0" x2="268.6" y2="264.2"/><polygon class="mo-combh" points="270.0,270.0 265.7,264.9 271.5,263.5"/><line class="mo-disp" x1="90.0" y1="130.0" x2="131.5" y2="72.9"/><polygon class="mo-disph" points="135.0,68.0 133.9,74.6 129.0,71.1"/><line class="mo-comb" x1="225.0" y1="130.0" x2="266.5" y2="72.9"/><polygon class="mo-combh" points="270.0,68.0 268.9,74.6 264.0,71.1"/><line class="mo-disp" x1="90.0" y1="138.0" x2="129.0" y2="138.0"/><polygon class="mo-disph" points="135.0,138.0 129.0,141.0 129.0,135.0"/><line class="mo-comb" x1="225.0" y1="138.0" x2="264.0" y2="138.0"/><polygon class="mo-combh" points="270.0,138.0 264.0,141.0 264.0,135.0"/><line class="mo-disp" x1="90.0" y1="146.0" x2="131.5" y2="203.1"/><polygon class="mo-disph" points="135.0,208.0 129.0,204.9 133.9,201.4"/><line class="mo-comb" x1="225.0" y1="146.0" x2="266.5" y2="203.1"/><polygon class="mo-combh" points="270.0,208.0 264.0,204.9 268.9,201.4"/><line class="mo-disp" x1="90.0" y1="154.0" x2="133.0" y2="272.4"/><polygon class="mo-disph" points="135.0,278.0 130.1,273.4 135.8,271.3"/><line class="mo-comb" x1="225.0" y1="154.0" x2="268.0" y2="272.4"/><polygon class="mo-combh" points="270.0,278.0 265.1,273.4 270.8,271.3"/><line class="mo-disp" x1="90.0" y1="200.0" x2="133.0" y2="81.6"/><polygon class="mo-disph" points="135.0,76.0 135.8,82.7 130.1,80.6"/><line class="mo-comb" x1="225.0" y1="200.0" x2="268.0" y2="81.6"/><polygon class="mo-combh" points="270.0,76.0 270.8,82.7 265.1,80.6"/><line class="mo-disp" x1="90.0" y1="208.0" x2="131.5" y2="150.9"/><polygon class="mo-disph" points="135.0,146.0 133.9,152.6 129.0,149.1"/><line class="mo-comb" x1="225.0" y1="208.0" x2="266.5" y2="150.9"/><polygon class="mo-combh" points="270.0,146.0 268.9,152.6 264.0,149.1"/><line class="mo-disp" x1="90.0" y1="216.0" x2="129.0" y2="216.0"/><polygon class="mo-disph" points="135.0,216.0 129.0,219.0 129.0,213.0"/><line class="mo-comb" x1="225.0" y1="216.0" x2="264.0" y2="216.0"/><polygon class="mo-combh" points="270.0,216.0 264.0,219.0 264.0,213.0"/><line class="mo-disp" x1="90.0" y1="224.0" x2="131.5" y2="281.1"/><polygon class="mo-disph" points="135.0,286.0 129.0,282.9 133.9,279.4"/><line class="mo-comb" x1="225.0" y1="224.0" x2="266.5" y2="281.1"/><polygon class="mo-combh" points="270.0,286.0 264.0,282.9 268.9,279.4"/><line class="mo-disp" x1="90.0" y1="270.0" x2="133.6" y2="89.8"/><polygon class="mo-disph" points="135.0,84.0 136.5,90.5 130.7,89.1"/><line class="mo-comb" x1="225.0" y1="270.0" x2="268.6" y2="89.8"/><polygon class="mo-combh" points="270.0,84.0 271.5,90.5 265.7,89.1"/><line class="mo-disp" x1="90.0" y1="278.0" x2="133.0" y2="159.6"/><polygon class="mo-disph" points="135.0,154.0 135.8,160.7 130.1,158.6"/><line class="mo-comb" x1="225.0" y1="278.0" x2="268.0" y2="159.6"/><polygon class="mo-combh" points="270.0,154.0 270.8,160.7 265.1,158.6"/><line class="mo-disp" x1="90.0" y1="286.0" x2="131.5" y2="228.9"/><polygon class="mo-disph" points="135.0,224.0 133.9,230.6 129.0,227.1"/><line class="mo-comb" x1="225.0" y1="286.0" x2="266.5" y2="228.9"/><polygon class="mo-combh" points="270.0,224.0 268.9,230.6 264.0,227.1"/><line class="mo-disp" x1="90.0" y1="294.0" x2="129.0" y2="294.0"/><polygon class="mo-disph" points="135.0,294.0 129.0,297.0 129.0,291.0"/><line class="mo-comb" x1="225.0" y1="294.0" x2="264.0" y2="294.0"/><polygon class="mo-combh" points="270.0,294.0 264.0,297.0 264.0,291.0"/><rect class="mo-gpu" x="0" y="44" width="90" height="56" rx="6"/><text class="mo-sm mo-b" x="45" y="60" text-anchor="middle">GPU 1</text><rect class="mo-chip" x="8" y="72" width="15" height="18" rx="4"/><rect class="mo-chip" x="27" y="72" width="15" height="18" rx="4"/><rect class="mo-chip" x="46" y="72" width="15" height="18" rx="4"/><rect class="mo-chip" x="65" y="72" width="15" height="18" rx="4"/><rect class="mo-gpu" x="135" y="44" width="90" height="56" rx="6"/><text class="mo-sm mo-b" x="180" y="60" text-anchor="middle">GPU 1</text><rect class="mo-ebox" x="143" y="68" width="34" height="26" rx="4"/><text class="mo-sm mo-b c-e" x="160" y="83" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">1</tspan></text><rect class="mo-ebox" x="183" y="68" width="34" height="26" rx="4"/><text class="mo-sm mo-b c-e" x="200" y="83" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">2</tspan></text><rect class="mo-gpu" x="270" y="44" width="90" height="56" rx="6"/><text class="mo-sm mo-b" x="315" y="60" text-anchor="middle">GPU 1</text><rect class="mo-chip" x="278" y="72" width="15" height="18" rx="4"/><rect class="mo-chip" x="297" y="72" width="15" height="18" rx="4"/><rect class="mo-chip" x="316" y="72" width="15" height="18" rx="4"/><rect class="mo-chip" x="335" y="72" width="15" height="18" rx="4"/><rect class="mo-gpu" x="0" y="114" width="90" height="56" rx="6"/><text class="mo-sm mo-b" x="45" y="130" text-anchor="middle">GPU 2</text><rect class="mo-chip" x="8" y="142" width="15" height="18" rx="4"/><rect class="mo-chip" x="27" y="142" width="15" height="18" rx="4"/><rect class="mo-chip" x="46" y="142" width="15" height="18" rx="4"/><rect class="mo-chip" x="65" y="142" width="15" height="18" rx="4"/><rect class="mo-gpu" x="135" y="114" width="90" height="56" rx="6"/><text class="mo-sm mo-b" x="180" y="130" text-anchor="middle">GPU 2</text><rect class="mo-ebox" x="143" y="138" width="34" height="26" rx="4"/><text class="mo-sm mo-b c-e" x="160" y="153" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">3</tspan></text><rect class="mo-ebox" x="183" y="138" width="34" height="26" rx="4"/><text class="mo-sm mo-b c-e" x="200" y="153" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">4</tspan></text><rect class="mo-gpu" x="270" y="114" width="90" height="56" rx="6"/><text class="mo-sm mo-b" x="315" y="130" text-anchor="middle">GPU 2</text><rect class="mo-chip" x="278" y="142" width="15" height="18" rx="4"/><rect class="mo-chip" x="297" y="142" width="15" height="18" rx="4"/><rect class="mo-chip" x="316" y="142" width="15" height="18" rx="4"/><rect class="mo-chip" x="335" y="142" width="15" height="18" rx="4"/><rect class="mo-gpu" x="0" y="184" width="90" height="56" rx="6"/><text class="mo-sm mo-b" x="45" y="200" text-anchor="middle">GPU 3</text><rect class="mo-chip" x="8" y="212" width="15" height="18" rx="4"/><rect class="mo-chip" x="27" y="212" width="15" height="18" rx="4"/><rect class="mo-chip" x="46" y="212" width="15" height="18" rx="4"/><rect class="mo-chip" x="65" y="212" width="15" height="18" rx="4"/><rect class="mo-gpu" x="135" y="184" width="90" height="56" rx="6"/><text class="mo-sm mo-b" x="180" y="200" text-anchor="middle">GPU 3</text><rect class="mo-ebox" x="143" y="208" width="34" height="26" rx="4"/><text class="mo-sm mo-b c-e" x="160" y="223" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">5</tspan></text><rect class="mo-ebox" x="183" y="208" width="34" height="26" rx="4"/><text class="mo-sm mo-b c-e" x="200" y="223" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">6</tspan></text><rect class="mo-gpu" x="270" y="184" width="90" height="56" rx="6"/><text class="mo-sm mo-b" x="315" y="200" text-anchor="middle">GPU 3</text><rect class="mo-chip" x="278" y="212" width="15" height="18" rx="4"/><rect class="mo-chip" x="297" y="212" width="15" height="18" rx="4"/><rect class="mo-chip" x="316" y="212" width="15" height="18" rx="4"/><rect class="mo-chip" x="335" y="212" width="15" height="18" rx="4"/><rect class="mo-gpu" x="0" y="254" width="90" height="56" rx="6"/><text class="mo-sm mo-b" x="45" y="270" text-anchor="middle">GPU 4</text><rect class="mo-chip" x="8" y="282" width="15" height="18" rx="4"/><rect class="mo-chip" x="27" y="282" width="15" height="18" rx="4"/><rect class="mo-chip" x="46" y="282" width="15" height="18" rx="4"/><rect class="mo-chip" x="65" y="282" width="15" height="18" rx="4"/><rect class="mo-gpu" x="135" y="254" width="90" height="56" rx="6"/><text class="mo-sm mo-b" x="180" y="270" text-anchor="middle">GPU 4</text><rect class="mo-ebox" x="143" y="278" width="34" height="26" rx="4"/><text class="mo-sm mo-b c-e" x="160" y="293" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">7</tspan></text><rect class="mo-ebox" x="183" y="278" width="34" height="26" rx="4"/><text class="mo-sm mo-b c-e" x="200" y="293" text-anchor="middle">E<tspan baseline-shift="sub" font-size="15">8</tspan></text><rect class="mo-gpu" x="270" y="254" width="90" height="56" rx="6"/><text class="mo-sm mo-b" x="315" y="270" text-anchor="middle">GPU 4</text><rect class="mo-chip" x="278" y="282" width="15" height="18" rx="4"/><rect class="mo-chip" x="297" y="282" width="15" height="18" rx="4"/><rect class="mo-chip" x="316" y="282" width="15" height="18" rx="4"/><rect class="mo-chip" x="335" y="282" width="15" height="18" rx="4"/><text class="mo-sm mo-s" x="180" y="336" text-anchor="middle">two all-to-all exchanges per MoE layer</text></svg>
-    <figcaption class="caption"><span class="fignum">Figure 6.</span> Dispatch sends tokens to their experts&rsquo; GPUs; combine sends outputs back.</figcaption>
+    <figcaption class="caption"><span class="fignum">Figure 2.</span> DeepSeekMoE, their Fig. 2: &ldquo;&hellip;(c) demonstrates the integration of the shared expert isolation strategy&hellip;&rdquo;</figcaption>
   </figure>
 
+  <h2 id="designWalk"><span class="secnum">5</span> Walkthrough: four designs on one layer</h2>
   <p>
-    A node is one machine holding several GPUs; DeepSeek-V3 has 8 per node.
-    Its node-limited routing lets each token&rsquo;s experts sit on at most <var>M</var> = 4 nodes, which cuts traffic between machines.
+    The same feed-forward slot drawn four ways. Each step names what changed in the compute per token, the weights stored and the choices a token has.
   </p>
-
-  <h2 id="memory"><span class="secnum">4</span> Memory versus compute</h2>
-  <figure class="figure mtd-fig" id="moeMemFig">
-<svg class="mtd-svg mo-svg" viewBox="0 0 360 88" role="img" aria-label="Mixtral holds about 94 GB of weights in memory, 47 billion at 2 bytes, but uses about 26 GB, 13 billion, per token."><text class="mo-b" x="0" y="16">Mixtral weights in bfloat16</text><rect class="mo-mem" x="0" y="26" width="340.0" height="24" rx="3"/><text class="mo-sm mo-b" x="8" y="43">in memory: about 94 GB (47B)</text><rect class="mo-comp" x="0" y="58" width="94.04255319148936" height="24" rx="3"/><text class="mo-sm mo-b" x="102.04255319148936" y="75">used per token: about 26 GB (13B)</text></svg>
-    <figcaption class="caption"><span class="fignum">Figure 7.</span> Every expert sits in memory; a token uses only its <var>k</var> experts.</figcaption>
+  <figure class="demo figure" id="moeDesignFig">
+    <div class="wt-controls"><button type="button" class="play-btn wt-prev" aria-label="Previous step">&#9664;</button><div class="wt-dots"></div><button type="button" class="play-btn wt-next" aria-label="Next step">&#9654;</button></div>
+    <svg class="dz-svg" id="dwSvg" viewBox="0 0 360 268" role="img" aria-label="One feed-forward slot: a token at the top, the experts in the middle, and three bars for the work per token, the weights stored and the choices."></svg>
+    <p class="wt-readout"></p>
+  <div class="eq-card" id="designWalkEq">
+    <p class="eq-what">The lines this walkthrough uses.</p>
+    <div class="eq-line" data-eqline="0"><span class="eq-n">(1)</span>\(\displaystyle {\begin{aligned}&y = \sum_{i \in \mathcal{T}(x)} \htmlClass{eqt sym-g}{\htmlStyle{color:#1f6aa5}{g_i(x)}}\, \htmlClass{eqt sym-r}{\htmlStyle{color:#117864}{E_i(x)}} \\ &\quad + \sum_{j=1}^{\htmlClass{eqt sym-s}{\htmlStyle{color:#7d3c98}{K_s}}} \htmlClass{eqt sym-s}{\htmlStyle{color:#7d3c98}{E^{s}_{j}(x)}}\end{aligned}}\)</div>
+    <div class="eq-why" data-eqline="0">The output mixes the few routed experts the router picked, each weighted by the router, plus every shared expert. <var>\(\mathcal{T}(x)\)</var> is the set of picked experts and <var>\(g_i\)</var> the router&rsquo;s weight for expert <var>\(i\)</var>, computed as in <a href="mixture-of-experts.html#top-k">Mixture of Experts, the router and top-k</a>. <var>\(E_i\)</var> is a routed expert; <var>\(E^{s}_{j}\)</var> is a shared expert that every token uses, and <var>\(K_s\)</var> counts them (zero for Switch and Mixtral). The shared experts add a fixed cost to every token; the routed ones add a chosen one.</div>
+    <div class="eq-line" data-eqline="1"><span class="eq-n">(2)</span>\(\displaystyle {\begin{aligned}&\text{active per token} \\ &\quad \propto (\htmlClass{eqt sym-r}{\htmlStyle{color:#117864}{k}} + \htmlClass{eqt sym-s}{\htmlStyle{color:#7d3c98}{K_s}})\, \htmlClass{eqt sym-x}{\htmlStyle{color:#a85a14}{d_{\text{expert}}}} \\ &\text{stored} \\ &\quad \propto (\htmlClass{eqt sym-r}{\htmlStyle{color:#117864}{N}} + \htmlClass{eqt sym-s}{\htmlStyle{color:#7d3c98}{K_s}})\, \htmlClass{eqt sym-x}{\htmlStyle{color:#a85a14}{d_{\text{expert}}}}\end{aligned}}\)</div>
+    <div class="eq-why" data-eqline="1">Compute follows the experts a token visits, memory follows every expert kept. <var>\(k\)</var> and <var>\(N\)</var> count the routed experts a token picks and the routed experts stored, and <var>\(d_{\text{expert}}\)</var> is the size of one expert. The idea is the store-versus-use split of <a href="mixture-of-experts.html#big-picture">Mixture of Experts</a>; this line only adds the shared term, which sits in both brackets.</div>
+    <div class="eq-line" data-eqline="2"><span class="eq-n">(3)</span>\(\displaystyle {\begin{aligned}&\htmlClass{eqt sym-r}{\htmlStyle{color:#117864}{N}} \to m\htmlClass{eqt sym-r}{\htmlStyle{color:#117864}{N}} \\ &\htmlClass{eqt sym-r}{\htmlStyle{color:#117864}{k}} \to m\htmlClass{eqt sym-r}{\htmlStyle{color:#117864}{k}} \\ &\htmlClass{eqt sym-x}{\htmlStyle{color:#a85a14}{d_{\text{expert}}}} \to \frac{\htmlClass{eqt sym-x}{\htmlStyle{color:#a85a14}{d_{\text{expert}}}}}{m}\end{aligned}}\)</div>
+    <div class="eq-why" data-eqline="2">Cut every expert into <var>\(m\)</var> pieces and pick <var>\(m\)</var> times as many. Both brackets of equation (2) grow by <var>\(m\)</var> while the expert size shrinks by <var>\(m\)</var>, so compute and memory stay where they were.</div>
+    <div class="eq-line" data-eqline="3"><span class="eq-n">(4)</span>\(\displaystyle {\begin{aligned}&\text{routed picked per token} \\ &\quad = m\htmlClass{eqt sym-r}{\htmlStyle{color:#117864}{k}} - \htmlClass{eqt sym-s}{\htmlStyle{color:#7d3c98}{K_s}} \\ &\text{routed experts} \\ &\quad = m\htmlClass{eqt sym-r}{\htmlStyle{color:#117864}{N}} - \htmlClass{eqt sym-s}{\htmlStyle{color:#7d3c98}{K_s}}\end{aligned}}\)</div>
+    <div class="eq-why" data-eqline="3">Turning <var>\(K_s\)</var> of the pieces into always-on shared experts removes the same number from the routed picks, so the work per token does not grow. From this line on, <var>\(N\)</var> and <var>\(k\)</var> are the counts from before the split, so <var>\(mN\)</var> and <var>\(mk\)</var> are the split counts.</div>
+    <div class="eq-line" data-eqline="4"><span class="eq-n">(5)</span>\(\displaystyle {\begin{aligned}&\#\,\text{expert groups} \\ &\quad = \binom{m\htmlClass{eqt sym-r}{\htmlStyle{color:#117864}{N}} - \htmlClass{eqt sym-s}{\htmlStyle{color:#7d3c98}{K_s}}}{m\htmlClass{eqt sym-r}{\htmlStyle{color:#117864}{k}} - \htmlClass{eqt sym-s}{\htmlStyle{color:#7d3c98}{K_s}}}\end{aligned}}\)</div>
+    <div class="eq-why" data-eqline="4">How many different groups of routed experts a token can be sent to: choose the routed picks out of the routed experts. It grows very fast as <var>\(m\)</var> grows, which is why fine-grained experts can each learn something narrow.</div>
+  </div>
+    <figcaption class="caption"><span class="fignum">Figure 3.</span> Illustrative layer. Green: experts this token uses; purple: shared, used by every token.</figcaption>
   </figure>
 
-  <p>
-    Compute follows the experts a token uses; memory follows all of them. In bfloat16, a 16-bit number format (<a href="mixture-of-experts.html#z-loss">Mixture of Experts, section 5</a>), Mixtral&rsquo;s 47B weights take about 94 GB at 2 bytes each, while each token uses only 13B of them, about 26 GB.
-    In Mixtral&rsquo;s words, &ldquo;The memory costs for serving Mixtral are proportional to its sparse parameter count&rdquo;.
-    Storing weights in fewer bits (<a href="quantization.html#quick-refresher-scale-and-zero-point">Quantization, section 1</a>) shrinks what has to sit in memory, and DeepSeek-V3 serves extra copies of its busiest experts.
-  </p>
-
-  <h2 id="batch"><span class="secnum">5</span> Batch size and expert load</h2>
-
-  <p>
-    Each expert sees about <var>k</var><var>T</var>/<var>N</var> tokens of a batch (<a href="#moeBatchFig">Figure 8</a>).
-    Shazeer et al. (2017) call this the shrinking batch problem: with many experts, each one&rsquo;s batch gets small and runs inefficiently.
-    The fix is data parallelism: several GPUs each run a different slice of the batch through their own copy of the non-expert weights, and all send tokens to one shared copy of each expert.
-  </p>
-  <figure class="figure mtd-fig" id="moeBatchFig">
-<svg class="mtd-svg mo-svg" viewBox="0 0 360 174" role="img" aria-label="In a batch of 4,096 tokens, each Mixtral expert sees 1,024 tokens and each DeepSeek-V3 routed expert 128. With 8 data-parallel copies of 4,096 tokens sending to one shared copy of each expert, a DeepSeek-V3 expert sees 1,024."><text class="mo-b" x="0" y="16">Tokens per expert in a batch of 4,096</text><rect class="b-e" x="0" y="26" width="340.0" height="24" rx="3"/><text class="mo-sm mo-b mo-wt" x="8" y="43">Mixtral, 2 of 8: 1,024</text><rect class="b-e" x="0" y="58" width="42.5" height="24" rx="3"/><text class="mo-sm mo-b" x="50.5" y="75">DeepSeek-V3, 8 of 256: 128</text><text class="mo-b" x="0" y="110">Fix: 8 data-parallel copies of 4,096</text><rect class="b-p" x="0" y="120" width="340.0" height="24" rx="3"/><text class="mo-sm mo-b mo-wt" x="8" y="137">DeepSeek-V3 expert: 8 × 128 = 1,024</text><text class="mo-sm mo-s" x="0" y="166">each expert sees about kT/N; T counts all copies</text></svg>
-    <figcaption class="caption"><span class="fignum">Figure 8.</span> Illustrative batch: each expert gets a slice; data-parallel copies add up.</figcaption>
-  </figure>
-
-
-  <h2 id="fine-tuning"><span class="secnum">6</span> Fine-tuning an MoE model</h2>
-
-  <p>
-    ST-MoE names two problems that held MoE back, &ldquo;training instabilities and uncertain quality during fine-tuning&rdquo;. The training one shows as loss spikes (section 9); the fine-tuning one is mostly overfitting.
-  </p>
-  <p>
-    ST-MoE fine-tunes its large model, ST-MoE-L, on SuperGLUE five ways. SuperGLUE is a harder successor to GLUE; both are sets of English understanding tasks such as question answering and entailment.
-    Updating all weights, only the non-MoE weights, or only the dense FFNs scores about the same; updating only attention scores a little lower; updating only the MoE weights drops sharply.
-  </p>
-  <figure class="figure mo-imgfig" id="moeFinetuneFig">
-    <div class="mo-imgwrap"><img src="figures/papers/stmoe-fig5-finetune-subsets.png" alt="Bar chart from the ST-MoE paper: SuperGLUE score by parameters updated. All about 86.1, Non MoE about 86.1, MoE about 82.7 with a wide error bar, Attention about 85.7, FFN about 86.4." width="506" height="413"></div>
-    <figcaption class="caption"><span class="fignum">Figure 9.</span> From the ST-MoE paper (their Fig. 5): &ldquo;&hellip;fine-tuning only the MoE parameters results in a drastic quality reduction.&rdquo;</figcaption>
+  <h2 id="design-tool"><span class="secnum">6</span> The tool: split the experts</h2>
+  <figure class="demo figure" id="moeDesignTool">
+    <div class="tool-row"><label for="mdtM">split each expert</label><input type="range" id="mdtM" min="0" max="3" step="1" value="2" aria-label="Split factor m"></div>
+    <div class="tool-ends"><span>few big experts</span><span>many small experts</span></div>
+    <div class="tool-row"><span class="seg" role="group" aria-label="Shared expert"><button type="button" id="mdtS1" class="active" aria-pressed="true">shared expert on</button><button type="button" id="mdtS0" aria-pressed="false">off</button></span></div>
+    <svg class="dz-svg" id="mdtSvg" viewBox="0 0 360 268" role="img" aria-label="The stored experts as tiles of constant total area, the tiles one token uses lit, and bars for work, weights and the number of possible expert groups."></svg>
+    <p class="tool-readout" id="mdtRead" aria-live="polite"></p>
+    <figcaption class="caption"><span class="fignum">Figure 4.</span> Illustrative layer. A new token arrives every second and lights its own group.</figcaption>
   </figure>
   <p>
-    Expert layers sit in only every fourth block, and a token sees at most two experts per layer, so updating only them changes few of the weights a token uses.
-    MoE models also overfit small tasks (Switch, section 2.4). Expert dropout helps: fine-tuning Switch-Base on GLUE, dropout 0.1 elsewhere with 0.4 inside the experts scores 85.2, against 84.7 with 0.1 everywhere. <a href="regularization.html#dropout">Dropout</a> (Regularization and Data Augmentation, section 1.1) is the chance of zeroing a unit.
-    ST-MoE adds a smaller batch and a higher learning rate.
+    Splitting never changes the lit area or the stored area, only how many groups a token can choose from. The choices bar uses a log scale: each step to the right multiplies the count.
   </p>
 
-  <h2 id="code"><span class="secnum">7</span> Bias routing and logging in PyTorch</h2>
-  <nav class="prereq-sec" aria-label="Builds on"><p>Builds on <a href="mixture-of-experts.html#code-capacity">the capacity mask</a> (Mixture of Experts, section 6.3)</p></nav>
-
-  <p class="code-lead">Bias-balanced routing, then the bias update once per step.</p>
-<pre class="cs" data-cs="1-4,5-7,8-12"><code class="language-python">import torch
-def route_with_bias(z, b, k):         # z: (tokens, n), b: (n,)
-    s = torch.sigmoid(z)
-    _, idx = (s + b).topk(k, dim=-1)  # the bias only picks
-    g = s.gather(-1, idx)
-    g = g / g.sum(-1, keepdim=True)   # gates from s alone
-    return g, idx
-@torch.no_grad()
-def update_bias(b, idx, n, gamma=1e-3):
-    load = torch.bincount(idx.flatten(), minlength=n).float()
-    b += gamma * torch.sign(load.mean() - load)
-    return load</code></pre>
-<ol class="cs-notes">
-  <li><span class="cs-n">1</span><a href="#moeBiasEq">The bias card</a>, lines 1 and 2: sigmoid scores, with the bias only in the pick.</li>
-  <li><span class="cs-n">2</span>Line 3: the gates use <var>s</var>, not <var>s</var> + <var>b</var>.</li>
-  <li><span class="cs-n">3</span>Line 4, run once per step after the batch. <var>b</var> is a buffer (register_buffer), not a trained weight, so the update sits inside no_grad.</li>
-</ol>
-
-  <figure class="figure mtd-fig" id="moeLogFig">
-<svg class="mtd-svg mo-svg" viewBox="0 0 360 248" role="img" aria-label="What to log, on the eight-expert top-1 toy of the Mixture of Experts balance demo at step 40. Loss off: one expert takes all 512 tokens, router entropy 0, MaxVio 7.0, and 84 percent of tokens dropped at capacity factor 1.25. Loss on: counts near even, router entropy 2.07 against the even 2.08, MaxVio 0.23, none dropped."><text class="mo-sm mo-b c-f" x="150" y="16" text-anchor="middle">loss off</text><text class="mo-sm mo-b c-e" x="262" y="16" text-anchor="middle">loss on</text><line class="mo-sep" x1="0" y1="24" x2="360" y2="24"/><text class="mo-sm mo-b" x="0" y="46">token counts</text><text class="mo-sm mo-b" x="0" y="62">per expert</text><rect class="b-f" x="106.0" y="81" width="8" height="1" rx="1"/><rect class="b-f" x="117.0" y="81" width="8" height="1" rx="1"/><rect class="b-f" x="128.0" y="81" width="8" height="1" rx="1"/><rect class="b-f" x="139.0" y="81" width="8" height="1" rx="1"/><rect class="b-f" x="150.0" y="34.0" width="8" height="48.0" rx="1"/><rect class="b-f" x="161.0" y="81" width="8" height="1" rx="1"/><rect class="b-f" x="172.0" y="81" width="8" height="1" rx="1"/><rect class="b-f" x="183.0" y="81" width="8" height="1" rx="1"/><line class="mo-base" x1="104.0" y1="82" x2="194.0" y2="82"/><rect class="b-e" x="218.0" y="75.9" width="8" height="6.1" rx="1"/><rect class="b-e" x="229.0" y="77.1" width="8" height="4.9" rx="1"/><rect class="b-e" x="240.0" y="74.6" width="8" height="7.4" rx="1"/><rect class="b-e" x="251.0" y="76.3" width="8" height="5.7" rx="1"/><rect class="b-e" x="262.0" y="77.6" width="8" height="4.4" rx="1"/><rect class="b-e" x="273.0" y="76.3" width="8" height="5.7" rx="1"/><rect class="b-e" x="284.0" y="74.6" width="8" height="7.4" rx="1"/><rect class="b-e" x="295.0" y="75.6" width="8" height="6.4" rx="1"/><line class="mo-base" x1="216.0" y1="82" x2="306.0" y2="82"/><text class="mo-sm mo-s" x="0" y="98">loss off: one expert takes all 512</text><line class="mo-sep" x1="0" y1="106" x2="360" y2="106"/><text class="mo-sm mo-b" x="0" y="126">router entropy</text><text class="mo-b c-f" x="150" y="126" text-anchor="middle">0</text><text class="mo-b c-e" x="262" y="126" text-anchor="middle">2.07</text><text class="mo-sm mo-s" x="0" y="144">ln 8 = 2.08 is even; ln k is collapse</text><line class="mo-sep" x1="0" y1="152" x2="360" y2="152"/><text class="mo-sm mo-b" x="0" y="172">MaxVio</text><text class="mo-b c-f" x="150" y="172" text-anchor="middle">7.0</text><text class="mo-b c-e" x="262" y="172" text-anchor="middle">0.23</text><text class="mo-sm mo-s" x="0" y="190">busiest expert over the mean</text><line class="mo-sep" x1="0" y1="198" x2="360" y2="198"/><text class="mo-sm mo-b" x="0" y="218">dropped, CF 1.25</text><text class="mo-b c-f" x="150" y="218" text-anchor="middle">84%</text><text class="mo-b c-e" x="262" y="218" text-anchor="middle">0%</text><text class="mo-sm mo-s" x="0" y="236">tokens past C = 80 skip the experts</text><line class="mo-sep" x1="0" y1="244" x2="360" y2="244"/></svg>
-    <figcaption class="caption"><span class="fignum">Figure 10.</span> Illustrative toy of <a href="mixture-of-experts.html#moeBalance">the balance demo</a>, step 40: collapse shows in every row.</figcaption>
-  </figure>
-
-  <p class="code-lead">Router entropy, dropped-token rate and MaxVio for every MoE layer.</p>
-<pre class="cs" data-cs="1-2,3,4-5,6-8"><code class="language-python">def log_router(load, keep, z):
-    max_vio = (load.max() - load.mean()) / load.mean()
-    dropped = 1 - keep.float().mean()
-    share = load / load.sum()
-    router_entropy = -(share * share.clamp_min(1e-9).log()).sum()
-    z_loss = torch.logsumexp(z, dim=-1).pow(2).mean()
-    return dict(max_vio=max_vio.item(), dropped=dropped.item(),
-                router_entropy=router_entropy.item(), z_loss=z_loss.item())</code></pre>
-<ol class="cs-notes">
-  <li><span class="cs-n">1</span>max_vio is <a href="#moeBiasEq">the bias card</a>&rsquo;s line 5.</li>
-  <li><span class="cs-n">2</span>dropped is the share of token-to-expert assignments past capacity, from the keep mask of <a href="mixture-of-experts.html#code-capacity">Mixture of Experts, section 6.3</a>; a dropless layer, one with no capacity limit such as DeepSeek-V3&rsquo;s, logs 0.</li>
-  <li><span class="cs-n">3</span>router_entropy is the entropy of the load shares<!-- link-pending: crossentropy-loss.html#entropy -->: ln <var>N</var> when even, ln <var>k</var> when collapsed (<a href="#moeLogFig">Figure 10</a>).</li>
-  <li><span class="cs-n">4</span>z_loss is the z-loss of <a href="mixture-of-experts.html#z-loss">Mixture of Experts, section 5</a> (code in 6.2).</li>
-</ol>
-
-  <h2 id="knobs"><span class="secnum">8</span> MoE routing and balancing settings</h2>
-  <figure class="figure mtd-fig" id="moeTimelineFig">
-<svg class="mtd-svg mo-svg" viewBox="0 0 360 150" role="img" aria-label="DeepSeek-V3 trains on 14.8T tokens: the bias step is 0.001 for the first 14.3T and 0 for the last 500B; the sequence-wise loss weight is 0.0001, each token reaches at most 4 nodes, and each layer has 1 shared plus 8 of 256 routed experts."><text class="mo-b" x="10" y="16">14.8T training tokens</text><rect class="mo-mem" x="10" y="26" width="328.5135135135135" height="26" rx="3"/><rect class="b-g" x="338.5135135135135" y="26" width="11.486486486486513" height="26" rx="0"/><text class="mo-sm mo-b" x="18" y="44">first 14.3T: γ = 0.001</text><line class="mo-ar" x1="344.3" y1="52" x2="344.3" y2="66"/><text class="mo-sm mo-b c-g" x="350" y="80" text-anchor="end">last 500B: γ = 0</text><text class="mo-sm" x="10" y="106">all the way: sequence-wise α = 0.0001</text><text class="mo-sm" x="10" y="124">M = 4 nodes per token</text><text class="mo-sm" x="10" y="142">1 shared + 8 of 256 routed experts</text></svg>
-    <figcaption class="caption"><span class="fignum">Figure 11.</span> DeepSeek-V3&rsquo;s balancing settings over its 14.8T training tokens.</figcaption>
-  </figure>
-
+  <h2 id="compare"><span class="secnum">7</span> How the designs compare</h2>
   <div class="mo-tablewrap mo-stack">
-  <table class="mo-table">
-    <thead><tr><th>knob</th><th>enters</th><th>raise it</th><th>lower it</th><th>seen in</th></tr></thead>
+  <table class="mo-table ">
+    <thead><tr><th>model</th><th><var>\(N\)</var> routed experts</th><th><var>\(k\)</var> picked</th><th>shared</th><th>fine-grained</th><th>stored / active</th><th>MoE layers</th><th>balancing</th></tr></thead>
     <tbody>
-      <tr><td><var>&gamma;</var></td><td data-h="enters">bias card, line 4</td><td data-h="raise it">corrects faster, keeps swinging (<a href="#moeBias">Figure 3</a>)</td><td data-h="lower it">balances slowly; 0 freezes the bias</td><td data-h="seen in">DeepSeek-V3: 0.001, then 0 for the last 500B tokens</td></tr>
-      <tr><td>sequence-wise <var>&alpha;</var></td><td data-h="enters">added loss</td><td data-h="raise it">stronger guard per sequence, small pull on the task loss</td><td data-h="lower it">one sequence can crowd an expert</td><td data-h="seen in">DeepSeek-V3: 0.0001</td></tr>
-      <tr><td>expert dropout</td><td data-h="enters">inside the experts</td><td data-h="raise it">helps small fine-tuning tasks (section 6)</td><td data-h="lower it">more overfitting</td><td data-h="seen in">Switch: 0.4 in experts; 0.2 or 0.3 everywhere scored 84.4 and 83.9</td></tr>
-      <tr><td><var>M</var></td><td data-h="enters">routing</td><td data-h="raise it">more experts reachable, more traffic</td><td data-h="lower it">less traffic between machines</td><td data-h="seen in">DeepSeek-V3: 4 nodes</td></tr>
-      <tr><td><var>k</var> and <var>N</var></td><td data-h="enters">bias card, line 2</td><td data-h="raise it">smaller experts, more combinations</td><td data-h="lower it">fewer, larger experts</td><td data-h="seen in">DeepSeek-V3: 8 of 256 plus 1 shared; Mixtral: 2 of 8</td></tr>
+      <tr><td>Switch-C</td><td class="mo-in" data-h="N routed experts">2048</td><td class="mo-in" data-h="k picked">1</td><td class="mo-in" data-h="shared">none</td><td class="mo-ph-hide" data-h="fine-grained">no</td><td data-h="stored / active">1571B stored</td><td class="mo-ph-hide" data-h="MoE layers">every FFN (Switch-Base: every other)</td><td data-h="balancing">aux loss</td></tr>
+      <tr><td>GShard 600B</td><td class="mo-in" data-h="N routed experts">2048</td><td class="mo-in" data-h="k picked">2</td><td class="mo-in" data-h="shared">none</td><td class="mo-ph-hide" data-h="fine-grained">no</td><td data-h="stored / active">600B stored</td><td class="mo-ph-hide" data-h="MoE layers">every other FFN</td><td data-h="balancing">aux loss</td></tr>
+      <tr><td>Mixtral 8x7B</td><td class="mo-in" data-h="N routed experts">8</td><td class="mo-in" data-h="k picked">2</td><td class="mo-in" data-h="shared">none</td><td class="mo-ph-hide" data-h="fine-grained">no</td><td data-h="stored / active">47B / 13B</td><td class="mo-ph-hide" data-h="MoE layers">every block</td><td data-h="balancing">not stated</td></tr>
+      <tr><td>DeepSeekMoE 16B</td><td class="mo-in" data-h="N routed experts">64</td><td class="mo-in" data-h="k picked">6</td><td class="mo-in" data-h="shared">2</td><td class="mo-ph-hide" data-h="fine-grained">yes</td><td data-h="stored / active">16.4B / 2.8B</td><td class="mo-ph-hide" data-h="MoE layers">all but the first</td><td data-h="balancing">expert-level aux loss</td></tr>
+      <tr><td>DeepSeek-V3</td><td class="mo-in" data-h="N routed experts">256</td><td class="mo-in" data-h="k picked">8</td><td class="mo-in" data-h="shared">1</td><td class="mo-ph-hide" data-h="fine-grained">yes</td><td data-h="stored / active">671B / 37B</td><td class="mo-ph-hide" data-h="MoE layers">all but the first three</td><td data-h="balancing"><a href="moe-bias-balancing.html">aux-loss-free bias</a>, plus a small sequence-wise loss</td></tr>
+      <tr><td>ST-MoE-32B</td><td class="mo-in" data-h="N routed experts">64</td><td class="mo-in" data-h="k picked">2</td><td class="mo-in" data-h="shared">none</td><td class="mo-ph-hide" data-h="fine-grained">no</td><td data-h="stored / active">269B stored, compute of a 32B dense model</td><td class="mo-ph-hide" data-h="MoE layers">every fourth FFN</td><td data-h="balancing">aux loss and router z-loss</td></tr>
     </tbody>
   </table>
   </div>
-
-  <h2 id="failures"><span class="secnum">9</span> MoE failures, symptoms and fixes</h2>
-
-  <ul class="mo-fails">
-    <li><strong>Collapse.</strong> Counts pile onto a few experts, MaxVio rises, and the router entropy falls toward ln <var>k</var>. Use the balance loss of <a href="mixture-of-experts.html#balance-loss">Mixture of Experts, section 3</a> or the bias, plus input jitter, the router input times random numbers near 1 (<a href="mixture-of-experts.html#top-k">Mixture of Experts, section 2.2</a>), and check that <var>&alpha;</var> is not 0.</li>
-    <li><strong>Imbalance across devices.</strong> One GPU finishes last every step. Use node-limited routing, and extra copies of busy experts when serving.</li>
-    <li><strong>Instability.</strong> The loss spikes in bfloat16. Keep the router in float32, add the z-loss with weight <var>&beta;</var> = 0.001, and scale the weight initialization down by 10 (Switch Table 3).</li>
-    <li><strong>Token dropping.</strong> The dropped rate climbs during pre-training. Raise CF, balance better, or use a dropless implementation (section 7). Fine-tuning tolerates dropping 10 to 15% of tokens about as well as under 1% (ST-MoE Table 5).</li>
-    <li><strong>Fine-tuning overfit.</strong> Small tasks do worse than with a dense model. Use expert dropout, a smaller batch and a higher learning rate, and never update only the MoE weights.</li>
-  </ul>
   <p>
-    The router runs for every generated token (<a href="decoding.html#generate-loop">Softmax, Temperature and Decoding, section 8.1</a>), and <a href="transformer-cost.html">Transformer Cost and Efficiency</a> counts what the rest of the block costs.
+    Sources: Switch Table 9; GShard section 2 and Table 2; Mixtral abstract; DeepSeekMoE section 5.1.2; DeepSeek-V3 sections 1 and 4.2; ST-MoE Table 11. A cell a paper does not give reads &ldquo;not stated&rdquo;.
   </p>
 
-  <h2 id="references"><span class="secnum">10</span> References</h2>
+  <h2 id="mmoe"><span class="secnum">8</span> Experts beyond language models</h2>
+  <p>
+    MMoE (Ma et al. 2018) uses the same gate for multitask learning rather than for scale: shared experts with one gate per task, so each task learns its own mix.
+    It is the hard-sharing setup of <a href="multitask-intro.html#hard-sharing">Introduction to Multitask Learning, hard sharing</a>, with a learned mix per task.
+  </p>
+
+  <h2 id="designs-practice"><span class="secnum">9</span> Choosing a design in practice</h2>
+  <p>
+    How raising or lowering <var>\(k\)</var> and <var>\(N\)</var> plays out is in <a href="mixture-of-experts.html#settings">Mixture of Experts, settings</a>. This page adds its own knobs.
+  </p>
+  <div class="mo-tablewrap mo-stack">
+  <table class="mo-table">
+    <thead><tr><th>knob</th><th>raise it</th><th>lower it</th><th>seen in</th></tr></thead>
+    <tbody>
+      <tr><td>shared experts <var>\(K_s\)</var></td><td data-h="raise it">more common capacity; fewer routed picks at the same compute</td><td data-h="lower it">routed experts must also hold common knowledge</td><td data-h="seen in">DeepSeek-V3: 1; DeepSeekMoE 16B: 2</td></tr>
+      <tr><td>split factor <var>\(m\)</var></td><td data-h="raise it">more groups and narrower experts; more routing work and smaller matrices</td><td data-h="lower it">fewer, broader experts</td><td data-h="seen in">DeepSeekMoE splits; Mixtral does not</td></tr>
+      <tr><td>which layers are MoE</td><td data-h="raise it">more MoE layers, more weights stored</td><td data-h="lower it">dense layers are cheaper to store and to balance</td><td data-h="seen in">DeepSeek-V3 keeps its first three FFNs dense</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="code-lead">Code 1, a DeepSeek-V3-style layer layout as a Hugging Face config (no weights are built).</p>
+<pre class="cs" data-cs="4,5,6,7-8"><code class="language-python">from transformers import DeepseekV3Config
+
+config = DeepseekV3Config(
+    n_routed_experts=N_ROUTED,
+    n_shared_experts=K_S,
+    num_experts_per_tok=K,
+    moe_intermediate_size=D_EXPERT,
+    first_k_dense_replace=DENSE_FIRST,
+)</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>The routed experts in each MoE layer, <var>\(N\)</var>.</li>
+  <li><span class="cs-n">2</span>The always-on shared experts, <var>\(K_s\)</var>.</li>
+  <li><span class="cs-n">3</span>The routed experts each token picks, <var>\(k\)</var>; DeepSeek-V3 uses eight.</li>
+  <li><span class="cs-n">4</span>The inner size of one expert, which the split factor <var>\(m\)</var> shrinks, and how many of the first layers stay dense. Capital names are placeholders.</li>
+</ol>
+
+  <h2 id="failures"><span class="secnum">10</span> What goes wrong</h2>
+  <div class="mo-tablewrap mo-stack">
+  <table class="mo-table fx-table">
+    <thead><tr><th>failure</th><th>cause</th><th>symptom</th><th>fix</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Too many experts per core</strong></td><td data-h="cause">more than one expert on an accelerator core</td><td data-h="symptom">more memory transfer and slower steps (ST-MoE section 5)</td><td data-h="fix">at most one expert per core</td></tr>
+      <tr><td><strong>Tokens dropped with top-1</strong></td><td data-h="cause">one expert per token and a small capacity</td><td data-h="symptom">overflowing tokens skip the layer</td><td data-h="fix">raise the capacity or balance better; see <a href="mixture-of-experts.html#capacity">Mixture of Experts, capacity</a></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>
+    Very small experts also see very small batches; that problem and its fix are in <a href="moe-expert-parallelism.html#batch">Expert Parallelism, the batch section</a>. Start from a published design and change one knob at a time.
+  </p>
+  <p class="closing-q"><strong>Next question.</strong> With many experts, how do you keep their loads even without a loss pulling on the model? <a href="moe-bias-balancing.html">Auxiliary-Loss-Free Load Balancing</a> picks this up.</p>
+
+  <hr>
+
+  <h2 id="references"><span class="secnum">11</span> References</h2>
   <ol class="brefs">
-    <li>DeepSeek-AI (2024). DeepSeek-V3 Technical Report. <a href="https://arxiv.org/abs/2412.19437">arXiv:2412.19437</a>.</li>
-    <li>Wang, L., et al. (2024). Auxiliary-Loss-Free Load Balancing Strategy for Mixture-of-Experts. <a href="https://arxiv.org/abs/2408.15664">arXiv:2408.15664</a>.</li>
     <li>Fedus, W., Zoph, B., Shazeer, N. (2021). Switch Transformers: Scaling to Trillion Parameter Models with Simple and Efficient Sparsity. JMLR 2022. <a href="https://arxiv.org/abs/2101.03961">arXiv:2101.03961</a>.</li>
     <li>Lepikhin, D., et al. (2020). GShard: Scaling Giant Models with Conditional Computation and Automatic Sharding. <a href="https://arxiv.org/abs/2006.16668">arXiv:2006.16668</a>.</li>
     <li>Jiang, A. Q., et al. (2024). Mixtral of Experts. <a href="https://arxiv.org/abs/2401.04088">arXiv:2401.04088</a>.</li>
     <li>Dai, D., et al. (2024). DeepSeekMoE: Towards Ultimate Expert Specialization in Mixture-of-Experts Language Models. <a href="https://arxiv.org/abs/2401.06066">arXiv:2401.06066</a>.</li>
+    <li>DeepSeek-AI (2024). DeepSeek-V3 Technical Report. <a href="https://arxiv.org/abs/2412.19437">arXiv:2412.19437</a>.</li>
     <li>Zoph, B., et al. (2022). ST-MoE: Designing Stable and Transferable Sparse Expert Models. <a href="https://arxiv.org/abs/2202.08906">arXiv:2202.08906</a>.</li>
-    <li>Ma, J., et al. (2018). Modeling Task Relationships in Multi-task Learning with Multi-gate Mixture-of-Experts. KDD 2018. <a href="https://doi.org/10.1145/3219819.3220007">doi:10.1145/3219819.3220007</a>.</li>
     <li>Shazeer, N., et al. (2017). Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer. <a href="https://arxiv.org/abs/1701.06538">arXiv:1701.06538</a>.</li>
+    <li>Ma, J., et al. (2018). Modeling Task Relationships in Multi-task Learning with Multi-gate Mixture-of-Experts. KDD 2018. <a href="https://doi.org/10.1145/3219819.3220007">doi:10.1145/3219819.3220007</a>.</li>
+    <li>Hugging Face Transformers. <a href="https://huggingface.co/docs/transformers/model_doc/deepseek_v3">DeepSeek-V3 model documentation</a> (<code>DeepseekV3Config</code>).</li>
   </ol>
+
+<script>
+/* Walkthrough stepper: each step lights diagram parts, eq lines and terms; the whole diagram stays drawn. */
+function mdWalk(rootId, steps, onStep) {
+  var root = document.getElementById(rootId); if (!root) return;
+  var parts = root.querySelectorAll('[data-part]');
+  var card = root.querySelector('.eq-card');
+  var read = root.querySelector('.wt-readout');
+  var dotsBox = root.querySelector('.wt-dots');
+  var prev = root.querySelector('.wt-prev'), next = root.querySelector('.wt-next');
+  var cur = 0, dots = [];
+  steps.forEach(function (s, i) {
+    var b = document.createElement('button'); b.type = 'button'; b.className = 'wt-dot';
+    b.textContent = String(i + 1); b.setAttribute('aria-label', 'Step ' + (i + 1));
+    b.addEventListener('click', function () { show(i); });
+    dotsBox.appendChild(b); dots.push(b);
+  });
+  function show(i) {
+    cur = Math.max(0, Math.min(steps.length - 1, i));
+    var s = steps[cur];
+    for (var p = 0; p < parts.length; p++) {
+      var keys = parts[p].getAttribute('data-part').split(' ');
+      var on = keys.some(function (k) { return (s.hl || []).indexOf(k) >= 0; });
+      var seen = keys.some(function (k) { return (s.show || s.hl || []).indexOf(k) >= 0; });
+      parts[p].classList.toggle('eq-dim', !on);
+      parts[p].style.visibility = (parts[p].hasAttribute('data-from') && cur + 1 < +parts[p].getAttribute('data-from')) ? 'hidden' : '';
+    }
+    if (card) {
+      var ls = card.querySelectorAll('[data-eqline]');
+      for (var k = 0; k < ls.length; k++) ls[k].classList.toggle('eq-active', (s.lines || []).indexOf(+ls[k].getAttribute('data-eqline')) >= 0);
+      var ts = card.querySelectorAll('.eqt');
+      for (var t = 0; t < ts.length; t++) {
+        var hit = (s.terms || []).some(function (c) { return ts[t].classList.contains(c); });
+        ts[t].classList.toggle('eqt-active', hit);
+      }
+    }
+    read.innerHTML = '<strong>Step ' + (cur + 1) + ' of ' + steps.length + '.</strong> ' + s.text;
+    if (window.siteMath) siteMath.typeset(read);
+    dots.forEach(function (d, j) { d.classList.toggle('active', j === cur); d.setAttribute('aria-pressed', j === cur ? 'true' : 'false'); });
+    prev.disabled = cur === 0; next.disabled = cur === steps.length - 1;
+    if (onStep) onStep(cur);
+  }
+  prev.addEventListener('click', function () { show(cur - 1); });
+  next.addEventListener('click', function () { show(cur + 1); });
+  show(0);
+}
+</script>
+
+<script>
+/* Expert tiles shared by the walkthrough and the tool. Total stored area is constant; lit area is the work per token. */
+var DZ = (function () {
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(t, a, txt) { var e = document.createElementNS(NS, t); for (var k in a) e.setAttribute(k, a[k]); if (txt) e.textContent = txt; return e; }
+  function lgC(n, r) { var s = 0; for (var i = 0; i < r; i++) s += Math.log10((n - i) / (i + 1)); return s; }
+  function draw(svg, o) {
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    svg.appendChild(el('rect', { 'class': 'dz-tok', x: 150, y: 4, width: 60, height: 24, rx: 12 }));
+    svg.appendChild(el('text', { x: 180, y: 21, 'text-anchor': 'middle' }, 'token'));
+    svg.appendChild(el('path', { 'class': 'dz-ar', d: 'M180 28 V40' }));
+    if (!o.dense) { svg.appendChild(el('rect', { 'class': 'dz-router', x: 130, y: 40, width: 100, height: 22, rx: 5 })); svg.appendChild(el('text', { x: 180, y: 56, 'text-anchor': 'middle' }, 'router')); }
+    var X0 = 20, Y0 = 72, W = 320, H = 104;
+    if (o.dense) {
+      svg.appendChild(el('rect', { 'class': 'dz-dense', x: 140, y: Y0, width: 40, height: H, rx: 3 }));
+      svg.appendChild(el('text', { 'class': 'dz-s', x: 190, y: Y0 + H / 2 + 4 }, 'one dense FFN'));
+    } else {
+      var cols = 8, rows = o.m, tw = W / cols, th = H / rows;
+      for (var r = 0; r < rows; r++) for (var c = 0; c < cols; c++) {
+        var idx = r * cols + c, cls = 'dz-t';
+        if (idx < o.ks) cls += ' dz-sh'; else if (o.lit.indexOf(idx) >= 0) cls += ' dz-on';
+        svg.appendChild(el('rect', { 'class': cls, x: (X0 + c * tw + 1).toFixed(1), y: (Y0 + r * th + 1).toFixed(1), width: (tw - 2).toFixed(1), height: Math.max(1, th - 2).toFixed(1), rx: 2 }));
+      }
+    }
+    var groups = o.dense ? 0 : lgC(o.m * 8 - o.ks, o.m * o.k - o.ks);
+    var bars = [['work per token', 'dz-bw', o.dense ? 1 : o.k], ['weights stored', 'dz-bs', o.dense ? 1 : 8], ['possible groups', 'dz-bc', null]];
+    bars.forEach(function (bb, i) {
+      var y = 190 + i * 26;
+      svg.appendChild(el('text', { 'class': 'dz-s', x: 20, y: y + 12 }, bb[0]));
+      svg.appendChild(el('rect', { 'class': 'dz-bar0', x: 130, y: y, width: 210, height: 15, rx: 2 }));
+      var w = bb[2] === null ? Math.max(4, 210 * groups / 15) : 210 * bb[2] / 8;
+      svg.appendChild(el('rect', { 'class': bb[1], x: 130, y: y, width: w.toFixed(1), height: 15, rx: 2 }));
+    });
+  }
+  function pick(n, r, ks, seed) {
+    var out = [], s = seed * 9301 + 49297;
+    while (out.length < r) { s = (s * 9301 + 49297) % 233280; var c = ks + Math.floor(s / 233280 * (n - ks)); if (out.indexOf(c) < 0) out.push(c); }
+    return out;
+  }
+  return { draw: draw, pick: pick };
+})();
+
+/* Walkthrough */
+(function () {
+  var svg = document.getElementById('dwSvg'); if (!svg) return;
+  var S = [
+    { text: 'A dense feed-forward layer: one block, and every weight in it works on every token.', lines: [], o: { dense: true } },
+    { text: 'Switch: many experts, one lit per token. Work of one, memory of all (equation (1)).', lines: [0], terms: ['sym-r'], o: { m: 1, k: 1, ks: 0, lit: [5] } },
+    { text: 'Mixtral: two experts lit. Twice the work, the same memory, more choices (equation (2)).', lines: [1], terms: ['sym-r'], o: { m: 1, k: 2, ks: 0, lit: [2, 5] } },
+    { text: 'DeepSeekMoE: finer experts, more lit, one shared always on. Same cost, far more choices.', lines: [0, 2, 3], terms: ['sym-s'], o: { m: 4, k: 2, ks: 1, lit: [3, 10, 14, 17, 22, 27, 30] } }
+  ];
+  mdWalk('moeDesignFig', S, function (i) { DZ.draw(svg, S[i].o); });
+})();
+
+/* Tool */
+(function () {
+  var svg = document.getElementById('mdtSvg'); if (!svg) return;
+  var mS = document.getElementById('mdtM'), on = document.getElementById('mdtS1'), off = document.getElementById('mdtS0'), read = document.getElementById('mdtRead');
+  var MV = [1, 2, 4, 8], WORD = ['not split', 'cut in two', 'cut in four', 'cut in eight'], shared = true, seed = 1, timer = null;
+  function upd() {
+    var m = MV[+mS.value], ks = shared ? 1 : 0, n = m * 8, r = m * 2 - ks;
+    DZ.draw(svg, { m: m, k: 2, ks: ks, lit: DZ.pick(n, r, ks, seed) });
+    read.textContent = 'Experts ' + WORD[+mS.value] + (m === 1 ? ': a token has few groups to pick from.' : ': same work and memory, more groups to pick from.') +
+      (shared ? ' Purple is always on.' : '');
+  }
+  function setShared(s) { shared = s; on.classList.toggle('active', s); off.classList.toggle('active', !s); on.setAttribute('aria-pressed', s); off.setAttribute('aria-pressed', !s); upd(); }
+  mS.addEventListener('input', upd); on.addEventListener('click', function () { setShared(true); }); off.addEventListener('click', function () { setShared(false); });
+  function tick() { seed++; upd(); }
+  if (!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)) timer = setInterval(tick, 1200);
+  upd();
+})();
+</script>
             <script>
         (function () {
             var nav = document.querySelector('.topnav');
@@ -1425,107 +1548,5 @@ def update_bias(b, idx, n, gamma=1e-3):
   if(document.fonts&&document.fonts.ready) document.fonts.ready.then(all);
 })();
 </script>
-<script>
-/* Figure 3 bias-step tool (#moeBias). Illustrative toy, reproduces bias_tool_sim.py exactly. */
-(function(){
-/*SIM-BEGIN*/
-function mbsSim(){
-  var N=8,D=16,T=512,K=2,STEPS=60,MEAN=K*T/N;
-  var a=7;
-  function r(){ a=a+0x6D2B79F5|0; var t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }
-  var spare=null;
-  function g(){ if(spare!==null){ var s=spare; spare=null; return s; }
-    var u=Math.max(r(),1e-12), v=r(), m=Math.sqrt(-2*Math.log(u));
-    spare=m*Math.sin(2*Math.PI*v); return m*Math.cos(2*Math.PI*v); }
-  var W=[],c=[],e,j,i,st;
-  for(e=0;e<N;e++){ W.push([]); for(j=0;j<D;j++) W[e].push(0.4*g()); }
-  for(e=0;e<N;e++) c.push(0.9-1.8*e/(N-1));
-  var S=[], x=new Array(D);
-  for(st=0;st<=STEPS;st++){ var rows=new Float64Array(T*N);
-    for(i=0;i<T;i++){ for(j=0;j<D;j++) x[j]=g()/4.0;
-      for(e=0;e<N;e++){ var z=0; for(j=0;j<D;j++) z+=W[e][j]*x[j]; rows[i*N+e]=1/(1+Math.exp(-(z+c[e]))); } }
-    S.push(rows); }
-  var GAM=[0.001,0.002,0.003,0.005,0.01,0.02,0.04,0.08,0.16], runs=[];
-  GAM.forEach(function(gam){
-    var b=[0,0,0,0,0,0,0,0], out=[];
-    for(st=0;st<=STEPS;st++){ var load=[0,0,0,0,0,0,0,0], rows=S[st];
-      for(i=0;i<T;i++){ var b1=-1,v1=-Infinity,b2=-1,v2=-Infinity;
-        for(e=0;e<N;e++){ var q=rows[i*N+e]+b[e];
-          if(q>v1){ b2=b1; v2=v1; b1=e; v1=q; } else if(q>v2){ b2=e; v2=q; } }
-        load[b1]++; load[b2]++; }
-      var mx=Math.max.apply(null,load);
-      out.push({load:load, bias:b.slice(), maxvio:(mx-MEAN)/MEAN});
-      if(st<STEPS){ b=b.map(function(bb,k){ return bb+gam*((MEAN>load[k])-(MEAN<load[k])); }); } }
-    runs.push(out); });
-  return {gammas:GAM, runs:runs};
-}
-/*SIM-END*/
-var root=document.getElementById('moeBias'); if(!root) return;
-var svg=document.getElementById('mbsSvg'), gIn=document.getElementById('mbsG'), tIn=document.getElementById('mbsT');
-var gV=document.getElementById('mbsGv'), tV=document.getElementById('mbsTv'), read=document.getElementById('mbsRead');
-var SIM=mbsSim(), GL=['0.001','0.002','0.003','0.005','0.01','0.02','0.04','0.08','0.16'];
-var committed=3, ghost=7, inGesture=false, moved=false;
-var X0=44,X1=350,AY0=34,AY1=140, BB=298,BH=82,BMAX=460, CZ=392,CH=34, PITCH=38,BW=26,BX=48;
-function ax(s){ return X0+(X1-X0)*s/60; }
-function ay(m){ return AY1-(AY1-AY0)*m/3; }
-function by(p){ return BB-BH*p/BMAX; }
-function f1(v){ return v.toFixed(1); }
-function sub(n){ return 'E<tspan baseline-shift="sub">'+n+'</tspan>'; }
-function path(run){ var d=''; for(var s=0;s<=60;s++) d+=(s?' L ':'M ')+f1(ax(s))+' '+f1(ay(run[s].maxvio)); return d; }
-function busiest(ld){ var k=0; for(var e=1;e<8;e++) if(ld[e]>ld[k]) k=e; return k; }
-function draw(){
-  var gi=+gIn.value, ts=+tIn.value, run=SIM.runs[gi], st=run[ts], h=[];
-  var showG=ghost!==gi, mv=st.maxvio, hot=mv>0.35, k=busiest(st.load);
-  /* legend */
-  h.push('<line class="mo-ln-l" x1="44" y1="13" x2="64" y2="13"/><text class="mo-b c-l" x="68" y="18">γ '+GL[gi]+' now</text>');
-  if(showG) h.push('<line class="mo-ghost" x1="170" y1="13" x2="190" y2="13"/><text x="194" y="18">'+(moved?'previous γ '+GL[ghost]:'γ '+GL[ghost]+' (larger step)')+'</text>');
-  /* panel A */
-  h.push('<text class="mo-s" transform="translate(17 87) rotate(-90)" text-anchor="middle">MaxVio</text>');
-  for(var m=0;m<=3;m++){ h.push('<line class="mo-sep" x1="'+X0+'" y1="'+ay(m)+'" x2="'+X1+'" y2="'+ay(m)+'"/><text class="mo-s" x="38" y="'+(ay(m)+5)+'" text-anchor="end">'+m+'</text>'); }
-  h.push('<line class="mo-base" x1="'+X0+'" y1="'+AY1+'" x2="'+X1+'" y2="'+AY1+'"/>');
-  [[0,'0','middle'],[20,'20','middle'],[40,'40','middle'],[60,'60','end']].forEach(function(q){ h.push('<text class="mo-s" x="'+(q[0]===60?X1:ax(q[0]))+'" y="158" text-anchor="'+q[2]+'">'+q[1]+'</text>'); });
-  h.push('<text class="mo-s" x="'+f1((X0+X1)/2)+'" y="178" text-anchor="middle">training step</text>');
-  if(showG) h.push('<path class="mo-ghost" d="'+path(SIM.runs[ghost])+'"/>');
-  h.push('<path class="mo-ln-l" d="'+path(run)+'"/>');
-  var cx=ax(ts), cy=ay(mv);
-  h.push('<line class="mo-tick" x1="'+f1(cx)+'" y1="'+AY0+'" x2="'+f1(cx)+'" y2="'+AY1+'"/>');
-  h.push('<circle class="b-l" cx="'+f1(cx)+'" cy="'+f1(cy)+'" r="5" style="stroke:#ffffff;stroke-width:1.5px"/>');
-  var mx1=ts>30?cx-13:cx+13, my1=AY0+10; /* above the line's highest point (MaxVio 2.38 sits at y 56) */
-  h.push('<circle class="mo-mkc" cx="'+f1(mx1)+'" cy="'+f1(my1)+'" r="9"/><text class="mo-mkt" x="'+f1(mx1)+'" y="'+f1(my1+5)+'" text-anchor="middle" aria-hidden="true">1</text>');
-  /* panel B */
-  h.push('<text class="mo-b c-l" x="4" y="210">tokens per expert, <tspan style="font-style:italic">ℓ</tspan><tspan baseline-shift="sub">i</tspan></text>');
-  h.push('<line class="mo-base" x1="'+(BX-6)+'" y1="'+BB+'" x2="'+(BX+7*PITCH+BW+6)+'" y2="'+BB+'"/>');
-  for(var e=0;e<8;e++){ var x=BX+e*PITCH, y=by(st.load[e]);
-    h.push('<rect class="b-l" x="'+x+'" y="'+f1(y)+'" width="'+BW+'" height="'+f1(BB-y)+'"/>');
-    h.push('<text class="mo-s" x="'+(x+BW/2)+'" y="316" text-anchor="middle">'+sub(e+1)+'</text>'); }
-  var ey=by(128);
-  h.push('<line class="mo-even" x1="'+(BX-6)+'" y1="'+f1(ey)+'" x2="'+(BX+7*PITCH+BW+6)+'" y2="'+f1(ey)+'"/><text class="mo-s" x="4" y="'+f1(ey-3)+'">even</text><text class="mo-s" x="4" y="'+f1(ey+18)+'">128</text>');
-  if(hot){ var hx=BX+k*PITCH, hy=by(st.load[k]);
-    h.push('<rect class="mo-hl" x="'+(hx-2)+'" y="'+f1(hy-2)+'" width="'+(BW+4)+'" height="'+f1(BB-hy+2)+'"/>');
-    h.push('<circle class="mo-mkc" cx="'+(hx+BW/2)+'" cy="'+f1(hy+13)+'" r="9"/><text class="mo-mkt" x="'+(hx+BW/2)+'" y="'+f1(hy+18)+'" text-anchor="middle" aria-hidden="true">2</text>'); }
-  /* panel C */
-  h.push('<text class="mo-b c-g" x="4" y="350">bias minus average</text>');
-  var mb=st.bias.reduce(function(p,q){return p+q;},0)/8;
-  h.push('<line class="mo-base" x1="'+(BX-6)+'" y1="'+CZ+'" x2="'+(BX+7*PITCH+BW+6)+'" y2="'+CZ+'"/>');
-  var nb=0;
-  for(e=0;e<8;e++){ var v=st.bias[e]-mb, hh=CH*Math.abs(v)/0.4, xx=BX+e*PITCH;
-    if(hh>0.05){ nb++; h.push('<rect class="b-g" x="'+xx+'" y="'+f1(v>0?CZ-hh:CZ)+'" width="'+BW+'" height="'+f1(hh)+'"/>'); } }
-  if(!nb) h.push('<text class="mo-s" x="'+f1((X0+X1)/2)+'" y="'+(CZ-6)+'" text-anchor="middle">all 0</text>');
-  svg.innerHTML=h.join('');
-  /* text */
-  gV.textContent=GL[gi]; tV.textContent=String(ts);
-  gIn.setAttribute('aria-valuetext','bias step '+GL[gi]); tIn.setAttribute('aria-valuetext','training step '+ts+' of 60');
-  var mvs=mv.toFixed(2);
-  read.innerHTML=hot?('Step '+ts+': MaxVio '+mvs+', busiest <strong style="color:#2c3e50">E<sub>'+(k+1)+'</sub></strong> ('+st.load[k]+'&nbsp;tokens).')
-                    :('Step '+ts+': MaxVio '+mvs+', busiest expert within 35% of even.');
-  svg.setAttribute('aria-label','MaxVio over 60 steps at bias step γ '+GL[gi]+(showG?(moved?', dashed: the previous γ ':', dashed: the larger step γ ')+GL[ghost]:'')+'; at step '+ts+' MaxVio '+mvs+(hot?'; busiest E'+(k+1)+' with '+st.load[k]+' tokens':'; busiest expert within 35% of even')+'. Bottom: each bias minus the average.');
-}
-gIn.addEventListener('input',function(){ var v=+gIn.value; if(!inGesture&&v!==committed){ ghost=committed; inGesture=true; moved=true; } draw(); });
-gIn.addEventListener('change',function(){ committed=+gIn.value; inGesture=false; draw(); });
-tIn.addEventListener('input',draw);
-draw();
-})();
-</script>
 </body>
 </html>
-

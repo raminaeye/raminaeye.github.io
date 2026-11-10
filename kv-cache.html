@@ -1,0 +1,1480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The KV Cache</title>
+  <meta name="description" content="Why a decoding Transformer stores past keys and values but not queries, what one decode step does in every layer, how the cache trades compute for memory, and how servers fit it in memory.">
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem;
+      line-height: 1.6;
+      color: #333;
+    }
+    h1, h2, h3, h4 {
+      color: #2c3e50;
+      margin-top: 1.5em;
+      margin-bottom: 0.5em;
+    }
+    h1 { font-size: 2.5em; border-bottom: 2px solid #3498db; padding-bottom: 0.3em;}
+    h2 { font-size: 2em; border-bottom: 1px solid #bdc3c7; padding-bottom: 0.2em;}
+    h3 { font-size: 1.5em; }
+    h4 { font-size: 1.2em; color: #555;}
+
+    /* Shared site nav (matches index.html topnav) */
+    body { padding-top: calc(64px + 1.5rem); }
+    h1, h2, h3 { scroll-margin-top: 84px; }
+    .topnav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        z-index: 1000;
+        background: rgba(255, 255, 255, 0.65);
+        backdrop-filter: blur(18px) saturate(1.5);
+        -webkit-backdrop-filter: blur(18px) saturate(1.5);
+        border-bottom: 1px solid transparent;
+        transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+    .topnav.scrolled {
+        background: rgba(255, 255, 255, 0.88);
+        border-bottom-color: #dee2e6;
+        box-shadow: 0 6px 24px rgba(33, 37, 41, 0.07);
+    }
+    .nav-inner {
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 0 1.5rem;
+        height: 64px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+    .wordmark {
+        font-weight: 700;
+        color: #212529;
+        text-decoration: none;
+        font-size: 1.05rem;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+    }
+    .nav-links {
+        display: flex;
+        gap: 2px;
+        align-items: center;
+    }
+    .nav-links a {
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        font-size: 0.95rem;
+        padding: 8px 14px;
+        border-radius: 999px;
+        transition: color 0.18s ease, background-color 0.18s ease;
+    }
+    .nav-links a:hover {
+        color: #007bff;
+        background-color: #e7f1ff;
+    }
+    .nav-links a.active {
+        color: #007bff;
+        background-color: #e7f1ff;
+        font-weight: 600;
+    }
+    .nav-links a:focus-visible,
+    .wordmark:focus-visible,
+    .nav-toggle:focus-visible,
+    .panel-link:focus-visible,
+    .panel-social a:focus-visible {
+        outline: 2px solid #007bff;
+        outline-offset: 2px;
+    }
+    @media (hover: hover) {
+        .nav-toggle:hover { background-color: #e7f1ff; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .topnav,
+        .nav-links a,
+        .nav-toggle span,
+        .nav-panel,
+        .nav-panel a.panel-link {
+            transition: none;
+        }
+    }
+    @media (hover: hover) {
+        .nav-toggle:hover { background-color: #e7f1ff; }
+    }
+    .nav-toggle {
+        display: none;
+        width: 42px;
+        height: 42px;
+        padding: 0;
+        background: none;
+        border: 0;
+        border-radius: 10px;
+        cursor: pointer;
+        flex: 0 0 auto;
+    }
+    .nav-panel {
+        display: grid;
+        grid-template-rows: 0fr;
+        visibility: hidden;
+        transition: grid-template-rows 0.32s ease, visibility 0s linear 0.32s;
+    }
+    .nav-panel.open {
+        grid-template-rows: 1fr;
+        visibility: visible;
+        transition: grid-template-rows 0.32s ease, visibility 0s;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner {
+        min-height: 0;
+        overflow: hidden;
+    }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link:hover {
+        background-color: #e7f1ff;
+        color: #007bff;
+    }
+    .nav-panel a.panel-link.active {
+        color: #007bff;
+        font-weight: 600;
+        background-color: #e7f1ff;
+    }
+    .panel-social a:hover {
+        border-color: #007bff;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner {
+        min-height: 0;
+        overflow: hidden;
+    }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link:hover {
+        background-color: #e7f1ff;
+        color: #007bff;
+    }
+    .nav-panel a.panel-link.active {
+        color: #007bff;
+        font-weight: 600;
+        background-color: #e7f1ff;
+    }
+    .panel-social a:hover {
+        border-color: #007bff;
+    }
+    /* Section tab strip: one slim row, scrolls sideways when it overflows. */
+    .tabs-label {
+        float: left;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #6c757d;
+        font-weight: 700;
+        line-height: 1.2;
+        margin: 0;
+        padding: 8px 12px 0 0;
+    }
+    .tab-strip {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 2px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        margin: 0 0 1.25rem;
+        max-width: 100%;
+    }
+    .tab-strip::-webkit-scrollbar { display: none; }
+    .tab-strip a.tab-chip,
+    .tab-strip a.tab-link {
+        display: inline-block;
+        flex: 0 0 auto;
+        padding: 6px 10px;
+        border-radius: 999px;
+        color: #495057;
+        text-decoration: none;
+        font-size: 0.82rem;
+        font-weight: 500;
+        line-height: 1.35;
+        white-space: nowrap;
+    }
+    .tab-strip a.tab-chip:hover,
+    .tab-strip a.tab-link:hover { color: #007bff; }
+    .tab-strip a.tab-chip.active,
+    .tab-strip a.tab-link.active { background: #007bff; color: #ffffff; }
+    @media (max-width: 768px) {
+        .tabs-label { display: none; }
+        .tab-strip {
+            width: 100vw;
+            max-width: 100vw;
+            box-sizing: border-box;
+            margin-left: calc((100% - 100vw) / 2);
+            padding-left: calc((100vw - 100%) / 2);
+        }
+        .tab-strip a.tab-chip,
+        .tab-strip a.tab-link { font-size: 0.75rem; padding: 6px 8px; }
+    }
+        .crumb { margin: 0 0 0.8em; }
+        .crumb a {
+            display: inline-block;
+            padding: 4px 14px;
+            border: 1px solid #dee2e6;
+            border-radius: 999px;
+            background: #f8f9fa;
+            color: #0056b3;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+        .crumb a:hover { border-color: #007bff; color: #007bff; }
+    .nav-panel a.panel-link {
+        display: flex;
+        align-items: center;
+        padding: 0.8rem 0.75rem;
+        margin: 0 0.25rem;
+        border-radius: 10px;
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        min-height: 48px;
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+    .panel-social {
+        display: flex;
+        gap: 0.5rem;
+        padding: 0.9rem 1rem 0.25rem;
+        flex-wrap: wrap;
+    }
+    .panel-social a {
+        color: #007bff;
+        text-decoration: none;
+        font-weight: 500;
+        font-size: 0.9rem;
+        padding: 6px 12px;
+        border: 1px solid #dee2e6;
+        border-radius: 999px;
+        transition: border-color 0.15s ease;
+    }
+    @media (max-width: 768px) {
+        .nav-links { display: none; }
+        .nav-toggle { display: block; }
+    }
+
+    pre {
+      background: #0d1117;
+      color: #e6edf3;
+      padding: 14px 16px;
+      overflow-x: auto;
+      border-radius: 8px;
+      font-size: 0.9em;
+      margin: 1em 0;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+    }
+    /* P52 canonical inline items in prose: numbers and variables wear the body
+       font at body size and read as part of the sentence (keeps P50's quiet
+       treatment, no pill; code blocks and eq-cards keep the mono treatment). */
+    code {
+        font-family: inherit;
+        font-size: 1em;
+        color: #1a1a1a;
+        background: none;
+        padding: 0 0.08em;
+        overflow-wrap: break-word;
+    }
+    pre code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 1em; }
+    .eq-card code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 0.92em; }
+    pre code {
+      background: none;
+      padding: 0;
+      font-size: 1em;
+      color: inherit;
+    }
+    ul, ol {
+      padding-left: 20px;
+    }
+    li {
+      margin-bottom: 0.5em;
+    }
+    strong {
+      color: #2980b9;
+    }
+    hr {
+      border: 0;
+      height: 1px;
+      background: #bdc3c7;
+      margin-top: 2em;
+      margin-bottom: 2em;
+    }
+    /* Rendered output block, not a print() cell */
+    .output {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 1rem 1.2rem;
+      border-radius: 6px;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+      font-size: 0.9em;
+      margin: 1em 0;
+      overflow-x: auto;
+      border-left: 4px solid #22c55e;
+    }
+    .output .dim { color: #94a3b8; }
+    /* Readability sweep: stat cards, data tables, numbered walkthroughs */
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 1.2em 0; }
+    .stat-card { border: 1px solid #bdc3c7; border-radius: 8px; padding: 14px 16px; background: #f7f9fb; }
+    .stat-num { font-size: 1.9em; font-weight: 800; color: #2c3e50; line-height: 1.15; }
+    .stat-unit { font-size: .55em; font-weight: 600; color: #7f8c8d; } .stat-vs { font-size: max(12px, .55em); font-weight: 600; color: #7f8c8d; }
+    .stat-label { font-size: .92em; font-weight: 600; margin-top: 6px; color: #2c3e50; }
+    .stat-note { font-size: .82em; color: #7f8c8d; margin-top: 3px; }
+    .datatable { border-collapse: collapse; margin: 1.2em 0; width: 100%; max-width: 560px; font-size: .95em; }
+    .datatable th, .datatable td { border: 1px solid #bdc3c7; padding: .45em .6em; text-align: center; }
+    .datatable th { background: #2c3e50; color: #fff; font-weight: 600; }
+    .datatable tr:nth-child(even) td { background: #f7f9fb; }
+    .datatable tr td.mask { background: #d8dee3; color: #6b7a89; font-weight: 600; }
+    .datatable caption { caption-side: bottom; text-align: left; font-size: .85em; color: #555; padding: .5em 0 0; border-left: 3px solid #3498db; padding-left: .8em; }
+/* Worked-example card (Round 9 template): a calm sage card that sets
+           math walkthrough steps apart from body text. Body font throughout,
+           all math in MathJax, one computation per line, generous spacing. */
+        .worked-example {
+            background: #f1f6ed;
+            border: 1px solid #d9e4d1;
+            border-left: 3px solid #6f9a63;
+            border-radius: 10px;
+            padding: 14px 20px;
+            margin: 1.1em 0;
+            max-width: 680px;
+            color: #2c3e50;
+            line-height: 1.8;
+            overflow-x: auto;
+        }
+        ol.worked-example {
+            list-style: none;
+            counter-reset: wex-step;
+            padding-left: 20px;
+        }
+        ol.worked-example > li {
+            counter-increment: wex-step;
+            position: relative;
+            margin: 0;
+            padding: 8px 0 8px 44px;
+        }
+        ol.worked-example > li + li { border-top: 1px dashed #cbdabf; }
+        ol.worked-example > li::before {
+            content: counter(wex-step);
+            position: absolute;
+            left: 0;
+            top: 9px;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: #6f9a63;
+            color: #ffffff;
+            font-size: 13px;
+            font-weight: 700;
+            line-height: 28px;
+            text-align: center;
+        }
+        @media (max-width: 480px) {
+            .worked-example { padding: 12px; font-size: 15px; }
+            ol.worked-example { padding-left: 12px; }
+            ol.worked-example > li { padding-left: 38px; }
+        }
+    .caption {
+      font-size: 0.9em; color: #555; margin-top: 1rem;
+      border-left: 3px solid #3498db; padding-left: 0.8em;
+    }
+    .diagram {
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      padding: 1rem;
+      margin: 1.75rem 0;
+      background: #fbfcfd;
+      overflow-x: auto;
+    }
+    /* Interactive demo */
+    .demo {
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      padding: 1.25rem;
+      margin: 1.75rem 0;
+      background: #fbfcfd;
+    }
+    .demo-controls { margin: 0.8rem 0 1rem; }
+    .demo-controls label { display: block; margin: 0.6em 0 0.3em; color: #2c3e50; }
+    .demo-controls input[type="range"] { width: 100%; }
+    .demo-controls select { font-size: 1em; padding: 0.3em 0.6em; }
+    .attn-toggle { display: inline-flex; border: 1px solid #bdc3c7; border-radius: 6px; overflow: hidden; margin: 0.6rem 0.6rem 1rem 0; flex-wrap: wrap; }
+    .attn-toggle button {
+      border: none; background: #fff; padding: 0.45em 1.0em; cursor: pointer;
+      font-size: 1em; color: #2c3e50; font-family: inherit;
+    }
+    .attn-toggle button.active { background: #1f618d; color: #fff; font-weight: bold; }
+    .table-scroll { overflow-x: auto; margin: 0 auto 1rem; }
+    .attn-mini { border-collapse: collapse; margin: 0 auto; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; font-size: 0.85em; }
+    .attn-mini th, .attn-mini td { border: 1px solid #bdc3c7; padding: 0.35em 0.55em; text-align: center; white-space: nowrap; }
+    .attn-mini th { background: #ecf0f1; color: #2c3e50; }
+    .attn-mini tr.hl td { background: #d6eafb; }
+    .attn-mini tr.hl th.rowhead { background: #1f618d; color: #fff; }
+    .attn-mini td.blocked { background: rgba(231,76,60,0.45); color: #7b241c; font-weight: bold; }
+    #causalDemo .kchip.masked rect, #causalDemo .qchip.masked rect { fill: #f2f4f4; stroke: #d5dbdb; }
+    #causalDemo .kchip.masked text, #causalDemo .qchip.masked text { fill: #566573; }
+    .attn-bars { max-width: 560px; margin: 0 auto; }
+    .attn-bar-row { display: flex; align-items: center; gap: 0.6em; margin: 0.45em 0; }
+    .attn-bar-row .lbl { width: 4.2em; text-align: right; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; color: #2c3e50; flex: none; font-size: 0.9em; }
+    .attn-bar-track { flex: 1; background: #ecf0f1; border-radius: 4px; height: 1.4em; min-width: 0; }
+    .attn-bar-fill { background: #3498db; border-radius: 4px; height: 100%; }
+    .attn-bar-fill.alt { background: #e67e22; }
+    .attn-bar-row .val { width: 2.8em; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; color: #2c3e50; flex: none; }
+    /* headRoles paired bars: both heads side by side per token */
+    .pair-tracks { display: flex; gap: 0.5em; flex: 1; min-width: 0; }
+    .pair-tracks .attn-bar-track.dim { opacity: 0.3; }
+    .attn-bar-row .val.pair { width: 6.6em; font-size: 0.85em; }
+    /* Fit-in-one-page: tighter bar rows for the 12-token headRoles viz. */
+    #headRoles .attn-bar-row { margin: 0.28em 0; }
+    #headRoles .attn-bar-track { height: 1.15em; }
+    /* One attention layer, walked through (attnLayer): 4-step stepper, HTML canvas. */
+    #attnLayer .stepper { display: flex; align-items: center; gap: 0.7rem; margin: 0.8rem 0; flex-wrap: wrap; }
+    #attnLayer .dots { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+    #attnLayer .dot { border: 1px solid #bdc3c7; background: #fff; border-radius: 999px; padding: 0.3em 0.85em; font-size: 0.9em; color: #2c3e50; cursor: pointer; }
+    #attnLayer .dot.active { background: #1f618d; border-color: #1f618d; color: #fff; font-weight: bold; }
+    #attnLayer .dot:focus-visible, #attnLayer .stepper .play-btn:focus-visible { outline: 2px solid #e67e22; outline-offset: 2px; }
+    #attnLayer .play-btn:disabled { opacity: 0.45; cursor: default; }
+    #attnLayer .al-canvas { margin: 1rem 0 0.4rem; }
+    #attnLayer .al-scene { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .7rem; }
+    #attnLayer .al-region { border: 1px solid #dfe6ec; border-radius: 10px; padding: .5rem .6rem; background: #fff; }
+    #attnLayer .al-region-title { font-size: .78rem; font-weight: 700; color: #2c3e50; margin: 0 0 .35rem; }
+        /* Shared walkthrough equation-card contract (verbatim, all pages) */
+        
+        .eq-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+
+          padding:1rem 1.2rem;margin:1.75rem auto;max-width:640px;overflow-x:auto}
+
+        .eq-what{font-size:.95rem;color:#334155;margin:0 0 .6rem;line-height:1.55}
+
+        .eq-line{font-size:1.38rem;line-height:2.0;letter-spacing:.015em;padding:.5rem .6rem;white-space:normal;font-weight:500;opacity:.38;border-left:3px solid transparent}
+
+        .eq-line.eq-active{opacity:1;border-left-color:#2c3e50}
+.eq-line sub,.eq-line sup{font-size:.68em}
+.frac{display:inline-flex;flex-direction:column;text-align:center;vertical-align:middle;margin:0 .18em;font-size:.8em;line-height:1.3}
+.frac .top{padding:0 .3em .1em}
+.frac .bot{border-top:2px solid currentColor;padding:.1em .3em 0}
+      .eq-why{display:none;visibility:hidden;font-size:1rem;color:#475569;padding:.15rem .35rem .4rem;line-height:1.65}
+      .eq-why.eq-active{display:block;visibility:visible}
+      .eq-card.eq-stepped .eq-line{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-line.eq-active{display:block;opacity:1;visibility:visible}
+      .eq-card.eq-stepped .eq-legend .eq-item{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-legend .eq-item.eq-active{display:block;visibility:visible}
+
+        .eqt{font-weight:600;padding:0 .1em;border-radius:3px}
+
+        .eqt.eqt-active{text-decoration:underline;text-underline-offset:2px}
+
+        .eq-legend{font-size:.85rem;color:#475569;margin-top:.6rem;line-height:1.75}
+
+        .eq-legend .eq-item{display:block}
+
+        .eq-legend .eq-item code{white-space:nowrap}
+
+        .eq-sw{display:inline-block;width:.7em;height:.7em;border-radius:2px;
+
+          margin:0 .25em 0 .6em;vertical-align:baseline}
+
+        @media (max-width:480px){.eq-card{padding:.85rem .9rem}.eq-line{font-size:1.24rem;line-height:1.95}}
+/* P70 inline variables and inline code, one style site-wide (VAR-STYLE.md v2) */
+var,.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic;font-weight:400;font-size:1em;color:#1d4e89;background:#edf3fa;border-radius:3px;padding:0 .18em;white-space:nowrap;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+var sub,var sup,.mvar sub,.mvar sup{font-size:.72em;font-style:normal}
+pre var,code var,.eq-line var{font:inherit;color:inherit;background:none;padding:0}
+svg text.mvar,svg tspan.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic}
+:not(pre)>code:not(.eq-line code){font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,Courier,monospace;font-size:.86em;color:#24292f;background:#f1f3f5;border:1px solid #dfe3e8;border-radius:4px;padding:.06em .32em;white-space:normal;overflow-wrap:anywhere}
+/* P79 numbering (NUMBERING.md) */
+.secnum{font-variant-numeric:tabular-nums;margin-right:.4em;color:inherit;font-weight:inherit}
+.tab-strip .secnum{margin-right:.3em;opacity:.75}
+.fignum{font-weight:600;margin-right:.3em;font-variant-numeric:tabular-nums}
+/* P80 code sections (CODE-SECTIONS.md) */
+pre.cs{position:relative;background-attachment:local;padding-left:20px}
+pre.cs code{display:block;line-height:1.55}
+pre.cs .cs-g{position:absolute;left:3px;width:11px;text-align:center;font:700 11px/1 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;-webkit-user-select:none;user-select:none;pointer-events:none}
+pre.cs .cs-g::before{content:attr(data-n)}
+ol.cs-notes{list-style:none;padding-left:0;margin:-.4em 0 1em}
+ol.cs-notes li{margin:0 0 .3em;padding-left:1.9em;position:relative}
+ol.cs-notes .cs-n{position:absolute;left:0;top:.1em;min-width:1.35em;padding:0 .25em;border-radius:4px;font:700 .8em/1.45 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;text-align:center;color:#0d1117}
+ol.cs-notes li:nth-child(6n+1) .cs-n{background:#79b8ff}
+ol.cs-notes li:nth-child(6n+2) .cs-n{background:#ffab70}
+ol.cs-notes li:nth-child(6n+3) .cs-n{background:#85e89d}
+ol.cs-notes li:nth-child(6n+4) .cs-n{background:#d2a8ff}
+ol.cs-notes li:nth-child(6n+5) .cs-n{background:#ffa198}
+ol.cs-notes li:nth-child(6n+6) .cs-n{background:#76e3ea}
+/* Page-specific: bold readout text inside this page's tools at 4.5:1 */
+.demo strong,.eq-card strong{color:#1f618d}
+/* Page-specific: square-root radicals in eq-lines (separate from the canonical eq-card block) */
+.rad{display:inline-flex;align-items:flex-start;vertical-align:middle;white-space:nowrap}
+.rad .rad-sym{font-size:1.12em;line-height:1}
+.rad .rad-body{border-top:.09em solid currentColor;line-height:1.18;padding:0 .12em 0 .04em}
+/* P74 caption markers, matching the numbered markers on figures */
+.cap-mk{display:inline-block;min-width:1.3em;height:1.3em;line-height:1.3em;border-radius:50%;background:#2c3e50;color:#fff;font-size:.8em;font-weight:700;text-align:center;font-style:normal;margin:0 .2em 0 0;vertical-align:.08em}
+/* P75 when-it-runs table */
+.when-table{border-collapse:collapse;width:100%;margin:1.25rem 0;font-size:.92em}.when-table th,.when-table td{border-top:1px solid #d5dbdb;padding:.45em .5em;text-align:left;vertical-align:top}.when-table th{font-weight:600}.when-table td,.when-table code{overflow-wrap:anywhere;white-space:normal}
+svg .fig-mk circle{fill:#2c3e50}svg .fig-mk text{fill:#fff;font-weight:700;font-size:14px;text-anchor:middle;dominant-baseline:central}
+    /* diagram-side dim/highlight (SVG/DOM). Do NOT use .hl/.dim: taken. */
+    .eq-dim{opacity:.58}
+    .eq-hl{filter:drop-shadow(0 0 3px currentColor)}
+    #attnLayer .al-row { display: flex; align-items: center; gap: 0.35rem; margin: 0.5em 0; padding: 0.45em 0.55em; border: 2px solid transparent; border-radius: 10px; flex-wrap: wrap; }
+    #attnLayer .al-row.follow { border-color: #e67e22; background: #fef9f0; }
+    #attnLayer .al-token { font-weight: bold; min-width: 2.4em; text-align: center; background: #ecf0f1; border-radius: 6px; padding: 0.25em 0.4em; font-size: 0.95em; }
+    #attnLayer .al-row.follow .al-token { background: #a04000; color: #fff; }
+    #attnLayer .al-follow { font-size: 0.85em; color: #8a4b00; font-weight: bold; }
+    #attnLayer .al-strip { display: inline-flex; align-items: flex-end; gap: 1px; height: 46px; }
+    #attnLayer .al-bar { width: 5px; background: #3498db; border-radius: 2px; }
+    #attnLayer .al-bar.pos { background: repeating-linear-gradient(45deg, #8e44ad, #8e44ad 3px, #d2b4de 3px, #d2b4de 6px); }
+    #attnLayer .al-bar.al-pre { background: #c9d2d9; }
+    #attnLayer .al-bar.mix { background: #2ecc71; }
+    #attnLayer .al-op { color: #555; font-weight: bold; font-size: 1.05em; }
+    #attnLayer .al-legend { font-size: 0.9em; color: #555; margin: 0.7em 0 0; }
+    #attnLayer .al-legend .sw { display: inline-block; width: 1.1em; height: 0.85em; border-radius: 3px; margin-right: 0.35em; vertical-align: middle; }
+    #attnLayer .al-legend .sw.word { background: #3498db; }
+    #attnLayer .al-legend .sw.pos { background: repeating-linear-gradient(45deg, #8e44ad, #8e44ad 2px, #d2b4de 2px, #d2b4de 4px); }
+    #attnLayer .al-legend .sw.mix { background: #2ecc71; }
+    #attnLayer .al-note { font-size: 0.92em; color: #555; margin: 0 0 0.5em; }
+    #attnLayer table.al-grid { border-collapse: collapse; margin: 0.4rem 0; }
+    #attnLayer table.al-grid th, #attnLayer table.al-grid td { border: 1px solid #bdc3c7; width: 62px; height: 40px; text-align: center; padding: 0; }
+    #attnLayer table.al-grid th { background: #ecf0f1; color: #2c3e50; font-size: 0.9em; width: auto; padding: 0.2em 0.7em; height: auto; }
+    #attnLayer table.al-grid tr.follow td { box-shadow: inset 0 0 0 3px #e67e22; }
+    #attnLayer table.al-grid tr.follow th.rowhead { background: #a04000; color: #fff; }
+    #attnLayer .al-wtrack { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #f4f6f7; }
+    #attnLayer .al-wfill { height: 14px; background: #e67e22; border-radius: 3px; }
+    #attnLayer .al-flow { display: flex; align-items: center; gap: 0.55rem; flex-wrap: wrap; margin: 0.6rem 0; }
+    #attnLayer .al-fnode { text-align: center; }
+    #attnLayer .al-flabel { font-size: 0.85em; color: #555; margin-top: 0.35em; max-width: 9em; }
+    #attnLayer .al-smallnote { font-size: 0.8em; color: #777; margin: 0.55em 0 0; }
+    #attnLayer .al-arrow { font-size: 1.5em; color: #2c3e50; font-weight: bold; }
+    #attnLayer .al-arrow.thick { font-size: 2em; color: #a04000; }
+    /* attnLayer phone scene (max-width 480px): the four regions stack in a
+       compact geometry so the stepper and the full scene share one phone
+       screen. Strips also shrink in the script (bar heights scale 0.47). */
+    @media (max-width: 480px) {
+      #attnLayer .stepper { gap: .4rem; margin: .3rem 0; }
+      #attnLayer .stepper .play-btn { padding: .35rem .8rem; }
+      #attnLayer .dot { padding: .18em .5em; font-size: .8em; }
+      #attnLayer .al-canvas { margin: .45rem 0 .25rem; }
+      #attnLayer .al-scene { gap: .4rem; }
+      #attnLayer .al-region { padding: .3rem .45rem; }
+      #attnLayer .al-region-title { font-size: .72rem; margin: 0 0 .2rem; }
+      #attnLayer .al-row { margin: .3em 0; padding: .28em .4em; gap: .3rem; }
+      #attnLayer .al-strip { height: 24px; }
+      #attnLayer .al-bar { width: 4px; }
+      #attnLayer .al-token { min-width: 2.2em; padding: .2em .3em; font-size: .9em; }
+      #attnLayer .al-legend { font-size: .8em; margin: .35em 0 0; line-height: 1.4; }
+      #attnLayer .al-note { font-size: .86em; margin: 0 0 .3em; line-height: 1.35; }
+      #attnLayer .al-smallnote { font-size: .76em; margin: .35em 0 0; line-height: 1.35; }
+      #attnLayer .al-follow { line-height: 1.2; }
+      #attnLayer table.al-grid { margin: .2rem 0; }
+      #attnLayer table.al-grid td { width: 40px; height: 22px; }
+      #attnLayer table.al-grid th { padding: .08em .3em; font-size: .82em; }
+      #attnLayer .al-wfill { height: 10px; }
+      #attnLayer .al-flow { gap: .4rem; margin: .3rem 0; }
+      #attnLayer .al-flabel { font-size: .78em; margin-top: .25em; max-width: 12em; }
+      #attnLayer .al-arrow { font-size: 1.25em; }
+      #attnLayer .al-arrow.thick { font-size: 1.6em; }
+    }
+    .head-key { display: flex; flex-wrap: wrap; gap: 1.2em; justify-content: center; margin: 0.4rem 0 0.6rem; font-size: 0.9em; color: #555; }
+    .head-key .sw { display: inline-block; width: 1.4em; height: 0.9em; border-radius: 3px; margin-right: 0.4em; vertical-align: middle; }
+    .head-key .sw.blue { background: #3498db; }
+    .head-key .sw.orange { background: #e67e22; }
+    /* maskDemo legend key: lives outside the grid, so 0/-inf text never has to fit a cell */
+    .mask-legend { display: flex; flex-wrap: wrap; gap: 1.2em; justify-content: center; margin: 0.6rem 0; font-size: 0.9em; color: #555; }
+    .mask-legend .sw { display: inline-block; width: 1.4em; height: 1em; border-radius: 3px; margin-right: 0.4em; vertical-align: middle; border: 1px solid #bdc3c7; }
+    .mask-legend .sw.allow { background: rgba(46,204,113,0.55); }
+    .mask-legend .sw.block { background: rgba(231,76,60,0.55); }
+    .demo-stats {
+      text-align: center; margin-top: 1rem; font-size: 0.95em; color: #2c3e50;
+    }
+    .demo-stats strong { color: #1f618d; }
+    .big-nums { display: flex; flex-wrap: wrap; gap: 1rem; justify-content: center; margin: 1rem 0; }
+    .big-num { text-align: center; min-width: 140px; }
+    .big-num .v { font-size: 1.5em; font-weight: bold; color: #1f618d; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; }
+    .big-num .k { font-size: 0.85em; color: #555; }
+    .chart-legend { display: flex; flex-wrap: wrap; gap: 1.2em; justify-content: center; margin: 0.4rem 0 0.6rem; font-size: 0.9em; color: #555; }
+    .chart-legend .sw { display: inline-block; width: 24px; height: 0; border-top: 3px solid #3498db; vertical-align: middle; margin-right: 0.4em; }
+    .chart-legend .sw.orange { border-top-color: #e67e22; }
+    .chart-legend .sw.gray { border-top: 3px dashed #95a5a6; }
+    canvas.flopchart { width: 100%; max-width: 600px; height: auto; display: block; margin: 0 auto; }
+    .kvbar-row { display: flex; align-items: center; gap: 0.6em; margin: 0.5em 0; }
+    .kvbar-row .lbl { width: 11em; text-align: right; color: #2c3e50; flex: none; font-size: 0.9em; }
+    .kvbar-track { flex: 1; background: #ecf0f1; border-radius: 4px; height: 1.5em; min-width: 0; position: relative; }
+    .kvbar-fill { background: #e74c3c; border-radius: 4px; height: 100%; }
+    .kvbar-fill.cache { background: #27ae60; }
+    .kvbar-row .val { width: 8.5em; white-space: nowrap; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; color: #2c3e50; flex: none; font-size: 0.85em; }
+    .kvbar-title { font-weight: bold; color: #2c3e50; margin: 0.7em 0 0.1em; }
+    .mask-grid {
+      border-collapse: collapse;
+      table-layout: fixed;
+      margin: 0 auto;
+    }
+    .mask-grid td {
+      border: 1px solid #7f8c8d;
+      width: 26px; height: 26px;
+      padding: 0;
+    }
+    /* Fit-in-one-page: streamMask uses a slightly tighter grid. */
+    #streamMask .mask-grid td { width: 22px; height: 22px; }
+    #streamMask .ctl-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 1rem; margin: 0.8rem 0 0.2rem; }
+    #streamMask .ctl-row .play-row { margin: 0; }
+    #streamMask .ctl-row .demo-buttons { margin-bottom: 0; justify-content: flex-start; }
+    .mask-grid td.allow { background: #3498db; }
+    .mask-grid td.block { background: #f4f6f7; }
+    .demo-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      justify-content: center;
+      margin-bottom: 1rem;
+    }
+    .demo-buttons button {
+      border: 1px solid #bdc3c7;
+      background: #fff;
+      padding: 0.5em 1.1em;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.9em;
+      color: #2c3e50;
+    }
+    .demo-buttons button.active {
+      background: #1f618d;
+      color: #fff;
+      font-weight: bold;
+      border-color: #1f618d;
+    }
+    /* Play buttons and plain-English walkthroughs */
+    .play-row { margin: 0.8rem 0 0.2rem; display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
+    .play-btn {
+      border: 1px solid #1f618d; background: #1f618d; color: #fff;
+      padding: 0.45em 1.3em; border-radius: 6px; cursor: pointer;
+      font-size: 0.95em; font-weight: bold; font-family: inherit;
+      flex: 0 0 auto;
+    }
+    .play-btn:hover { background: #1a5276; }
+    .play-btn.stop { background: #e74c3c; border-color: #e74c3c; }
+    .play-btn.stop:hover { background: #c0392b; }
+    .howto {
+      background: #eef6fb; border-left: 4px solid #3498db;
+      padding: 0.7em 1em; border-radius: 0 6px 6px 0;
+      font-size: 0.95em; color: #2c3e50; margin: 0.8rem 0;
+    }
+    .howto strong { color: #1f618d; }
+    /* Caption card (refocus round, shared across widgets) */
+    .capcard {
+      background: #ffffff;
+      border: 1px solid #e3e8ee;
+      border-left: 3px solid #2c3e50;
+      border-radius: 10px;
+      padding: 18px;
+      margin-top: 14px;
+      font-size: 15px;
+      line-height: 1.65;
+      color: #2c3e50;
+    }
+    .howto.capcard strong, .caption.capcard strong { color: #2c3e50; }
+    .capcard .cap-title {
+      display: block;
+      font-size: 15px;
+      font-weight: bold;
+      color: #2c3e50;
+      margin-bottom: 8px;
+    }
+    .capcard ul { list-style: none; margin: 0; padding: 0; }
+    .capcard li { position: relative; padding-left: 16px; margin: 0 0 7px; }
+    .capcard li:last-child { margin-bottom: 0; }
+    /* Fit-in-one-page: tighter how-to cards on phones. */
+    @media (max-width: 480px) {
+      .howto.capcard { padding: 12px 13px; font-size: 14px; line-height: 1.55; }
+      .capcard li { margin: 0 0 5px; }
+      .capcard .cap-title { margin-bottom: 6px; }
+    }
+    .capcard li::before {
+      content: ""; position: absolute; left: 2px; top: 0.68em;
+      width: 6px; height: 6px; border-radius: 50%; background: #2c3e50;
+    }
+    .canvas-wrap { position: relative; }
+    
+    /* Same side-by-side treatment for the causal twin. */
+    #causalDemo .canvas-wrap { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 1.25rem; align-items: start; }
+    @media (max-width: 768px) { #causalDemo .canvas-wrap { display: block; } }
+    .attn-bar-fill { transition: width 0.4s ease; }
+    /* KV cache blocks */
+    .kv-blocks { display: flex; flex-wrap: wrap; gap: 3px; margin: 0.8rem 0; }
+    .kv-block { width: 14px; height: 14px; border-radius: 3px; background: #ecf0f1; }
+    .kv-block.on { background: #27ae60; animation: kvpop 0.4s ease; }
+    @keyframes kvpop { from { transform: scale(0.4); } to { transform: scale(1); } }
+    .kv-stage { font-size: 0.9em; color: #555; margin: 0.6rem 0 0.2rem; }
+    /* Pinned-total flash (headParams) */
+    .big-num .v.pinned-flash { animation: pinflash 0.5s ease; }
+    @keyframes pinflash { 0% { color: #117a65; } 100% { color: #1f618d; } }
+    /* Streaming token strips */
+    .stream-strip { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 0.5rem 0; font-size: 0.9em; color: #2c3e50; }
+    .tok {
+      display: inline-block; min-width: 1.8em; padding: 0.25em 0.4em; text-align: center;
+      border-radius: 4px; background: #ecf0f1; color: #566573;
+      font-family: 'SFMono-Regular', Consolas, Menlo, monospace; font-size: 0.85em;
+    }
+    .tok.arrived { background: #d6eaf8; color: #2c3e50; }
+    .tok.emitted { background: #1e8449; color: #fff; }
+    .mask-grid td.pending { background: #e9ecef; }
+    /* Head slicing visual (headParams): the 512-dim pie being re-sliced */
+    .slice-wrap { max-width: 560px; margin: 0.8rem auto 0.2rem; }
+    .slice-bar { display: flex; height: 34px; border-radius: 6px; overflow: hidden; border: 1px solid #bdc3c7; }
+    .slice-seg {
+      height: 100%; border-right: 1px solid #fff; box-sizing: border-box;
+      transition: width 0.45s ease, background-color 0.45s ease;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; color: #fff; font-weight: bold; min-width: 0; overflow: hidden;
+      white-space: nowrap;
+    }
+    .slice-cap { text-align: center; font-size: 0.9em; color: #555; margin-top: 0.35rem; }
+    /* Param bill bar (headParams): fixed-length bar, constant total, 75/25 QKV vs output-proj */
+    .bill-bar { display: flex; height: 30px; border-radius: 6px; overflow: hidden; border: 2px solid #2c3e50; }
+    .bill-seg { height: 100%; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+      font-size: 12px; color: #fff; font-weight: bold; white-space: nowrap; overflow: hidden; }
+    .bill-bar.bill-pulse { animation: billpulse 0.5s ease; }
+    @keyframes billpulse { 0% { box-shadow: 0 0 0 4px rgba(39,174,96,.55); } 100% { box-shadow: 0 0 0 0 rgba(39,174,96,0); } }
+    .bill-cap { text-align: center; font-size: 0.9em; color: #555; margin-top: 0.35rem; }
+    /* Let wide display equations scroll instead of pushing the page wide */
+    .mjx-chtml.MJXc-display { overflow-x: auto; overflow-y: hidden; max-width: 100%; }
+    /* Source-level containment for raw $$ display math before MathJax typesets */
+    .dmath { overflow-x: auto; max-width: 100%; margin: 1.4rem 0; }
+    /* Small screens: keep heatmaps and bars usable */
+    @media (max-width: 520px) {
+      .attn-mini { font-size: 0.75em; }
+      .attn-mini th, .attn-mini td { padding: 0.3em 0.45em; }
+      .kvbar-row { flex-wrap: wrap; }
+      .kvbar-row .lbl { width: 100%; text-align: left; margin-bottom: 0.2em; }
+      .kvbar-track { flex: 1 1 55%; }
+      .kvbar-row .val { width: auto; }
+      .big-num { min-width: 110px; }
+      .big-num .v { font-size: 1.25em; }
+    }
+    /* Static paper-figure citation */
+    .fig-cite { border-left: 3px solid #bdc3c7; margin: 1em 0; padding: 0.4em 0 0.4em 1em; color: #555; font-size: 0.9em; }
+
+  
+/* canonical spacing: display math */
+.MathJax_Display, mjx-container[display="true"] { margin: 1.4rem 0 !important; }
+figcaption { margin-top: 1rem; }
+    /* Compact phone walkthrough layout (canonical block, every tutorial page):
+       two-column eq legends, tightened demo spacing, and diagrams capped so
+       controls and diagram share the first phone screen. Phone widths only;
+       desktop rendering and equation typography are unchanged. */
+    @media (max-width:480px){
+      .demo{padding:.75rem}
+      .demo>*{margin-top:.6rem;margin-bottom:.6rem}
+      .demo>*:first-child{margin-top:0}
+      .demo .eq-card{margin:1rem auto;padding:.7rem .8rem}
+      .demo .cap-card,.demo .capcard{padding:.85rem .95rem}
+      .eq-legend{display:grid;grid-template-columns:1fr 1fr;column-gap:.9rem;row-gap:.1rem;line-height:1.5}
+      .eq-legend .eq-item:has(> code ~ code){grid-column:1/-1}
+      .demo svg,.demo canvas{max-height:55vh}
+    }
+/* PREV-NEXT-BEGIN */
+nav.tut-seq{display:flex;align-items:center;gap:0 .75rem;margin:0 0 .25rem;font-size:.85rem;white-space:nowrap}
+nav.tut-seq a{position:relative;display:block;flex:0 1 auto;min-width:0;height:44px;line-height:44px;padding:0 2px;overflow:hidden;text-overflow:ellipsis;color:#0056b3;text-decoration:none}
+nav.tut-seq a.seq-home{flex:0 0 auto}
+nav.tut-seq a.seq-next{margin-left:auto}
+nav.tut-seq .seq-w{font-weight:600}
+nav.tut-seq a:hover{text-decoration:underline}
+nav.tut-seq a:focus-visible{outline:2px solid #0056b3;outline-offset:2px}
+@media (max-width:575px){nav.tut-seq .seq-t{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}}
+@media (forced-colors:active){nav.tut-seq a:focus-visible{outline-color:Highlight}}
+@media print{nav.tut-seq{display:none}}
+/* PREV-NEXT-END */
+/* MATH-BEGIN v1 (P88, site-math.js renders KaTeX; byte-identical on every page) */
+.eq-line{overflow-x:auto;overflow-y:hidden;white-space:normal}
+.eq-line .katex{font-size:1.02em;line-height:1.6}
+.eq-line .katex .base{margin:.15em 0}
+var .katex,p .katex,li .katex,td .katex,th .katex,figcaption .katex,.eq-why .katex,.eq-what .katex,.eq-legend .katex{font-size:1.06em}
+var:has(.katex){font-style:normal}
+.katex-display{margin:.6rem 0;overflow-x:auto;overflow-y:hidden}
+/* MATH-END */
+</style>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+<style>
+/* Static teaching diagrams (mtd), shared across tutorials, 2026-11-01 */
+.figure.mtd-fig { margin: 1.75rem 0; }
+.mtd-fig > svg.mtd-svg { display: block; width: 100%; height: auto; margin: 0 auto; }
+.mtd-fig .caption { margin-top: 1rem; }
+.mtd-svg text { fill: #2c3e50; font-family: sans-serif; }
+.mtd-svg .mtd-sub { fill: #555; }
+.mtd-svg .mtd-t1 { fill: #1f618d; }
+.mtd-svg .mtd-t2 { fill: #a04000; }
+.mtd-svg .mtd-pu { fill: #7d3c98; }
+.mtd-svg .mtd-red { fill: #c0392b; }
+.mtd-svg .mtd-grn { fill: #117a65; }
+.mtd-svg line, .mtd-svg path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.mtd-svg .mtd-s.mtd-c1 { stroke: #1f618d; } .mtd-svg .mtd-f.mtd-c1 { fill: #1f618d; }
+.mtd-svg .mtd-s.mtd-c2 { stroke: #a04000; } .mtd-svg .mtd-f.mtd-c2 { fill: #a04000; }
+.mtd-svg .mtd-s.mtd-cp { stroke: #7d3c98; } .mtd-svg .mtd-f.mtd-cp { fill: #7d3c98; }
+.mtd-svg .mtd-s.mtd-cr { stroke: #c0392b; } .mtd-svg .mtd-f.mtd-cr { fill: #c0392b; }
+.mtd-svg .mtd-s.mtd-cg { stroke: #2c3e50; } .mtd-svg .mtd-f.mtd-cg { fill: #2c3e50; }
+.mtd-svg .mtd-sep { stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-pic { fill: #fbfcfd; stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-axis { stroke: #7f8c8d; stroke-width: 1.5px; }
+.mtd-svg .mtd-arc { stroke: #2c3e50; stroke-width: 2px; }
+.mtd-svg .mtd-dot { fill: #2c3e50; }
+.mtd-svg .mtd-guide { stroke: #7f8c8d; stroke-width: 1.4px; stroke-dasharray: 4 4; }
+.mtd-svg .mtd-ring { fill: #fbfcfd; stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-pt { fill: #1f618d; opacity: .55; }
+.mtd-svg .mtd-cross { stroke: #2c3e50; stroke-width: 2.2px; }
+.mtd-svg .mtd-barbg { fill: #eef1f4; }
+.mtd-svg .mtd-bar { fill: #7d3c98; }
+.mtd-svg .mtd-cart { fill: #ffffff; stroke: #2c3e50; stroke-width: 2px; }
+.mtd-svg .mtd-zero { stroke: #95a5a6; stroke-width: 1.2px; stroke-dasharray: 4 4; }
+.mtd-svg .mtd-axisl { stroke: #7f8c8d; stroke-width: 2px; }
+.mtd-svg .mtd-norm { stroke: #117a65; stroke-width: 4px; }
+.mtd-svg .mtd-read { fill: #ffffff; stroke: #2c3e50; stroke-width: 2.5px; }
+.mtd-svg .mtd-ball { fill: #7d3c98; fill-opacity: .08; stroke: #7d3c98; stroke-width: 1.6px; stroke-dasharray: 5 4; }
+.mtd-svg .mtd-box { fill: #fbfcfd; stroke: #bdc3c7; stroke-width: 1.4px; }
+.mtd-svg .mtd-crossbg { fill: #ffffff; }
+.mtd-svg .mtd-halo { stroke: #ffffff; stroke-width: 5px; stroke-linejoin: round; paint-order: stroke; }
+.mtd-svg .mtd-box.mtd-note { stroke-dasharray: 5 4; }
+</style>
+<style>
+/* Page 5 (transformer-cost) local styles: subtitle and the three new static diagrams. */
+.dek { font-size: 1.15em; color: #555; margin-top: 0.2em; }
+.mtd-svg .p5-q { fill: #7d3c98; }
+.mtd-svg .p5-kv { fill: #a04000; }
+.mtd-svg .p5-kvbar { fill: #a04000; }
+.mtd-svg .p5-link { stroke: #7f8c8d; stroke-width: 1.6px; }
+.mtd-svg .p5-white { fill: #ffffff; }
+.mtd-svg .p5-cell { fill: #eef1f4; stroke: #ffffff; stroke-width: 2px; }
+.mtd-svg .p5-cell-on { fill: #117a65; stroke: #ffffff; stroke-width: 2px; }
+.mtd-svg .p5-qblk { fill: #e8daef; stroke: #ffffff; stroke-width: 2px; }
+.mtd-svg .p5-qblk-on { fill: #7d3c98; stroke: #ffffff; stroke-width: 2px; }
+.mtd-svg .p5-kblk { fill: #fae5d3; stroke: #ffffff; stroke-width: 2px; }
+.mtd-svg .p5-kblk-on { fill: #a04000; stroke: #ffffff; stroke-width: 2px; }
+.mtd-svg .p5-mat { fill: #fbfcfd; stroke: #2c3e50; stroke-width: 1.6px; }
+.mtd-svg .p5-mat-q { fill: #f4ecf7; stroke: #7d3c98; stroke-width: 1.8px; }
+.mtd-svg .p5-mat-k { fill: #fdf2e9; stroke: #a04000; stroke-width: 1.8px; }
+.mtd-svg .p5-mat-s { fill: #eaf2f8; stroke: #1f618d; stroke-width: 1.8px; }
+.mtd-svg .p5-grid { stroke: #aed6f1; stroke-width: 1px; }
+.mtd-svg .p5-ffn { fill: #e8f6f3; stroke: #117a65; stroke-width: 1.8px; }
+.mtd-svg .p5-arrow { stroke: #2c3e50; stroke-width: 2px; }
+.mtd-svg .p5-head { fill: #2c3e50; }
+</style>
+<style>
+/* Series and page map (B-TF, 2026-11-02) */
+.sermap { margin: .5rem 0 1.1rem; font-size: .8rem; line-height: 1.3; }
+.sermap ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; row-gap: 5px; }
+.sermap li { display: flex; align-items: center; margin: 0; padding: 0; line-height: 1.25; }
+.sermap li + li::before { content: "\2192"; color: #95a5a6; margin: 0 5px; }
+.sermap a, .sermap .sm-here { display: inline-block; padding: 2px 7px; line-height: 1.25; border-radius: 6px; text-decoration: none; }
+.sermap .sm-series a { padding: 1px 2px; color: #1f618d; text-decoration: underline; text-decoration-color: #a9cce3; text-underline-offset: 2px; }
+.sermap .sm-series .sm-here { padding: 1px 6px; background: #117a65; color: #fff; font-weight: 600; }
+.sermap .sm-series { row-gap: 0; }
+.sermap .sm-series a, .sermap .sm-series .sm-here, .sermap .sm-also a { display: inline-flex; align-items: center; min-height: 44px; box-sizing: border-box; }
+.sermap .sm-flow { margin-top: 6px; padding-left: 8px; border-left: 3px solid #117a65; }
+.sermap .sm-flow a { border: 1px solid #d5dbdb; background: #f8f9fa; color: #2c3e50; }
+.sermap .sm-also { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin: 6px 0 0; line-height: 1.25; color: #566573; }
+.sermap .sm-also a { border: 1px dashed #a9cce3; color: #1f618d; background: #fff; }
+.sermap a:hover { border-color: #1f618d; }
+@media (max-width: 400px) { .sermap { font-size: .72rem; } .sermap a, .sermap .sm-here { padding: 2px 5px; } .sermap li + li::before { margin: 0 3px; } }
+</style>
+<style>
+/* 12 px floor for subscripts, superscripts and nested exponents (owner ruling 2026-11-03, as audio fix wave 11).
+   Same em sizes as the canonical rules, never under 12 px; html raises specificity by one type.
+   The canonical eq-card block is not edited. */
+html sub,html sup{font-size:max(12px,.83em)}
+html .eq-line sub,html .eq-line sup{font-size:max(12px,.68em)}
+html var sub,html var sup,html .mvar sub,html .mvar sup{font-size:max(12px,.72em)}
+</style>
+<style>
+/* One-topic split, transformer-cost family (2026-11-08): shared page styles */
+.dek { font-size: 1.15em; color: #555; margin-top: 0.2em; }
+nav.prereq { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .4rem; margin: .6rem 0 1.1rem; }
+nav.prereq .prereq-label { font-size: .82rem; font-weight: 600; color: #6c757d; margin-right: .15rem; }
+nav.prereq a.prereq-chip { display: inline-block; padding: .15rem .6rem; border: 1px solid #ced4da; border-radius: 999px; font-size: .85rem; line-height: 1.4; color: #0056b3; text-decoration: none; }
+nav.prereq a.prereq-chip:hover, nav.prereq a.prereq-chip:focus-visible { background: #e7f1ff; border-color: #007bff; }
+.eq-part { font-size: .85rem; font-weight: 700; color: #475569; margin: .7rem 0 .1rem; letter-spacing: .02em; }
+.tc-svg { display: block; width: 100%; height: auto; margin: 0 auto; }
+figure.figure { margin-left: 0; margin-right: 0; }
+.tc-svg text { font-family: sans-serif; fill: #2c3e50; }
+.tc-svg .t-sub { fill: #566573; }
+.wt-controls { display: flex; align-items: center; gap: .4rem; flex-wrap: nowrap; margin: 0 0 .7rem; }
+.wt-controls .play-btn { min-width: 44px; min-height: 44px; padding: 0 .7em; flex: none; }
+.wt-dots { display: flex; gap: .3rem; flex-wrap: nowrap; flex: 1 1 auto; justify-content: center; min-width: 0; }
+.wt-dot { border: 1px solid #bdc3c7; background: #fff; border-radius: 999px; min-width: 44px; min-height: 44px; padding: 0 .6em; font-size: .9em; color: #2c3e50; cursor: pointer; }
+@media (max-width: 480px) { .wt-controls { flex-wrap: wrap; justify-content: space-between; row-gap: .4rem; } .wt-dots { order: 3; flex: 1 1 100%; flex-wrap: wrap; gap: .25rem; } .wt-dot { min-width: 32px; min-height: 36px; padding: 0 .2em; } .wt-controls .play-btn { min-width: 44px; padding: 0 .4em; } }
+.wt-dot.active { background: #1f618d; border-color: #1f618d; color: #fff; font-weight: bold; }
+.demo .play-btn { min-height: 44px; }
+.play-btn:disabled { opacity: .45; cursor: default; }
+.wt-readout, .tool-readout { margin: .6rem 0 0; min-height: 3.2em; color: #2c3e50; line-height: 1.5; }
+.tool-row { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin: 0 0 .5rem; }
+.tool-row label { font-size: .92rem; color: #2c3e50; }
+.tool-row input[type=range] { flex: 1 1 140px; min-width: 120px; min-height: 44px; }
+.seg { display: inline-flex; border: 1px solid #bdc3c7; border-radius: 6px; overflow: hidden; }
+.seg button { border: none; background: #fff; min-height: 44px; padding: 0 .8em; cursor: pointer; font-size: .92rem; color: #2c3e50; font-family: inherit; }
+.seg button + button { border-left: 1px solid #bdc3c7; }
+.seg button.active { background: #1f618d; color: #fff; font-weight: 600; }
+.seg button.greyed { color: #95a5a6; }
+.seg button.greyed.active { background: #95a5a6; color: #fff; }
+.wt-part { transition: opacity .25s; }
+li a { overflow-wrap: anywhere; }
+#kvPlay, #snPlay { min-width: 6.2em; }  /* Play/Pause label swap never reflows the row */
+.wt-part.eq-dim { opacity: .3; }
+.eq-card.eq-card-dim { opacity: .4; transition: opacity .25s; }
+.eq-card.eq-card-dim .eq-line.eq-active { border-left-color: transparent; }
+.cache-table td, .cache-table th { vertical-align: top; }
+@keyframes tcflash { 0% { opacity: 0; } 20% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: .55; } }
+.tc-flash { animation: tcflash 1.1s ease-out 1 both; }
+@media (prefers-reduced-motion: reduce) { .tc-flash { animation: none; } .wt-part { transition: none; } }
+
+@keyframes tcfade { 0% { opacity: 0; } 25% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: .12; } }
+.tc-fade { animation: tcfade 1.3s ease-out 1 both; }
+.tc-gone { opacity: .12; }
+@media (prefers-reduced-motion: reduce) { .tc-fade { animation: none; opacity: .12; } }
+
+</style>
+  <script src="site-math.js" defer></script>
+</head>
+<body>
+      <nav class="topnav" aria-label="Site">
+    <div class="nav-inner">
+        <a class="wordmark" href="index.html">Ramin Anushiravani</a>
+        <div class="nav-links">
+            <a href="tutorial.html" class="active">Tutorials</a>
+            <a href="pubs.html">Publications</a>
+            <a href="index.html">About</a>
+            <a href="work.html">Projects</a>
+        </div>
+        <button class="nav-toggle" id="navToggle" aria-expanded="false" aria-controls="navPanel" aria-label="Menu"><span></span><span></span><span></span></button>
+    </div>
+    <div class="nav-panel" id="navPanel">
+        <div class="nav-panel-inner">
+            <div class="nav-panel-body">
+                <a class="panel-link active" href="tutorial.html">Tutorials</a>
+                <a class="panel-link" href="pubs.html">Publications</a>
+                <a class="panel-link" href="index.html">About</a>
+                <a class="panel-link" href="work.html">Projects</a>
+                <div class="panel-social">
+                    <a href="https://linkedin.com/in/raminanushiravani" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+                    <a href="https://github.com/raminaeye/" target="_blank" rel="noopener noreferrer">GitHub</a>
+                    <a href="https://scholar.google.com/citations?user=kouXx8gAAAAJ&hl=en" target="_blank" rel="noopener noreferrer">Google Scholar</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</nav>
+
+    <p class="crumb"><a href="tutorial.html">&larr; All tutorials</a></p>
+    <script src="tutorial-nav.js"></script>
+
+  <h1>The KV Cache</h1>
+  <p class="dek">When a model writes one token at a time, the keys and values of earlier tokens never change, so it stores them and computes only the new token's.</p>
+  <nav class="sermap" aria-label="The Transformers series">
+      <ol class="sm-series">
+        <li><a href="transformers.html">Attention</a></li>
+        <li><a href="transformer-position-masking.html">Positional Encoding and Masking</a></li>
+        <li><a href="transformer-block.html">The Transformer Block</a></li>
+        <li><a href="cross-attention.html">Cross-Attention</a></li>
+        <li><a href="transformer-cost.html">Transformer Cost and Efficiency</a></li>
+        <li><a href="flash-attention.html">FlashAttention</a></li>
+        <li><span class="sm-here" aria-current="page">The KV Cache</span></li>
+        <li><a href="grouped-query-attention.html">Multi-Query and Grouped-Query Attention</a></li>
+        <li><a href="sliding-window-attention.html">Sliding-Window Attention</a></li>
+        <li><a href="attention-sinks.html">Attention Sinks and Streaming Generation</a></li>
+      </ol>
+    </nav>
+  <nav class="prereq" aria-label="Before you start"><span class="prereq-label">Before you start</span><a class="prereq-chip" href="transformers.html#how-it-works-the-equation" title="Attention, section 3" aria-label="Attention, taught in Attention, section 3">Attention</a><a class="prereq-chip" href="transformers.html#multi-head-attention" title="Attention, section 5" aria-label="Multi-head attention, taught in Attention, section 5">Multi-head attention</a><a class="prereq-chip" href="transformer-position-masking.html" title="Positional Encoding and Masking, the causal mask section" aria-label="Causal mask, taught in Positional Encoding and Masking, the causal mask section">Causal mask</a><a class="prereq-chip" href="transformer-block.html" title="The Transformer Block, the decoder-only section" aria-label="Decoder-only models, taught in The Transformer Block, the decoder-only section">Decoder-only models</a><a class="prereq-chip" href="decoding.html" title="Decoding, the generate loop section" aria-label="The generate loop, taught in Decoding, the generate loop section">The generate loop</a></nav>
+  <p class="tabs-label">On this page</p>
+  <div class="tab-strip">
+    <a class="tab-chip" href="#recompute"><span class="secnum">1</span> A naive loop redoes the whole text every step</a>
+    <a class="tab-chip" href="#cache"><span class="secnum">2</span> Past keys and values never change, so keep them</a>
+    <a class="tab-chip" href="#walkthrough"><span class="secnum">3</span> One decode step</a>
+    <a class="tab-chip" href="#memory"><span class="secnum">4</span> The cache trades compute for memory</a>
+    <a class="tab-chip" href="#tool"><span class="secnum">5</span> Redo the table, or add one row</a>
+    <a class="tab-chip" href="#in-practice"><span class="secnum">6</span> Prefill, decode and cache types</a>
+    <a class="tab-chip" href="#serving"><span class="secnum">7</span> Fitting the cache in memory when serving</a>
+    <a class="tab-chip" href="#failures"><span class="secnum">8</span> Failures and fixes</a>
+    <a class="tab-chip" href="#references"><span class="secnum">9</span> References</a>
+  </div>
+
+  <h2 id="recompute"><span class="secnum">1</span> A naive loop redoes the whole text every step</h2>
+  <p>
+    A chat model answering a long prompt writes one token, appends it, and runs again. A naive loop feeds the whole text back in each time, so every step rebuilds the full score table to get one new row.
+  </p>
+  <figure class="figure" id="fig-recompute"><svg class="tc-svg" viewBox="0 0 360 228" style="max-width:480px" role="img" aria-label="At step t a naive loop recomputes the whole t by t causal table; every row but the last was already computed at earlier steps."><defs><pattern id="kvHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" style="fill:#fdf2e9"/><line x1="0" y1="0" x2="0" y2="6" style="stroke:#e0b48a;stroke-width:2px"/></pattern></defs><text x="10" y="18" style="font-size:14px;font-weight:700">step t of a naive loop</text><rect x="20" y="30" width="22" height="22" style="fill:url(#kvHatch);stroke:#b9770e;stroke-width:1px"/><rect x="20" y="52" width="22" height="22" style="fill:url(#kvHatch);stroke:#b9770e;stroke-width:1px"/><rect x="42" y="52" width="22" height="22" style="fill:url(#kvHatch);stroke:#b9770e;stroke-width:1px"/><rect x="20" y="74" width="22" height="22" style="fill:url(#kvHatch);stroke:#b9770e;stroke-width:1px"/><rect x="42" y="74" width="22" height="22" style="fill:url(#kvHatch);stroke:#b9770e;stroke-width:1px"/><rect x="64" y="74" width="22" height="22" style="fill:url(#kvHatch);stroke:#b9770e;stroke-width:1px"/><rect x="20" y="96" width="22" height="22" style="fill:url(#kvHatch);stroke:#b9770e;stroke-width:1px"/><rect x="42" y="96" width="22" height="22" style="fill:url(#kvHatch);stroke:#b9770e;stroke-width:1px"/><rect x="64" y="96" width="22" height="22" style="fill:url(#kvHatch);stroke:#b9770e;stroke-width:1px"/><rect x="86" y="96" width="22" height="22" style="fill:url(#kvHatch);stroke:#b9770e;stroke-width:1px"/><rect x="20" y="118" width="22" height="22" style="fill:url(#kvHatch);stroke:#b9770e;stroke-width:1px"/><rect x="42" y="118" width="22" height="22" style="fill:url(#kvHatch);stroke:#b9770e;stroke-width:1px"/><rect x="64" y="118" width="22" height="22" style="fill:url(#kvHatch);stroke:#b9770e;stroke-width:1px"/><rect x="86" y="118" width="22" height="22" style="fill:url(#kvHatch);stroke:#b9770e;stroke-width:1px"/><rect x="108" y="118" width="22" height="22" style="fill:url(#kvHatch);stroke:#b9770e;stroke-width:1px"/><rect x="20" y="140" width="22" height="22" style="fill:url(#kvHatch);stroke:#b9770e;stroke-width:1px"/><rect x="42" y="140" width="22" height="22" style="fill:url(#kvHatch);stroke:#b9770e;stroke-width:1px"/><rect x="64" y="140" width="22" height="22" style="fill:url(#kvHatch);stroke:#b9770e;stroke-width:1px"/><rect x="86" y="140" width="22" height="22" style="fill:url(#kvHatch);stroke:#b9770e;stroke-width:1px"/><rect x="108" y="140" width="22" height="22" style="fill:url(#kvHatch);stroke:#b9770e;stroke-width:1px"/><rect x="130" y="140" width="22" height="22" style="fill:url(#kvHatch);stroke:#b9770e;stroke-width:1px"/><rect x="20" y="162" width="22" height="22" style="fill:url(#kvHatch);stroke:#b9770e;stroke-width:1px"/><rect x="42" y="162" width="22" height="22" style="fill:url(#kvHatch);stroke:#b9770e;stroke-width:1px"/><rect x="64" y="162" width="22" height="22" style="fill:url(#kvHatch);stroke:#b9770e;stroke-width:1px"/><rect x="86" y="162" width="22" height="22" style="fill:url(#kvHatch);stroke:#b9770e;stroke-width:1px"/><rect x="108" y="162" width="22" height="22" style="fill:url(#kvHatch);stroke:#b9770e;stroke-width:1px"/><rect x="130" y="162" width="22" height="22" style="fill:url(#kvHatch);stroke:#b9770e;stroke-width:1px"/><rect x="152" y="162" width="22" height="22" style="fill:url(#kvHatch);stroke:#b9770e;stroke-width:1px"/><rect x="20" y="184" width="22" height="22" style="fill:#f5b041;stroke:#b9770e;stroke-width:1px"/><rect x="42" y="184" width="22" height="22" style="fill:#f5b041;stroke:#b9770e;stroke-width:1px"/><rect x="64" y="184" width="22" height="22" style="fill:#f5b041;stroke:#b9770e;stroke-width:1px"/><rect x="86" y="184" width="22" height="22" style="fill:#f5b041;stroke:#b9770e;stroke-width:1px"/><rect x="108" y="184" width="22" height="22" style="fill:#f5b041;stroke:#b9770e;stroke-width:1px"/><rect x="130" y="184" width="22" height="22" style="fill:#f5b041;stroke:#b9770e;stroke-width:1px"/><rect x="152" y="184" width="22" height="22" style="fill:#f5b041;stroke:#b9770e;stroke-width:1px"/><rect x="174" y="184" width="22" height="22" style="fill:#f5b041;stroke:#b9770e;stroke-width:1px"/><rect x="214" y="60" width="16" height="16" style="fill:url(#kvHatch);stroke:#b9770e"/><text x="236" y="73" style="font-size:14px">already computed,</text><text x="236" y="88" style="font-size:14px">computed again</text><rect x="214" y="120" width="16" height="16" style="fill:#f5b041;stroke:#b9770e"/><text x="236" y="133" style="font-size:14px">the only new row</text></svg><figcaption class="caption"><span class="fignum">Figure 1.</span> A naive loop redoes every earlier row to get one new row.</figcaption></figure>
+
+  <hr>
+
+  <h2 id="cache"><span class="secnum">2</span> Past keys and values never change, so keep them</h2>
+  <p>
+    Under the causal mask a token never sees later tokens, so the keys and values of earlier tokens never change. Real systems store them in a <strong>KV cache</strong>.
+    Each step computes only the new token's key and value, appends them, and scores the new query against everything stored.
+    <strong>Prefill</strong> runs the prompt through in one pass to fill the cache; <strong>decode</strong> then adds one token per step.
+  </p>
+  <p>
+    Queries are not cached. A query is used once, at its own step, to score the keys; no later token ever reads an earlier query, while every later token reads every earlier key and value.
+  </p>
+  <p>
+    The cache exists once per layer. The new token still runs through every layer: in each one, its own input to that layer gives that layer's key and value, which are appended to that layer's cache, and that layer's attention reads only its own cache.
+  </p>
+  <div class="eq-card" id="kvK1">
+      <div class="eq-what">The attention cost of decode step <var>\(t\)</var> in one layer, with and without the cache.</div>
+      <div class="eq-line eq-active" data-eqline="0">\({\displaystyle \text{with cache: }\;4\,\htmlClass{eqt sym-d}{\htmlStyle{color:#1f618d}{d}}\,\htmlClass{eqt sym-t}{\htmlStyle{color:#9a6400}{t}}}\)</div>
+        <div class="eq-why eq-active" data-eqline="0">At step <var>\(t\)</var> the one new query is scored against the <var>\(t\)</var> stored keys, and one weighted sum runs over the <var>\(t\)</var> stored values, so the cost grows in a straight line with <var>\(t\)</var>. The 4 counts two products of <var>\(d\)</var> multiply-adds per stored token, the scores and the weighted sum, at two FLOPs per multiply-add.</div>
+      <div class="eq-line eq-active" data-eqline="1">\({\displaystyle \text{without cache: }\;4\,\htmlClass{eqt sym-d}{\htmlStyle{color:#1f618d}{d}}\,\htmlClass{eqt sym-t}{\htmlStyle{color:#9a6400}{t}}^{2}}\)</div>
+        <div class="eq-why eq-active" data-eqline="1">Without the cache all <var>\(t\)</var> queries are recomputed against all <var>\(t\)</var> keys, the full table, though only its last row is new; so step <var>\(t\)</var> costs <var>\(t\)</var> times the cached step. Both lines are the attention line of <a href="transformer-cost.html#attention-cost">Transformer Cost and Efficiency</a>, with one query row or with all of them.</div>
+      <div class="eq-legend"><span class="eq-item"><span class="eq-sw" style="background:#9a6400"></span>tokens so far</span><span class="eq-item"><span class="eq-sw" style="background:#1f618d"></span>model width</span></div>
+  </div>
+<pre class="cs" data-cs="3-6,8-9,10-11"><code class="language-python">import torch
+
+B, h, T, d_k = 1, 8, 10, 64
+K = torch.randn(B, h, T, d_k)  # cache so far
+V = torch.randn(B, h, T, d_k)
+q, k, v = torch.randn(3, B, h, 1, d_k)  # the new token
+
+K = torch.cat([K, k], dim=2)
+V = torch.cat([V, v], dim=2)
+S = q @ K.transpose(-2, -1) / d_k ** 0.5  # (B, h, 1, T + 1)
+out = S.softmax(dim=-1) @ V               # (B, h, 1, d_k)</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>The cache so far, one key and one value per earlier token, and the new token's query, key and value.</li>
+  <li><span class="cs-n">2</span>The cache grows by one key and one value; nothing earlier is recomputed.</li>
+  <li><span class="cs-n">3</span>One query row attends over every stored key, the first line of the card above.</li>
+</ol>
+
+  <hr>
+
+  <h2 id="walkthrough"><span class="secnum">3</span> One decode step</h2>
+  <div class="demo" id="kvStep">
+    <div class="wt-controls"><button type="button" class="play-btn wt-prev" aria-label="Previous step">&#9664;</button><div class="wt-dots"></div><button type="button" class="play-btn wt-next" aria-label="Next step">&#9654;</button></div>
+    <svg class="tc-svg" viewBox="0 0 360 250" style="max-width:520px" role="img" aria-label="Walkthrough: prompt tokens, the cache as stacked key and value blocks, the new token with its query, key and value, the score row and the output; a ghosted full table for the no-cache contrast."><text x="8" y="16" style="font-size:14px;font-weight:700">tokens</text><g class="wt-part" data-part="prompt"><rect x="8" y="24" width="34" height="22" rx="4" style="fill:#eaf2f8;stroke:#1f618d;stroke-width:1.2px"/><rect x="46" y="24" width="34" height="22" rx="4" style="fill:#eaf2f8;stroke:#1f618d;stroke-width:1.2px"/><rect x="84" y="24" width="34" height="22" rx="4" style="fill:#eaf2f8;stroke:#1f618d;stroke-width:1.2px"/><rect x="122" y="24" width="34" height="22" rx="4" style="fill:#eaf2f8;stroke:#1f618d;stroke-width:1.2px"/><text x="82" y="62" text-anchor="middle" style="font-size:14px">prompt</text></g><g class="wt-part" data-part="new"><rect x="168" y="24" width="34" height="22" rx="4" style="fill:#fff;stroke:#7d3c98;stroke-width:2px"/><text x="185" y="62" text-anchor="middle" style="font-size:14px">new</text></g><g class="wt-part" data-part="qkv"><rect x="214" y="22" width="26" height="26" rx="4" style="fill:#f4ecf7;stroke:#7d3c98;stroke-width:1.5px"/><text x="227" y="40" text-anchor="middle" class="mvar" style="font-size:14px">q</text><rect x="246" y="22" width="26" height="26" rx="4" style="fill:#fdf2e9;stroke:#a04000;stroke-width:1.5px"/><text x="259" y="40" text-anchor="middle" class="mvar" style="font-size:14px">k</text><rect x="278" y="22" width="26" height="26" rx="4" style="fill:#fdf2e9;stroke:#a04000;stroke-width:1.5px"/><text x="291" y="40" text-anchor="middle" class="mvar" style="font-size:14px">v</text></g><g class="wt-part" data-part="qkv"><text x="227" y="78" text-anchor="middle" style="font-size:14px;fill:#7d3c98">q: not stored</text></g><text x="8" y="92" style="font-size:14px;font-weight:700;fill:#a04000">cache</text><g class="wt-part" data-part="layers"><rect x="222" y="112" width="56" height="44" rx="4" style="fill:#fdf2e9;stroke:#a04000;stroke-width:1.2px"/><rect x="228" y="106" width="56" height="44" rx="4" style="fill:#fdf2e9;stroke:#a04000;stroke-width:1.2px"/><rect x="234" y="100" width="56" height="44" rx="4" style="fill:#fdf2e9;stroke:#a04000;stroke-width:1.2px"/><text x="262" y="126" text-anchor="middle" style="font-size:14px;fill:#a04000">layer L</text><text x="252" y="172" text-anchor="middle" style="font-size:14px;fill:#a04000">one per layer</text></g><g class="wt-part" data-part="prompt"><rect x="8" y="100" width="34" height="20" rx="3" style="fill:#f0b27a;stroke:#a04000;stroke-width:1.2px"/><rect x="46" y="100" width="34" height="20" rx="3" style="fill:#f0b27a;stroke:#a04000;stroke-width:1.2px"/><rect x="84" y="100" width="34" height="20" rx="3" style="fill:#f0b27a;stroke:#a04000;stroke-width:1.2px"/><rect x="122" y="100" width="34" height="20" rx="3" style="fill:#f0b27a;stroke:#a04000;stroke-width:1.2px"/><rect x="8" y="126" width="34" height="20" rx="3" style="fill:#f0b27a;stroke:#a04000;stroke-width:1.2px"/><rect x="46" y="126" width="34" height="20" rx="3" style="fill:#f0b27a;stroke:#a04000;stroke-width:1.2px"/><rect x="84" y="126" width="34" height="20" rx="3" style="fill:#f0b27a;stroke:#a04000;stroke-width:1.2px"/><rect x="122" y="126" width="34" height="20" rx="3" style="fill:#f0b27a;stroke:#a04000;stroke-width:1.2px"/></g><g class="wt-part" data-part="append"><rect x="160" y="100" width="34" height="20" rx="3" style="fill:#d35400;stroke:#a04000;stroke-width:1.4px"/><rect x="160" y="126" width="34" height="20" rx="3" style="fill:#d35400;stroke:#a04000;stroke-width:1.4px"/><text x="200" y="116" style="font-size:14px;fill:#a04000">K</text><text x="200" y="142" style="font-size:14px;fill:#a04000">V</text></g><g class="wt-part" data-part="score"><text x="8" y="176" style="font-size:14px;font-weight:700;fill:#9a6400">scores</text><rect x="8" y="184" width="34" height="20" rx="3" style="fill:#fdebd0;stroke:#b9770e;stroke-width:1.2px"/><rect x="46" y="184" width="34" height="20" rx="3" style="fill:#fdebd0;stroke:#b9770e;stroke-width:1.2px"/><rect x="84" y="184" width="34" height="20" rx="3" style="fill:#fdebd0;stroke:#b9770e;stroke-width:1.2px"/><rect x="122" y="184" width="34" height="20" rx="3" style="fill:#fdebd0;stroke:#b9770e;stroke-width:1.2px"/><rect x="160" y="184" width="34" height="20" rx="3" style="fill:#fdebd0;stroke:#b9770e;stroke-width:1.2px"/><text x="110" y="220" text-anchor="middle" style="font-size:14px">one query against every stored key</text></g><g class="wt-part" data-part="out"><rect x="236" y="180" width="40" height="28" rx="4" style="fill:#e8f6f6;stroke:#117a7a;stroke-width:1.6px"/><text x="256" y="199" text-anchor="middle" style="font-size:14px">output</text><text x="256" y="226" text-anchor="middle" style="font-size:14px">next token</text></g><g class="wt-part" data-part="ghost"><text x="294" y="82" style="font-size:14px;fill:#566573">no cache:</text><rect x="296" y="90" width="10" height="10" style="fill:#f5b041;stroke:#b9770e;stroke-width:.6px;opacity:.6"/><rect x="296" y="101" width="10" height="10" style="fill:#f5b041;stroke:#b9770e;stroke-width:.6px;opacity:.6"/><rect x="307" y="101" width="10" height="10" style="fill:#f5b041;stroke:#b9770e;stroke-width:.6px;opacity:.6"/><rect x="296" y="112" width="10" height="10" style="fill:#f5b041;stroke:#b9770e;stroke-width:.6px;opacity:.6"/><rect x="307" y="112" width="10" height="10" style="fill:#f5b041;stroke:#b9770e;stroke-width:.6px;opacity:.6"/><rect x="318" y="112" width="10" height="10" style="fill:#f5b041;stroke:#b9770e;stroke-width:.6px;opacity:.6"/><rect x="296" y="123" width="10" height="10" style="fill:#f5b041;stroke:#b9770e;stroke-width:.6px;opacity:.6"/><rect x="307" y="123" width="10" height="10" style="fill:#f5b041;stroke:#b9770e;stroke-width:.6px;opacity:.6"/><rect x="318" y="123" width="10" height="10" style="fill:#f5b041;stroke:#b9770e;stroke-width:.6px;opacity:.6"/><rect x="329" y="123" width="10" height="10" style="fill:#f5b041;stroke:#b9770e;stroke-width:.6px;opacity:.6"/><rect x="296" y="134" width="10" height="10" style="fill:#f5b041;stroke:#b9770e;stroke-width:.6px;opacity:.6"/><rect x="307" y="134" width="10" height="10" style="fill:#f5b041;stroke:#b9770e;stroke-width:.6px;opacity:.6"/><rect x="318" y="134" width="10" height="10" style="fill:#f5b041;stroke:#b9770e;stroke-width:.6px;opacity:.6"/><rect x="329" y="134" width="10" height="10" style="fill:#f5b041;stroke:#b9770e;stroke-width:.6px;opacity:.6"/><rect x="340" y="134" width="10" height="10" style="fill:#f5b041;stroke:#b9770e;stroke-width:.6px;opacity:.6"/><text x="294" y="160" style="font-size:14px;fill:#566573">redo it all</text></g></svg>
+    <p class="wt-readout" aria-live="polite"></p>
+  <div class="eq-card eq-stepped" id="kvWalkEq" data-stepped="1">
+      <div class="eq-what">The cost of decode step <var>\(t\)</var>, with and without the cache.</div>
+      <div class="eq-line" data-eqline="0">\({\displaystyle \text{with cache: }\;4\,\htmlClass{eqt sym-d}{\htmlStyle{color:#1f618d}{d}}\,\htmlClass{eqt sym-t}{\htmlStyle{color:#9a6400}{t}}}\)</div>
+        <div class="eq-why" data-eqline="0">One query row against every stored key: grows in a straight line with the length.</div>
+      <div class="eq-line" data-eqline="1">\({\displaystyle \text{without cache: }\;4\,\htmlClass{eqt sym-d}{\htmlStyle{color:#1f618d}{d}}\,\htmlClass{eqt sym-t}{\htmlStyle{color:#9a6400}{t}}^{2}}\)</div>
+        <div class="eq-why" data-eqline="1">The whole table again: grows with the square of the length.</div>
+      <div class="eq-legend"><span class="eq-item eq-active"><span class="eq-sw" style="background:#9a6400"></span>tokens so far</span><span class="eq-item eq-active"><span class="eq-sw" style="background:#1f618d"></span>model width</span></div>
+  </div>
+    <p class="caption"><span class="fignum">Figure 2.</span> One decode step: compute one new key and value, store them, score one row.</p>
+  </div>
+
+  <hr>
+
+  <h2 id="memory"><span class="secnum">4</span> The cache trades compute for memory</h2>
+  <p id="kv-cache-memory">
+    The saved arithmetic is paid for in memory: the cache holds every key and value of every layer for the whole conversation.
+  </p>
+  <div class="eq-card" id="kvK2">
+      <div class="eq-what">The size of the cache.</div>
+      <div class="eq-line eq-active" data-eqline="0">\({\displaystyle \htmlClass{eqt sym-cb}{\htmlStyle{color:#a04000}{B_{\text{cache}}}}=2\,\htmlClass{eqt sym-L}{\htmlStyle{color:#2c3e50}{L}}\,\htmlClass{eqt sym-hkv}{\htmlStyle{color:#a04000}{h_{kv}}}\,\htmlClass{eqt sym-dk}{\htmlStyle{color:#1f618d}{d_k}}\,\htmlClass{eqt sym-T}{\htmlStyle{color:#9a6400}{T}}\,\htmlClass{eqt sym-b}{\htmlStyle{color:#1e8449}{b}}}\)</div>
+        <div class="eq-why eq-active" data-eqline="0">A long chat fills this fast. <var>\(B_{\text{cache}}\)</var> is the cache size in bytes. The 2 is one key and one value; then come the layers <var>\(L\)</var>, the stored heads per layer <var>\(h_{kv}\)</var>, the numbers per head <var>\(d_k\)</var>, the tokens kept <var>\(T\)</var> and the bytes per number <var>\(b\)</var>. Every factor scales the cache in proportion. <var>\(h_{kv}\)</var> is the one that sharing heads cuts.</div>
+      <div class="eq-legend"><span class="eq-item"><span class="eq-sw" style="background:#a04000"></span>stored heads</span><span class="eq-item"><span class="eq-sw" style="background:#1f618d"></span>head size</span><span class="eq-item"><span class="eq-sw" style="background:#9a6400"></span>tokens kept</span><span class="eq-item"><span class="eq-sw" style="background:#1e8449"></span>bytes per number</span></div>
+  </div>
+<pre class="cs" data-cs="1-2,4"><code class="language-python">def kv_cache_bytes(L, h_kv, d_k, T, b):
+    return 2 * L * h_kv * d_k * T * b  # 2 = key + value
+
+mistral_7b = kv_cache_bytes(L=32, h_kv=8, d_k=128, T=4096, b=2)</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>The cache-size line of the card above, factor for factor.</li>
+  <li><span class="cs-n">2</span>Mistral 7B's settings: 32 layers, 8 stored heads of 128 numbers, 2 bytes per number in bf16, and at most 4096 tokens kept: its <a href="sliding-window-attention.html#rolling-buffer">rolling buffer</a> caps the cache at the window even though its context is longer.</li>
+</ol>
+  <p>
+    Shazeer (2019) pointed out what this does to speed: each decode step must read the whole cache, so memory bandwidth, not arithmetic, sets how fast tokens come out.
+  </p>
+  <div class="eq-card" id="kvK3">
+      <div class="eq-what">A lower bound on one decode step, this page's summary of Shazeer (2019).</div>
+      <div class="eq-line eq-active" data-eqline="0">\({\displaystyle \htmlClass{eqt sym-ts}{\htmlStyle{color:#2c3e50}{t_{\text{step}}}}\;\gtrsim\;\frac{\htmlClass{eqt sym-cb}{\htmlStyle{color:#a04000}{B_{\text{cache}}}}}{\htmlClass{eqt sym-bw}{\htmlStyle{color:#1e8449}{\text{bandwidth}}}}}\)</div>
+        <div class="eq-why eq-active" data-eqline="0">Every step reads every stored key and value once, so the step time <var>\(t_{\text{step}}\)</var> is at least the cache size in bytes <var>\(B_{\text{cache}}\)</var> divided by the memory bandwidth, the bytes memory can deliver per second. The model weights are read every step too, so this is a bound from the cache alone. A bigger cache makes every token slower even though each token needs little arithmetic.</div>
+      <div class="eq-legend"><span class="eq-item"><span class="eq-sw" style="background:#a04000"></span>cache bytes, the line above</span><span class="eq-item"><span class="eq-sw" style="background:#1e8449"></span>memory bandwidth</span></div>
+  </div>
+
+  <hr>
+
+  <h2 id="tool"><span class="secnum">5</span> Redo the table, or add one row</h2>
+  <p>Generate tokens with the cache on and off. Lit cells are the work done this step; the stack is what memory holds between steps.</p>
+
+  <div class="demo" id="kvTool">
+    <div class="tool-row"><button type="button" class="play-btn" id="kvPlay">Play</button><label for="kvT">Tokens</label><input type="range" id="kvT" min="1" max="14" step="1" value="8" aria-label="Tokens generated"></div>
+    <div class="tool-row"><span style="font-size:.92rem">Cache</span><div class="seg" id="kvMode" role="group" aria-label="Cache on or off"><button type="button" data-m="1" class="active">on</button><button type="button" data-m="0">off</button></div></div>
+    <svg class="tc-svg" id="kvSvg" viewBox="0 0 360 310" style="max-width:460px" role="img" aria-label="The causal score triangle and, inside a GPU memory frame, the key and value stack held between steps"></svg>
+    <p class="tool-readout" id="kvRead" aria-live="polite"></p>
+    <p class="caption"><span class="fignum">Figure 3.</span> Redo the table, or add one row: a chat model writing its reply, one token per step.</p>
+  </div>
+
+  <hr>
+
+  <h2 id="in-practice"><span class="secnum">6</span> Prefill, decode and cache types</h2>
+  <p>Generation runs once over the prompt, then once per token against the cache.</p>
+<pre class="cs" data-cs="4-8,10-14"><code class="language-python">import torch
+import torch.nn.functional as F
+
+sdpa = F.scaled_dot_product_attention
+B, h, T, d_k = 1, 8, 16, 64
+q, K, V = torch.randn(3, B, h, T, d_k)  # the prompt
+prompt_out = sdpa(q, K, V, is_causal=True)
+# K and V are now the cache
+
+q_new = torch.randn(B, h, 1, d_k)
+k_new, v_new = torch.randn(2, B, h, 1, d_k)
+K = torch.cat([K, k_new], dim=2)  # cache grows by one
+V = torch.cat([V, v_new], dim=2)
+step_out = sdpa(q_new, K, V)  # no is_causal here</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>Prefill: the prompt in one causal call, step 1 of <a href="#kvStep">Figure 2</a>.</li>
+  <li><span class="cs-n">2</span>One decode step: append one key and value, attend from one query, step 4 of <a href="#kvStep">Figure 2</a>.</li>
+</ol>
+  <table class="when-table" aria-label="When it runs, its settings and code">
+    <tr><th scope="row">When</th><td>Lives through one generation; grows by one key and one value per stored head per layer per token.</td></tr>
+    <tr><th scope="row">Cache type</th><td>Hugging Face's default <code>DynamicCache</code> grows token by token; <code>cache_implementation="static"</code> preallocates the full length and works with <code>torch.compile</code>.</td></tr>
+    <tr><th scope="row">Cache length <var>\(T\)</var></th><td>Longer remembers more and costs more, in proportion, by the cache-size card; capped by the trained context, 2048 tokens for GPT-3.</td></tr>
+    <tr><th scope="row">Code</th><td><a href="https://huggingface.co/docs/transformers/en/kv_cache">Cache strategies</a> (Hugging Face), <a href="https://docs.pytorch.org/docs/2.15/generated/torch.nn.functional.scaled_dot_product_attention.html"><code>F.scaled_dot_product_attention</code></a> (PyTorch docs).</td></tr>
+  </table>
+  <p>
+    The same reuse happens in translation: the decoder's <a href="cross-attention.html#translation">cross-attention</a> reads the encoder's keys and values, computed once.
+  </p>
+
+  <hr>
+
+  <h2 id="serving"><span class="secnum">7</span> Fitting the cache in memory when serving</h2>
+  <p>
+    A server answering many chats at once holds one cache per request, and the batch it can run is set by how many caches fit.
+    Serving systems shrink the cache, move it, or stop wasting it.
+  </p>
+  <ul>
+    <li><strong>Quantized cache.</strong> Store the keys and values at lower precision, fewer bytes per number <var>\(b\)</var>. Hugging Face's <code>QuantizedCache</code> does this; its docs warn it can slow short generations that already fit in memory.</li>
+    <li><strong>Offloaded cache.</strong> Keep every layer's cache in CPU memory except the layer running now, and fetch the next layer's cache ahead of time. GPU memory drops for a small loss in speed (Hugging Face's offloaded caches).</li>
+    <li><strong>Paged blocks.</strong> PagedAttention (Kwon et al. 2023) splits each request's cache into fixed-size blocks, allocated only as tokens arrive and placed anywhere in memory, found through a per-request block table, as an operating system pages memory. Earlier servers reserved one contiguous run per request for its maximum length; the paper measured that only 20.4% to 38.2% of that memory held real keys and values. Blocks can also be shared, for example between several samples of the same prompt. Its server, vLLM, reports 2 to 4 times the throughput at the same latency.</li>
+  </ul>
+  <figure class="figure" id="fig-paged"><svg class="tc-svg" viewBox="0 0 360 250" style="max-width:520px" role="img" aria-label="Top: each request reserves one contiguous run of cache slots for its maximum length, mostly empty. Bottom: paged blocks; each request holds only the fixed-size blocks it has filled, scattered through memory, found through a block table."><text x="4" y="16" style="font-size:14px;font-weight:700">reserve the maximum length</text><text x="4" y="41" style="font-size:14px">req A</text><rect x="52" y="26" width="22" height="20" rx="2" style="fill:#f0b27a;stroke:#a04000;stroke-width:1px"/><rect x="77" y="26" width="22" height="20" rx="2" style="fill:#f0b27a;stroke:#a04000;stroke-width:1px"/><rect x="102" y="26" width="22" height="20" rx="2" style="fill:#f0b27a;stroke:#a04000;stroke-width:1px"/><rect x="127" y="26" width="22" height="20" rx="2" style="fill:#fbfcfc;stroke:#b3b6b7;stroke-width:1px"/><rect x="152" y="26" width="22" height="20" rx="2" style="fill:#fbfcfc;stroke:#b3b6b7;stroke-width:1px"/><rect x="177" y="26" width="22" height="20" rx="2" style="fill:#fbfcfc;stroke:#b3b6b7;stroke-width:1px"/><rect x="202" y="26" width="22" height="20" rx="2" style="fill:#fbfcfc;stroke:#b3b6b7;stroke-width:1px"/><rect x="227" y="26" width="22" height="20" rx="2" style="fill:#fbfcfc;stroke:#b3b6b7;stroke-width:1px"/><rect x="252" y="26" width="22" height="20" rx="2" style="fill:#fbfcfc;stroke:#b3b6b7;stroke-width:1px"/><rect x="277" y="26" width="22" height="20" rx="2" style="fill:#fbfcfc;stroke:#b3b6b7;stroke-width:1px"/><rect x="302" y="26" width="22" height="20" rx="2" style="fill:#fbfcfc;stroke:#b3b6b7;stroke-width:1px"/><rect x="327" y="26" width="22" height="20" rx="2" style="fill:#fbfcfc;stroke:#b3b6b7;stroke-width:1px"/><text x="4" y="71" style="font-size:14px">req B</text><rect x="52" y="56" width="22" height="20" rx="2" style="fill:#f0b27a;stroke:#a04000;stroke-width:1px"/><rect x="77" y="56" width="22" height="20" rx="2" style="fill:#f0b27a;stroke:#a04000;stroke-width:1px"/><rect x="102" y="56" width="22" height="20" rx="2" style="fill:#f0b27a;stroke:#a04000;stroke-width:1px"/><rect x="127" y="56" width="22" height="20" rx="2" style="fill:#f0b27a;stroke:#a04000;stroke-width:1px"/><rect x="152" y="56" width="22" height="20" rx="2" style="fill:#f0b27a;stroke:#a04000;stroke-width:1px"/><rect x="177" y="56" width="22" height="20" rx="2" style="fill:#fbfcfc;stroke:#b3b6b7;stroke-width:1px"/><rect x="202" y="56" width="22" height="20" rx="2" style="fill:#fbfcfc;stroke:#b3b6b7;stroke-width:1px"/><rect x="227" y="56" width="22" height="20" rx="2" style="fill:#fbfcfc;stroke:#b3b6b7;stroke-width:1px"/><rect x="252" y="56" width="22" height="20" rx="2" style="fill:#fbfcfc;stroke:#b3b6b7;stroke-width:1px"/><rect x="277" y="56" width="22" height="20" rx="2" style="fill:#fbfcfc;stroke:#b3b6b7;stroke-width:1px"/><rect x="302" y="56" width="22" height="20" rx="2" style="fill:#fbfcfc;stroke:#b3b6b7;stroke-width:1px"/><rect x="327" y="56" width="22" height="20" rx="2" style="fill:#fbfcfc;stroke:#b3b6b7;stroke-width:1px"/><text x="200" y="102" text-anchor="middle" style="font-size:14px;fill:#566573">empty slots stay reserved</text><text x="4" y="132" style="font-size:14px;font-weight:700">paged blocks, filled on demand</text><rect x="52" y="142" width="22" height="22" rx="2" style="fill:#f0b27a;stroke:#a04000;stroke-width:1px"/><text x="63" y="158" text-anchor="middle" style="font-size:14px">A</text><rect x="77" y="142" width="22" height="22" rx="2" style="fill:#d2b4de;stroke:#7d3c98;stroke-width:1px"/><text x="88" y="158" text-anchor="middle" style="font-size:14px">B</text><rect x="102" y="142" width="22" height="22" rx="2" style="fill:#fbfcfc;stroke:#b3b6b7;stroke-width:1px"/><rect x="127" y="142" width="22" height="22" rx="2" style="fill:#f0b27a;stroke:#a04000;stroke-width:1px"/><text x="138" y="158" text-anchor="middle" style="font-size:14px">A</text><rect x="152" y="142" width="22" height="22" rx="2" style="fill:#d2b4de;stroke:#7d3c98;stroke-width:1px"/><text x="163" y="158" text-anchor="middle" style="font-size:14px">B</text><rect x="177" y="142" width="22" height="22" rx="2" style="fill:#fbfcfc;stroke:#b3b6b7;stroke-width:1px"/><rect x="202" y="142" width="22" height="22" rx="2" style="fill:#d2b4de;stroke:#7d3c98;stroke-width:1px"/><text x="213" y="158" text-anchor="middle" style="font-size:14px">B</text><rect x="227" y="142" width="22" height="22" rx="2" style="fill:#fbfcfc;stroke:#b3b6b7;stroke-width:1px"/><rect x="252" y="142" width="22" height="22" rx="2" style="fill:#fbfcfc;stroke:#b3b6b7;stroke-width:1px"/><rect x="277" y="142" width="22" height="22" rx="2" style="fill:#f0b27a;stroke:#a04000;stroke-width:1px"/><text x="288" y="158" text-anchor="middle" style="font-size:14px">A</text><rect x="302" y="142" width="22" height="22" rx="2" style="fill:#fbfcfc;stroke:#b3b6b7;stroke-width:1px"/><rect x="327" y="142" width="22" height="22" rx="2" style="fill:#fbfcfc;stroke:#b3b6b7;stroke-width:1px"/><text x="4" y="158" style="font-size:14px">memory</text><text x="4" y="196" style="font-size:14px">block table: A uses blocks 1, 4, 10; B uses 2, 5, 7</text><text x="4" y="226" style="font-size:14px;fill:#566573">free blocks serve any request</text></svg><figcaption class="caption"><span class="fignum">Figure 4.</span> Reserving the maximum wastes slots; paged blocks hold only what is filled.</figcaption></figure>
+  <p>
+    The model itself can also store less: fewer stored heads (<a href="grouped-query-attention.html">Multi-Query and Grouped-Query Attention</a>), a window that caps the tokens kept (<a href="sliding-window-attention.html">Sliding-Window Attention</a>), or, for a model trained with full attention, a window plus a few pinned first tokens (<a href="attention-sinks.html">Attention Sinks and Streaming Generation</a>).
+  </p>
+
+  <hr>
+
+  <h2 id="failures"><span class="secnum">8</span> Failures and fixes</h2>
+  <div class="table-scroll"><table class="datatable fail-table" style="width:100%;font-size:.9rem">
+    <thead><tr><th scope="col">cause</th><th scope="col">symptom</th><th scope="col">fix</th></tr></thead>
+    <tbody>
+      <tr><td>a cache too big for the GPU</td><td>out of memory during long generations or big batches</td><td>a quantized, offloaded or paged cache (<a href="#serving">section 7</a>), <a href="grouped-query-attention.html">fewer stored heads</a> or a <a href="sliding-window-attention.html">window</a></td></tr>
+      <tr><td><code>is_causal=True</code> on the one-query decode step</td><td>the query sees only the first key: PyTorch aligns the mask to the upper left when query and key lengths differ</td><td>drop it on decode</td></tr>
+      <tr><td>generating past the trained context</td><td>quality falls</td><td>positional methods (<a href="transformer-position-masking.html">Positional Encoding and Masking, the learned-table section</a>) or a <a href="attention-sinks.html">window with attention sinks</a></td></tr>
+      <tr><td>compiling generation with the default <code>DynamicCache</code></td><td>Hugging Face's docs say it does not support <code>torch.compile</code></td><td>use the static cache, which preallocates</td></tr>
+    </tbody>
+  </table></div>
+
+  <p>
+    The cache grows with every head of every layer: what if many query heads shared one stored head? <a href="grouped-query-attention.html">Multi-Query and Grouped-Query Attention</a>.
+  </p>
+
+  <hr>
+
+  <h2 id="references"><span class="secnum">9</span> References</h2>
+  <ol class="brefs">
+    <li>Shazeer, N. (2019). Fast Transformer Decoding: One Write-Head is All You Need. <a href="https://arxiv.org/abs/1911.02150">arXiv:1911.02150</a>.</li>
+    <li>Vaswani, A., et al. (2017). Attention Is All You Need. NeurIPS 2017. <a href="https://arxiv.org/abs/1706.03762">arXiv:1706.03762</a>.</li>
+    <li>Ainslie, J., et al. (2023). GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints. <a href="https://arxiv.org/abs/2305.13245">arXiv:2305.13245</a>.</li>
+    <li>Jiang, A. Q., et al. (2023). Mistral 7B. <a href="https://arxiv.org/abs/2310.06825">arXiv:2310.06825</a>.</li>
+    <li>Kwon, W., et al. (2023). Efficient Memory Management for Large Language Model Serving with PagedAttention. SOSP 2023. <a href="https://arxiv.org/abs/2309.06180">arXiv:2309.06180</a>.</li>
+    <li>Hugging Face Transformers documentation, <a href="https://huggingface.co/docs/transformers/en/kv_cache">Cache strategies</a>.</li>
+    <li>PyTorch documentation, <a href="https://docs.pytorch.org/docs/2.15/generated/torch.nn.functional.scaled_dot_product_attention.html">torch.nn.functional.scaled_dot_product_attention</a>.</li>
+  </ol>
+
+
+<script>
+/* Walkthrough stepper (shared by the transformer-cost family). Steps carry the parts to light,
+   the eq lines and the eq terms. Whole diagram stays drawn; the active part is lit. */
+function tcWalk(rootId, steps) {
+  var root = document.getElementById(rootId); if (!root) return;
+  var parts = root.querySelectorAll('[data-part]');
+  var card = root.querySelector('.eq-card');
+  var read = root.querySelector('.wt-readout');
+  var dotsBox = root.querySelector('.wt-dots');
+  var prev = root.querySelector('.wt-prev'), next = root.querySelector('.wt-next');
+  var cur = 0, dots = [];
+  steps.forEach(function (s, i) {
+    var b = document.createElement('button'); b.type = 'button'; b.className = 'wt-dot';
+    b.textContent = String(i + 1); b.setAttribute('aria-label', 'Step ' + (i + 1));
+    b.addEventListener('click', function () { show(i); });
+    dotsBox.appendChild(b); dots.push(b);
+  });
+  function show(i) {
+    cur = Math.max(0, Math.min(steps.length - 1, i));
+    var s = steps[cur];
+    for (var p = 0; p < parts.length; p++) {
+      var keys = parts[p].getAttribute('data-part').split(' ');
+      var on = keys.some(function (k) { return s.hl.indexOf(k) >= 0; });
+      var hide = parts[p].hasAttribute('data-only') &&
+        !parts[p].getAttribute('data-only').split(' ').some(function (k) { return String(cur + 1) === k; });
+      parts[p].classList.toggle('eq-hl', on);
+      parts[p].classList.toggle('eq-dim', !on);
+      parts[p].style.visibility = hide ? 'hidden' : '';
+    }
+    if (card) {
+      /* a step with no equation keeps the nearest step's lines on screen, dimmed, so the layout never jumps */
+      var lines = s.lines, dimCard = !lines.length;
+      if (dimCard) {
+        for (var dd = 1; dd < steps.length && !lines.length; dd++) {
+          if (cur + dd < steps.length && steps[cur + dd].lines.length) lines = steps[cur + dd].lines;
+          else if (cur - dd >= 0 && steps[cur - dd].lines.length) lines = steps[cur - dd].lines;
+        }
+      }
+      card.classList.toggle('eq-card-dim', dimCard);
+      var ls = card.querySelectorAll('[data-eqline]');
+      for (var k = 0; k < ls.length; k++) {
+        var n = +ls[k].getAttribute('data-eqline');
+        ls[k].classList.toggle('eq-active', lines.indexOf(n) >= 0);
+      }
+      var pt = card.querySelectorAll('.eq-part');   /* a part heading shows only when one of its lines is lit */
+      for (var q = 0; q < pt.length; q++) {
+        var any = false, e2 = pt[q].nextElementSibling;
+        while (e2 && !e2.classList.contains('eq-part')) { if (e2.classList.contains('eq-active')) any = true; e2 = e2.nextElementSibling; }
+        pt[q].style.display = any ? '' : 'none';
+      }
+      var ts = card.querySelectorAll('.eqt');
+      for (var t = 0; t < ts.length; t++) {
+        var hit = !dimCard && (s.terms || []).some(function (c) { return ts[t].classList.contains(c); });
+        ts[t].classList.toggle('eqt-active', hit);
+      }
+    }
+    read.innerHTML = '<strong>Step ' + (cur + 1) + ' of ' + steps.length + '.</strong> ' + s.text;
+    if (window.siteMath) siteMath.typeset(read);
+    dots.forEach(function (d, j) { d.classList.toggle('active', j === cur); d.setAttribute('aria-pressed', j === cur ? 'true' : 'false'); });
+    prev.disabled = cur === 0; next.disabled = cur === steps.length - 1;
+  }
+  prev.addEventListener('click', function () { show(cur - 1); });
+  next.addEventListener('click', function () { show(cur + 1); });
+  show(0);
+}
+</script>
+
+<script>
+tcWalk('kvStep', [
+  {hl: ['prompt'], lines: [], text: 'Prefill: the whole prompt runs through in one causal pass and fills the cache with its keys and values.'},
+  {hl: ['new', 'qkv'], lines: [], text: 'A new token arrives. Only its own query, key and value are computed.'},
+  {hl: ['append', 'qkv'], lines: [], text: 'Its key and value are appended to the cache; nothing already stored is touched. Its query is not stored: no later step needs it.'},
+  {hl: ['layers', 'append'], lines: [], text: 'This happens in every layer: the new token\'s input to each layer gives that layer\'s own key and value, appended to that layer\'s own cache.'},
+  {hl: ['score', 'append', 'prompt'], lines: [0], terms: ['sym-d', 'sym-t'], text: 'The one query is scored against every stored key: one row of scores, not a table.'},
+  {hl: ['out'], lines: [0], text: 'The scores become weights that average the stored values; the output picks the next token, as in the <a href="decoding.html">generate loop</a>.'},
+  {hl: ['ghost'], lines: [1], terms: ['sym-t'], text: 'Without the cache, every earlier row would be recomputed at this step, the whole table again.'}
+]);
+</script>
+
+<script>
+(function () {
+  var svg = document.getElementById('kvSvg'); if (!svg) return;
+  var NS = 'http://www.w3.org/2000/svg';
+  var T = document.getElementById('kvT'), read = document.getElementById('kvRead'), play = document.getElementById('kvPlay');
+  var mBtns = document.querySelectorAll('#kvMode button'), on = true, timer = null, beat = 0;
+  var TMAX = 14, cell = 15;
+  function el(t, a, txt) { var e = document.createElementNS(NS, t); for (var k in a) e.setAttribute(k, a[k]); if (txt) e.textContent = txt; svg.appendChild(e); return e; }
+  function draw(anim) {
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    var n = +T.value, x0 = 14, y0 = 40;
+    el('text', { x: x0, y: 22, style: 'font-size:14px;font-weight:700' }, 'scores computed this step');
+    for (var r = 0; r < TMAX; r++) for (var c = 0; c <= r; c++) {
+      if (r >= n) { el('rect', { x: x0 + c * cell, y: y0 + r * cell, width: cell - 1, height: cell - 1, style: 'fill:none;stroke:#eaecee;stroke-width:.8px' }); continue; }
+      var lit = !on || r === n - 1;
+      el('rect', { x: x0 + c * cell, y: y0 + r * cell, width: cell - 1, height: cell - 1, class: lit && anim ? 'tc-flash' : '',
+        style: lit ? 'fill:#f39c12;stroke:#b9770e;stroke-width:.8px' : 'fill:#e5e8e8;stroke:#ccd1d1;stroke-width:.8px' });
+    }
+    if (on && n > 1) {
+      el('path', { d: 'M' + x0 + ' ' + y0 + ' L' + (x0 + cell) + ' ' + y0 + ' L' + (x0 + n * cell) + ' ' + (y0 + (n - 1) * cell) + ' L' + (x0 + n * cell) + ' ' + (y0 + n * cell) + ' L' + x0 + ' ' + (y0 + n * cell) + ' Z', style: 'fill:none;stroke:#b9770e;stroke-width:1.2px;stroke-dasharray:4 3;opacity:.7' });
+      el('text', { x: x0 + 4, y: y0 + (n - 1) * cell - 4 > y0 + 10 ? y0 + Math.max(12, (n - 1) * cell / 2) : y0 + 12, style: 'font-size:14px;fill:#566573' }, 'reused');
+    }
+    /* GPU memory frame: what is HELD between steps. Cache on: the stack stays; cache off: rebuilt, used, then freed */
+    var fx = 238, fy = 30, fw = 116, fh = 270;
+    el('rect', { x: fx, y: fy, width: fw, height: fh, rx: 8, style: 'fill:#f8f9f9;stroke:#5d6d7e;stroke-width:1.6px' });
+    el('text', { x: fx + fw / 2, y: fy + 18, 'text-anchor': 'middle', style: 'font-size:14px;font-weight:700;fill:#34495e' }, 'GPU memory');
+    el('text', { x: fx + fw / 2, y: fy + 34, 'text-anchor': 'middle', style: 'font-size:14px;fill:#34495e' }, on ? 'held: the cache' : 'held: nothing');
+    el('text', { x: fx + 30, y: fy + fh - 8, 'text-anchor': 'middle', style: 'font-size:14px;fill:#a04000' }, 'K');
+    el('text', { x: fx + 86, y: fy + fh - 8, 'text-anchor': 'middle', style: 'font-size:14px;fill:#a04000' }, 'V');
+    var bh = 13, by = fy + fh - 26;
+    for (var i = 0; i < n; i++) {
+      var newest = on ? (i === n - 1) : true;
+      var cls = on ? (newest && anim ? 'tc-flash' : '') : (anim ? 'tc-fade' : 'tc-gone');
+      var a = { y: by - (i + 1) * bh, height: bh - 2, rx: 2, class: cls,
+        style: (on ? 'fill:' + (i < n - 1 ? '#f0b27a' : '#d35400') + ';stroke:#a04000;stroke-width:1px' : 'fill:#f5cba7;stroke:#a04000;stroke-width:1px;stroke-dasharray:3 2') };
+      a.x = fx + 10; a.width = 40; el('rect', a);
+      var b2 = {}; for (var k in a) b2[k] = a[k]; b2.x = fx + 66; el('rect', b2);
+    }
+    if (!on) {
+      el('text', { x: fx + fw / 2, y: fy + 50, 'text-anchor': 'middle', style: 'font-size:14px;fill:#566573' }, 'rebuilt, then freed');
+    }
+    read.innerHTML = on ? '<strong>Cache on: one new row of work; memory held grows by one block.</strong> Earlier rows are reused, and the stack stays in memory between steps: that is the price of the saved work.'
+                        : '<strong>Cache off: the whole table is recomputed; nothing is held.</strong> Every row lights again, and the keys and values are rebuilt, used once and freed.';
+  }
+  function stop() { if (timer) clearTimeout(timer); timer = null; play.textContent = 'Play'; }
+  function tick() {
+    beat = Date.now();
+    if (+T.value >= TMAX) { stop(); return; }
+    T.value = +T.value + 1; draw(true);
+    timer = setTimeout(tick, 650);
+  }
+  play.addEventListener('click', function () {
+    if (timer && Date.now() - beat < 2000) { stop(); return; }
+    stop(); if (+T.value >= TMAX) { T.value = 1; draw(true); }
+    play.textContent = 'Pause'; timer = setTimeout(tick, 400); beat = Date.now();
+  });
+  T.addEventListener('input', function () { stop(); draw(true); });
+  for (var j = 0; j < mBtns.length; j++) mBtns[j].addEventListener('click', function () {
+    on = this.getAttribute('data-m') === '1';
+    for (var k = 0; k < mBtns.length; k++) mBtns[k].classList.toggle('active', mBtns[k] === this);
+    draw(true);
+  });
+  draw(false);
+})();
+</script>
+            <script>
+        (function () {
+            var nav = document.querySelector('.topnav');
+            function onNavScroll() {
+                nav.classList.toggle('scrolled', window.scrollY > 4);
+            }
+            window.addEventListener('scroll', onNavScroll, { passive: true });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            window.addEventListener('resize', function () {
+                if (window.innerWidth > 768) {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            onNavScroll();
+            var toggle = document.getElementById('navToggle');
+            var panel = document.getElementById('navPanel');
+            if (toggle && panel) {
+                toggle.addEventListener('click', function () {
+                    var open = panel.classList.toggle('open');
+                    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                });
+                panel.addEventListener('click', function (e) {
+                    if (e.target && e.target.classList && e.target.classList.contains('panel-link')) {
+                        panel.classList.remove('open');
+                        toggle.setAttribute('aria-expanded', 'false');
+                    }
+                });
+            }
+            var links = Array.prototype.slice.call(document.querySelectorAll('.tab-strip a.tab-chip[href^="#"]'));
+            if (!links.length) return;
+            var tabMap = {};
+            links.forEach(function (a) { tabMap[a.getAttribute('href').slice(1)] = a; });
+            var current = null;
+            function centerTab(tab) {
+                var strip = tab.parentElement;
+                if (!strip || !strip.classList.contains('tab-strip')) return;
+                var sr = strip.getBoundingClientRect();
+                var pr = tab.getBoundingClientRect();
+                strip.scrollLeft += (pr.width >= sr.width) ? (pr.left - sr.left) : (pr.left - sr.left) - (sr.width - pr.width) / 2;
+            }
+            function setActive(id) {
+                if (!tabMap[id] || id === current) return;
+                current = id;
+                links.forEach(function (a) {
+                    a.classList.toggle('active', a.getAttribute('href') === '#' + id);
+                });
+                centerTab(tabMap[id]);
+            }
+            links.forEach(function (a) {
+                a.addEventListener('click', function () {
+                    setActive(a.getAttribute('href').slice(1));
+                });
+            });
+            setActive(links[0].getAttribute('href').slice(1));
+            if ('IntersectionObserver' in window) {
+                var obs = new IntersectionObserver(function (entries) {
+                    entries.forEach(function (en) {
+                        if (en.isIntersecting) setActive(en.target.id);
+                    });
+                }, { rootMargin: '-35% 0px -55% 0px' });
+                Object.keys(tabMap).forEach(function (id) {
+                    var el = document.getElementById(id);
+                    if (el) obs.observe(el);
+                });
+                window.addEventListener('scroll', function () {
+                    if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) {
+                        setActive(links[links.length - 1].getAttribute('href').slice(1));
+                    }
+                }, { passive: true });
+            }
+            window.addEventListener('load', function () {
+                var act = document.querySelector('.tab-strip a.active');
+                if (act) centerTab(act);
+            });
+        })();
+    </script>
+<script>
+/* P80 code sections (CODE-SECTIONS.md) */
+(function(){
+  var C=['121,184,255','255,171,112','133,232,157','210,168,255','255,161,152','118,227,234'];
+  function lay(pre){
+    var code=pre.querySelector('code'); if(!code) return;
+    var lh=parseFloat(getComputedStyle(code).lineHeight);
+    var pt=parseFloat(getComputedStyle(pre).paddingTop);
+    var old=pre.querySelectorAll('.cs-g'); for(var j=0;j<old.length;j++) pre.removeChild(old[j]);
+    var imgs=[],sizes=[],pos=[];
+    (pre.getAttribute('data-cs')||'').split(',').forEach(function(r,i){
+      var m=r.trim().match(/^(\d+)(?:-(\d+))?$/); if(!m) return;
+      var a=+m[1],b=+(m[2]||m[1]),c=C[i%C.length],top=pt+(a-1)*lh,h=(b-a+1)*lh;
+      imgs.push('linear-gradient(rgba('+c+',.55),rgba('+c+',.55))','linear-gradient(rgba('+c+',.13),rgba('+c+',.13))');
+      sizes.push('3px '+h+'px','100% '+h+'px'); pos.push('0 '+top+'px','0 '+top+'px');
+      var g=document.createElement('span'); g.className='cs-g'; g.setAttribute('aria-hidden','true');
+      g.setAttribute('data-n',String(i+1)); g.style.top=(top+(lh-11)/2)+'px'; g.style.color='rgb('+c+')';
+      pre.insertBefore(g,code);
+    });
+    pre.style.backgroundImage=imgs.join(','); pre.style.backgroundSize=sizes.join(',');
+    pre.style.backgroundPosition=pos.join(','); pre.style.backgroundRepeat='no-repeat';
+  }
+  function all(){ var p=document.querySelectorAll('pre.cs'); for(var i=0;i<p.length;i++) lay(p[i]); }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',all); else all();
+  window.addEventListener('load',all);
+  window.addEventListener('resize',all);
+  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(all);
+})();
+</script>
+</body>
+</html>

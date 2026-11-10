@@ -15,7 +15,8 @@
     "logistic.html": {"src": "podcasts/logistic.mp3?v=b0b41b70", "secs": 660},
     "mlp.html": {"src": "podcasts/mlp.mp3?v=0c3ea04f", "secs": 676},
     "probability.html": {"src": "podcasts/probability.mp3?v=8d890cce", "secs": 894},
-    "regression.html": {"src": "podcasts/regression.mp3?v=304c9f3c", "secs": 723}
+    "regression.html": {"src": "podcasts/regression.mp3?v=304c9f3c", "secs": 723},
+    "svm.html": {"src": "podcasts/svm.mp3?v=9445c87c", "secs": 787}
   };
   /* EPISODES-END */
 

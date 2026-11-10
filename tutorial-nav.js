@@ -85,7 +85,8 @@
     ["rl-policy-gradients.html", "Policy Gradients", "Policy Gradients: REINFORCE, Actor-Critic and PPO", "Reinforcement Learning"],
     ["reinforce.html", "REINFORCE", "REINFORCE and the Baseline", "Reinforcement Learning"],
     ["actor-critic.html", "Actor-Critic", "Actor-Critic: A2C and A3C", "Reinforcement Learning"],
-    ["rl-continuous-actions.html", "TD3 and SAC", "Continuous-Action Actor-Critic: TD3 and SAC", "Reinforcement Learning"],
+    ["ppo.html", "PPO", "Proximal Policy Optimization (PPO)", "Reinforcement Learning"],
+    ["rl-continuous-actions.html", "Continuous Action", "Continuous-Action RL", "Reinforcement Learning"],
     ["rl-model-based.html", "Model-Based RL", "Model-Based RL: Dyna, AlphaZero and MuZero", "Reinforcement Learning"],
     ["ddpg.html", "DDPG", "Deep Deterministic Policy Gradient (DDPG): Actor and Critic", "Reinforcement Learning"],
     ["ddpg-training.html", "Training DDPG", "Training DDPG: Target Networks, Replay and Noise", "Reinforcement Learning"],
@@ -235,7 +236,7 @@
     "rl-policy-gradients.html": "Policy Gradients",
     "reinforce.html": "REINFORCE",
     "actor-critic.html": "Actor-Critic",
-    "rl-continuous-actions.html": "TD3 and SAC",
+    "rl-continuous-actions.html": "Continuous Action",
     "rl-model-based.html": "Model-Based RL",
     "dqn.html": "DQN",
     "ddpg.html": "DDPG",
@@ -306,7 +307,8 @@
     "pcgrad.html": "PCGrad",
     "gradvac.html": "GradVac",
     "cagrad.html": "CAGrad",
-    "multitask-training-loop.html": "Training Loop"
+    "multitask-training-loop.html": "Training Loop",
+    "ppo.html": "PPO"
   };
   /* TITLES-END */
 

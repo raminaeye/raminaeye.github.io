@@ -16,7 +16,8 @@
     "mlp.html": {"src": "podcasts/mlp.mp3?v=0c3ea04f", "secs": 676},
     "probability.html": {"src": "podcasts/probability.mp3?v=8d890cce", "secs": 894},
     "regression.html": {"src": "podcasts/regression.mp3?v=304c9f3c", "secs": 723},
-    "svm.html": {"src": "podcasts/svm.mp3?v=9445c87c", "secs": 787}
+    "svm.html": {"src": "podcasts/svm.mp3?v=9445c87c", "secs": 787},
+    "trees.html": {"src": "podcasts/trees.mp3?v=234e8a77", "secs": 687}
   };
   /* EPISODES-END */
 

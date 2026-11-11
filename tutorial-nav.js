@@ -95,6 +95,7 @@
     ["dyna.html", "Dyna-Q", "Dyna-Q: Learning from Imagined Steps", "Reinforcement Learning"],
     ["alphazero.html", "AlphaZero", "AlphaZero: Search and Self-Play", "Reinforcement Learning"],
     ["muzero.html", "MuZero", "MuZero: Planning with a Learned Model", "Reinforcement Learning"],
+    ["dreamer.html", "Dreamer", "World Models and Dreamer", "Reinforcement Learning"],
     ["multi-agent-rl.html", "Multi-Agent RL", "Multi-Agent Reinforcement Learning", "Reinforcement Learning"],
     ["rl-alignment.html", "Aligning with RL", "Aligning Language Models with RL", "Reinforcement Learning"],
     ["transformers.html", "Attention", "Attention", "Transformers"],
@@ -318,7 +319,8 @@
     "sac.html": "SAC",
     "dyna.html": "Dyna-Q",
     "alphazero.html": "AlphaZero",
-    "muzero.html": "MuZero"
+    "muzero.html": "MuZero",
+    "dreamer.html": "Dreamer"
   };
   /* TITLES-END */
 

@@ -94,6 +94,7 @@
     ["rl-model-based.html", "Model-Based RL", "Model-Based RL: Dyna, AlphaZero and MuZero", "Reinforcement Learning"],
     ["dyna.html", "Dyna-Q", "Dyna-Q: Learning from Imagined Steps", "Reinforcement Learning"],
     ["alphazero.html", "AlphaZero", "AlphaZero: Search and Self-Play", "Reinforcement Learning"],
+    ["muzero.html", "MuZero", "MuZero: Planning with a Learned Model", "Reinforcement Learning"],
     ["multi-agent-rl.html", "Multi-Agent RL", "Multi-Agent Reinforcement Learning", "Reinforcement Learning"],
     ["rl-alignment.html", "Aligning with RL", "Aligning Language Models with RL", "Reinforcement Learning"],
     ["transformers.html", "Attention", "Attention", "Transformers"],
@@ -316,7 +317,8 @@
     "td3.html": "TD3",
     "sac.html": "SAC",
     "dyna.html": "Dyna-Q",
-    "alphazero.html": "AlphaZero"
+    "alphazero.html": "AlphaZero",
+    "muzero.html": "MuZero"
   };
   /* TITLES-END */
 

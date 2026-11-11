@@ -109,6 +109,7 @@
     ["reward-models.html", "Reward Models", "Reward Models from Human Preferences", "Reinforcement Learning"],
     ["rlhf.html", "RLHF", "RLHF with PPO (InstructGPT)", "Reinforcement Learning"],
     ["constitutional-ai.html", "Constitutional AI", "Constitutional AI: Critique, Revise and AI Feedback", "Reinforcement Learning"],
+    ["rlaif.html", "RLAIF", "RLAIF: AI Feedback in Place of Human Labels", "Reinforcement Learning"],
     ["transformers.html", "Attention", "Attention", "Transformers"],
     ["transformer-position-masking.html", "Positional Encoding", "Positional Encoding: Sinusoidal, Learned and ALiBi", "Transformers"],
     ["rope.html", "RoPE", "Rotary Position Embedding (RoPE)", "Transformers"],
@@ -350,7 +351,8 @@
     "lora.html": "LoRA",
     "reward-models.html": "Reward Models",
     "rlhf.html": "RLHF",
-    "constitutional-ai.html": "Constitutional AI"
+    "constitutional-ai.html": "Constitutional AI",
+    "rlaif.html": "RLAIF"
   };
   /* TITLES-END */
 

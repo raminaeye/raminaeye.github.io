@@ -106,6 +106,7 @@
     ["dreamer.html", "Dreamer", "World Models and Dreamer", "Reinforcement Learning"],
     ["multi-agent-rl.html", "Multi-Agent RL", "Multi-Agent RL: Self-Play DDPG and MADDPG", "Reinforcement Learning"],
     ["rl-alignment.html", "Aligning with RL", "Aligning Language Models with RL", "Reinforcement Learning"],
+    ["reward-models.html", "Reward Models", "Reward Models from Human Preferences", "Reinforcement Learning"],
     ["transformers.html", "Attention", "Attention", "Transformers"],
     ["transformer-position-masking.html", "Positional Encoding", "Positional Encoding: Sinusoidal, Learned and ALiBi", "Transformers"],
     ["rope.html", "RoPE", "Rotary Position Embedding (RoPE)", "Transformers"],
@@ -342,7 +343,8 @@
     "efficientnet.html": "EfficientNet",
     "rope.html": "RoPE",
     "attention-masks.html": "Attention Masks",
-    "lora.html": "LoRA"
+    "lora.html": "LoRA",
+    "reward-models.html": "Reward Models"
   };
   /* TITLES-END */
 

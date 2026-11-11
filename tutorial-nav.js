@@ -107,6 +107,7 @@
     ["multi-agent-rl.html", "Multi-Agent RL", "Multi-Agent RL: Self-Play DDPG and MADDPG", "Reinforcement Learning"],
     ["rl-alignment.html", "Aligning with RL", "Aligning Language Models with RL", "Reinforcement Learning"],
     ["reward-models.html", "Reward Models", "Reward Models from Human Preferences", "Reinforcement Learning"],
+    ["rlhf.html", "RLHF", "RLHF with PPO (InstructGPT)", "Reinforcement Learning"],
     ["transformers.html", "Attention", "Attention", "Transformers"],
     ["transformer-position-masking.html", "Positional Encoding", "Positional Encoding: Sinusoidal, Learned and ALiBi", "Transformers"],
     ["rope.html", "RoPE", "Rotary Position Embedding (RoPE)", "Transformers"],
@@ -146,7 +147,8 @@
     ["diffusion-sampling.html", "Faster Sampling", "Faster Diffusion Sampling: DDIM and Flow Matching", "Generative Models"],
     ["diffusion-guidance.html", "Guided Diffusion", "Guided and Latent Diffusion: Classifier-Free Guidance, Stable Diffusion and DiT", "Generative Models"],
     ["quantization.html", "Quantization", "Quantization Basics", "Model Efficiency"],
-    ["quantization-ptq-qat.html", "PTQ and QAT", "Post-Training Quantization and Quantization-Aware Training", "Model Efficiency"],
+    ["quantization-ptq-qat.html", "PTQ", "Post-Training Quantization: Dynamic and Static", "Model Efficiency"],
+    ["qat.html", "QAT", "Quantization-Aware Training", "Model Efficiency"],
     ["normalization-quantization.html", "Normalization and Quantization", "Normalization and Quantization", "Model Efficiency"],
     ["quantization-debugging.html", "Debugging", "Debugging a Quantized Model", "Model Efficiency"],
     ["nas.html", "NAS", "Neural Architecture Search Basics", "Model Efficiency"],
@@ -297,7 +299,8 @@
     "diffusion-sampling.html": "Faster Sampling",
     "diffusion-guidance.html": "Guided Diffusion",
     "quantization.html": "Quantization",
-    "quantization-ptq-qat.html": "PTQ and QAT",
+    "quantization-ptq-qat.html": "PTQ",
+    "qat.html": "QAT",
     "normalization-quantization.html": "Normalization and Quantization",
     "quantization-debugging.html": "Debugging",
     "nas.html": "NAS",
@@ -344,7 +347,8 @@
     "rope.html": "RoPE",
     "attention-masks.html": "Attention Masks",
     "lora.html": "LoRA",
-    "reward-models.html": "Reward Models"
+    "reward-models.html": "Reward Models",
+    "rlhf.html": "RLHF"
   };
   /* TITLES-END */
 

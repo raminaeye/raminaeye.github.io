@@ -1,0 +1,1864 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Soft Actor-Critic (SAC)</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+            line-height: 1.6;
+            color: #333;
+        }
+        h1, h2, h3, h4 {
+            color: #2c3e50; /* Darker shade for better contrast */
+            margin-top: 1.5em;
+            margin-bottom: 0.5em;
+        }
+        h1 { font-size: 2.5em; border-bottom: 2px solid #3498db; padding-bottom: 0.3em;}
+        .dek { font-size: 1.15em; color: #555; margin-top: 0.2em; }
+        .crumb { margin: 0 0 0.8em; }
+        .crumb a {
+            display: inline-block;
+            padding: 4px 14px;
+            border: 1px solid #dee2e6;
+            border-radius: 999px;
+            background: #f8f9fa;
+            color: #0056b3;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+        .crumb a:hover { border-color: #007bff; color: #007bff; }
+    /* Section tab strip: one slim row, scrolls sideways when it overflows. */
+    .tabs-label {
+        float: left;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #6c757d;
+        font-weight: 700;
+        line-height: 1.2;
+        margin: 0;
+        padding: 8px 12px 0 0;
+    }
+    .tab-strip {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 2px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        margin: 0 0 1.25rem;
+        max-width: 100%;
+    }
+    .tab-strip::-webkit-scrollbar { display: none; }
+    .tab-strip a.tab-chip,
+    .tab-strip a.tab-link {
+        display: inline-block;
+        flex: 0 0 auto;
+        padding: 6px 10px;
+        border-radius: 999px;
+        color: #495057;
+        text-decoration: none;
+        font-size: 0.82rem;
+        font-weight: 500;
+        line-height: 1.35;
+        white-space: nowrap;
+    }
+    .tab-strip a.tab-chip:hover,
+    .tab-strip a.tab-link:hover { color: #007bff; }
+    .tab-strip a.tab-chip.active,
+    .tab-strip a.tab-link.active { background: #007bff; color: #ffffff; }
+    @media (max-width: 768px) {
+        .tabs-label { display: none; }
+        .tab-strip {
+            width: 100vw;
+            max-width: 100vw;
+            box-sizing: border-box;
+            margin-left: calc((100% - 100vw) / 2);
+            padding-left: calc((100vw - 100%) / 2);
+        }
+        .tab-strip a.tab-chip,
+        .tab-strip a.tab-link { font-size: 0.75rem; padding: 6px 8px; }
+    }
+        h2 { font-size: 2em; border-bottom: 1px solid #bdc3c7; padding-bottom: 0.2em;}
+        h3 { font-size: 1.5em; }
+        h4 { font-size: 1.2em; color: #555;}
+
+    /* Shared site nav (matches index.html topnav) */
+    body { padding-top: calc(64px + 1.5rem); }
+    h1, h2, h3 { scroll-margin-top: 84px; }
+    #sacWalk { scroll-margin-top: 84px; }
+    .topnav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        z-index: 1000;
+        background: rgba(255, 255, 255, 0.65);
+        backdrop-filter: blur(18px) saturate(1.5);
+        -webkit-backdrop-filter: blur(18px) saturate(1.5);
+        border-bottom: 1px solid transparent;
+        transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+    .topnav.scrolled {
+        background: rgba(255, 255, 255, 0.88);
+        border-bottom-color: #dee2e6;
+        box-shadow: 0 6px 24px rgba(33, 37, 41, 0.07);
+    }
+    .nav-inner {
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 0 1.5rem;
+        height: 64px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+    .wordmark {
+        font-weight: 700;
+        color: #212529;
+        text-decoration: none;
+        font-size: 1.05rem;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+    }
+    .nav-links {
+        display: flex;
+        gap: 2px;
+        align-items: center;
+    }
+    .nav-links a {
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        font-size: 0.95rem;
+        padding: 8px 14px;
+        border-radius: 999px;
+        transition: color 0.18s ease, background-color 0.18s ease;
+    }
+    .nav-links a:hover {
+        color: #007bff;
+        background-color: #e7f1ff;
+    }
+    .nav-links a.active {
+        color: #007bff;
+        background-color: #e7f1ff;
+        font-weight: 600;
+    }
+    .nav-toggle {
+        display: none;
+        width: 42px;
+        height: 42px;
+        padding: 0;
+        background: none;
+        border: 0;
+        border-radius: 10px;
+        cursor: pointer;
+        flex: 0 0 auto;
+    }
+    .nav-panel {
+        display: grid;
+        grid-template-rows: 0fr;
+        visibility: hidden;
+        transition: grid-template-rows 0.32s ease, visibility 0s linear 0.32s;
+    }
+    .nav-panel.open {
+        grid-template-rows: 1fr;
+        visibility: visible;
+        transition: grid-template-rows 0.32s ease, visibility 0s;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner {
+        min-height: 0;
+        overflow: hidden;
+    }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link:hover {
+        background-color: #e7f1ff;
+        color: #007bff;
+    }
+    .nav-panel a.panel-link.active {
+        color: #007bff;
+        font-weight: 600;
+        background-color: #e7f1ff;
+    }
+    .panel-social a:hover {
+        border-color: #007bff;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner {
+        min-height: 0;
+        overflow: hidden;
+    }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link:hover {
+        background-color: #e7f1ff;
+        color: #007bff;
+    }
+    .nav-panel a.panel-link.active {
+        color: #007bff;
+        font-weight: 600;
+        background-color: #e7f1ff;
+    }
+    .panel-social a:hover {
+        border-color: #007bff;
+    }
+    .nav-links a:focus-visible,
+    .wordmark:focus-visible,
+    .nav-toggle:focus-visible,
+    .panel-link:focus-visible,
+    .panel-social a:focus-visible {
+        outline: 2px solid #007bff;
+        outline-offset: 2px;
+    }
+    @media (hover: hover) {
+        .nav-toggle:hover { background-color: #e7f1ff; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .topnav,
+        .nav-links a,
+        .nav-toggle span,
+        .nav-panel,
+        .nav-panel a.panel-link {
+            transition: none;
+        }
+    }
+    @media (hover: hover) {
+        .nav-toggle:hover { background-color: #e7f1ff; }
+    }
+    .nav-panel a.panel-link {
+        display: flex;
+        align-items: center;
+        padding: 0.8rem 0.75rem;
+        margin: 0 0.25rem;
+        border-radius: 10px;
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        min-height: 48px;
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+    .panel-social {
+        display: flex;
+        gap: 0.5rem;
+        padding: 0.9rem 1rem 0.25rem;
+        flex-wrap: wrap;
+    }
+    .panel-social a {
+        color: #007bff;
+        text-decoration: none;
+        font-weight: 500;
+        font-size: 0.9rem;
+        padding: 6px 12px;
+        border: 1px solid #dee2e6;
+        border-radius: 999px;
+        transition: border-color 0.15s ease;
+    }
+    @media (max-width: 768px) {
+        .nav-links { display: none; }
+        .nav-toggle { display: block; }
+    }
+
+        pre {
+          background: #0d1117;
+          color: #e6edf3;
+          padding: 14px 16px;
+          overflow-x: auto;
+          border-radius: 8px;
+          font-size: 0.9em;
+          margin: 1em 0;
+          font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+        }
+        /* P52 canonical inline items in prose: numbers and variables wear the body
+           font at body size and read as part of the sentence (keeps P50's quiet
+           treatment, no pill; code blocks and eq-cards keep the mono treatment). */
+        code {
+            font-family: inherit;
+            font-size: 1em;
+            color: #1a1a1a;
+            background: none;
+            padding: 0 0.08em;
+            overflow-wrap: break-word;
+        }
+        pre code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 1em; }
+        .eq-card code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 0.92em; }
+        pre code { /* Reset for code inside pre, already handled by pre styling */
+            background: none;
+            padding: 0;
+            font-size: 1em; /* Ensure pre's font size is inherited */
+            color: inherit;
+        }
+        ul, ol {
+            padding-left: 20px;
+        }
+        li {
+            margin-bottom: 0.5em;
+        }
+        strong {
+            color: #2980b9;
+        }
+        /* Rendered result block, not a print() call */
+        .output {
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 1rem 1.2rem;
+            border-radius: 6px;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+            font-size: 0.9em;
+            margin: 1em 0;
+            overflow-x: auto;
+            border-left: 4px solid #22c55e;
+        }
+        .output .dim { color: #94a3b8; }
+        .output .good { color: #4ade80; font-weight: bold; }
+        /* Placement diagram: one transformer block with adapters */
+        .diagram {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            margin: 1.75rem 0;
+        }
+        .diagram .box {
+            width: 360px;
+            max-width: 92%;
+            padding: 0.55em 1em;
+            border-radius: 6px;
+            text-align: center;
+            font-size: 0.9em;
+        }
+        .diagram .frozen {
+            background: #eaf2f8;
+            border: 2px solid #3498db;
+            color: #2c3e50;
+        }
+        .diagram .trainable {
+            background: #fef5e7;
+            border: 2px solid #e67e22;
+            color: #7e5109;
+            font-weight: bold;
+        }
+        .diagram .arrow {
+            color: #7f8c8d;
+            font-size: 1.1em;
+            line-height: 1;
+        }
+        .diagram .legend {
+            display: flex;
+            gap: 1.5em;
+            margin-top: 0.6em;
+            font-size: 0.85em;
+            color: #555;
+        }
+        .diagram .swatch {
+            display: inline-block;
+            width: 1em;
+            height: 1em;
+            border-radius: 3px;
+            vertical-align: -0.15em;
+            margin-right: 0.3em;
+        }
+        .swatch.blue { background: #eaf2f8; border: 2px solid #3498db; }
+        .swatch.orange { background: #fef5e7; border: 2px solid #e67e22; }
+        .caption {
+            max-width: 640px;
+            margin: 1rem auto 1.5em auto;
+            font-size: 0.9em;
+            color: #555;
+            text-align: center;
+        }
+        /* Interactive demo */
+        .demo {
+            border: 1px solid #e1e4e8;
+            border-radius: 8px;
+            padding: 1.25rem;
+            margin: 1.75rem 0;
+            background: #fbfcfd;
+        }
+        .demo-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem 1.5rem;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        .demo-controls label { font-weight: bold; color: #2c3e50; }
+        .demo-controls label span { color: #2980b9; }
+        .demo-controls input[type=range] { width: 220px; max-width: 100%; accent-color: #3498db; }
+        .demo-stats {
+            text-align: center;
+            margin: 1rem 0 0.8rem;
+            font-size: 0.95em;
+            color: #2c3e50;
+            line-height: 1.8;
+        }
+        .demo-stats strong { color: #2980b9; }
+        .demo-hint { font-size: 0.85em; color: #7f8c8d; }
+        .chart-legend { display: flex; flex-wrap: wrap; gap: 0.4em 1.2em; font-size: 0.9em; color: #555; margin: 0.5rem 0 0.2rem 0; }
+        .chart-legend .lg-sw { display: inline-block; width: 24px; height: 0; border-top: 3px solid; vertical-align: middle; margin-right: 0.4em; }
+        .chart-legend .lg-blue { border-color: #3498db; }
+        .chart-legend .lg-orange { border-color: #e67e22; }
+        .chart-legend .lg-gray { border-color: #7f8c8d; border-top-style: dashed; }
+        .demo-note { font-size: 0.85em; color: #777; margin-top: 1rem; }
+        .play-btn {
+            background: #3498db;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            padding: 0.5rem 1.2rem;
+            font-size: 0.95em;
+            font-weight: bold;
+            cursor: pointer;
+            min-height: 40px;
+        }
+        .play-btn:hover { background: #2980b9; }
+        .play-btn.playing { background: #e67e22; }
+        .play-btn.playing:hover { background: #d35400; }
+        /* Caption card, shared by every widget. */
+        .cap-card {
+            font-size: 15px;
+            line-height: 1.65;
+            color: #2c3e50;
+            background: #ffffff;
+            border: 1px solid #e3e8ee;
+            border-left: 3px solid #2c3e50;
+            border-radius: 10px;
+            padding: 18px;
+            margin: 14px 0 0;
+        }
+        .cap-card > strong { display: block; font-size: 15px; margin-bottom: 6px; }
+        .cap-card ul { list-style: none; margin: 0; padding: 0; }
+        .cap-card li { position: relative; padding-left: 18px; margin: 7px 0; }
+        .cap-card li::before {
+            content: ""; position: absolute; left: 0; top: 9px;
+            width: 6px; height: 6px; border-radius: 50%; background: #2c3e50;
+        }
+        .figure { margin: 1.75rem 0; text-align: center; }
+        .figure img, .figure video { display: block; margin: 0 auto; }
+        /* TD3 page: walkthrough signal-flow diagram */
+        .loop-svg { width: 100%; height: auto; display: block; margin: 0.4rem 0 0.2rem 0; }
+        .loop-svg .node { fill: #f4f6f7; stroke: #bdc3c7; stroke-width: 2; }
+        .loop-svg .node.on { fill: #eaf2f8; stroke: #3498db; stroke-width: 3; }
+        .loop-svg .node.cur { stroke: #e67e22; stroke-width: 4; }
+        .loop-svg .node.actor.on { fill: #fdf0dc; stroke: #bdc3c7; }
+        .loop-svg .node.critic.on { fill: #eafaf1; stroke: #bdc3c7; }
+        .loop-svg .node.reward.on { fill: #fef9e7; stroke: #bdc3c7; }
+        /* Current stage wins over visited styling: exactly one orange target. */
+        .loop-svg .node.on.cur { stroke: #e67e22; }
+        .loop-svg .edge { fill: none; stroke: #bdc3c7; stroke-width: 2; }
+        .loop-svg .edge.on { stroke: #2c3e50; stroke-width: 3.5; }
+        .loop-svg .edge.cur { stroke: #e67e22; }
+        .loop-svg .edge.dashed { stroke-dasharray: 7 5; }
+        .loop-svg .ntitle { font-size: 15px; font-weight: bold; fill: #2c3e50; }
+        .loop-svg .nsub { font-size: 12px; fill: #7f8c8d; }
+        .loop-svg .elabel { font-size: 12px; fill: #7f8c8d; }
+        @media (max-width: 480px) {
+          .loop-svg .ntitle { font-size: 28px; }
+          .loop-svg .nsub { font-size: 28px; }
+          .loop-svg .elabel { font-size: 28px; }
+          .loop-svg #archLabel { display: none; }
+          /* Re-stacking the two text lines for 28px type lives in the JS mobile
+             block (setAttribute('y', ...)): Chromium ignores CSS `y` on SVG
+             <text>, so CSS alone can never move these. */
+        }
+        .loop-svg .elabel.on { fill: #2c3e50; font-weight: bold; }
+        /* TD3 page: static explanatory diagrams (actor/critic wiring, action
+           spaces, stabilizers). Same type scale as the loop diagram. */
+        .stat-svg { width: 100%; height: auto; display: block; margin: 0.4rem 0 0.2rem 0; }
+        .stat-svg .node { fill: #f4f6f7; stroke: #bdc3c7; stroke-width: 2; }
+        .stat-svg .node.actor { fill: #fdf0dc; stroke: #e67e22; }
+        .stat-svg .node.critic { fill: #eafaf1; stroke: #27ae60; }
+        .stat-svg .edge { fill: none; stroke: #bdc3c7; stroke-width: 2; }
+        .stat-svg .nhead { font-size: 17px; font-weight: bold; fill: #2c3e50; }
+        .stat-svg .ntitle { font-size: 15px; font-weight: bold; fill: #2c3e50; }
+        .stat-svg .nsub { font-size: 12px; fill: #7f8c8d; }
+        .stat-svg .elabel { font-size: 12px; fill: #7f8c8d; }
+        .stat-svg .bignum { font-size: 20px; font-weight: bold; fill: #2c3e50; }
+        .stat-svg .callnum { font-size: 13px; font-weight: bold; fill: #ffffff; }
+        @media (max-width: 480px) {
+          .stat-svg .nhead { font-size: 24px; }
+          .stat-svg .ntitle { font-size: 22px; }
+          .stat-svg .nsub { font-size: 18px; }
+          .stat-svg .elabel { font-size: 18px; }
+          .stat-svg .bignum { font-size: 28px; }
+          .stat-svg .hide-sm { display: none; }
+        }
+        /* The step-name span reserves its tallest stage name (inline-block so
+           the reserved min-height applies) to keep Play/Reset scroll-neutral. */
+        #sacWalk #sacStepName { display: inline-block; }
+
+    
+/* canonical spacing: display math */
+nav.prereq{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem .4rem;margin:.6rem 0 1.1rem}
+nav.prereq .prereq-label{font-size:.82rem;font-weight:600;color:#6c757d;margin-right:.15rem}
+nav.prereq a.prereq-chip{display:inline-block;padding:.15rem .6rem;border:1px solid #ced4da;border-radius:999px;font-size:.85rem;line-height:1.4;color:#0056b3;text-decoration:none}
+nav.prereq a.prereq-chip:hover,nav.prereq a.prereq-chip:focus-visible{background:#e7f1ff;border-color:#007bff}
+/* PREV-NEXT-BEGIN */
+nav.tut-seq{display:flex;align-items:center;gap:0 .75rem;margin:0 0 .25rem;font-size:.85rem;white-space:nowrap}
+nav.tut-seq a{position:relative;display:block;flex:0 1 auto;min-width:0;height:44px;line-height:44px;padding:0 2px;overflow:hidden;text-overflow:ellipsis;color:#0056b3;text-decoration:none}
+nav.tut-seq a.seq-home{flex:0 0 auto}
+nav.tut-seq a.seq-next{margin-left:auto}
+nav.tut-seq .seq-w{font-weight:600}
+nav.tut-seq a:hover{text-decoration:underline}
+nav.tut-seq a:focus-visible{outline:2px solid #0056b3;outline-offset:2px}
+@media (max-width:575px){nav.tut-seq .seq-t{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}}
+@media (forced-colors:active){nav.tut-seq a:focus-visible{outline-color:Highlight}}
+@media print{nav.tut-seq{display:none}}
+/* PREV-NEXT-END */
+</style>
+
+<style>
+/* MATH-BEGIN v1 (P88, site-math.js renders KaTeX; byte-identical on every page) */
+.eq-line{overflow-x:auto;overflow-y:hidden;white-space:normal}
+.eq-line .katex{font-size:1.02em;line-height:1.6}
+.eq-line .katex .base{margin:.15em 0}
+var .katex,p .katex,li .katex,td .katex,th .katex,figcaption .katex,.eq-why .katex,.eq-what .katex,.eq-legend .katex{font-size:1.06em}
+var:has(.katex){font-style:normal}
+.katex-display{margin:.6rem 0;overflow-x:auto;overflow-y:hidden}
+/* MATH-END */
+</style>
+
+    <script src="site-math.js" defer></script>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script>if (window.hljs) { hljs.highlightAll(); }</script>
+<style>
+/* Static teaching diagrams (mtd), shared across tutorials, 2026-11-01 */
+.figure.mtd-fig { margin: 1.75rem 0; }
+.mtd-fig > svg.mtd-svg { display: block; width: 100%; height: auto; margin: 0 auto; }
+.mtd-fig .caption { margin-top: 1rem; }
+.mtd-svg text { fill: #2c3e50; font-family: sans-serif; }
+.mtd-svg .mtd-sub { fill: #555; }
+.mtd-svg .mtd-t1 { fill: #1f618d; }
+.mtd-svg .mtd-t2 { fill: #ca6f1e; }
+.mtd-svg .mtd-pu { fill: #7d3c98; }
+.mtd-svg .mtd-red { fill: #c0392b; }
+.mtd-svg .mtd-grn { fill: #148f77; }
+.mtd-svg line, .mtd-svg path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.mtd-svg .mtd-s.mtd-c1 { stroke: #1f618d; } .mtd-svg .mtd-f.mtd-c1 { fill: #1f618d; }
+.mtd-svg .mtd-s.mtd-c2 { stroke: #ca6f1e; } .mtd-svg .mtd-f.mtd-c2 { fill: #ca6f1e; }
+.mtd-svg .mtd-s.mtd-cp { stroke: #7d3c98; } .mtd-svg .mtd-f.mtd-cp { fill: #7d3c98; }
+.mtd-svg .mtd-s.mtd-cr { stroke: #c0392b; } .mtd-svg .mtd-f.mtd-cr { fill: #c0392b; }
+.mtd-svg .mtd-s.mtd-cg { stroke: #2c3e50; } .mtd-svg .mtd-f.mtd-cg { fill: #2c3e50; }
+.mtd-svg .mtd-sep { stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-pic { fill: #fbfcfd; stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-axis { stroke: #7f8c8d; stroke-width: 1.5px; }
+.mtd-svg .mtd-arc { stroke: #2c3e50; stroke-width: 2px; }
+.mtd-svg .mtd-dot { fill: #2c3e50; }
+.mtd-svg .mtd-guide { stroke: #7f8c8d; stroke-width: 1.4px; stroke-dasharray: 4 4; }
+.mtd-svg .mtd-ring { fill: #fbfcfd; stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-pt { fill: #1f618d; opacity: .55; }
+.mtd-svg .mtd-cross { stroke: #2c3e50; stroke-width: 2.2px; }
+.mtd-svg .mtd-barbg { fill: #eef1f4; }
+.mtd-svg .mtd-bar { fill: #7d3c98; }
+.mtd-svg .mtd-cart { fill: #ffffff; stroke: #2c3e50; stroke-width: 2px; }
+.mtd-svg .mtd-zero { stroke: #95a5a6; stroke-width: 1.2px; stroke-dasharray: 4 4; }
+.mtd-svg .mtd-axisl { stroke: #7f8c8d; stroke-width: 2px; }
+.mtd-svg .mtd-norm { stroke: #148f77; stroke-width: 4px; }
+.mtd-svg .mtd-read { fill: #ffffff; stroke: #2c3e50; stroke-width: 2.5px; }
+.mtd-svg .mtd-ball { fill: #7d3c98; fill-opacity: .08; stroke: #7d3c98; stroke-width: 1.6px; stroke-dasharray: 5 4; }
+.mtd-svg .mtd-box { fill: #fbfcfd; stroke: #bdc3c7; stroke-width: 1.4px; }
+.mtd-svg .mtd-crossbg { fill: #ffffff; }
+.mtd-svg .mtd-halo { stroke: #ffffff; stroke-width: 5px; stroke-linejoin: round; paint-order: stroke; }
+.mtd-svg .mtd-box.mtd-note { stroke-dasharray: 5 4; }
+</style>
+<style>
+/* Series and page map (B-TF, 2026-11-02) */
+.sermap { margin: .5rem 0 1.1rem; font-size: .8rem; line-height: 1.3; }
+.sermap ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; row-gap: 5px; }
+.sermap li { display: flex; align-items: center; margin: 0; padding: 0; line-height: 1.25; }
+.sermap li + li::before { content: "\2192"; color: #95a5a6; margin: 0 5px; }
+.sermap a, .sermap .sm-here { display: inline-block; padding: 2px 7px; line-height: 1.25; border-radius: 6px; text-decoration: none; }
+.sermap .sm-series a { padding: 1px 2px; color: #1f618d; text-decoration: underline; text-decoration-color: #a9cce3; text-underline-offset: 2px; }
+.sermap .sm-series .sm-here { padding: 1px 6px; background: #117a65; color: #fff; font-weight: 600; }
+.sermap .sm-series { row-gap: 0; }
+.sermap .sm-series a, .sermap .sm-series .sm-here, .sermap .sm-also a { display: inline-flex; align-items: center; min-height: 44px; box-sizing: border-box; }
+.sermap .sm-flow { margin-top: 6px; padding-left: 8px; border-left: 3px solid #117a65; }
+.sermap .sm-series .sm-plain { display: inline-flex; align-items: center; min-height: 44px; box-sizing: border-box; padding: 1px 2px; color: #5d6d7e; }
+</style>
+<style>
+      .dt-dots{display:flex;gap:10px;justify-content:center;margin:0 0 0.6rem}
+      .dt-dot{width:34px;height:34px;border-radius:50%;border:2px solid #e67e22;background:#fff;color:#e67e22;font-weight:700;font-size:15px;cursor:pointer;line-height:1;padding:0}
+      .dt-dot.active{background:#e67e22;color:#fff}
+      .dt-dot:focus-visible{outline:2px solid #2c3e50;outline-offset:2px}
+      #sacWalk .play-btn:disabled{opacity:.35;cursor:default}
+      #sacWalkSvg.dt-phone{max-height:none}
+      #sacWalkSvg.dt-phone .dt-t{font-size:16px}
+      #sacWalkSvg.dt-phone .dt-s,#sacWalkSvg.dt-phone .dt-l{font-size:15px}
+      #sacWalkSvg{width:100%;max-width:640px;height:auto;display:block;margin:0 auto}
+      /* Shared walkthrough equation-card contract (verbatim, all pages) */
+      
+      .eq-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+
+        padding:1rem 1.2rem;margin:1.75rem auto;max-width:640px;overflow-x:auto}
+
+      .eq-what{font-size:.95rem;color:#334155;margin:0 0 .6rem;line-height:1.55}
+
+      .eq-line{font-size:1.38rem;line-height:2.0;letter-spacing:.015em;padding:.5rem .6rem;white-space:normal;font-weight:500;opacity:.38;border-left:3px solid transparent}
+
+      .eq-line.eq-active{opacity:1;border-left-color:#2c3e50}
+.eq-line sub,.eq-line sup{font-size:.68em}
+      .eq-why{display:none;visibility:hidden;font-size:1rem;color:#475569;padding:.15rem .35rem .4rem;line-height:1.65}
+      .eq-why.eq-active{display:block;visibility:visible}
+      .eq-card.eq-stepped .eq-line{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-line.eq-active{display:block;opacity:1;visibility:visible}
+      .eq-card.eq-stepped .eq-legend .eq-item{display:none;visibility:hidden}
+      .eq-card.eq-stepped .eq-legend .eq-item.eq-active{display:block;visibility:visible}
+
+      .eqt{font-weight:600;padding:0 .1em;border-radius:3px}
+
+      .eqt.eqt-active{text-decoration:underline;text-underline-offset:2px}
+
+      .eq-legend{font-size:.85rem;color:#475569;margin-top:.6rem;line-height:1.75}
+
+      .eq-legend .eq-item{display:block}
+
+      .eq-legend .eq-item code{white-space:nowrap}
+
+      .eq-sw{display:inline-block;width:.7em;height:.7em;border-radius:2px;
+
+        margin:0 .25em 0 .6em;vertical-align:baseline}
+
+      @media (max-width:480px){.eq-card{padding:.85rem .9rem}.eq-line{font-size:1.24rem;line-height:1.95} #sacWalkEq .eq-line{font-size:1.18rem}}
+/* P70 inline variables and inline code, one style site-wide (VAR-STYLE.md v2) */
+var,.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic;font-weight:400;font-size:1em;color:#1d4e89;background:#edf3fa;border-radius:3px;padding:0 .18em;white-space:nowrap;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+var sub,var sup,.mvar sub,.mvar sup{font-size:.72em;font-style:normal}
+pre var,code var,.eq-line var{font:inherit;color:inherit;background:none;padding:0}
+svg text.mvar,svg tspan.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic}
+:not(pre)>code:not(.eq-line code){font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,Courier,monospace;font-size:.86em;color:#24292f;background:#f1f3f5;border:1px solid #dfe3e8;border-radius:4px;padding:.06em .32em;white-space:normal;overflow-wrap:anywhere}
+/* P79 numbering (NUMBERING.md) */
+.secnum{font-variant-numeric:tabular-nums;margin-right:.4em;color:inherit;font-weight:inherit}
+.tab-strip .secnum{margin-right:.3em;opacity:.75}
+.fignum{font-weight:600;margin-right:.3em;font-variant-numeric:tabular-nums}
+/* P80 code sections (CODE-SECTIONS.md) */
+pre.cs{position:relative;background-attachment:local;padding-left:20px}
+pre.cs code{display:block;line-height:1.55}
+pre.cs .cs-g{position:absolute;left:3px;width:11px;text-align:center;font:700 11px/1 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;-webkit-user-select:none;user-select:none;pointer-events:none}
+pre.cs .cs-g::before{content:attr(data-n)}
+ol.cs-notes{list-style:none;padding-left:0;margin:-.4em 0 1em}
+ol.cs-notes li{margin:0 0 .3em;padding-left:1.9em;position:relative}
+ol.cs-notes .cs-n{position:absolute;left:0;top:.1em;min-width:1.35em;padding:0 .25em;border-radius:4px;font:700 .8em/1.45 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;text-align:center;color:#0d1117}
+ol.cs-notes li:nth-child(6n+1) .cs-n{background:#79b8ff}
+ol.cs-notes li:nth-child(6n+2) .cs-n{background:#ffab70}
+ol.cs-notes li:nth-child(6n+3) .cs-n{background:#85e89d}
+ol.cs-notes li:nth-child(6n+4) .cs-n{background:#d2a8ff}
+ol.cs-notes li:nth-child(6n+5) .cs-n{background:#ffa198}
+ol.cs-notes li:nth-child(6n+6) .cs-n{background:#76e3ea}
+figure.fig-wrap{margin:1.75rem 0}
+      /* diagram-side dim/highlight (SVG/DOM). Do NOT use .hl/.dim: taken. */
+      .eq-dim{opacity:.32}
+      .eq-hl{filter:drop-shadow(0 0 3px currentColor)}
+      #sacWalkSvg .dt-h{font-size:16px;font-weight:700;fill:#2c3e50}
+      #sacWalkSvg .dt-t{font-size:14px;font-weight:700;fill:#2c3e50}
+      #sacWalkSvg .dt-s{font-size:12px;fill:#5d6d7e}
+      #sacWalkSvg .dt-l{font-size:11px;fill:#7f8c8d}
+      #sacWalkSvg .dt-tag{font-size:11px;font-weight:700;fill:#ffffff}
+      /* F3a: the glow goes on shapes only; every label gets a white halo
+         so dark text never sits on a dark glow and arrow lines stop at the
+         label's edge instead of running through it. */
+      #sacWalkSvg .eq-hl{filter:none}
+      #sacWalkSvg .eq-hl rect,#sacWalkSvg .eq-hl path,#sacWalkSvg .eq-hl line,#sacWalkSvg .eq-hl polyline,#sacWalkSvg .eq-hl polygon,#sacWalkSvg .eq-hl circle{filter:drop-shadow(0 0 3px #e67e22)}
+      #sacWalkSvg text{paint-order:stroke;stroke:#ffffff;stroke-width:4px;stroke-linejoin:round}
+      #sacWalkSvg .dt-tag{stroke:none}
+      /* Dim fades shapes only; words stay at full opacity in a muted ink. */
+      #sacWalkSvg .eq-dim{opacity:1}
+      #sacWalkSvg .eq-dim rect,#sacWalkSvg .eq-dim circle,#sacWalkSvg .eq-dim polygon,#sacWalkSvg .eq-dim path{opacity:.45}
+      #sacWalkSvg .eq-dim line,#sacWalkSvg .eq-dim polyline{opacity:.55}
+      #sacWalkSvg .eq-dim text:not(.dt-tag){fill:#54626f}
+          /* Compact phone walkthrough layout (canonical block, every tutorial page):
+       two-column eq legends, tightened demo spacing, and diagrams capped so
+       controls and diagram share the first phone screen. Phone widths only;
+       desktop rendering and equation typography are unchanged. */
+    @media (max-width:480px){
+      .demo{padding:.75rem}
+      .demo>*{margin-top:.6rem;margin-bottom:.6rem}
+      .demo>*:first-child{margin-top:0}
+      .demo .eq-card{margin:1rem auto;padding:.7rem .8rem}
+      .demo .cap-card,.demo .capcard{padding:.85rem .95rem}
+      .eq-legend{display:grid;grid-template-columns:1fr 1fr;column-gap:.9rem;row-gap:.1rem;line-height:1.5}
+      .dt-dots{flex-wrap:wrap;gap:4px}
+      .dt-dot{flex-shrink:0}
+      .eq-legend .eq-item:has(> code ~ code){grid-column:1/-1}
+      .demo svg,.demo canvas{max-height:55vh}
+    }
+</style>
+<style>
+/* tables */
+.qtab-wrap { overflow-x: auto; margin: 1.75rem 0; }
+table.qtab { border-collapse: collapse; width: 100%; font-size: .92rem; line-height: 1.5; }
+table.qtab caption { caption-side: top; text-align: left; font-size: .9em; color: #555; margin-bottom: .5rem; }
+table.qtab th, table.qtab td { border: 1px solid #dfe3e8; padding: .45rem .6rem; text-align: left; vertical-align: top; }
+table.qtab th { background: #f4f6f8; font-weight: 600; }
+table.qtab code { white-space: nowrap; overflow-wrap: normal; }
+@media (max-width: 480px) {
+  table.qtab-stack thead { display: none; }
+  table.qtab-stack, table.qtab-stack tbody, table.qtab-stack tr, table.qtab-stack td { display: block; width: auto; }
+  table.qtab-stack caption { display: block; }
+  table.qtab-stack tr { border: 1px solid #dfe3e8; border-radius: 8px; margin: 0 0 .6rem; overflow: hidden; background: #ffffff; padding-bottom: .3rem; }
+  table.qtab-stack td { border: none; padding: .2rem .6rem .2rem 6.4rem; position: relative; }
+  table.qtab-stack td:first-child { padding: .35rem .6rem; margin-bottom: .2rem; font-weight: 600; background: #f4f6f8; }
+  table.qtab-stack td:not(:first-child)::before { content: attr(data-label); position: absolute; left: .6rem; width: 5.5rem; font-size: .8rem; font-weight: 600; color: #5d6d7e; line-height: 1.45; padding-top: .12rem; }
+}
+</style>
+<style>
+#fig-sac-reacher text.rca-lab { paint-order: stroke; stroke: #ffffff; stroke-width: 4px; }
+nav.prereq span.prereq-chip{display:inline-block;padding:.15rem .6rem;border:1px solid #ced4da;border-radius:999px;font-size:.85rem;line-height:1.4;color:#5d6d7e}
+.eq-note{font-size:.9rem;color:#5d6d7e;margin:-1rem auto 1.75rem;max-width:640px}
+#sacWalkEq .eqt.eqt-active{text-decoration:none;background:#fef9c7}
+/* SAC tool (Figure 5): one plot plus a bell-width gauge at the side */
+#sacTool .sac-controls{align-items:flex-start}
+#sacTool .sac-ctl{display:flex;flex-direction:column;flex:1 1 auto;min-width:0}
+#sacTool .sac-ctl.sac-auto{flex:0 0 auto}
+#sacTool .sac-auto-row{display:flex;align-items:center;gap:.3rem;white-space:nowrap}
+#sacTool .sac-cap{font-size:.82rem;color:#475569;line-height:1.45;display:block;margin-top:.3rem}
+#sacTool .sac-plot-label{font-size:.85rem;color:#475569;text-align:center;margin:.4rem 0 .2rem}
+#sacTool .sac-panels{display:flex;gap:.5rem;align-items:stretch}
+#sacTool canvas.sac-canvas{flex:1 1 auto;min-width:0;height:300px;display:block}
+#sacTool canvas.sac-gauge{flex:0 0 40px;width:40px;height:300px;display:block}
+#sacTool .sac-legend{font-size:.85rem;color:#475569;margin:.5rem 0 .2rem}
+#sacTool .sac-readout{font-size:1rem;color:#2c3e50;margin:.2rem 0 .5rem;min-height:1.4em}
+@media (max-width:480px){
+  #sacTool .sac-controls .sac-ctl{flex:1 1 100%}
+  #sacTool .sac-controls .play-btn{align-self:flex-start}
+  #sacTool .sac-controls{gap:.6rem 1.5rem}
+  #sacTool .sac-cap{font-size:.8rem}
+}
+</style>
+</head>
+<body>
+        <nav class="topnav" aria-label="Site">
+    <div class="nav-inner">
+        <a class="wordmark" href="index.html">Ramin Anushiravani</a>
+        <div class="nav-links">
+            <a href="tutorial.html" class="active">Tutorials</a>
+            <a href="pubs.html">Publications</a>
+            <a href="index.html">About</a>
+            <a href="work.html">Projects</a>
+        </div>
+        <button class="nav-toggle" id="navToggle" aria-expanded="false" aria-controls="navPanel" aria-label="Menu"><span></span><span></span><span></span></button>
+    </div>
+    <div class="nav-panel" id="navPanel">
+        <div class="nav-panel-inner">
+            <div class="nav-panel-body">
+                <a class="panel-link active" href="tutorial.html">Tutorials</a>
+                <a class="panel-link" href="pubs.html">Publications</a>
+                <a class="panel-link" href="index.html">About</a>
+                <a class="panel-link" href="work.html">Projects</a>
+                <div class="panel-social">
+                    <a href="https://linkedin.com/in/raminanushiravani" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+                    <a href="https://github.com/raminaeye/" target="_blank" rel="noopener noreferrer">GitHub</a>
+                    <a href="https://scholar.google.com/citations?user=kouXx8gAAAAJ&hl=en" target="_blank" rel="noopener noreferrer">Google Scholar</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</nav>
+    <p class="crumb"><a href="index.html">Home</a> &gt; <a href="tutorial.html">Tutorials</a> &gt; Reinforcement Learning</p>
+    <script src="tutorial-nav.js"></script>
+    <h1>Soft Actor-Critic (SAC)</h1>
+    <p class="dek">A network that sets a robot's turning forces keeps a range of choices and is rewarded for staying undecided.</p>
+    <nav class="sermap" aria-label="The continuous-action series">
+      <ol class="sm-series">
+        <li><a href="rl.html">RL Basics: the full path</a></li>
+        <li><a href="rl-continuous-actions.html">Continuous Actions</a></li>
+        <li><a href="ddpg.html">DDPG</a></li>
+        <li><a href="ddpg-training.html">Training DDPG</a></li>
+        <li><a href="td3.html">TD3</a></li>
+        <li><span class="sm-here" aria-current="page">SAC</span></li>
+      </ol>
+    </nav>
+    <nav class="prereq" aria-label="Before you start"><span class="prereq-label">Before you start</span><a class="prereq-chip" href="rl.html#the-loop" title="RL Basics" aria-label="The agent, the state, the move, the reward and the return, taught in RL Basics">RL Basics</a><a class="prereq-chip" href="ddpg.html#ddpg-networks" title="Deep Deterministic Policy Gradient (DDPG): Actor and Critic" aria-label="The deterministic actor and the critic for torques, taught in Deep Deterministic Policy Gradient (DDPG): Actor and Critic">Deep Deterministic Policy Gradient (DDPG): Actor and Critic</a><a class="prereq-chip" href="ddpg-training.html#ddpg-targets" title="Training DDPG: Target Networks, Replay and Noise" aria-label="Target networks, replay and noise, taught in Training DDPG: Target Networks, Replay and Noise">Training DDPG: Target Networks, Replay and Noise</a><a class="prereq-chip" href="td3.html#twin-critics" title="Twin Delayed DDPG (TD3)" aria-label="Twin critics and the lower score, taught in Twin Delayed DDPG (TD3)">Twin Delayed DDPG (TD3)</a><a class="prereq-chip" href="reinforce.html#entropy" title="REINFORCE and the Baseline" aria-label="Entropy and the entropy bonus, taught in REINFORCE and the Baseline">REINFORCE and the Baseline</a><a class="prereq-chip" href="distributions.html#gaussian" title="Common Probability Distributions" aria-label="The standard normal bell, taught in Common Probability Distributions">Common Probability Distributions</a><a class="prereq-chip" href="rl-policy-gradients.html#policy-based" title="Policy Gradient Methods" aria-label="Log-probability, taught in Policy Gradient Methods">Policy Gradient Methods</a><a class="prereq-chip" href="rl-continuous-actions.html#stored-steps" title="Continuous-Action RL" aria-label="Stored arm steps and the plain target, taught in Continuous-Action RL">Continuous-Action RL</a><a class="prereq-chip" href="dqn.html#dqn-replay" title="Deep Q-Networks (DQN)" aria-label="Replay and the target network, taught in Deep Q-Networks (DQN)">Deep Q-Networks (DQN)</a></nav>
+    <p class="tabs-label">On this page</p>
+    <div class="tab-strip">
+        <a class="tab-link active" href="#sac-problem"><span class="secnum">1</span> Why commit to one set of forces</a>
+        <a class="tab-link" href="#sac"><span class="secnum">2</span> A range of torques instead of one torque</a>
+        <a class="tab-link" href="#sac-equations"><span class="secnum">3</span> SAC's objective, target, actor and temperature</a>
+        <a class="tab-link" href="#sac-step"><span class="secnum">4</span> One SAC update</a>
+        <a class="tab-link" href="#sac-code"><span class="secnum">5</span> SAC's actor and update in PyTorch</a>
+        <a class="tab-link" href="#sac-tool"><span class="secnum">6</span> How the temperature sets the bell's width</a>
+        <a class="tab-link" href="#sac-practice"><span class="secnum">7</span> How SAC is trained and how it compares</a>
+        <a class="tab-link" href="#sac-when"><span class="secnum">8</span> When SAC fits</a>
+        <a class="tab-link" href="#sac-breaks"><span class="secnum">9</span> How SAC fails</a>
+        <a class="tab-link" href="#sac-next"><span class="secnum">10</span> Practising inside a model of the world</a>
+        <a class="tab-link" href="#references"><span class="secnum">11</span> References</a>
+    </div>
+
+    <section>
+      <h2 id="sac-problem"><span class="secnum">1</span> Why commit to one set of forces</h2>
+      <h3><span class="secnum">1.1</span> Fixed noise is one more setting to tune</h3>
+      <p>Deep Deterministic Policy Gradient (DDPG) commits to one set of turning forces, so it needs noise added from outside to try new ones. On a real robot, every wild move costs time and can damage it.</p>
+      <p>Twin Delayed DDPG (TD3) commits and explores the same way. So the learner should decide for itself how far to stray from its best forces.</p>
+      <p>Soft Actor-Critic (SAC) lets the network that picks the forces keep a range instead. That range lets it explore without noise added from outside.</p>
+      <p>The agent is the learner that picks the moves. (<a href="rl.html#the-loop">RL Basics</a>) A state is the agent's situation right now. A move, or action, is one choice the agent can make in a state. A reward is the number the world hands back after each move, good or bad. (<a href="rl.html#the-loop">RL Basics</a>)</p>
+      <p>On a robot, sensing, moving and scoring repeat many times every second.</p>
+      <p>The running example is the Reacher task: a robot arm with two joints whose actions are four torques. A torque is a turning force a motor applies at a joint. On the Reacher each torque is a number from -1 to 1. Each joint can turn about two axes, so each joint gets two torques. Every step the arm senses its state, numbers describing the position, rotation and speed of its parts, and earns a small reward whenever its hand is inside a moving goal. (<a href="rl-continuous-actions.html#continuous">Continuous-Action RL</a>)</p>
+      <figure id="fig-sac-reacher" class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 360 262" style="max-width:480px" role="img" aria-label="A robot arm with two joints. Two curved torque arrows sit at each joint, one per turning axis. The hand sits near a dashed goal circle."><defs><marker id="rcaArrB" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:#1f618d;stroke:none"/></marker><marker id="rcaArrO" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:#ca6f1e;stroke:none"/></marker></defs><rect x="36" y="206" width="56" height="10" rx="3" style="fill:#eef1f4;stroke:#bdc3c7;stroke-width:1px"/><line x1="64" y1="206" x2="168" y2="118" style="stroke:#2c3e50;stroke-width:10px;stroke-linecap:round"/><line x1="168" y1="118" x2="256" y2="150" style="stroke:#2c3e50;stroke-width:10px;stroke-linecap:round"/><path d="M 40 178 A 40 40 0 0 1 88 180" style="fill:none;stroke:#1f618d;stroke-width:3.5px" marker-end="url(#rcaArrB)"/><path d="M 38 184 A 22 22 0 0 0 56 214" style="fill:none;stroke:#ca6f1e;stroke-width:3.5px" marker-end="url(#rcaArrO)"/><path d="M 146 96 A 40 40 0 0 1 190 98" style="fill:none;stroke:#1f618d;stroke-width:3.5px" marker-end="url(#rcaArrB)"/><path d="M 200 142 A 30 30 0 0 1 160 126" style="fill:none;stroke:#ca6f1e;stroke-width:3.5px" marker-end="url(#rcaArrO)"/><circle cx="64" cy="206" r="11" style="fill:#ffffff;stroke:#2c3e50;stroke-width:2px"/><circle cx="168" cy="118" r="9" style="fill:#ffffff;stroke:#2c3e50;stroke-width:2px"/><circle cx="256" cy="150" r="7" style="fill:#1f618d;stroke:#ffffff;stroke-width:1.5px"/><circle cx="302" cy="104" r="17" style="fill:none;stroke:#148f77;stroke-width:2px;stroke-dasharray:5 4"/><text x="64" y="132" text-anchor="middle" class="rca-lab mtd-t1" style="font-size:13px">shoulder, axis 1</text><text x="64" y="148" text-anchor="middle" class="rca-lab mtd-t2" style="font-size:13px">shoulder, axis 2</text><text x="168" y="56" text-anchor="middle" class="rca-lab mtd-t1" style="font-size:13px">elbow, axis 1</text><text x="168" y="72" text-anchor="middle" class="rca-lab mtd-t2" style="font-size:13px">elbow, axis 2</text><text x="64" y="250" text-anchor="middle" style="font-size:14px">shoulder joint</text><text x="168" y="178" text-anchor="middle" style="font-size:14px">elbow joint</text><text x="256" y="178" text-anchor="middle" style="font-size:14px">hand</text><text x="302" y="76" text-anchor="middle" style="font-size:14px">goal</text></svg><figcaption class="caption"><span class="fignum">Figure 1.</span> The Reacher arm, with two joints, four torques and a moving goal.</figcaption></figure>
+      <p>The return is all the reward still to come, with later rewards counted a little less. (<a href="rl.html#why-hard">RL Basics</a>) A move's value <var>\(Q(s,a)\)</var>, also called its score, is the return the agent expects if it makes move <var>\(a\)</var> in state <var>\(s\)</var> and plays on from there. (<a href="rl.html#how-it-learns">RL Basics</a>) So the hand must follow the goal as it moves, not just reach it once.</p>
+      <p>DDPG and TD3 learn two kinds of network. The deterministic actor <var>\(\mu_\theta\)</var> is a network with weights <var>\(\theta\)</var> that outputs one action every time, with no random draw. (<a href="ddpg.html#ddpg-networks">Deep Deterministic Policy Gradient (DDPG): Actor and Critic</a>) The critic <var>\(Q_\phi\)</var> is a network with weights <var>\(\phi\)</var> that scores a state and an action together; its score stands for the return the agent expects. (<a href="ddpg.html#ddpg-networks">Deep Deterministic Policy Gradient (DDPG): Actor and Critic</a>) Both networks learn from the steps the arm has already taken.</p>
+      <p>DDPG and TD3 explore by adding noise to that one set of torques. Exploration noise is a small random nudge added to the actor's actions while it learns, so the agent tries moves it is not sure about. (<a href="ddpg-training.html#ddpg-noise">Training DDPG: Target Networks, Replay and Noise</a>) On a real robot every one of those random tries costs time and wear.</p>
+      <h3><span class="secnum">1.2</span> Every step costs on a real robot</h3>
+      <p>The Minitaur is a small four-legged robot with eight motors, two per leg. Its actions are each leg's swing angle and extension, which a low-level controller turns into motor positions. Each fall costs time and can damage it, so the learner must reuse old steps and explore without wild moves.</p>
+      <figure id="fig-sac-minitaur" class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 272" style="max-width:480px" role="img" aria-label="The Minitaur, a small four-legged robot. Each leg has two motors marked M. It is shown on flat ground, a slope, wooden blocks and stairs."><text x="20" y="28" style="font-size:13px">M marks a motor</text><rect x="50" y="110" width="120" height="30" rx="8" style="fill:#eef1f4;stroke:#2c3e50;stroke-width:1.5px"/><rect x="58" y="140" width="24" height="80" style="fill:#d6eaf8;stroke:#2c3e50;stroke-width:1.5px"/><rect x="92" y="140" width="24" height="80" style="fill:#d6eaf8;stroke:#2c3e50;stroke-width:1.5px"/><rect x="126" y="140" width="24" height="80" style="fill:#d6eaf8;stroke:#2c3e50;stroke-width:1.5px"/><rect x="160" y="140" width="24" height="80" style="fill:#d6eaf8;stroke:#2c3e50;stroke-width:1.5px"/><circle cx="70" cy="158" r="7" style="fill:#1f618d"/><circle cx="70" cy="192" r="7" style="fill:#1f618d"/><circle cx="104" cy="158" r="7" style="fill:#1f618d"/><circle cx="104" cy="192" r="7" style="fill:#1f618d"/><circle cx="138" cy="158" r="7" style="fill:#1f618d"/><circle cx="138" cy="192" r="7" style="fill:#1f618d"/><circle cx="172" cy="158" r="7" style="fill:#1f618d"/><circle cx="172" cy="192" r="7" style="fill:#1f618d"/><text x="70" y="161" text-anchor="middle" style="font-size:9px;font-weight:700;fill:#ffffff">M</text><text x="70" y="195" text-anchor="middle" style="font-size:9px;font-weight:700;fill:#ffffff">M</text><text x="104" y="161" text-anchor="middle" style="font-size:9px;font-weight:700;fill:#ffffff">M</text><text x="104" y="195" text-anchor="middle" style="font-size:9px;font-weight:700;fill:#ffffff">M</text><text x="138" y="161" text-anchor="middle" style="font-size:9px;font-weight:700;fill:#ffffff">M</text><text x="138" y="195" text-anchor="middle" style="font-size:9px;font-weight:700;fill:#ffffff">M</text><text x="172" y="161" text-anchor="middle" style="font-size:9px;font-weight:700;fill:#ffffff">M</text><text x="172" y="195" text-anchor="middle" style="font-size:9px;font-weight:700;fill:#ffffff">M</text><line x1="20" y1="220" x2="380" y2="220" style="stroke:#2c3e50;stroke-width:1.5px"/><line x1="200" y1="220" x2="260" y2="200" style="stroke:#2c3e50;stroke-width:2px"/><rect x="275" y="206" width="14" height="14" style="fill:#eef1f4;stroke:#2c3e50;stroke-width:1.5px"/><rect x="291" y="206" width="14" height="14" style="fill:#eef1f4;stroke:#2c3e50;stroke-width:1.5px"/><polyline points="325,220 325,206 340,206 340,192 355,192 355,178 370,178" style="fill:none;stroke:#2c3e50;stroke-width:2px"/><text x="110" y="245" text-anchor="middle" style="font-size:13px">flat</text><text x="230" y="245" text-anchor="middle" style="font-size:13px">slope</text><text x="290" y="262" text-anchor="middle" style="font-size:13px">wooden blocks</text><text x="355" y="245" text-anchor="middle" style="font-size:13px">stairs</text></svg><figcaption class="caption"><span class="fignum">Figure 2.</span> The Minitaur, a small four-legged robot with eight motors, two per leg, on flat ground, a slope, wooden blocks and stairs.</figcaption></figure>
+    </section>
+
+    <section>
+      <h2 id="sac"><span class="secnum">2</span> A range of torques instead of one torque</h2>
+      <p>A policy is the agent's rule for choosing a move in each state; it may always pick the same move or pick by chance. (<a href="rl.html#the-loop">RL Basics</a>) SAC's actor draws its torques from a bell.</p>
+      <p>A Gaussian actor outputs one centre and one width per torque and draws each torque from that bell. We write SAC's actor as <var>\(\pi_\theta\)</var>, with weights <var>\(\theta\)</var>, because it draws its torques by chance; <var>\(\mu_\theta\)</var> is the actor that outputs one action every time. For the Reacher that is four centres and four widths. The actor learns all eight numbers itself, so the width is not a noise size set by hand.</p>
+      <p>The tanh function squashes any number into -1 to 1, the torque range. (<a href="rl-continuous-actions.html#continuous">Continuous-Action RL</a>) Each draw is then squashed, so every torque stays in range.</p>
+      <p>Entropy <var>\(\mathcal{H}\)</var> is how undecided the policy is; for a bell of torques, it is how wide the bell is. (<a href="reinforce.html#entropy">REINFORCE and the Baseline</a>) Staying undecided keeps several good ways of moving alive, so the actor does not lock onto one fragile gait (a way of walking) too early. The entropy bonus is a small extra term that rewards the policy for staying undecided between moves, so it keeps trying the others for longer. (<a href="reinforce.html#entropy">REINFORCE and the Baseline</a>) SAC adds this bonus to each step's reward, and a wider bell earns more of it, so the critic's score also counts the bonus still to come.</p>
+      <p>The critic learns by being pulled toward a target, the step's reward plus its own score for what comes next, counted a little less. (<a href="rl-continuous-actions.html#stored-steps">Continuous-Action RL</a>) That target moves whenever the critic moves. SAC also keeps TD3's two critics but not its other two changes.</p>
+      <p>The temperature <var>\(\alpha\)</var> sets how much staying undecided is worth against reward. A higher temperature keeps the bell wider.</p>
+    </section>
+
+    <section>
+      <h2 id="sac-equations"><span class="secnum">3</span> SAC's objective, target, actor and temperature</h2>
+      <h3><span class="secnum">3.1</span> Reward plus how undecided the policy is</h3>
+      <p>Replay keeps a memory of past steps, and training draws random batches from it. (<a href="dqn.html#dqn-replay">Deep Q-Networks (DQN)</a>) The sign <var>\(\sim\)</var> means drawn at random from. (<a href="distributions.html#sampling-draw">Common Probability Distributions</a>) <var>\(\log \pi_\theta(a \mid s)\)</var> is the log of how likely the actor was to draw this action from its bell, the height of the bell at that action; very negative means an unlikely draw, which happens more often when the bell is wide. (<a href="rl-policy-gradients.html#policy-based">Policy Gradient Methods</a>) SAC scores each draw's unlikeliness as its bonus for staying undecided.</p>
+      <div class="eq-card">
+        <div class="eq-what"><b>Equation 1. Reward plus how undecided the policy is.</b> The Reacher arm earns reward for keeping its hand on the goal and also a small bonus at every step where its torques stay varied rather than locked to one value.</div>
+        <div class="eq-line eq-active" data-eqline="0">\(\displaystyle \htmlStyle{color:#0e6b59}{J}(\htmlStyle{color:#a04000}{\pi_\theta}) =\)</div>
+        <div class="eq-line eq-active" data-eqline="0">\(\displaystyle \htmlStyle{color:#5d6d7e}{\sum_{t}}\ \htmlStyle{color:#5d6d7e}{\mathbb{E}}\big[\, \htmlStyle{color:#0e6b59}{r_{t+1}} + \htmlStyle{color:#7d6608}{\alpha}\,\htmlStyle{color:#7d6608}{\mathcal{H}_t} \big]\)</div>
+        <div class="eq-why eq-active" data-eqline="0">A policy's score is reward plus a bonus for staying undecided; the actor should succeed while staying as undecided as it can afford. <var>\(J(\pi_\theta)\)</var> is the score the actor is trained to raise; on SAC it counts the entropy bonus on top of reward. <var>\(r_{t+1}\)</var> is the reward that follows the step-t action. <var>\(\mathcal{H}_t\)</var> is the entropy in state <var>\(s_t\)</var>, how undecided the policy is there. <var>\(\alpha\)</var> is the temperature. The average <var>\(\mathbb{E}\)</var> runs over the states the actor visits and the torques it draws, and the sum runs over the steps of an episode. An episode is one run from the start until it ends. (<a href="rl.html#banana-collector">RL Basics</a>) With <var>\(\alpha\)</var> at zero this is the sum of rewards; the paper adds the discount in practice. The discount <var>\(\gamma\)</var> sets how much a reward one step later still counts. (<a href="rl.html#why-hard">RL Basics</a>)</div>
+        <div class="eq-line eq-active" data-eqline="1">\(\displaystyle \htmlStyle{color:#7d6608}{h} = -\log \htmlStyle{color:#a04000}{\pi_\theta}(\htmlStyle{color:#a04000}{a} \mid \htmlStyle{color:#2471a3}{s_t})\)</div>
+        <div class="eq-why eq-active" data-eqline="1"><var>\(h\)</var> is how unlikely one draw was: minus the log-probability of the torques the actor drew.</div>
+        <div class="eq-line eq-active" data-eqline="2">\(\displaystyle \htmlStyle{color:#7d6608}{\mathcal{H}_t} = \htmlStyle{color:#5d6d7e}{\mathbb{E}_{a \sim \pi_\theta}}[\htmlStyle{color:#7d6608}{h}]\)</div>
+        <div class="eq-why eq-active" data-eqline="2">The entropy is the average of how unlikely the actor's own draws are: unlikely draws on average mean a wide bell. <var>\(a \sim \pi_\theta\)</var> means torques drawn from the actor's whole bell. Line 3 defines the bonus used in line 1. This builds on the return (<a href="rl.html#why-hard">RL Basics</a>), the entropy bonus (<a href="reinforce.html#entropy">REINFORCE and the Baseline</a>), the stochastic policy (<a href="rl.html#the-loop">RL Basics</a>) and the log-probability (<a href="rl-policy-gradients.html#policy-based">Policy Gradient Methods</a>).</div>
+      </div>
+      <p>SAC never sums this directly; the target below builds it one step at a time.</p>
+      <h3><span class="secnum">3.2</span> A target that rewards staying undecided</h3>
+      <p>A slow copy of a network is a copy updated only a little at a time. In DDPG both the actor and the critic have a slow copy, marked by a prime on the weights, and the targets are built from those copies. (<a href="ddpg-training.html#ddpg-targets">Training DDPG: Target Networks, Replay and Noise</a>) In DDPG both copies enter the critic's target; SAC keeps only the slow critics. SAC does not need a slow actor, because its next torques come from a fresh draw.</p>
+      <p>The live networks are the actor and critic being trained, with weights <var>\(\theta\)</var> and <var>\(\phi\)</var>. (<a href="ddpg-training.html#ddpg-targets">Training DDPG: Target Networks, Replay and Noise</a>) The soft update blends a small share <var>\(\tau\)</var> of the live weights into each slow copy after every update, instead of overwriting it. (<a href="dqn.html#dqn-target">Deep Q-Networks (DQN)</a>) Soft in Soft Actor-Critic means a move's value counts the entropy bonus; it is unrelated to the soft update that blends slow copies. Every slow critic below is blended this way after each update.</p>
+      <p>The DDPG critic's target is the step's reward plus the discounted score the slow critic gives to the slow actor's next torques. (<a href="ddpg.html#ddpg-critic">Deep Deterministic Policy Gradient (DDPG): Actor and Critic</a>) TD3 trains two critics side by side and builds the target from the lower of their two scores. (<a href="td3.html#twin-critics">Twin Delayed DDPG (TD3)</a>) SAC's target adds one more term to that lower score.</p>
+      <div class="eq-card">
+        <div class="eq-what"><b>Equation 2. A target that rewards staying undecided.</b> For a stored arm step the actor draws next torques; the target adds their lower slow-critic score and a bonus that is bigger when that draw was unlikely, which on average means a wide bell.</div>
+        <div class="eq-line eq-active" data-eqline="0">\(\displaystyle \htmlStyle{color:#a04000}{a'} \sim \htmlStyle{color:#a04000}{\pi_\theta}(\cdot \mid \htmlStyle{color:#2471a3}{s'})\)</div>
+        <div class="eq-why eq-active" data-eqline="0"><var>\(a'\)</var> is the next torques drawn from the live actor. The dot means "over every possible torque": <var>\(\pi_\theta(\cdot \mid s')\)</var> is the whole bell in state <var>\(s'\)</var>.</div>
+        <div class="eq-line eq-active" data-eqline="1">\(\displaystyle \htmlStyle{color:#8e44ad}{q'} = \htmlStyle{color:#5d6d7e}{\min_{i=1,2}}\ \htmlStyle{color:#8e44ad}{Q_{\phi'_i}}(\htmlStyle{color:#2471a3}{s'}, \htmlStyle{color:#a04000}{a'})\)</div>
+        <div class="eq-why eq-active" data-eqline="1"><var>\(q'\)</var> is the lower slow-critic score as in TD3. (<a href="td3.html#twin-critics">Twin Delayed DDPG (TD3)</a>)</div>
+        <div class="eq-line eq-active" data-eqline="2">\(\displaystyle \htmlStyle{color:#7d6608}{h'} = -\log \htmlStyle{color:#a04000}{\pi_\theta}(\htmlStyle{color:#a04000}{a'} \mid \htmlStyle{color:#2471a3}{s'})\)</div>
+        <div class="eq-why eq-active" data-eqline="2"><var>\(h'\)</var> is how unlikely that one draw was, one sample of Equation 1 line 3.</div>
+        <div class="eq-line eq-active" data-eqline="3">\(\displaystyle \htmlStyle{color:#0e6b59}{y} = \htmlStyle{color:#0e6b59}{r} + \htmlStyle{color:#5d6d7e}{\gamma}\,\big(\htmlStyle{color:#8e44ad}{q'} + \htmlStyle{color:#7d6608}{\alpha}\,\htmlStyle{color:#7d6608}{h'}\big)\)</div>
+        <div class="eq-why eq-active" data-eqline="3">TD3's target, with the slow actor replaced by a fresh draw from the live actor and the future entropy counted as part of the value. The bonus must measure how undecided the live actor is, so the next torques are drawn from its own bell; the SAC paper found a slow actor unnecessary. <var>\(r\)</var> is the reward stored with this step, <var>\(\gamma\)</var> and <var>\(s'\)</var> are as in the DDPG critic's target, and <var>\(\alpha h'\)</var> is the entropy bonus for that draw. (<a href="ddpg.html#ddpg-critic">Deep Deterministic Policy Gradient (DDPG): Actor and Critic</a>) Line 4 is Equation 1 written one step at a time. This builds on TD3's lower-of-two target and Equation 1.</div>
+      </div>
+      <p>Both live critics then move toward y by shrinking the squared gap between their score and y.</p>
+      <h3><span class="secnum">3.3</span> The actor's draw and loss</h3>
+      <p>The DDPG actor update moves the actor's weights so its torques shift the way the critic's score rises. (<a href="ddpg.html#ddpg-uphill">Deep Deterministic Policy Gradient (DDPG): Actor and Critic</a>) A torque picked by chance has no smooth rule linking it to the actor's weights, so the critic's slope cannot pass back through it. The reparameterization trick writes a random draw as the centre plus the width times a fixed random number, so the critic's slope can flow back into the actor. The draw is then squashed into the torque range.</p>
+      <div class="eq-card">
+        <div class="eq-what"><b>Equation 3. The actor's draw.</b> For each of the arm's four torques the actor outputs a centre and a width; a standard random draw is scaled by the width, shifted by the centre and squashed into -1 to 1.</div>
+        <div class="eq-line eq-active" data-eqline="0">\(\displaystyle \htmlStyle{color:#a04000}{u} = \htmlStyle{color:#a04000}{m_\theta(s)} + \htmlStyle{color:#a04000}{\sigma_\theta(s)}\,\htmlStyle{color:#5d6d7e}{\xi}\)</div>
+        <div class="eq-why eq-active" data-eqline="0">Move the randomness into a fixed input, so the torques become a smooth function of the actor's weights and the critic's slope can flow back into them, as in DDPG. <var>\(m_\theta(s)\)</var> is the centre, one per torque. <var>\(\sigma_\theta(s)\)</var> is the width, one per torque, the bell width. <var>\(\xi\)</var> is a fresh random number drawn from a standard normal bell, one per torque, drawn independently. (<a href="distributions.html#gaussian">Common Probability Distributions</a>) <var>\(u\)</var> is the unsquashed draw.</div>
+        <div class="eq-line eq-active" data-eqline="1">\(\displaystyle \htmlStyle{color:#a04000}{a} = \tanh(\htmlStyle{color:#a04000}{u})\)</div>
+        <div class="eq-why eq-active" data-eqline="1"><var>\(\tanh\)</var> squashes into the torque range. Equation 4 passes slopes through these two lines. This builds on the DDPG actor, the DDPG actor update and the Gaussian bell. (<a href="distributions.html#gaussian">Common Probability Distributions</a>)</div>
+      </div>
+      <div class="eq-card">
+        <div class="eq-what"><b>Equation 4. The actor's loss.</b> For each stored arm state, the actor's drawn torques should score high on the lower live critic, and the actor is penalised when its draws are too predictable.</div>
+        <div class="eq-line eq-active" data-eqline="0">\(\displaystyle \htmlStyle{color:#8e44ad}{q} = \htmlStyle{color:#5d6d7e}{\min_{i=1,2}}\ \htmlStyle{color:#8e44ad}{Q_{\phi_i}}(\htmlStyle{color:#2471a3}{s}, \htmlStyle{color:#a04000}{a})\)</div>
+        <div class="eq-why eq-active" data-eqline="0"><var>\(q\)</var> is the lower of the two live critics' scores for the drawn torques <var>\(a\)</var> from Equation 3.</div>
+        <div class="eq-line eq-active" data-eqline="1">\(\displaystyle \htmlStyle{color:#5d6d7e}{L(\theta)} =\)</div>
+        <div class="eq-line eq-active" data-eqline="1">\(\displaystyle \htmlStyle{color:#5d6d7e}{\mathbb{E}_{s,\xi}}\big[\htmlStyle{color:#7d6608}{\alpha} \log \htmlStyle{color:#a04000}{\pi_\theta}(\htmlStyle{color:#a04000}{a} \mid \htmlStyle{color:#2471a3}{s}) - \htmlStyle{color:#8e44ad}{q}\big]\)</div>
+        <div class="eq-why eq-active" data-eqline="1">Climb the critic like DDPG, but each bit of indecision given up costs <var>\(\alpha\)</var>. <var>\(\alpha \log \pi_\theta(a \mid s)\)</var> is large when the draw was very likely, meaning a narrow bell, so minimising it keeps the bell wide. Minus <var>\(q\)</var> is "climb the lower critic". The average runs over stored states and fresh draws <var>\(\xi\)</var>. Equation 1 per state, as a loss to minimise. This builds on the DDPG actor update, TD3's lower of two, and Equations 1 and 3.</div>
+      </div>
+      <p>So the actor climbs the lower critic while keeping its bell from narrowing.</p>
+      <h3 id="temperature"><span class="secnum">3.4</span> Tuning the temperature automatically</h3>
+      <p>SAC can also set the temperature itself while it trains; this is called automatic tuning. The target entropy <var>\(\bar{\mathcal{H}}\)</var> is how undecided automatic tuning holds the policy to. Tuning raises the temperature when the actor grows too decided and lowers it when the actor grows too undecided.</p>
+      <div class="eq-card">
+        <div class="eq-what"><b>Equation 5. Tuning the temperature.</b> When the arm's torques are more varied than the target entropy asks for, alpha falls; when they narrow below it, alpha rises, and the actor's next update widens the bell again.</div>
+        <div class="eq-line eq-active" data-eqline="0">\(\displaystyle \htmlStyle{color:#7d6608}{h} = -\log \htmlStyle{color:#a04000}{\pi_\theta}(\htmlStyle{color:#a04000}{a} \mid \htmlStyle{color:#2471a3}{s})\)</div>
+        <div class="eq-why eq-active" data-eqline="0"><var>\(h\)</var> is one sample of how undecided the actor is, with <var>\(a\)</var> drawn from the actor, as <var>\(h'\)</var> in Equation 2.</div>
+        <div class="eq-line eq-active" data-eqline="1">\(\displaystyle \htmlStyle{color:#5d6d7e}{L(\alpha)} = \htmlStyle{color:#5d6d7e}{\mathbb{E}}\big[\htmlStyle{color:#7d6608}{\alpha}\,\htmlStyle{color:#7d6608}{h} - \htmlStyle{color:#7d6608}{\alpha}\,\htmlStyle{color:#7d6608}{\bar{\mathcal{H}}}\big]\)</div>
+        <div class="eq-why eq-active" data-eqline="1">Choose how undecided the actor should stay, and let <var>\(\alpha\)</var> move to hold it there; <var>\(\alpha\)</var> rises when the actor is more decided than the target entropy asks for and falls when it is less. <var>\(\bar{\mathcal{H}}\)</var> is the target entropy. This loss is never minimised to the end; it only supplies a slope for <var>\(\alpha\)</var>. The slope is the gap <var>\(h\)</var> minus the target entropy, so each step nudges <var>\(\alpha\)</var> up when the actor is too decided and down when it is too undecided. The actor's next update (Equation 4) widens or narrows its bell in response, and that is what closes the gap. This replaces hand-tuning <var>\(\alpha\)</var> in Equation 1; the code's <code>alpha_loss</code> is this line with log alpha in place of alpha. This builds on Equation 1 line 3 and Equation 4.</div>
+      </div>
+      <p>The SAC papers write <var>\(\phi\)</var> for the actor, <var>\(\theta\)</var> for the critics, a bar for slow copies, <var>\(\epsilon\)</var> for the random draw, and <var>\(r(s_t, a_t)\)</var> for the reward; we keep the series letters and write <var>\(r_{t+1}\)</var>.</p>
+    </section>
+
+    <section>
+      <h2 id="sac-step"><span class="secnum">4</span> One SAC update</h2>
+      <p>Each update draws a random batch from the replay memory, and the whole update looks like this.</p>
+      <figure id="fig-sac-chain" class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 580 400" style="max-width:480px" role="img" aria-label="A chain: a random batch feeds the target, which feeds the critics, which feed the actor, which feeds the slow copies. The temperature sets a bonus for unlikely draws that joins the target, and holds how undecided the actor stays."><defs><marker id="sacChainArr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:#2c3e50;stroke:none"/></marker></defs><rect x="20" y="8" width="300" height="44" rx="6" style="fill:#eef1f4;stroke:#2c3e50;stroke-width:1.5px"/><text x="170" y="36" text-anchor="middle" class="mtd-t1" style="font-size:15px;font-weight:700">random batch</text><line x1="170" y1="52" x2="170" y2="72" style="stroke:#2c3e50;stroke-width:2px" marker-end="url(#sacChainArr)"/><rect x="20" y="74" width="300" height="56" rx="6" style="fill:#fef5e7;stroke:#e67e22;stroke-width:2px"/><text x="170" y="98" text-anchor="middle" class="mtd-t1" style="font-size:15px;font-weight:700">target</text><text x="170" y="118" text-anchor="middle" class="mtd-t1" style="font-size:13px">lower score plus a bonus</text><line x1="170" y1="130" x2="170" y2="150" style="stroke:#2c3e50;stroke-width:2px" marker-end="url(#sacChainArr)"/><rect x="20" y="152" width="300" height="56" rx="6" style="fill:#eef1f4;stroke:#2c3e50;stroke-width:1.5px"/><text x="170" y="176" text-anchor="middle" class="mtd-t1" style="font-size:15px;font-weight:700">critics</text><text x="170" y="196" text-anchor="middle" class="mtd-t1" style="font-size:13px">two live critics</text><line x1="170" y1="208" x2="170" y2="228" style="stroke:#2c3e50;stroke-width:2px" marker-end="url(#sacChainArr)"/><rect x="20" y="230" width="300" height="80" rx="6" style="fill:#fef5e7;stroke:#e67e22;stroke-width:2px"/><text x="170" y="256" text-anchor="middle" class="mtd-t1" style="font-size:15px;font-weight:700">actor</text><text x="170" y="276" text-anchor="middle" class="mtd-t1" style="font-size:13px">range of torques</text><path d="M 130 304 C 150 304, 155 282, 170 282 C 185 282, 190 304, 210 304" style="fill:none;stroke:#a04000;stroke-width:2.5px"/><line x1="170" y1="310" x2="170" y2="330" style="stroke:#2c3e50;stroke-width:2px" marker-end="url(#sacChainArr)"/><rect x="20" y="332" width="300" height="44" rx="6" style="fill:#eef1f4;stroke:#2c3e50;stroke-width:1.5px"/><text x="170" y="360" text-anchor="middle" class="mtd-t1" style="font-size:15px;font-weight:700">slow copies</text><rect x="360" y="8" width="180" height="56" rx="6" style="fill:#eef1f4;stroke:#2c3e50;stroke-width:1.5px"/><text x="450" y="30" text-anchor="middle" class="mtd-t1" style="font-size:15px;font-weight:700">how undecided</text><text x="450" y="48" text-anchor="middle" class="mtd-t1" style="font-size:15px;font-weight:700">to stay</text><rect x="360" y="74" width="180" height="44" rx="6" style="fill:#fef5e7;stroke:#e67e22;stroke-width:2px"/><text x="450" y="102" text-anchor="middle" class="mtd-t1" style="font-size:15px;font-weight:700">temperature</text><rect x="360" y="152" width="180" height="88" rx="6" style="fill:#fef5e7;stroke:#e67e22;stroke-width:2px"/><text x="450" y="172" text-anchor="middle" class="mtd-t1" style="font-size:15px;font-weight:700">bonus for</text><text x="450" y="190" text-anchor="middle" class="mtd-t1" style="font-size:15px;font-weight:700">unlikely draws</text><text x="450" y="210" text-anchor="middle" class="mtd-t1" style="font-size:13px">larger on average</text><text x="450" y="226" text-anchor="middle" class="mtd-t1" style="font-size:13px">when the bell is wider</text><path d="M 540 96 C 568 96, 568 52, 540 52" style="fill:none;stroke:#2c3e50;stroke-width:2px" marker-end="url(#sacChainArr)"/><line x1="450" y1="118" x2="450" y2="150" style="stroke:#2c3e50;stroke-width:2px" marker-end="url(#sacChainArr)"/><path d="M 360 194 L 340 194 L 340 102 L 322 102" style="fill:none;stroke:#2c3e50;stroke-width:2px" marker-end="url(#sacChainArr)"/></svg><figcaption class="caption"><span class="fignum">Figure 3.</span> SAC keeps TD3's two critics and the lower score; the actor draws from a bell, and unlikely draws earn a bonus.</figcaption></figure>
+      <div class="demo" id="sacWalk">
+        <div class="demo-controls">
+          <button type="button" class="play-btn" id="sacPlay" style="min-width:84px">Play</button>
+          <button type="button" class="play-btn" id="sacPrev">Prev</button>
+          <button type="button" class="play-btn" id="sacNext">Next</button>
+          <button type="button" class="play-btn" id="sacReset">Reset</button>
+          <label>Step <span id="sacStepName">batch drawn</span><br>
+            <input type="range" id="sacStep" min="0" max="12" step="1" value="0" aria-label="Walkthrough step">
+          </label>
+        </div>
+        <div class="dt-dots" id="sacDots">
+          <button type="button" class="dt-dot active" data-step="0" aria-label="Go to step 1">1</button>
+          <button type="button" class="dt-dot" data-step="1" aria-label="Go to step 2">2</button>
+          <button type="button" class="dt-dot" data-step="2" aria-label="Go to step 3">3</button>
+          <button type="button" class="dt-dot" data-step="3" aria-label="Go to step 4">4</button>
+          <button type="button" class="dt-dot" data-step="4" aria-label="Go to step 5">5</button>
+          <button type="button" class="dt-dot" data-step="5" aria-label="Go to step 6">6</button>
+          <button type="button" class="dt-dot" data-step="6" aria-label="Go to step 7">7</button>
+          <button type="button" class="dt-dot" data-step="7" aria-label="Go to step 8">8</button>
+          <button type="button" class="dt-dot" data-step="8" aria-label="Go to step 9">9</button>
+          <button type="button" class="dt-dot" data-step="9" aria-label="Go to step 10">10</button>
+          <button type="button" class="dt-dot" data-step="10" aria-label="Go to step 11">11</button>
+          <button type="button" class="dt-dot" data-step="11" aria-label="Go to step 12">12</button>
+          <button type="button" class="dt-dot" data-step="12" aria-label="Go to step 13">13</button>
+        </div>
+        <svg id="sacWalkSvg" class="loop-svg" viewBox="0 0 660 500" role="img" aria-label="One SAC update: a random batch goes to the actor, whose next torques go to the two slow critics; the lower score joins the reward in the target, the live critics move toward it, the actor draws again and moves, and the slow critics blend.">
+          <defs>
+            <marker id="sacWalkArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#7f8c8d"></path>
+            </marker>
+            <marker id="sacWalkArrowOn" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#2c3e50"></path>
+            </marker>
+          </defs>
+          <line id="e0" class="edge" x1="190" y1="65" x2="242" y2="65" marker-end="url(#sacWalkArrow)"></line>
+          <line id="e1" class="edge" x1="410" y1="65" x2="462" y2="65" marker-end="url(#sacWalkArrow)"></line>
+          <text id="l1" class="elabel" x="436" y="128" text-anchor="middle">next torques</text>
+          <line id="e2" class="edge" x1="555" y1="100" x2="555" y2="192" marker-end="url(#sacWalkArrow)"></line>
+          <text id="l2" class="elabel" x="565" y="152">scores</text>
+          <line id="e3" class="edge" x1="470" y1="235" x2="418" y2="235" marker-end="url(#sacWalkArrow)"></line>
+          <text id="l3" class="elabel" x="444" y="303" text-anchor="middle">lower score</text>
+          <path id="e4" class="edge" d="M 280 270 L 160 365" marker-end="url(#sacWalkArrow)"></path>
+          <text id="l4" class="elabel" x="300" y="303" text-anchor="middle">shared</text>
+          <line id="e5" class="edge" x1="105" y1="100" x2="105" y2="192" marker-end="url(#sacWalkArrow)"></line>
+          <text id="l5" class="elabel" x="115" y="152">stored state</text>
+          <line id="e6" class="edge" x1="105" y1="270" x2="105" y2="362" marker-end="url(#sacWalkArrow)"></line>
+          <text id="l6" class="elabel" x="115" y="320">squashed draw</text>
+          <line id="e7" class="edge" x1="190" y1="405" x2="242" y2="405" marker-end="url(#sacWalkArrow)"></line>
+          <text id="l7" class="elabel" x="216" y="468" text-anchor="middle">slope</text>
+          <path id="e8" class="edge" d="M 105 440 L 105 462 L 555 462 L 555 440" marker-end="url(#sacWalkArrow)"></path>
+          <text id="l8" class="elabel" x="330" y="484" text-anchor="middle">blend</text>
+          <rect id="nBatch" class="node" x="20" y="30" width="170" height="70" rx="8"></rect>
+          <text id="tBatch" class="ntitle" x="105" y="58" text-anchor="middle">batch</text>
+          <text id="sBatch" class="nsub" x="105" y="78" text-anchor="middle">past steps</text>
+          <rect id="nActor" class="node actor" x="250" y="30" width="160" height="70" rx="8"></rect>
+          <text id="tActor" class="ntitle" x="330" y="58" text-anchor="middle">actor</text>
+          <text id="sActor" class="nsub" x="330" y="78" text-anchor="middle">bell of torques</text>
+          <rect id="nCriticsS" class="node critic" x="470" y="30" width="170" height="70" rx="8"></rect>
+          <text id="tCriticsS" class="ntitle" x="555" y="58" text-anchor="middle">critics</text>
+          <text id="sCriticsS" class="nsub" x="555" y="78" text-anchor="middle">slow pair</text>
+          <rect id="nDraw" class="node actor" x="20" y="200" width="170" height="70" rx="8"></rect>
+          <text id="tDraw" class="ntitle" x="105" y="228" text-anchor="middle">draw</text>
+          <text id="sDraw" class="nsub" x="105" y="248" text-anchor="middle">fresh draw</text>
+          <text id="xiDraw" class="elabel" x="170" y="222" text-anchor="middle" style="font-size:26px">ξ</text>
+          <rect id="nTarget" class="node" x="250" y="200" width="160" height="70" rx="8"></rect>
+          <text id="tTarget" class="ntitle" x="330" y="240" text-anchor="middle">target</text>
+          <rect id="nLower" class="node" x="470" y="200" width="170" height="70" rx="8"></rect>
+          <text id="tLower" class="ntitle" x="555" y="228" text-anchor="middle">lower</text>
+          <text id="sLower" class="nsub" x="555" y="248" text-anchor="middle">of the two</text>
+          <rect id="nLive" class="node critic" x="20" y="370" width="170" height="70" rx="8"></rect>
+          <text id="tLive" class="ntitle" x="105" y="398" text-anchor="middle">critics</text>
+          <text id="sLive" class="nsub" x="105" y="418" text-anchor="middle">live, two</text>
+          <rect id="nActorL" class="node actor" x="250" y="370" width="160" height="70" rx="8"></rect>
+          <text id="tActorL" class="ntitle" x="330" y="398" text-anchor="middle">actor</text>
+          <text id="sActorL" class="nsub" x="330" y="418" text-anchor="middle">weights move</text>
+          <rect id="nCopies" class="node" x="470" y="370" width="170" height="70" rx="8"></rect>
+          <text id="tCopies" class="ntitle" x="555" y="398" text-anchor="middle">copies</text>
+          <text id="sCopies" class="nsub" x="555" y="418" text-anchor="middle">slow ones</text>
+        </svg>
+        <p class="caption"><span class="fignum">Figure 4.</span> One SAC update on a random batch of stored arm steps.</p>
+        <p class="demo-stats" id="sacStats" aria-live="polite"></p>
+        <div class="eq-card eq-stepped" id="sacWalkEq">
+          <div class="eq-what">One SAC update, in the equations it uses.</div>
+          <div class="eq-line" data-eqline="0">\(\displaystyle \htmlClass{eqt}{\htmlData{k=a2}{\htmlStyle{color:#a04000}{a'}}} \sim \htmlClass{eqt}{\htmlData{k=pi}{\htmlStyle{color:#a04000}{\pi_\theta}}}(\cdot \mid \htmlClass{eqt}{\htmlData{k=sp}{\htmlStyle{color:#2471a3}{s'}}})\)</div>
+          <div class="eq-why" data-eqline="0">The live actor's next torques for each next state.</div>
+          <div class="eq-line" data-eqline="1">\(\displaystyle \htmlClass{eqt}{\htmlData{k=qp}{\htmlStyle{color:#8e44ad}{q'}}} = \htmlClass{eqt}{\htmlData{k=min}{\htmlStyle{color:#5d6d7e}{\min_{i=1,2}}}}\ \htmlClass{eqt}{\htmlData{k=Q}{\htmlStyle{color:#8e44ad}{Q_{\phi'_i}}}}(\htmlClass{eqt}{\htmlData{k=sp}{\htmlStyle{color:#2471a3}{s'}}}, \htmlClass{eqt}{\htmlData{k=a2}{\htmlStyle{color:#a04000}{a'}}})\)</div>
+          <div class="eq-why" data-eqline="1">The lower of the two slow critics' scores.</div>
+          <div class="eq-line" data-eqline="2">\(\displaystyle \htmlClass{eqt}{\htmlData{k=hp}{\htmlStyle{color:#7d6608}{h'}}} = -\log \htmlClass{eqt}{\htmlData{k=pi}{\htmlStyle{color:#a04000}{\pi_\theta}}}(\htmlClass{eqt}{\htmlData{k=a2}{\htmlStyle{color:#a04000}{a'}}} \mid \htmlClass{eqt}{\htmlData{k=sp}{\htmlStyle{color:#2471a3}{s'}}})\)</div>
+          <div class="eq-why" data-eqline="2">How unlikely that one draw was.</div>
+          <div class="eq-line" data-eqline="3">\(\displaystyle \htmlClass{eqt}{\htmlData{k=y}{\htmlStyle{color:#0e6b59}{y}}} = \htmlClass{eqt}{\htmlData{k=r}{\htmlStyle{color:#0e6b59}{r}}} + \htmlClass{eqt}{\htmlData{k=gamma}{\htmlStyle{color:#5d6d7e}{\gamma}}}\,(\htmlClass{eqt}{\htmlData{k=qp}{\htmlStyle{color:#8e44ad}{q'}}} + \htmlClass{eqt}{\htmlData{k=alpha}{\htmlStyle{color:#7d6608}{\alpha}}}\,\htmlClass{eqt}{\htmlData{k=hp}{\htmlStyle{color:#7d6608}{h'}}})\)</div>
+          <div class="eq-why" data-eqline="3">The target: the reward plus the discounted lower score and the temperature times that bonus.</div>
+          <div class="eq-line" data-eqline="4">\(\displaystyle \htmlClass{eqt}{\htmlData{k=u}{\htmlStyle{color:#a04000}{u}}} = \htmlClass{eqt}{\htmlData{k=m}{\htmlStyle{color:#a04000}{m_\theta(s)}}} + \htmlClass{eqt}{\htmlData{k=sig}{\htmlStyle{color:#a04000}{\sigma_\theta(s)}}}\,\htmlClass{eqt}{\htmlData{k=xi}{\htmlStyle{color:#5d6d7e}{\xi}}}\)</div>
+          <div class="eq-why" data-eqline="4">The actor's fresh draw: centre plus width times a random number.</div>
+          <div class="eq-line" data-eqline="5">\(\displaystyle \htmlClass{eqt}{\htmlData{k=a}{\htmlStyle{color:#a04000}{a}}} = \tanh(\htmlClass{eqt}{\htmlData{k=u}{\htmlStyle{color:#a04000}{u}}})\)</div>
+          <div class="eq-why" data-eqline="5">The draw squashed into the torque range.</div>
+          <div class="eq-line" data-eqline="6">\(\displaystyle \htmlClass{eqt}{\htmlData{k=q}{\htmlStyle{color:#8e44ad}{q}}} = \htmlClass{eqt}{\htmlData{k=min}{\htmlStyle{color:#5d6d7e}{\min_{i=1,2}}}}\ \htmlClass{eqt}{\htmlData{k=Q}{\htmlStyle{color:#8e44ad}{Q_{\phi_i}}}}(\htmlClass{eqt}{\htmlData{k=s}{\htmlStyle{color:#2471a3}{s}}}, \htmlClass{eqt}{\htmlData{k=a}{\htmlStyle{color:#a04000}{a}}})\)</div>
+          <div class="eq-why" data-eqline="6">The lower live critic's score for the squashed draw.</div>
+          <div class="eq-line" data-eqline="7">\(\displaystyle \htmlClass{eqt}{\htmlData{k=L}{\htmlStyle{color:#5d6d7e}{L(\theta)}}} =\)</div>
+          <div class="eq-line" data-eqline="7">\(\displaystyle \htmlClass{eqt}{\htmlData{k=E}{\htmlStyle{color:#5d6d7e}{\mathbb{E}_{s,\xi}}}}\big[\htmlClass{eqt}{\htmlData{k=alpha}{\htmlStyle{color:#7d6608}{\alpha}}} \htmlClass{eqt}{\htmlData{k=logp}{\htmlStyle{color:#a04000}{\log \pi_\theta(a \mid s)}}}\)</div>
+          <div class="eq-line" data-eqline="7">\(\displaystyle - \htmlClass{eqt}{\htmlData{k=q}{\htmlStyle{color:#8e44ad}{q}}}\big]\)</div>
+          <div class="eq-why" data-eqline="7">The actor's loss: the temperature times how likely the draw was, minus that score.</div>
+          <div class="eq-line" data-eqline="8">\(\displaystyle \htmlClass{eqt}{\htmlData{k=h}{\htmlStyle{color:#7d6608}{h}}} = -\htmlClass{eqt}{\htmlData{k=logp}{\htmlStyle{color:#a04000}{\log \pi_\theta(a \mid s)}}}\)</div>
+          <div class="eq-why" data-eqline="8">How undecided the actor is on this fresh draw.</div>
+          <div class="eq-line" data-eqline="9">\(\displaystyle \htmlClass{eqt}{\htmlData{k=L}{\htmlStyle{color:#5d6d7e}{L(\alpha)}}} = \htmlClass{eqt}{\htmlData{k=E}{\htmlStyle{color:#5d6d7e}{\mathbb{E}}}}\big[\htmlClass{eqt}{\htmlData{k=alpha}{\htmlStyle{color:#7d6608}{\alpha}}}\,\htmlClass{eqt}{\htmlData{k=h}{\htmlStyle{color:#7d6608}{h}}} - \htmlClass{eqt}{\htmlData{k=alpha}{\htmlStyle{color:#7d6608}{\alpha}}}\,\htmlClass{eqt}{\htmlData{k=Hbar}{\htmlStyle{color:#7d6608}{\bar{\mathcal{H}}}}}\big]\)</div>
+          <div class="eq-why" data-eqline="9">The temperature's loss: the temperature times the gap to the target entropy.</div>
+          <div class="eq-legend">
+            <span class="eq-item" data-lines="0"><span class="eq-sw" style="background:#a04000"></span><code>a′</code> next torques</span>
+            <span class="eq-item" data-lines="0 2"><span class="eq-sw" style="background:#a04000"></span><code>πθ</code> the actor's bell</span>
+            <span class="eq-item" data-lines="0 1 2"><span class="eq-sw" style="background:#2471a3"></span><code>s′</code> next state</span>
+            <span class="eq-item" data-lines="1 3"><span class="eq-sw" style="background:#8e44ad"></span><code>q′</code> lower slow score</span>
+            <span class="eq-item" data-lines="1"><span class="eq-sw" style="background:#8e44ad"></span><code>Q</code> the slow critics' score</span>
+            <span class="eq-item" data-lines="2 3"><span class="eq-sw" style="background:#7d6608"></span><code>h′</code> one draw's unlikeliness</span>
+            <span class="eq-item" data-lines="3"><span class="eq-sw" style="background:#0e6b59"></span><code>y</code> the target</span>
+            <span class="eq-item" data-lines="3"><span class="eq-sw" style="background:#0e6b59"></span><code>r</code> stored reward</span>
+            <span class="eq-item" data-lines="3"><span class="eq-sw" style="background:#5d6d7e"></span><code>γ</code> discount</span>
+            <span class="eq-item" data-lines="3 7 9"><span class="eq-sw" style="background:#7d6608"></span><code>α</code> temperature</span>
+            <span class="eq-item" data-lines="4 5"><span class="eq-sw" style="background:#a04000"></span><code>u</code> unsquashed draw</span>
+            <span class="eq-item" data-lines="4"><span class="eq-sw" style="background:#a04000"></span><code>m</code> centre</span>
+            <span class="eq-item" data-lines="4"><span class="eq-sw" style="background:#a04000"></span><code>σ</code> width</span>
+            <span class="eq-item" data-lines="4"><span class="eq-sw" style="background:#5d6d7e"></span><code>ξ</code> a fresh random draw</span>
+            <span class="eq-item" data-lines="5 6"><span class="eq-sw" style="background:#a04000"></span><code>a</code> squashed draw</span>
+            <span class="eq-item" data-lines="6"><span class="eq-sw" style="background:#2471a3"></span><code>s</code> stored state</span>
+            <span class="eq-item" data-lines="6"><span class="eq-sw" style="background:#8e44ad"></span><code>Q</code> the live critics' score</span>
+            <span class="eq-item" data-lines="6 7"><span class="eq-sw" style="background:#8e44ad"></span><code>q</code> lower live score</span>
+            <span class="eq-item" data-lines="1 6"><span class="eq-sw" style="background:#5d6d7e"></span><code>min</code> lower of two</span>
+            <span class="eq-item" data-lines="7 9"><span class="eq-sw" style="background:#5d6d7e"></span><code>L</code> a loss to minimise</span>
+            <span class="eq-item" data-lines="7 9"><span class="eq-sw" style="background:#5d6d7e"></span><code>E</code> the average over the batch</span>
+            <span class="eq-item" data-lines="7 8"><span class="eq-sw" style="background:#a04000"></span><code>log π</code> how likely the draw was</span>
+            <span class="eq-item" data-lines="8 9"><span class="eq-sw" style="background:#7d6608"></span><code>h</code> one sample of undecidedness</span>
+            <span class="eq-item" data-lines="9"><span class="eq-sw" style="background:#7d6608"></span><code>H̄</code> the target entropy</span>
+          </div>
+        </div>
+        <p class="eq-note" id="sacWalkNote">no equation in this step</p>
+      </div>
+    </section>
+
+    <section>
+      <h2 id="sac-code"><span class="secnum">5</span> SAC's actor and update in PyTorch</h2>
+      <p>The five equations above become two code blocks below: the actor, then one update step.</p>
+      <pre class="cs" data-cs="1-10,15-16,17-17"><code class="language-python">class SquashedGaussianActor(nn.Module):
+    def __init__(self, state_dim, act_dim):
+        super().__init__()
+        self.net = nn.Sequential(nn.Linear(state_dim, 256), nn.ReLU(), nn.Linear(256, 256), nn.ReLU())
+        self.mean = nn.Linear(256, act_dim)
+        self.log_std = nn.Linear(256, act_dim)
+
+    def forward(self, s):
+        h = self.net(s)
+        return self.mean(h), self.log_std(h)
+
+def sample_action(actor, s):
+    m, log_std = actor(s)
+    std = log_std.exp()
+    u = m + std * torch.randn_like(m)
+    a = torch.tanh(u)
+    logp = Normal(m, std).log_prob(u).sum(-1) - torch.log(1 - a.pow(2) + 1e-6).sum(-1)
+    return a, logp</code></pre>
+      <ol class="cs-notes">
+        <li><span class="cs-n">1</span>First, the network: it returns one centre and one log width per torque. The network outputs the log of the width, so the width stays positive.</li>
+        <li><span class="cs-n">2</span>Next, the draw of Equation 3: a fresh random draw is scaled by the width, shifted by the centre and squashed into the torque range.</li>
+        <li><span class="cs-n">3</span>Last, the log-probability of the squashed draw from Equation 3. Squashing piles torques up near -1 and 1, so the likelihood of a squashed torque is corrected by the second term. <code>1e-6</code> is a tiny number that avoids the log of zero.</li>
+      </ol>
+      <p>One update step uses both blocks.</p>
+      <pre class="cs" data-cs="4-12,13-24"><code class="language-python">def sac_update(batch, actor, q1, q2, q1_t, q2_t, log_alpha, target_entropy):
+    s, a, r, s2 = batch
+    alpha = log_alpha.exp()
+    # the target
+    with torch.no_grad():
+        a2, logp2 = sample_action(actor, s2)
+        target_q = torch.min(q1_t(s2, a2), q2_t(s2, a2)) - alpha * logp2
+        y = r + gamma * target_q
+    # both critics toward the shared target
+    critic_loss = mse(q1(s, a), y) + mse(q2(s, a), y)
+    critic_loss.backward()
+    critic_opt.step()
+    # the actor loss and the temperature loss
+    a_new, logp = sample_action(actor, s)
+    actor_loss = (alpha * logp - torch.min(q1(s, a_new), q2(s, a_new))).mean()
+    actor_loss.backward()
+    actor_opt.step()
+    alpha_loss = -(log_alpha * (logp + target_entropy).detach()).mean()
+    alpha_loss.backward()
+    alpha_opt.step()
+    alpha = log_alpha.exp()
+    # the slow copies blend a small step
+    soft_update(q1_t, q1, tau)
+    soft_update(q2_t, q2, tau)</code></pre>
+      <ol class="cs-notes">
+        <li><span class="cs-n">1</span>First, the target of Equation 2: under <code>torch.no_grad()</code> the target is a fixed number, not trained. The target is the reward plus the discount times the lower slow score minus the temperature times the log-probability of the next draw. Both live critics move toward the one shared target. <code>mse</code> is the mean squared gap, as Equation 2 shows.</li>
+        <li><span class="cs-n">2</span>Next, the actor loss of Equation 4 and the temperature loss of Equation 5: the actor loss climbs the lower live critic while keeping the bell wide. The temperature loss uses log alpha in place of alpha, which keeps alpha positive, and <code>detach</code> means use this value but do not pass slopes through it. After the temperature step, alpha is refreshed from log alpha, then each slow critic blends a small step toward its live critic.</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2 id="sac-tool"><span class="secnum">6</span> How the temperature sets the bell's width</h2>
+      <p>The tuned bell covers both good regions instead of picking one, so some draws land in the dip between them.</p>
+      <div class="demo" id="sacTool">
+        <div class="demo-controls sac-controls">
+          <label class="sac-ctl">temperature alpha<br>
+            <input type="range" id="sacAlpha" min="0.03" max="0.5" step="0.005" value="0.03" aria-label="Temperature alpha">
+            <span class="sac-cap">Raising the temperature makes the bell jump from one region to one bell over both; too high, it ignores the critic.</span>
+          </label>
+          <label class="sac-ctl sac-auto"><span class="sac-auto-row"><input type="checkbox" id="sacAuto"> automatic</span>
+            <span class="sac-cap">Automatic tuning takes sixty small steps and stops.</span>
+          </label>
+        </div>
+        <p class="sac-plot-label">illustrative, equally good ways to turn the shoulder about one axis</p>
+        <div class="sac-panels">
+          <canvas id="sacPlot" class="sac-canvas" role="img" aria-label="An illustrative critic score over one torque with two equally good regions, the actor's bell of torques below it, and sampled torque dots falling from the bell."></canvas>
+          <canvas id="sacGauge" class="sac-gauge" role="img" aria-label="A vertical gauge showing the bell's width against the target entropy band."></canvas>
+        </div>
+        <p class="sac-legend">Wide bells are cut at the plot's edge. The gauge shows the bell's width; the band is the target entropy.</p>
+        <p class="sac-readout" id="sacRead" aria-live="polite"></p>
+        <p class="caption"><span class="fignum">Figure 5.</span> A bell of torques over two equally good regions; the temperature sets how wide the bell stays.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2 id="sac-practice"><span class="secnum">7</span> How SAC is trained and how it compares</h2>
+      <h3><span class="secnum">7.1</span> One gradient step for every step the arm takes</h3>
+      <p>After every step the arm takes, one gradient step runs for the critics, the actor and alpha, then the slow copies blend.</p>
+      <p>Evaluation means testing the trained actor with exploration switched off. (<a href="ddpg-training.html#fig-9">Training DDPG: Target Networks, Replay and Noise</a>) At evaluation the arm uses the centre of the bell, not a random draw.</p>
+      <p>The authors' code and Stable-Baselines3, a widely used reinforcement learning code library, both run this update. Both run the same SAC update, with two critics and a bell of torques.</p>
+      <h3><span class="secnum">7.2</span> One set of SAC settings for every task</h3>
+      <div class="qtab-wrap"><table class="qtab qtab-stack">
+        <caption>Table 1. SAC's settings from the paper.</caption>
+        <thead><tr><th>Setting</th><th>Value</th><th>Raising it</th><th>Lowering it</th></tr></thead>
+        <tbody>
+          <tr><td data-label="Setting"><a href="adaptive-optimizers.html#adam">Adam</a> learning rate, which adapts its step size per weight</td><td data-label="Value">3e-4</td><td data-label="Raising it">Bigger steps learn faster at first, but can overshoot and make training unstable</td><td data-label="Lowering it">Smaller steps are steadier, but learning crawls</td></tr>
+          <tr><td data-label="Setting">Discount <var>\(\gamma\)</var></td><td data-label="Value">0.99</td><td data-label="Raising it">Later rewards count more, so the arm plans further ahead, but learning is slower to settle</td><td data-label="Lowering it">The arm cares mostly about the next reward, so it learns fast but may miss the longer game</td></tr>
+          <tr><td data-label="Setting">Replay buffer</td><td data-label="Value">1,000,000 steps</td><td data-label="Raising it">More past steps to learn from, but more memory used</td><td data-label="Lowering it">Less memory, but the arm forgets older steps sooner</td></tr>
+          <tr><td data-label="Setting">Hidden layers</td><td data-label="Value">2 hidden layers of 256 units, ReLU (ReLU passes positive signals and turns negative ones to zero), all networks</td><td data-label="Raising it">Bigger layers can fit finer detail, but train slower and need more steps to settle</td><td data-label="Lowering it">Smaller layers train faster, but may not fit the arm's scores well enough</td></tr>
+          <tr><td data-label="Setting">Batch</td><td data-label="Value">256</td><td data-label="Raising it">Each update averages over more steps, so it is steadier, but each update costs more</td><td data-label="Lowering it">Each update is cheaper, but noisier</td></tr>
+          <tr><td data-label="Setting">Soft-update share <var>\(\tau\)</var></td><td data-label="Value">0.005</td><td data-label="Raising it">The slow copies track the live networks faster, but the target moves more</td><td data-label="Lowering it">The slow copies move less, so the target stays still, but they lag further behind</td></tr>
+          <tr><td data-label="Setting">Target update interval</td><td data-label="Value">1</td><td data-label="Raising it">The slow copies update less often, so the target stays still longer, but they lag further behind</td><td data-label="Lowering it">1 is already every step; it cannot go lower</td></tr>
+          <tr><td data-label="Setting">Gradient steps per environment step</td><td data-label="Value">1</td><td data-label="Raising it">The arm reuses each step more, so it learns faster from the same steps, but each step costs more compute</td><td data-label="Lowering it">Fewer updates per step, so learning is cheaper per step but slower overall</td></tr>
+          <tr><td data-label="Setting">Target entropy</td><td data-label="Value">minus the number of action dimensions. For real-valued torques the entropy measure can go below zero; minus the number of torques means a fairly narrow bell that has not collapsed to a single torque</td><td data-label="Raising it">A higher target entropy keeps the bell wider, so the actor explores more, but may ignore reward</td><td data-label="Lowering it">A lower target entropy lets the bell narrow, so the actor commits sooner, but may lock onto one fragile gait</td></tr>
+        </tbody>
+      </table></div>
+      <p>The 2018a version tuned a reward scale per task instead; a reward scale means multiplying every reward by a number, which changes how much reward weighs against the entropy bonus. Automatic alpha replaces it.</p>
+      <h3 id="sac-results"><span class="secnum">7.3</span> SAC against other methods and on a real robot</h3>
+      <p>The comparison includes Proximal Policy Optimization (PPO), another way to train an actor: it makes small, careful updates and learns only from fresh steps. SAC reuses each stored step many times from its replay memory.</p>
+      <p>The comparison runs simulated robot tasks in MuJoCo, a physics simulator used for robot tasks, through Gym, a standard collection of reinforcement learning tasks. Each task is a simulated body learning to move: a one-legged hopper, a two-legged walker, a running half cheetah, a four-legged ant, a humanoid, and a harder humanoid from rllab, an older benchmark suite. Each body learns to move forward as fast as it can. It is compared with DDPG, PPO, soft Q-learning, an earlier method by the same group that also rewards staying undecided, and TD3.</p>
+      <p>The Minitaur senses its motor angles and how its body tips and turns. It is rewarded for walking forward and penalised for jerky or unsafe motion. It trained on flat ground only.</p>
+      <p>SAC is compared with a deterministic variant that does not reward staying undecided and closely resembles DDPG. A hard copy overwrites the slow copy with the live weights every so often. (<a href="ddpg-training.html#ddpg-targets">Training DDPG: Target Networks, Replay and Noise</a>) This variant keeps two critics, updates their slow copies by hard copies, has no slow actor and explores with fixed noise. SAC learned far more steadily than this variant from one run to the next.</p>
+      <p>A seed is one full training run started from its own random start.</p>
+      <div class="qtab-wrap"><table class="qtab qtab-stack">
+        <caption>Table 2. How the comparison was run.</caption>
+        <thead><tr><th>Experiment</th><th>Setting</th><th>Value</th></tr></thead>
+        <tbody>
+          <tr><td data-label="Experiment">Simulated robot tasks</td><td data-label="Setting">Seeds per method</td><td data-label="Value">5</td></tr>
+          <tr><td data-label="Experiment">Simulated robot tasks</td><td data-label="Setting">Evaluation</td><td data-label="Value">one rollout, one test episode, every 1,000 steps, using the bell's centre</td></tr>
+          <tr><td data-label="Experiment">Simulated robot tasks</td><td data-label="Setting">Humanoid (rllab) action dimensions</td><td data-label="Value">21</td></tr>
+          <tr><td data-label="Experiment">Minitaur</td><td data-label="Setting">State</td><td data-label="Value">the current and the past five observations and actions</td></tr>
+          <tr><td data-label="Experiment">Minitaur</td><td data-label="Setting">Actor and critic hidden layers</td><td data-label="Value">2 of 256 units</td></tr>
+          <tr><td data-label="Experiment">Deterministic variant</td><td data-label="Setting">Runs with different seeds</td><td data-label="Value">5</td></tr>
+        </tbody>
+      </table></div>
+      <div class="qtab-wrap"><table class="qtab qtab-stack">
+        <caption>Table 3. What the comparison found.</caption>
+        <thead><tr><th>Experiment</th><th>Result</th></tr></thead>
+        <tbody>
+          <tr><td data-label="Experiment">Simulated robot tasks</td><td data-label="Result">SAC learned faster and reached higher returns on the hardest tasks, and DDPG made no progress on Ant, Humanoid and Humanoid (rllab). The automatic temperature tuning scheme "works well across all the environments, and thus effectively eliminates the need for tuning the temperature".</td></tr>
+          <tr><td data-label="Experiment">Minitaur</td><td data-label="Result">Learned to walk from 160,000 real-world steps, about 400 episodes of at most 500 steps, about 2 hours of real-world training, then walked up and down a slope, through wooden blocks and down stairs it had never trained on, with no further training.</td></tr>
+          <tr><td data-label="Experiment">Deterministic variant</td><td data-label="Result">SAC's runs had a small spread across seeds; the deterministic variant's runs varied widely.</td></tr>
+        </tbody>
+      </table></div>
+      <p><a href="td3.html#td3-results">TD3's results table</a> showed an earlier SAC version; the version here is the one the TD3 paper calls competitive with TD3 on most tasks.</p>
+    </section>
+
+    <section>
+      <h2 id="sac-when"><span class="secnum">8</span> When SAC fits</h2>
+      <p>SAC fits continuous actions where steps are costly, as on real robots, where exploration matters, or where settings must work across tasks without tuning. Prefer <a href="td3.html#td3">Twin Delayed DDPG (TD3)</a> for a deterministic actor and slightly simpler code; <a href="ppo.html">Proximal Policy Optimization (PPO)</a> when fresh steps are cheap.</p>
+    </section>
+
+    <section>
+      <h2 id="sac-breaks"><span class="secnum">9</span> How SAC fails</h2>
+      <div class="qtab-wrap"><table class="qtab qtab-stack">
+        <caption>Table 4. How SAC fails.</caption>
+        <thead><tr><th>Cause</th><th>Symptom</th><th>Fix</th><th>Source</th></tr></thead>
+        <tbody>
+          <tr><td data-label="Cause">Fixed alpha too high</td><td data-label="Symptom">The actor is nearly random and ignores reward</td><td data-label="Fix">Use automatic alpha or lower it</td><td data-label="Source">SAC paper</td></tr>
+          <tr><td data-label="Cause">Fixed alpha too low</td><td data-label="Symptom">The bell narrows early and the arm is stuck in a poor gait</td><td data-label="Fix">Raise it</td><td data-label="Source">SAC paper</td></tr>
+          <tr><td data-label="Cause">Missing tanh correction</td><td data-label="Symptom">The bell's entropy is measured wrongly near the torque limits. Automatic temperature tuning then holds the bell at the wrong width, because the entropy it compares with the target entropy is measured wrongly</td><td data-label="Fix">Add the tanh correction to the log-probability</td><td data-label="Source">our reasoning, not a paper finding</td></tr>
+          <tr><td data-label="Cause">Evaluating with random draws</td><td data-label="Symptom">Scores look worse than the policy</td><td data-label="Fix">Evaluate with the centre</td><td data-label="Source">SAC paper</td></tr>
+          <tr><td data-label="Cause">Tau too large</td><td data-label="Symptom">Unstable</td><td data-label="Fix">Use a smaller tau</td><td data-label="Source">SAC paper</td></tr>
+          <tr><td data-label="Cause">Reward scale changed with a fixed alpha</td><td data-label="Symptom">Same as alpha too high or too low</td><td data-label="Fix">Use automatic alpha or retune the scale</td><td data-label="Source">SAC paper</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section>
+      <h2 id="sac-next"><span class="secnum">10</span> Practising inside a model of the world</h2>
+      <p><a href="rl-model-based.html">Model-based reinforcement learning</a> is next in the series: learn a model of the world so fewer real steps are needed, the Minitaur's concern. <a href="multi-agent-rl.html">Multi-agent reinforcement learning</a> is also in the series.</p>
+      <p>What if the agent could practise inside a model of the world instead of on the real robot?</p>
+    </section>
+
+    <section>
+      <h2 id="references"><span class="secnum">11</span> References</h2>
+      <ol class="brefs">
+        <li>Haarnoja, T., et al. (2018). Soft Actor-Critic: Off-Policy Maximum Entropy Deep Reinforcement Learning with a Stochastic Actor. <a href="https://arxiv.org/abs/1801.01290">arXiv:1801.01290</a>.</li>
+        <li>Haarnoja, T., et al. (2018). Soft Actor-Critic Algorithms and Applications. <a href="https://arxiv.org/abs/1812.05905">arXiv:1812.05905</a>. The authors' code: <a href="http://github.com/rail-berkeley/softlearning/">github.com/rail-berkeley/softlearning</a>.</li>
+        <li>Fujimoto, S., et al. (2018). Addressing Function Approximation Error in Actor-Critic Methods. ICML. <a href="https://arxiv.org/abs/1802.09477">arXiv:1802.09477</a>.</li>
+        <li>Lillicrap, T. P., et al. (2016). Continuous Control with Deep Reinforcement Learning. ICLR. <a href="https://arxiv.org/abs/1509.02971">arXiv:1509.02971</a>.</li>
+        <li>Raffin, A., et al. (2021). Stable-Baselines3: Reliable Reinforcement Learning Implementations. <em>Journal of Machine Learning Research</em> 22, pages 1 to 8. <a href="https://arxiv.org/abs/2010.02910">arXiv:2010.02910</a>.</li>
+      </ol>
+    </section>
+
+  <script>
+  /* Walkthrough: one SAC update on a Reacher batch. Play lights each step in turn. */
+  (function () {
+    /* Mobile: re-stack every title/subtitle pair with real y attributes.
+       The 28px line box is 32.4 units tall, so the baselines sit 34 units
+       apart (title at node-center - 9, subtitle at node-center + 25).
+       Row 1 node center y=65, row 2 center y=235, row 3 center y=405. */
+    if (window.matchMedia('(max-width: 480px)').matches) {
+      var vpos = [
+        ['tBatch', 56], ['sBatch', 90],
+        ['tActor', 56], ['sActor', 90],
+        ['tCriticsS', 56], ['sCriticsS', 90],
+        ['tDraw', 226], ['sDraw', 260],
+        ['tTarget', 244],
+        ['tLower', 226], ['sLower', 260],
+        ['tLive', 396], ['sLive', 430],
+        ['tActorL', 396], ['sActorL', 430],
+        ['tCopies', 396], ['sCopies', 430],
+        /* Edge labels: l4 and l6 sit 37 units apart on baselines (303 and
+           340), and l6 moves right of the diagonal edge e4 on phones. */
+        ['l4', 303], ['l6', 340]
+      ];
+      vpos.forEach(function (pair) {
+        var vel = document.getElementById(pair[0]);
+        if (vel) vel.setAttribute('y', String(pair[1]));
+      });
+      /* l6 labels the vertical edge e6 at x=105 on desktop, but at 28px its
+         13 characters would cross the diagonal e4; on phones it moves to
+         x=230, clear of e4 (x=192 at y=340) and of the live-critics node. */
+      var l6el = document.getElementById('l6');
+      if (l6el) l6el.setAttribute('x', '230');
+    }
+    var playBtn = document.getElementById('sacPlay');
+    var prevBtn = document.getElementById('sacPrev');
+    var nextBtn = document.getElementById('sacNext');
+    var step = document.getElementById('sacStep');
+    var stepName = document.getElementById('sacStepName');
+    var stats = document.getElementById('sacStats');
+    var note = document.getElementById('sacWalkNote');
+    var dots = Array.prototype.slice.call(document.querySelectorAll('#sacDots .dt-dot'));
+    var STAGES = [
+      { name: 'batch drawn', focal: 'nBatch', nodes: ['nBatch'], edges: [], labels: [],
+        text: 'A random batch of stored steps is drawn from the replay memory.',
+        lines: [], terms: [] },
+      { name: 'next torques drawn', focal: 'nActor', nodes: ['nActor'], edges: ['e0'], labels: ['l1'],
+        text: 'The live actor draws next torques for each next state from its bell.',
+        lines: [0], terms: ['a2', 'pi', 'sp'] },
+      { name: 'lower score kept', focal: 'nLower', nodes: ['nCriticsS', 'nLower'], edges: ['e1', 'e2'], labels: ['l2'],
+        text: 'Both slow critics score those torques; the lower score is kept.',
+        lines: [1], terms: ['qp', 'min', 'Q', 'sp', 'a2'] },
+      { name: 'unlikeliness measured', focal: 'nTarget', nodes: ['nTarget'], edges: ['e3'], labels: ['l3'],
+        text: 'How unlikely that draw was is measured; on average it is larger when the bell is wide.',
+        lines: [2], terms: ['hp', 'pi', 'a2', 'sp'] },
+      { name: 'target built', focal: 'nTarget', nodes: ['nTarget'], edges: [], labels: [],
+        text: 'The target adds the reward, the discounted lower score and the temperature times that bonus.',
+        lines: [3], terms: ['y', 'r', 'gamma', 'qp', 'alpha', 'hp'] },
+      { name: 'critics move', focal: 'nLive', nodes: ['nLive'], edges: ['e4'], labels: ['l4'],
+        text: 'Both live critics move their scores toward the target by shrinking the squared gap.',
+        lines: [], terms: [] },
+      { name: 'fresh draw made', focal: 'nDraw', nodes: ['nDraw'], edges: ['e5'], labels: ['l5'],
+        text: 'The actor makes a fresh draw for the stored state, its centre plus its width times a random number.',
+        lines: [4], terms: ['u', 'm', 'sig', 'xi'] },
+      { name: 'draw squashed', focal: 'nDraw', nodes: ['nDraw'], edges: [], labels: [],
+        text: 'The draw is squashed into the torque range.',
+        lines: [5], terms: ['a', 'u'] },
+      { name: 'draw scored', focal: 'nLive', nodes: ['nLive'], edges: ['e6'], labels: ['l6'],
+        text: 'The lower live critic scores the squashed draw.',
+        lines: [6], terms: ['q', 'min', 'Q', 'a'] },
+      { name: 'actor moves', focal: 'nActorL', nodes: ['nActorL'], edges: ['e7'], labels: ['l7'],
+        text: 'The actor\'s weights move to raise that score while keeping the bell from narrowing.',
+        lines: [7], terms: ['L', 'E', 'alpha', 'logp', 'q'] },
+      { name: 'undecidedness measured', focal: 'nDraw', nodes: ['nDraw'], edges: [], labels: [],
+        text: 'How undecided the actor is on this fresh draw is measured.',
+        lines: [8], terms: ['h', 'logp'] },
+      { name: 'temperature nudged', focal: 'nActor', nodes: ['nActor'], edges: [], labels: [],
+        text: 'The temperature is nudged up if the actor is more decided than the target entropy asks for and down if it is less; the actor\'s next update then moves its bell\'s width toward the width the target entropy asks for.',
+        lines: [9], terms: ['L', 'E', 'alpha', 'h', 'Hbar'] },
+      { name: 'slow critics blend', focal: 'nCopies', nodes: ['nCopies'], edges: ['e8'], labels: ['l8'],
+        text: 'The slow critics blend a small step toward the live critics.',
+        lines: [], terms: [] }
+    ];
+    var cur = 0;
+    function el(id) { return document.getElementById(id); }
+    function setOn(id, lit, isCur) {
+      var n = el(id);
+      if (!n) return;
+      n.classList.toggle('on', lit);
+      n.classList.toggle('cur', !!isCur);
+      if (n.classList.contains('edge')) {
+        n.setAttribute('marker-end', lit ? 'url(#sacWalkArrowOn)' : 'url(#sacWalkArrow)');
+      }
+    }
+    /* Stepped eq-card: light the lines of this stage, their readings, the
+       legend items that name them, and the named terms inside the lines. */
+    function syncEq(cardId, lines, terms) {
+      var card = document.getElementById(cardId);
+      if (!card) return;
+      card.querySelectorAll('.eq-line').forEach(function (el2) {
+        el2.classList.toggle('eq-active', lines.indexOf(parseInt(el2.getAttribute('data-eqline'), 10)) !== -1);
+      });
+      card.querySelectorAll('.eq-why').forEach(function (el2) {
+        el2.classList.toggle('eq-active', lines.indexOf(parseInt(el2.getAttribute('data-eqline'), 10)) !== -1);
+      });
+      card.querySelectorAll('.eq-legend .eq-item').forEach(function (el2) {
+        var ls = (el2.getAttribute('data-lines') || '').split(' ').map(function (x) { return parseInt(x, 10); });
+        el2.classList.toggle('eq-active', ls.some(function (l) { return lines.indexOf(l) !== -1; }));
+      });
+      card.querySelectorAll('.eqt').forEach(function (el2) {
+        var inner = el2.querySelector('[data-k]');
+        var k = inner ? inner.getAttribute('data-k') : el2.getAttribute('data-k');
+        el2.classList.toggle('eqt-active', terms.indexOf(k) !== -1);
+      });
+    }
+    function show(i) {
+      cur = i;
+      step.value = i;
+      stepName.textContent = STAGES[i].name;
+      /* Exactly one orange focal per step: the current stage's focal node.
+         Visited stages keep the plain blue .on treatment. A single pass
+         over the union of visited stages decides every element, so a node
+         shared across stages is never overwritten by a later stage. */
+      var litSet = {};
+      for (var k = 0; k <= i; k++) {
+        STAGES[k].nodes.concat(STAGES[k].edges, STAGES[k].labels).forEach(function (id) { litSet[id] = true; });
+      }
+      var focal = STAGES[i].focal;
+      STAGES.forEach(function (st) {
+        st.nodes.concat(st.edges, st.labels).forEach(function (id) { setOn(id, !!litSet[id], id === focal); });
+      });
+      /* Three steps light no line; the note shows on every such step, not
+         only at step 1. */
+      if (note) note.style.visibility = (STAGES[i].lines.length === 0) ? 'visible' : 'hidden';
+      dots.forEach(function (d, j) { d.classList.toggle('active', j === i); });
+      prevBtn.disabled = (i === 0);
+      nextBtn.disabled = (i === STAGES.length - 1);
+      stats.textContent = STAGES[i].text;
+      syncEq('sacWalkEq', STAGES[i].lines, STAGES[i].terms);
+    }
+    var timers = [], playing = false, STEP = 2300;
+    function stop() {
+      timers.forEach(function (t) { clearTimeout(t); });
+      timers = []; playing = false;
+      playBtn.textContent = 'Play'; playBtn.classList.remove('playing');
+    }
+    playBtn.addEventListener('click', function () {
+      if (playing) { stop(); return; }
+      playing = true;
+      playBtn.textContent = 'Stop'; playBtn.classList.add('playing');
+      try { playScrollEnsure(document.getElementById('sacWalk')); } catch (e) {}
+      show(0);
+      for (var j = 1; j < STAGES.length; j++) {
+        (function (kk, tt) {
+          timers.push(setTimeout(function () { if (playing) show(kk); }, tt));
+        })(j, j * STEP);
+      }
+      timers.push(setTimeout(stop, STAGES.length * STEP));
+    });
+    /* Reset: stop the run and restore the walkthrough's start (stage 0, the
+       batch box lit, step slider back to "batch drawn"). */
+    document.getElementById('sacReset').addEventListener('click', function () { stop(); show(0); });
+    prevBtn.addEventListener('click', function () { stop(); if (cur > 0) show(cur - 1); });
+    nextBtn.addEventListener('click', function () { stop(); if (cur < STAGES.length - 1) show(cur + 1); });
+    dots.forEach(function (d, j) { d.addEventListener('click', function () { stop(); show(j); }); });
+    step.addEventListener('input', function () { stop(); show(parseInt(step.value, 10)); });
+    /* The walk card's terms are KaTeX spans, which site-math.js builds after
+       this script runs; re-apply the highlight once typesetting is done. */
+    document.addEventListener('DOMContentLoaded', function () {
+      syncEq('sacWalkEq', STAGES[cur].lines, STAGES[cur].terms);
+    });
+    /* No-scroll-on-Play: reserve the tallest stage's height for the text
+       regions up front, so the demo never changes height mid-run and Chrome
+       scroll anchoring has nothing to compensate for. The inline reserve is
+       cleared before measuring so a re-run (e.g. on resize) can never
+       ratchet upward off its own previous value. */
+    var sacLastW = 0, sacRT = null;
+    function reserveSacHeights() {
+      var pairs = [
+        [stats, STAGES.map(function (s) { return s.text; })],
+        [stepName, STAGES.map(function (s) { return s.name; })]
+      ];
+      pairs.forEach(function (pair) {
+        var node = pair[0], samples = pair[1], prev = node.textContent, max = 0;
+        node.style.minHeight = '';
+        samples.forEach(function (t) { node.textContent = t; max = Math.max(max, node.getBoundingClientRect().height); });
+        node.textContent = prev;
+        node.style.minHeight = Math.ceil(max) + 'px';
+      });
+      /* The "Step {name}" label itself wraps differently per stage, so the
+         span reserve above is not enough: reserve the label's tallest height
+         too, or .demo-controls breathes by a line at some stages. */
+      var stepLabel = stepName.parentNode, prevName = stepName.textContent, maxLabel = 0;
+      stepLabel.style.minHeight = '';
+      STAGES.forEach(function (s) {
+        stepName.textContent = s.name;
+        maxLabel = Math.max(maxLabel, stepLabel.getBoundingClientRect().height);
+      });
+      stepName.textContent = prevName;
+      stepLabel.style.minHeight = Math.ceil(maxLabel) + 'px';
+      /* The eq card: each step shows one line, its reading and its legend
+         items, so the card's height changes per step. Reserve the tallest
+         step's height (measured with the card's own reserve cleared first)
+         so the demo never changes height while stepping or playing. */
+      var card = document.getElementById('sacWalkEq');
+      if (card) {
+        var cs = getComputedStyle(card);
+        var extra = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom) + parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
+        card.style.minHeight = '';
+        var maxCard = 0;
+        STAGES.forEach(function (s) {
+          syncEq('sacWalkEq', s.lines, s.terms);
+          maxCard = Math.max(maxCard, card.getBoundingClientRect().height);
+        });
+        syncEq('sacWalkEq', STAGES[cur].lines, STAGES[cur].terms);
+        card.style.minHeight = Math.ceil(maxCard - extra) + 'px';
+      }
+    }
+    window.addEventListener('resize', function () {
+      if (sacRT) clearTimeout(sacRT);
+      sacRT = setTimeout(function () {
+        if (window.innerWidth !== sacLastW) { sacLastW = window.innerWidth; reserveSacHeights(); }
+      }, 150);
+    });
+    /* KaTeX typesets after this script runs, which changes the eq card's
+       heights; re-reserve once the math is rendered, and again on load as
+       a backstop. */
+    document.addEventListener('sitemath:ready', reserveSacHeights);
+    window.addEventListener('load', reserveSacHeights);
+    show(0);
+    sacLastW = window.innerWidth;
+    reserveSacHeights();
+  })();
+  </script>
+
+  <script>
+  /* SAC tool (Figure 5): the temperature sets how wide the actor's bell
+     of torques stays; automatic tuning holds that width at the target
+     entropy. The bell's centre and width are computed live as the best
+     bell for the current alpha, minimising Equation 4 over a grid of
+     centres and widths, exactly as sac_view.py does. */
+  (function () {
+    /* SAC-SOLVER-START */
+    /* Quadrature over a standard normal (201 points, -5 to 5). */
+    var SAC_ZN = 201, SAC_Z = [], SAC_W = [], SAC_WSUM = 0, SAC_ZI;
+    for (SAC_ZI = 0; SAC_ZI < SAC_ZN; SAC_ZI++) {
+      var SAC_ZV = -5 + 10 * SAC_ZI / (SAC_ZN - 1);
+      SAC_Z.push(SAC_ZV);
+      var SAC_WV = Math.exp(-SAC_ZV * SAC_ZV / 2);
+      SAC_W.push(SAC_WV);
+      SAC_WSUM += SAC_WV;
+    }
+    for (SAC_ZI = 0; SAC_ZI < SAC_ZN; SAC_ZI++) SAC_W[SAC_ZI] /= SAC_WSUM;
+    /* Grid of centres (-1.5 to 1.5, 241) and widths (log-spaced 0.02 to 3, 160). */
+    var SAC_MN = 241, SAC_SN = 160, SAC_MS = [], SAC_SS = [], SAC_MI, SAC_SI;
+    for (SAC_MI = 0; SAC_MI < SAC_MN; SAC_MI++) SAC_MS.push(-1.5 + 3 * SAC_MI / (SAC_MN - 1));
+    for (SAC_SI = 0; SAC_SI < SAC_SN; SAC_SI++) SAC_SS.push(Math.exp(Math.log(0.02) + (Math.log(3) - Math.log(0.02)) * SAC_SI / (SAC_SN - 1)));
+    /* Illustrative critic: two humps at plus and minus 0.10, width 0.10. */
+    function SAC_Q(x) {
+      var d1 = (x + 0.10) / 0.10, d2 = (x - 0.10) / 0.10;
+      return Math.exp(-d1 * d1) + Math.exp(-d2 * d2);
+    }
+    /* Precompute E[logp] and E[Q] once on the grid. */
+    var SAC_EL = [], SAC_EQ = [], SAC_K;
+    for (SAC_MI = 0; SAC_MI < SAC_MN; SAC_MI++) {
+      SAC_EL.push([]); SAC_EQ.push([]);
+      for (SAC_SI = 0; SAC_SI < SAC_SN; SAC_SI++) {
+        var SAC_M = SAC_MS[SAC_MI], SAC_S = SAC_SS[SAC_SI], SAC_ELV = 0, SAC_EQV = 0;
+        for (SAC_K = 0; SAC_K < SAC_ZN; SAC_K++) {
+          var SAC_U = SAC_M + SAC_S * SAC_Z[SAC_K], SAC_A = Math.tanh(SAC_U);
+          var SAC_LP = -0.5 * SAC_Z[SAC_K] * SAC_Z[SAC_K] - Math.log(SAC_S) - 0.5 * Math.log(2 * Math.PI) - Math.log(1 - SAC_A * SAC_A + 1e-9);
+          SAC_ELV += SAC_LP * SAC_W[SAC_K];
+          SAC_EQV += SAC_Q(SAC_A) * SAC_W[SAC_K];
+        }
+        SAC_EL[SAC_MI].push(SAC_ELV); SAC_EQ[SAC_MI].push(SAC_EQV);
+      }
+    }
+    /* Best bell for one alpha: minimise alpha * E[logp] - E[Q]. Ties within
+       1e-9 of the minimum keep the centre closest to the previous centre. */
+    function SAC_BEST(alpha, prevM) {
+      var bestV = Infinity, bi, bj;
+      for (bi = 0; bi < SAC_MN; bi++) for (bj = 0; bj < SAC_SN; bj++) {
+        var v = alpha * SAC_EL[bi][bj] - SAC_EQ[bi][bj];
+        if (v < bestV) bestV = v;
+      }
+      var bestD = Infinity, bestM = prevM, bestS = SAC_SS[0];
+      for (bi = 0; bi < SAC_MN; bi++) for (bj = 0; bj < SAC_SN; bj++) {
+        var v2 = alpha * SAC_EL[bi][bj] - SAC_EQ[bi][bj];
+        if (v2 <= bestV + 1e-9) {
+          var d = Math.abs(SAC_MS[bi] - prevM);
+          if (d < bestD) { bestD = d; bestM = SAC_MS[bi]; bestS = SAC_SS[bj]; }
+        }
+      }
+      /* Entropy of the best bell: -E[logp] at its grid cell. */
+      var mi = SAC_MS.indexOf(bestM), si = SAC_SS.indexOf(bestS);
+      return { m: bestM, s: bestS, H: -SAC_EL[mi][si] };
+    }
+    /* SAC-SOLVER-END */
+    var TARGET_H = -1; /* target entropy for this one-torque toy */
+    var slider = document.getElementById('sacAlpha');
+    var autoBox = document.getElementById('sacAuto');
+    var plot = document.getElementById('sacPlot');
+    var gauge = document.getElementById('sacGauge');
+    var read = document.getElementById('sacRead');
+    var pctx = plot.getContext('2d');
+    var gctx = gauge.getContext('2d');
+    var alpha = parseFloat(slider.value);
+    var bell = SAC_BEST(alpha, 0);
+    var prevM = bell.m;
+    var SEEDS = [11, 23, 37, 58], seedIdx = 0;
+    /* mulberry32, fixed seeds; the falling dots carry no claim. */
+    function mulberry32(a) {
+      return function () {
+        a |= 0; a = a + 0x6D2B79F5 | 0;
+        var t = Math.imul(a ^ a >>> 15, 1 | a);
+        t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+      };
+    }
+    var rng = mulberry32(SEEDS[seedIdx]);
+    function randn() {
+      var u1 = rng(), u2 = rng();
+      if (u1 <= 0) u1 = 1e-12;
+      return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+    }
+    var DOTS = [], DI;
+    function seedDots() {
+      rng = mulberry32(SEEDS[seedIdx]);
+      DOTS = [];
+      for (DI = 0; DI < 26; DI++) DOTS.push({ a: 0, y: 235 + rng() * 49, v: 20 + rng() * 14, on: false });
+      DOTS.forEach(function (d) { d.a = Math.tanh(bell.m + bell.s * randn()); d.on = Math.abs(d.a) <= 0.4; });
+    }
+    seedDots();
+    function bellDensity(a) {
+      var at = Math.atanh(Math.max(-0.999999, Math.min(0.999999, a)));
+      var z = (at - bell.m) / bell.s;
+      return Math.exp(-0.5 * z * z) / (bell.s * (1 - a * a) * Math.sqrt(2 * Math.PI));
+    }
+    function readoutText(H) {
+      if (H < TARGET_H - 0.05) return 'the bell is narrower than the target entropy asks for';
+      if (H > TARGET_H + 0.05) return 'the bell is wider than the target entropy asks for';
+      return 'at the width the target entropy asks for';
+    }
+    function drawPlot() {
+      var W = plot.clientWidth, H = 300, dpr = window.devicePixelRatio || 1;
+      if (plot.width !== Math.round(W * dpr) || plot.height !== Math.round(H * dpr)) {
+        plot.width = Math.round(W * dpr); plot.height = Math.round(H * dpr);
+      }
+      pctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      pctx.clearRect(0, 0, W, H);
+      function X(a) { return 6 + (a + 0.4) / 0.8 * (W - 12); }
+      /* Critic region: y 8 to 120. */
+      var QMAX = 1.0183, xi;
+      pctx.beginPath();
+      for (xi = 0; xi <= 120; xi++) {
+        var ax = -0.4 + 0.8 * xi / 120, ay = 120 - SAC_Q(ax) / QMAX * 100;
+        if (xi === 0) pctx.moveTo(X(ax), ay); else pctx.lineTo(X(ax), ay);
+      }
+      pctx.strokeStyle = '#2c3e50'; pctx.lineWidth = 2; pctx.stroke();
+      pctx.fillStyle = '#5d6d7e'; pctx.font = '11px sans-serif'; pctx.textAlign = 'left';
+      pctx.fillText('critic score', 8, 20);
+      /* Bell region: y 140 to 230. */
+      var dmax = 0, di;
+      for (di = 0; di <= 120; di++) dmax = Math.max(dmax, bellDensity(-0.4 + 0.8 * di / 120));
+      pctx.beginPath();
+      pctx.moveTo(X(-0.4), 230);
+      for (di = 0; di <= 120; di++) {
+        var bx = -0.4 + 0.8 * di / 120, by = 230 - bellDensity(bx) / dmax * 76;
+        pctx.lineTo(X(bx), by);
+      }
+      pctx.lineTo(X(0.4), 230);
+      pctx.closePath();
+      pctx.fillStyle = 'rgba(164,64,0,0.28)'; pctx.fill();
+      pctx.beginPath();
+      for (di = 0; di <= 120; di++) {
+        var cx2 = -0.4 + 0.8 * di / 120, cy2 = 230 - bellDensity(cx2) / dmax * 76;
+        if (di === 0) pctx.moveTo(X(cx2), cy2); else pctx.lineTo(X(cx2), cy2);
+      }
+      pctx.strokeStyle = '#a04000'; pctx.lineWidth = 2; pctx.stroke();
+      /* White halo so the bell's top edge can never strike through the label;
+         the bell top is also capped at y=154, below the label row. */
+      pctx.strokeStyle = '#ffffff'; pctx.lineWidth = 4;
+      pctx.strokeText('actor\'s bell', 8, 152);
+      pctx.fillStyle = '#5d6d7e'; pctx.fillText('actor\'s bell', 8, 152);
+      /* Clip marks where the bell's central 95% passes the plot's edge. */
+      var z95 = 1.959964, lo = Math.tanh(bell.m - z95 * bell.s), hi = Math.tanh(bell.m + z95 * bell.s);
+      pctx.fillStyle = '#a04000';
+      if (lo < -0.4) pctx.fillRect(2, 179, 4, 12);
+      if (hi > 0.4) pctx.fillRect(W - 6, 179, 4, 12);
+      /* Falling sampled dots, y 235 to 284. */
+      pctx.fillStyle = '#2c3e50';
+      DOTS.forEach(function (d) {
+        if (!d.on) return;
+        pctx.beginPath(); pctx.arc(X(d.a), d.y, 3, 0, 2 * Math.PI); pctx.fill();
+      });
+      /* Axis. */
+      pctx.strokeStyle = '#bdc3c7'; pctx.lineWidth = 1;
+      pctx.beginPath(); pctx.moveTo(6, 292); pctx.lineTo(W - 6, 292); pctx.stroke();
+      pctx.fillStyle = '#5d6d7e'; pctx.textAlign = 'center';
+      pctx.fillText('torque', W / 2, 299);
+    }
+    function drawGauge() {
+      var W = 40, H = 300, dpr = window.devicePixelRatio || 1;
+      if (gauge.width !== Math.round(W * dpr) || gauge.height !== Math.round(H * dpr)) {
+        gauge.width = Math.round(W * dpr); gauge.height = Math.round(H * dpr);
+      }
+      gctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      gctx.clearRect(0, 0, W, H);
+      function Y(h) { return (1 - h) / 4 * H; }
+      /* Target entropy band: -1.15 to -0.85. */
+      gctx.fillStyle = 'rgba(14,107,89,0.25)';
+      gctx.fillRect(6, Y(-0.85), 28, Y(-1.15) - Y(-0.85));
+      gctx.strokeStyle = '#0e6b59'; gctx.lineWidth = 1;
+      gctx.strokeRect(6, Y(-0.85), 28, Y(-1.15) - Y(-0.85));
+      /* Marker at the current entropy. */
+      var y = Y(Math.max(-3, Math.min(1, bell.H)));
+      var inBand = bell.H >= -1.15 && bell.H <= -0.85;
+      gctx.strokeStyle = inBand ? '#0e6b59' : '#a04000'; gctx.lineWidth = 2.5;
+      gctx.beginPath(); gctx.moveTo(2, y); gctx.lineTo(38, y); gctx.stroke();
+      gctx.fillStyle = '#5d6d7e'; gctx.font = '9px sans-serif'; gctx.textAlign = 'center';
+      gctx.fillText('wide', W / 2, 10);
+      gctx.fillText('narrow', W / 2, 296);
+    }
+    function draw() {
+      bell = SAC_BEST(alpha, prevM);
+      prevM = bell.m;
+      read.textContent = readoutText(bell.H);
+      drawPlot();
+      drawGauge();
+    }
+    /* Automatic tuning: 60 damped steps of 0.2 in log alpha, capped at 0.5. */
+    var autoTimer = null, autoStep = 0;
+    function stopAuto() {
+      if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+      autoStep = 0;
+      slider.disabled = false;
+    }
+    function startAuto() {
+      stopAuto();
+      slider.disabled = true;
+      autoStep = 0;
+      autoTimer = setInterval(function () {
+        var la = Math.log(alpha);
+        la -= 0.2 * (bell.H - TARGET_H);
+        alpha = Math.min(0.5, Math.exp(la));
+        slider.value = String(alpha);
+        draw();
+        autoStep++;
+        if (autoStep >= 60) { autoBox.checked = false; stopAuto(); }
+      }, 90);
+    }
+    autoBox.addEventListener('change', function () {
+      if (autoBox.checked) startAuto(); else stopAuto();
+    });
+    slider.addEventListener('input', function () {
+      if (autoBox.checked) return;
+      alpha = parseFloat(slider.value);
+      draw();
+    });
+    /* Falling dots: ambient motion, paused offscreen. */
+    var visible = true, lastT = null;
+    function tick(t) {
+      requestAnimationFrame(tick);
+      if (!visible || document.hidden) { lastT = t; return; }
+      if (lastT === null) lastT = t;
+      var dt = Math.min(0.1, (t - lastT) / 1000);
+      lastT = t;
+      var moved = false;
+      DOTS.forEach(function (d) {
+        d.y += d.v * dt;
+        if (d.y > 284) { d.y = 235; d.a = Math.tanh(bell.m + bell.s * randn()); d.on = Math.abs(d.a) <= 0.4; }
+        moved = true;
+      });
+      if (moved) drawPlot();
+    }
+    if ('IntersectionObserver' in window) {
+      var obs = new IntersectionObserver(function (entries) {
+        entries.forEach(function (en) { visible = en.isIntersecting; });
+      });
+      obs.observe(plot);
+    }
+    var sacRT = null;
+    window.addEventListener('resize', function () {
+      if (sacRT) clearTimeout(sacRT);
+      sacRT = setTimeout(function () { drawPlot(); drawGauge(); }, 150);
+    });
+    draw();
+    requestAnimationFrame(tick);
+    /* Handle for the build gate: rerun sac_view.py against this solver. */
+    window.__sacSolver = { best: SAC_BEST, Q: SAC_Q, targetH: TARGET_H };
+  })();
+  </script>
+
+            <script>
+        (function () {
+            var nav = document.querySelector('.topnav');
+            function onNavScroll() {
+                nav.classList.toggle('scrolled', window.scrollY > 4);
+            }
+            window.addEventListener('scroll', onNavScroll, { passive: true });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            window.addEventListener('resize', function () {
+                if (window.innerWidth > 768) {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            onNavScroll();
+            var toggle = document.getElementById('navToggle');
+            var panel = document.getElementById('navPanel');
+            if (toggle && panel) {
+                toggle.addEventListener('click', function () {
+                    var open = panel.classList.toggle('open');
+                    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                });
+                panel.addEventListener('click', function (e) {
+                    if (e.target && e.target.classList && e.target.classList.contains('panel-link')) {
+                        panel.classList.remove('open');
+                        toggle.setAttribute('aria-expanded', 'false');
+                    }
+                });
+            }
+            var links = Array.prototype.slice.call(document.querySelectorAll('.tab-strip a.tab-link[href^="#"]'));
+            if (!links.length) return;
+            var tabEls = {};
+            links.forEach(function (a) { tabEls[a.getAttribute('href').slice(1)] = a; });
+            var current = null;
+            function centerTab(tab) {
+                var strip = tab.parentElement;
+                if (!strip || !strip.classList.contains('tab-strip')) return;
+                var sr = strip.getBoundingClientRect();
+                var pr = tab.getBoundingClientRect();
+                strip.scrollLeft += (pr.width >= sr.width) ? (pr.left - sr.left) : (pr.left - sr.left) - (sr.width - pr.width) / 2;
+            }
+            function setActive(id) {
+                if (!tabEls[id] || id === current) return;
+                current = id;
+                links.forEach(function (a) {
+                    a.classList.toggle('active', a.getAttribute('href') === '#' + id);
+                });
+                centerTab(tabEls[id]);
+            }
+            links.forEach(function (a) {
+                a.addEventListener('click', function () {
+                    setActive(a.getAttribute('href').slice(1));
+                });
+            });
+            setActive(links[0].getAttribute('href').slice(1));
+            if ('IntersectionObserver' in window) {
+                var obs = new IntersectionObserver(function (entries) {
+                    entries.forEach(function (en) {
+                        if (en.isIntersecting) setActive(en.target.id);
+                    });
+                }, { rootMargin: '-35% 0px -55% 0px' });
+                Object.keys(tabEls).forEach(function (id) {
+                    var el = document.getElementById(id);
+                    if (el) obs.observe(el);
+                });
+                window.addEventListener('scroll', function () {
+                    if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) {
+                        setActive(links[links.length - 1].getAttribute('href').slice(1));
+                    }
+                }, { passive: true });
+            }
+            window.addEventListener('load', function () {
+                var act = document.querySelector('.tab-strip a.active');
+                if (act) centerTab(act);
+            });
+        })();
+    </script>
+
+
+  <script>
+  function playScrollEnsure(el) {
+    /* Disabled 2026-10-06: user hates scroll-on-Play. No scrolling. */
+    return;
+  }
+  </script>
+  <script> /* r7reflow-reserve */
+  /* Scroll-stability (2026-10-09, Round 7 reflow sweep): Play-button label swaps
+     ("Play"/"Pause"/"Stop", "Playing...") widened or narrowed these buttons and
+     shifted their Reset siblings. Reserve each button's width to its widest label
+     variant so the control rows never reflow. Buttons are border-box in this UA
+     stylesheet, so minWidth floors the measured border-box width directly. */
+  (function () {
+    var sets = {
+      'sacPlay': ['Play', 'Pause', 'Stop']
+    };
+    Object.keys(sets).forEach(function (id) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      var prev = btn.textContent, max = 0;
+      sets[id].forEach(function (t) {
+        btn.textContent = t;
+        var w = btn.getBoundingClientRect().width;
+        if (w > max) max = w;
+      });
+      btn.textContent = prev;
+      btn.style.minWidth = Math.ceil(max) + 'px';
+    });
+  })();
+  </script>
+<script>
+/* P80 code sections (CODE-SECTIONS.md) */
+(function(){
+  var C=['121,184,255','255,171,112','133,232,157','210,168,255','255,161,152','118,227,234'];
+  function lay(pre){
+    var code=pre.querySelector('code'); if(!code) return;
+    var lh=parseFloat(getComputedStyle(code).lineHeight);
+    var pt=parseFloat(getComputedStyle(pre).paddingTop);
+    var old=pre.querySelectorAll('.cs-g'); for(var j=0;j<old.length;j++) pre.removeChild(old[j]);
+    var imgs=[],sizes=[],pos=[];
+    (pre.getAttribute('data-cs')||'').split(',').forEach(function(r,i){
+      var m=r.trim().match(/^(\d+)(?:-(\d+))?$/); if(!m) return;
+      var a=+m[1],b=+(m[2]||m[1]),c=C[i%C.length],top=pt+(a-1)*lh,h=(b-a+1)*lh;
+      imgs.push('linear-gradient(rgba('+c+',.55),rgba('+c+',.55))','linear-gradient(rgba('+c+',.13),rgba('+c+',.13))');
+      sizes.push('3px '+h+'px','100% '+h+'px'); pos.push('0 '+top+'px','0 '+top+'px');
+      var g=document.createElement('span'); g.className='cs-g'; g.setAttribute('aria-hidden','true');
+      g.setAttribute('data-n',String(i+1)); g.style.top=(top+(lh-11)/2)+'px'; g.style.color='rgb('+c+')';
+      pre.insertBefore(g,code);
+    });
+    pre.style.backgroundImage=imgs.join(','); pre.style.backgroundSize=sizes.join(',');
+    pre.style.backgroundPosition=pos.join(','); pre.style.backgroundRepeat='no-repeat';
+  }
+  function all(){ var p=document.querySelectorAll('pre.cs'); for(var i=0;i<p.length;i++) lay(p[i]); }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',all); else all();
+  window.addEventListener('load',all);
+  window.addEventListener('resize',all);
+  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(all);
+})();
+</script>
+</body>
+</html>

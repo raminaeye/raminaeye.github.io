@@ -89,6 +89,8 @@
     ["rl-continuous-actions.html", "Continuous-Action RL", "Continuous-Action RL", "Reinforcement Learning"],
     ["ddpg.html", "DDPG", "Deep Deterministic Policy Gradient (DDPG): Actor and Critic", "Reinforcement Learning"],
     ["ddpg-training.html", "Training DDPG", "Training DDPG: Target Networks, Replay and Noise", "Reinforcement Learning"],
+    ["td3.html", "TD3", "Twin Delayed DDPG (TD3)", "Reinforcement Learning"],
+    ["sac.html", "SAC", "Soft Actor-Critic (SAC)", "Reinforcement Learning"],
     ["rl-model-based.html", "Model-Based RL", "Model-Based RL: Dyna, AlphaZero and MuZero", "Reinforcement Learning"],
     ["multi-agent-rl.html", "Multi-Agent RL", "Multi-Agent Reinforcement Learning", "Reinforcement Learning"],
     ["rl-alignment.html", "Aligning with RL", "Aligning Language Models with RL", "Reinforcement Learning"],
@@ -308,7 +310,9 @@
     "gradvac.html": "GradVac",
     "cagrad.html": "CAGrad",
     "multitask-training-loop.html": "Training Loop",
-    "ppo.html": "PPO"
+    "ppo.html": "PPO",
+    "td3.html": "TD3",
+    "sac.html": "SAC"
   };
   /* TITLES-END */
 

@@ -92,6 +92,8 @@
     ["td3.html", "TD3", "Twin Delayed DDPG (TD3)", "Reinforcement Learning"],
     ["sac.html", "SAC", "Soft Actor-Critic (SAC)", "Reinforcement Learning"],
     ["rl-model-based.html", "Model-Based RL", "Model-Based RL: Dyna, AlphaZero and MuZero", "Reinforcement Learning"],
+    ["dyna.html", "Dyna-Q", "Dyna-Q: Learning from Imagined Steps", "Reinforcement Learning"],
+    ["alphazero.html", "AlphaZero", "AlphaZero: Search and Self-Play", "Reinforcement Learning"],
     ["multi-agent-rl.html", "Multi-Agent RL", "Multi-Agent Reinforcement Learning", "Reinforcement Learning"],
     ["rl-alignment.html", "Aligning with RL", "Aligning Language Models with RL", "Reinforcement Learning"],
     ["transformers.html", "Attention", "Attention", "Transformers"],
@@ -312,7 +314,9 @@
     "multitask-training-loop.html": "Training Loop",
     "ppo.html": "PPO",
     "td3.html": "TD3",
-    "sac.html": "SAC"
+    "sac.html": "SAC",
+    "dyna.html": "Dyna-Q",
+    "alphazero.html": "AlphaZero"
   };
   /* TITLES-END */
 

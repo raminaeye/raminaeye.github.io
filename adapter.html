@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Adapters</title>
+    <title>Bottleneck Adapters and Compacter</title>
     <style>
         body {
             font-family: sans-serif;
@@ -620,6 +620,10 @@ var .katex,p .katex,li .katex,td .katex,th .katex,figcaption .katex,.eq-why .kat
 var:has(.katex){font-style:normal}
 .katex-display{margin:.6rem 0;overflow-x:auto;overflow-y:hidden}
 /* MATH-END */
+nav.prereq{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem .4rem;margin:.6rem 0 1.1rem}
+nav.prereq .prereq-label{font-size:.82rem;font-weight:600;color:#6c757d;margin-right:.15rem}
+nav.prereq a.prereq-chip{display:inline-block;padding:.15rem .6rem;border:1px solid #ced4da;border-radius:999px;font-size:.85rem;line-height:1.4;color:#0056b3;text-decoration:none}
+nav.prereq a.prereq-chip:hover,nav.prereq a.prereq-chip:focus-visible{background:#e7f1ff;border-color:#007bff}
 </style>
 
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
@@ -739,24 +743,26 @@ ol.cs-notes li:nth-child(6n+6) .cs-n{background:#76e3ea}
     <p class="crumb"><a href="tutorial.html">&larr; All tutorials</a></p>
     <script src="tutorial-nav.js"></script>
 
-    <h1>Adapters</h1>
-    <p class="dek">Adapting a frozen model to a new task by training small added modules.</p>
+    <h1>Bottleneck Adapters and Compacter</h1>
+    <p class="dek">Teach a frozen Transformer a new task by training two small added modules per layer.</p>
+
+    <nav class="prereq" aria-label="Before you start"><span class="prereq-label">Before you start</span><a class="prereq-chip" href="transformers.html#who-should-each-token-listen-to" title="Attention" aria-label="Each token learns which other tokens to attend to; query, key and value are introduced there, taught in Attention">Attention</a><a class="prereq-chip" href="transformer-block.html#the-full-block" title="The Transformer Block" aria-label="The block the adapters plug into, taught in The Transformer Block">The Transformer Block</a><a class="prereq-chip" href="mlp.html#how" title="Multilayer Perceptrons (MLP)" aria-label="The one-hidden-layer MLP; an adapter is a small two-layer MLP, taught in Multilayer Perceptrons">Multilayer Perceptrons (MLP)</a></nav>
 
     <p class="tabs-label">On this page</p>
     <div class="tab-strip">
-      <a class="tab-link" href="#the-bottleneck-adapter"><span class="secnum">1</span> Bottleneck adapters</a>
-      <a class="tab-link" href="#lora-shrink-the-update-not-the-model"><span class="secnum">2</span> LoRA (low-rank adaptation)</a>
-      <a class="tab-link" href="#compacter-cheaper-matrices-inside-the-adapter"><span class="secnum">3</span> Compacter (Kronecker-factored adapters)</a>
-      <a class="tab-link" href="#what-happens-on-a-real-task"><span class="secnum">4</span> Results on sentiment classification</a>
-      <a class="tab-link" href="#other-ways-to-shrink-the-update"><span class="secnum">5</span> Other parameter-efficient fine-tuning methods</a>
-      <a class="tab-link" href="#in-practice"><span class="secnum">6</span> LoRA in practice</a>
-      <a class="tab-link" href="#caveats"><span class="secnum">7</span> Pitfalls</a>
-      <a class="tab-link" href="#what-is-next"><span class="secnum">8</span> Combining adapters with quantization</a>
-      <a class="tab-link" href="#references"><span class="secnum">9</span> References</a>
+      <a class="tab-link" href="#full-fine-tuning-is-too-heavy"><span class="secnum">1</span> Full fine-tuning is too heavy</a>
+      <a class="tab-link" href="#the-bottleneck-adapter"><span class="secnum">2</span> Bottleneck adapters</a>
+      <a class="tab-link" href="#compacter-cheaper-matrices-inside-the-adapter"><span class="secnum">3</span> Compacter: cheaper matrices inside the adapter</a>
+      <a class="tab-link" href="#other-ways-to-shrink-the-update"><span class="secnum">4</span> Other parameter-efficient fine-tuning methods</a>
+      <a class="tab-link" href="#adapters-in-practice"><span class="secnum">5</span> Adapters in practice</a>
+      <a class="tab-link" href="#what-breaks-and-what-to-watch"><span class="secnum">6</span> What breaks and what to watch</a>
+      <a class="tab-link" href="#references"><span class="secnum">7</span> References</a>
     </div>
 
 
-    <p><em>How do you teach a large model a new task without retraining the whole thing?</em></p>
+    <h2 id="full-fine-tuning-is-too-heavy"><span class="secnum">1</span> Full fine-tuning is too heavy</h2>
+
+<p><em>How do you teach a large model a new task without retraining the whole thing?</em></p>
 
     <p>Full fine-tuning updates every parameter of a transformer, a stack of blocks where the positions of a sequence first exchange information and then each position is processed on its own, and keeps one full copy per task. This page uses RoBERTa-base as its example model: 12 layers with hidden size 768 and 125 million parameters, the learned numbers that make up its weights (BERT-base has the same shape and 110 million).</p>
     <p>Worse, Adam, the optimizer that runs training, keeps extra state for every parameter:</p>
@@ -770,13 +776,13 @@ ol.cs-notes li:nth-child(6n+6) .cs-n{background:#76e3ea}
     <p><strong>Adapters</strong> do the opposite: freeze the big model, add small trainable modules, and train only those (<a href="#fig-1">Figure 1</a>).</p>
     <figure id="fig-1" class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 276" style="max-width:480px" role="img" aria-label="Left: full fine-tuning trains and stores a whole model for each of three tasks. Right: adapters keep one frozen model and train only a small adapter per task"><text class="" x="100.0" y="24.0" text-anchor="middle" style="font-size:18px;font-weight:700">Full fine-tuning</text><text class="mtd-sub" x="100.0" y="47.0" text-anchor="middle" style="font-size:17px">a full copy per task</text><rect class="mtd-adp-trn" x="22.0" y="62.0" width="156.0" height="48.0" rx="6"/><text class="mtd-t2" x="100.0" y="92.0" text-anchor="middle" style="font-size:17px;font-weight:600">model for task 1</text><rect class="mtd-adp-trn" x="22.0" y="120.0" width="156.0" height="48.0" rx="6"/><text class="mtd-t2" x="100.0" y="150.0" text-anchor="middle" style="font-size:17px;font-weight:600">model for task 2</text><rect class="mtd-adp-trn" x="22.0" y="178.0" width="156.0" height="48.0" rx="6"/><text class="mtd-t2" x="100.0" y="208.0" text-anchor="middle" style="font-size:17px;font-weight:600">model for task 3</text><line class="mtd-sep" x1="200" y1="8" x2="200" y2="236"/><text class="" x="300.0" y="24.0" text-anchor="middle" style="font-size:18px;font-weight:700">Adapters</text><text class="mtd-sub" x="300.0" y="47.0" text-anchor="middle" style="font-size:17px">one frozen copy</text><rect class="mtd-adp-frz" x="222.0" y="62.0" width="156.0" height="86.0" rx="6"/><text class="mtd-t1" x="300.0" y="100.0" text-anchor="middle" style="font-size:17px;font-weight:600">frozen model</text><text class="mtd-sub" x="300.0" y="124.0" text-anchor="middle" style="font-size:16px">never updated</text><text class="mtd-t2" x="300.0" y="174.0" text-anchor="middle" style="font-size:16px;font-weight:600">adapters</text><rect class="mtd-adp-trn" x="222.0" y="182.0" width="48.0" height="44.0" rx="5"/><text class="mtd-t2" x="246.0" y="211.0" text-anchor="middle" style="font-size:17px;font-weight:700">1</text><rect class="mtd-adp-trn" x="276.0" y="182.0" width="48.0" height="44.0" rx="5"/><text class="mtd-t2" x="300.0" y="211.0" text-anchor="middle" style="font-size:17px;font-weight:700">2</text><rect class="mtd-adp-trn" x="330.0" y="182.0" width="48.0" height="44.0" rx="5"/><text class="mtd-t2" x="354.0" y="211.0" text-anchor="middle" style="font-size:17px;font-weight:700">3</text><rect class="mtd-adp-trn" x="70.0" y="250.0" width="16.0" height="16.0" rx="3"/><text class="" x="92.0" y="264.0" text-anchor="start" style="font-size:16px">trained</text><rect class="mtd-adp-frz" x="230.0" y="250.0" width="16.0" height="16.0" rx="3"/><text class="" x="252.0" y="264.0" text-anchor="start" style="font-size:16px">frozen</text></svg><figcaption class="caption"><span class="fignum">Figure 1.</span> One frozen model serves every task; each task adds only a small adapter.</figcaption></figure>
 
-    <p>Adapters train like ordinary fine-tuning, on every step of the new task's data, and the state a task leaves behind is its adapter (<a href="#fig-train-serve">Figure 2</a>). The gradient still has to pass through the frozen backbone to reach the adapters, and at serving time LoRA, the second method here, folds away.</p>
-<figure id="fig-train-serve" class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 238" style="max-width:480px" role="img" aria-label="Training: the forward and backward passes run through the frozen backbone, which keeps no gradient and no Adam state, while the adapter keeps gradients and Adam state. Serving: a bottleneck adapter adds its layers to every forward pass; LoRA folds into W once and adds nothing"><text class="" x="110" y="20" text-anchor="middle" style="font-size:16px;font-weight:700">training step</text><text class="" x="302" y="20" text-anchor="middle" style="font-size:16px;font-weight:700">serving</text><rect class="mtd-adp-frz" x="40" y="34" width="160" height="80" rx="6"/><text class="mtd-t1" x="120" y="58" text-anchor="middle" style="font-size:15px;font-weight:700">frozen backbone</text><text class="mtd-sub" x="120" y="80" text-anchor="middle" style="font-size:15px">no gradient,</text><text class="mtd-sub" x="120" y="98" text-anchor="middle" style="font-size:15px">no Adam state</text><rect class="mtd-adp-trn" x="40" y="124" width="160" height="60" rx="6"/><text class="mtd-t2" x="120" y="148" text-anchor="middle" style="font-size:15px;font-weight:700">adapter</text><text class="mtd-t2" x="120" y="170" text-anchor="middle" style="font-size:15px">gradients + Adam state</text><line class="mtd-s mtd-cg" x1="16" y1="184" x2="16.0" y2="46.0" style="stroke-width:3px"/><polygon class="mtd-f mtd-cg" points="16.0,36.0 21.5,46.0 10.5,46.0"/><line class="mtd-s mtd-cr" x1="30" y1="36" x2="30.0" y2="174.0" style="stroke-width:3px"/><polygon class="mtd-f mtd-cr" points="30.0,184.0 24.5,174.0 35.5,174.0"/><text class="mtd-sub" x="110" y="208" text-anchor="middle" style="font-size:15px">forward and backward passes</text><text class="mtd-sub" x="110" y="226" text-anchor="middle" style="font-size:15px">run through everything</text><rect class="mtd-adp-trn" x="214" y="34" width="182" height="80" rx="6"/><text class="mtd-t2" x="305" y="58" text-anchor="middle" style="font-size:15px;font-weight:700">bottleneck adapter</text><text class="" x="305" y="80" text-anchor="middle" style="font-size:15px">adds its layers to</text><text class="" x="305" y="98" text-anchor="middle" style="font-size:15px">every forward pass</text><rect class="mtd-adp-frz" x="214" y="124" width="182" height="60" rx="6"/><text class="mtd-t1" x="305" y="148" text-anchor="middle" style="font-size:15px;font-weight:700">LoRA</text><text class="" x="305" y="170" text-anchor="middle" style="font-size:15px">folds into W once</text><text class="mtd-sub" x="305" y="208" text-anchor="middle" style="font-size:15px">LoRA adds nothing</text><text class="mtd-sub" x="305" y="226" text-anchor="middle" style="font-size:15px">at serving time</text></svg><figcaption class="caption"><span class="fignum">Figure 2.</span> Training passes through the frozen backbone; only the adapter learns.</figcaption></figure>
+    <p>Adapters train like ordinary fine-tuning, on every step of the new task's data, and the state a task leaves behind is its adapter (<a href="#fig-train-serve">Figure 2</a>). The gradient still has to pass through the frozen backbone to reach the adapters. At serving time the adapter layers stay in every forward pass, so they cost two extra matrix multiplications per block per token; the method that folds away instead is <a href="lora.html">LoRA</a>, taught on the LoRA and QLoRA page.</p>
+<figure id="fig-train-serve" class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 238" style="max-width:480px" role="img" aria-label="Training: the forward and backward passes run through the frozen backbone, which keeps no gradient and no Adam state, while the adapter keeps gradients and Adam state. Serving: a bottleneck adapter adds its layers to every forward pass, two extra matrix multiplications per block per token"><text class="" x="110" y="20" text-anchor="middle" style="font-size:16px;font-weight:700">training step</text><text class="" x="302" y="20" text-anchor="middle" style="font-size:16px;font-weight:700">serving</text><rect class="mtd-adp-frz" x="40" y="34" width="160" height="80" rx="6"/><text class="mtd-t1" x="120" y="58" text-anchor="middle" style="font-size:15px;font-weight:700">frozen backbone</text><text class="mtd-sub" x="120" y="80" text-anchor="middle" style="font-size:15px">no gradient,</text><text class="mtd-sub" x="120" y="98" text-anchor="middle" style="font-size:15px">no Adam state</text><rect class="mtd-adp-trn" x="40" y="124" width="160" height="60" rx="6"/><text class="mtd-t2" x="120" y="148" text-anchor="middle" style="font-size:15px;font-weight:700">adapter</text><text class="mtd-t2" x="120" y="170" text-anchor="middle" style="font-size:15px">gradients + Adam state</text><line class="mtd-s mtd-cg" x1="16" y1="184" x2="16.0" y2="46.0" style="stroke-width:3px"/><polygon class="mtd-f mtd-cg" points="16.0,36.0 21.5,46.0 10.5,46.0"/><line class="mtd-s mtd-cr" x1="30" y1="36" x2="30.0" y2="174.0" style="stroke-width:3px"/><polygon class="mtd-f mtd-cr" points="30.0,184.0 24.5,174.0 35.5,174.0"/><text class="mtd-sub" x="110" y="208" text-anchor="middle" style="font-size:15px">forward and backward passes</text><text class="mtd-sub" x="110" y="226" text-anchor="middle" style="font-size:15px">run through everything</text><rect class="mtd-adp-trn" x="214" y="34" width="182" height="80" rx="6"/><text class="mtd-t2" x="305" y="58" text-anchor="middle" style="font-size:15px;font-weight:700">bottleneck adapter</text><text class="" x="305" y="80" text-anchor="middle" style="font-size:15px">adds its layers to</text><text class="" x="305" y="98" text-anchor="middle" style="font-size:15px">every forward pass</text><text class="mtd-sub" x="305" y="148" text-anchor="middle" style="font-size:15px">two extra matrix multiplications</text><text class="mtd-sub" x="305" y="170" text-anchor="middle" style="font-size:15px">per block, per token</text><text class="mtd-sub" x="305" y="208" text-anchor="middle" style="font-size:15px">LoRA folds away instead,</text><text class="mtd-sub" x="305" y="226" text-anchor="middle" style="font-size:15px">on the LoRA and QLoRA page</text></svg><figcaption class="caption"><span class="fignum">Figure 2.</span> Training passes through the frozen backbone; only the adapter learns. At serving the adapter layers stay in every forward pass.</figcaption></figure>
 
 
-    <h2 id="the-bottleneck-adapter"><span class="secnum">1</span> Bottleneck adapters</h2>
+    <h2 id="the-bottleneck-adapter"><span class="secnum">2</span> Bottleneck adapters</h2>
 
-    <p>The original idea (Houlsby et al. 2019) is simple. Each transformer layer has an attention block, where each position mixes in information from the other positions, and a feed-forward block, which processes each position on its own. After each one you insert a small two-layer MLP (multilayer perceptron) with a <strong>bottleneck</strong>: the hidden state, the vector that carries one position through the layer, is 768 numbers wide, and the adapter projects it down to 64 numbers and back up to 768.</p>
+    <p>The original idea (Houlsby et al. 2019) is simple. Each transformer layer has an attention block, where each position mixes in information from the other positions, and a feed-forward block, which processes each position on its own. After each one you insert a small two-layer <a href="mlp.html#how">MLP</a> (multilayer perceptron) with a <strong>bottleneck</strong>: the hidden state, the vector that carries one position through the layer, is 768 numbers wide, and the adapter projects it down to 64 numbers and back up to 768.</p>
 
     <figure id="fig-2" class="diagram">
       <div class="box frozen">Input hidden states</div>
@@ -805,7 +811,7 @@ ol.cs-notes li:nth-child(6n+6) .cs-n{background:#76e3ea}
 
     <p>Transferring BERT (Bidirectional Encoder Representations from Transformers, a large pretrained language model) to GLUE (a standard suite of language-understanding tests), <em>adapters land within 0.4% of full fine-tuning while adding only 3.6% parameters per task,</em> against 100% for fine-tuning; the paper finds the same pattern across 26 text classification tasks.</p>
 
-    <p>The listing is the whole module; input and output are both <code>hidden_dim</code> wide.</p>
+    <p>The listing is the whole module, kept whole at 15 lines; input and output are both <code>hidden_dim</code> wide.</p>
 
 <pre class="cs" data-cs="6-9,12-15"><code class="language-python">import torch.nn as nn
 
@@ -831,25 +837,15 @@ class SimpleAdapter(nn.Module):
 
 
 
-    <p>A wider bottleneck adds capacity and parameters; a narrower one is cheaper but can underfit. On GLUE the paper picked 8, 64 or 256 per task (256 for the large MNLI, 8 for the small RTE), and fixing 64 cost 0.4 points on average.</p>
-<p>The parameter count, with a hidden size of 768 and a bottleneck of 64; a bias is one learned number added to each output of a projection, on top of its weights.</p>
+    <p>A wider bottleneck adds capacity and parameters; a narrower one is cheaper but can underfit. On GLUE the paper picked 8, 64 or 256 per task (256 for the large MNLI, Multi-Genre Natural Language Inference, judging whether one sentence follows from another, 8 for the small RTE, Recognizing Textual Entailment, the same judgment on a smaller set), and fixing 64 cost 0.4 points on average.</p>
+    <p>Adapters start near the identity: the projection layers start near zero and the adapter carries its own internal skip connection, so the frozen model is almost unchanged at step one (the paper, sections 2 and 2.1).</p>
+<p>The parameter count below uses a hidden size of 768 and a bottleneck of 64; a bias is one learned number added to each output of a projection, on top of its weights.</p>
 
     <figure id="fig-bn-count" class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 236" style="max-width:480px" role="img" aria-label="One adapter: down and up projections plus biases, a small share of the model; across every layer and adapter, still only a small share trained; the rest stays frozen"><text class="" x="20" y="22" text-anchor="start" style="font-size:15px;font-weight:700">one adapter, a small share</text><rect class="mtd-adp-trn" x="20" y="34" width="168" height="34" rx="4"/><text class="mtd-t2" x="104" y="56" text-anchor="middle" style="font-size:15px;font-weight:700">down</text><rect class="mtd-adp-trn" x="192" y="34" width="168" height="34" rx="4"/><text class="mtd-t2" x="276" y="56" text-anchor="middle" style="font-size:15px;font-weight:700">up</text><rect class="" x="364" y="34" width="4" height="34" rx="1" style="fill:#ca6f1e;stroke:none"/><text class="mtd-t2" x="380" y="88" text-anchor="end" style="font-size:15px">+ biases</text><text class="" x="20" y="122" text-anchor="start" style="font-size:15px;font-weight:700">across every layer and adapter</text><text class="" x="20" y="152" text-anchor="start" style="font-size:15px">share of the 125M-parameter model</text><rect class="" x="20" y="162" width="360" height="30" rx="4" style="fill:#eaf2f8;stroke:#1f618d;stroke-width:1.4px"/><rect class="" x="20" y="162" width="6.84" height="30" rx="2" style="fill:#ca6f1e;stroke:none"/><text class="mtd-t1" x="200" y="182" text-anchor="middle" style="font-size:15px">frozen, never updated</text><text class="mtd-t2" x="20" y="212" text-anchor="start" style="font-size:15px;font-weight:700">a small share trained</text><text class="mtd-sub" x="380" y="212" text-anchor="end" style="font-size:15px">the rest frozen</text></svg><figcaption class="caption"><span class="fignum">Figure 4.</span> Bottleneck adapters at hidden size 768, bottleneck 64.</figcaption></figure>
 
     <p>Training only a small share of the model leaves the rest where pretraining put it. <em>That is why the model does not forget.</em></p>
 
-    <p>Training is the usual loop with one filter, so the optimizer keeps no state for the backbone. The learning rate is a placeholder.</p>
 
-<pre class="cs" data-cs="1-3,4-6"><code class="language-python">for name, param in model.named_parameters():
-    # all else frozen
-    param.requires_grad = "adapter" in name
-ps = model.parameters()
-trainable = [p for p in ps if p.requires_grad]
-optimizer = torch.optim.AdamW(trainable, lr=1e-4)</code></pre>
-<ol class="cs-notes">
-  <li><span class="cs-n">1</span>Freezes every parameter whose name lacks "adapter".</li>
-  <li><span class="cs-n">2</span>Gives the optimizer only the trainable adapter parameters.</li>
-</ol>
 
     <div class="demo" id="stepDemo">
 <style>
@@ -886,6 +882,7 @@ optimizer = torch.optim.AdamW(trainable, lr=1e-4)</code></pre>
         margin:0 .25em 0 .6em;vertical-align:baseline}
 
       @media (max-width:480px){.eq-card{padding:.85rem .9rem}.eq-line{font-size:1.24rem;line-height:1.95}}
+      @media (max-width:380px){#stepDemoEq .eq-line{font-size:1rem;line-height:1.9}}
 svg text.mvar,svg tspan.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic}
 /* phone code blocks: smaller type, long statements wrap instead of scrolling sideways */
       /* diagram-side dim/highlight (SVG/DOM). Do NOT use .hl/.dim: taken. */
@@ -1067,642 +1064,62 @@ svg text.mvar,svg tspan.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman
     })();
     </script>
 
-
-
-
-    <h2 id="lora-shrink-the-update-not-the-model"><span class="secnum">2</span> LoRA (low-rank adaptation)</h2>
-
-    <p><strong>LoRA</strong> (low-rank adaptation, Hu et al. 2022) looks at what fine-tuning does to a weight matrix. It starts from the pretrained weight <var>\(W\)</var> and ends with <var>\(W\)</var> plus a big dense update, dense meaning its entries are filled in rather than mostly zero. <em>The useful part of that update lives in a tiny subspace,</em> a low dimensional slice of all possible updates, so LoRA learns it as two skinny matrices multiplied together.</p>
-
-    
-
-    
-
-    <figure id="fig-4" class="mtd-fig"><div>
-    <div style="position:relative;max-width:640px;margin:0 auto;">
-      <img src="figures/papers/lora-fig1.png" alt="Figure 1 from the LoRA paper: input x at the bottom feeds a frozen blue box of pretrained weights W on the left and two stacked orange parallelograms labeled A and B on the right, with a rank r brace between them; both paths combine at a plus sign into output h at the top." style="width:100%;height:auto;display:block;">
-    </div>
-    </div>
-    <p class="paper-caption"><span class="fignum">Figure 6.</span> The <a href="https://arxiv.org/abs/2106.09685">paper's Figure 1</a>: "Our reparametrization. We only train A and B."</p></figure>
-    <p>Reparametrization means writing the trained weight as the frozen <var>\(W\)</var> plus the learned <var>\(BA\)</var> detour, so the update lives in the two small matrices.</p>
-
-    
-<div class="eq-card" id="loraEqStatic">
-<div class="eq-what">Freeze what the model already knows and learn only the change, as a detour through a tiny bottleneck.</div>
-<div class="eq-line eq-active" data-eqline="0">\(\displaystyle \htmlClass{eqt}{\htmlData{k=W}{\htmlStyle{color:#2c3e50}{W}}} + \htmlClass{eqt}{\htmlData{k=BA}{\htmlStyle{color:#b45309}{BA}}}\)</div>
-<div class="eq-why eq-active" data-eqline="0">Read <span class="eqt" style="color:#b45309"><var>\(BA\)</var></span> as one learned update: <span class="eqt" style="color:#b45309"><var>\(A\)</var></span> projects the input down to rank <var>\(r\)</var>, <span class="eqt" style="color:#b45309"><var>\(B\)</var></span> projects it back up, and the pair is added to the frozen pretrained weight <span class="eqt" style="color:#2c3e50"><var>\(W\)</var></span>.</div>
-</div>
-
-
-    <p>The <var>\(r\)</var> brace between the slabs is the rank, the entire budget of new parameters.</p>
-<div class="eq-card">
-<div class="eq-what">What LoRA trains for one weight matrix, against the full update.</div>
-<div class="eq-line eq-active">\(\displaystyle \htmlStyle{color:#b45309}{r}(\htmlStyle{color:#2471a3}{d} + \htmlStyle{color:#2c3e50}{k})\)</div>
-<div class="eq-why eq-active"><var>\(A\)</var> holds <var>\(r \times d\)</var> numbers and <var>\(B\)</var> holds <var>\(k \times r\)</var>, where <span class="eqt" style="color:#2471a3"><var>\(d\)</var></span> is the input size, <span class="eqt" style="color:#2c3e50"><var>\(k\)</var></span> the output size and <span class="eqt" style="color:#b45309"><var>\(r\)</var></span> the rank.</div>
-<div class="eq-line eq-active">\(\displaystyle \htmlStyle{color:#2471a3}{d} \cdot \htmlStyle{color:#2c3e50}{k}\)</div>
-<div class="eq-why eq-active">What a full update trains for the same matrix. A smaller <var>\(r\)</var> means far fewer new parameters and a coarser approximation of the update.</div>
-</div>
-    <figure id="fig-5" class="mtd-fig">
-<svg viewBox="0 0 300 112" role="img" aria-label="Trainable numbers: the dense matrix against LoRA at rank 8" style="width:100%;max-width:520px;height:auto;display:block;margin:0 auto;">
-<text x="4" y="18" font-size="16" style="fill:#2c3e50">dense W</text>
-<rect x="4" y="24" width="220" height="26" rx="3" style="fill:#7f8c8d"/>
-<text x="230" y="43" font-size="16" font-weight="700" style="fill:#7f8c8d">full matrix</text>
-<text x="4" y="74" font-size="16" style="fill:#2c3e50">LoRA A and B, r = 8</text>
-<rect x="4" y="80" width="4.6" height="26" rx="3" style="fill:#d35400"/>
-<text x="14.6" y="99" font-size="16" font-weight="700" style="fill:#d35400">a small share</text>
-</svg>
-<figcaption class="caption"><span class="fignum">Figure 7.</span> At low rank, LoRA trains only a small share of the matrix.</figcaption>
-</figure>
-    
-
-<p><var>\(A\)</var> starts as small random numbers from a bell curve centered at 0; <a href="#fig-4">Figure 6</a> names that curve <var>\(N\)</var> with spread <var>\(\sigma\)</var> (not the ReLU <var>\(\sigma\)</var> of <a href="#the-bottleneck-adapter">Section 1</a>), set by the code's <code>* 0.01</code>. <var>\(B\)</var> starts at zeros, so at step one the side path adds nothing to the pretrained model.</p>
-
-
-
-
-    <p>The code wraps a frozen linear layer <code>self.linear</code> with the side path through <var>\(A\)</var> then <var>\(B\)</var>.</p>
-
-<pre class="cs" data-cs="7-10,11-15,18-20"><code class="language-python">import torch
-import torch.nn as nn
-
-class LoRALinear(nn.Module):
-    def __init__(self, linear, rank=8, alpha=16.0):
-        super().__init__()
-        # frozen W
-        self.linear = linear.requires_grad_(False)
-        k = linear.out_features
-        d = linear.in_features
-        a0 = torch.randn(rank, d) * 0.01
-        self.A = nn.Parameter(a0)
-        # BA = 0 at start
-        self.B = nn.Parameter(torch.zeros(k, rank))
-        self.scale = alpha / rank
-
-    # x: (..., d) -&gt; (..., k)
-    def forward(self, x):
-        side = x @ self.A.T @ self.B.T
-        return self.linear(x) + self.scale * side</code></pre>
-<ol class="cs-notes">
-  <li><span class="cs-n">1</span>Keeps the original linear layer <var>\(W\)</var> frozen.</li>
-  <li><span class="cs-n">2</span>Low-rank factors: <var>\(A\)</var> small random, <var>\(B\)</var> zero, so <var>\(BA\)</var> = 0 at start; scale is <var>\(\alpha\)</var>/<var>\(r\)</var>.</li>
-  <li><span class="cs-n">3</span>Output is the frozen path plus the scaled low-rank path.</li>
-</ol>
-
-    <p>Before serving, fold <var>\(BA\)</var> into <var>\(W\)</var> once and call the plain layer, so inference costs nothing extra:</p>
-
-<pre class="cs" data-cs="1-2,3-6"><code class="language-python"># (k, r) @ (r, d) = (k, d)
-delta = lora.scale * (lora.B @ lora.A)
-with torch.no_grad():
-    lora.linear.weight += delta
-# serve this plain layer
-merged = lora.linear</code></pre>
-<ol class="cs-notes">
-  <li><span class="cs-n">1</span>Forms the full update <var>\(BA\)</var>, scaled.</li>
-  <li><span class="cs-n">2</span>Adds it into <var>\(W\)</var> once, so serving uses one plain layer.</li>
-</ol>
-
-    <p>In practice LoRA wraps the query and value projections of each attention block and leaves the rest frozen. A projection is a learned matrix that turns each position into a new vector: the query says what a position is looking for, the key what it advertises, and the value what it passes along (see <a href="transformers.html">Attention</a>). The listing wraps them in RoBERTa-base.</p>
-
-<pre class="cs" data-cs="1-2,3-6"><code class="language-python"># RobertaModel, all frozen
-model.requires_grad_(False)
-for block in model.encoder.layer:
-    attn = block.attention.self
-    attn.query = LoRALinear(attn.query)
-    attn.value = LoRALinear(attn.value)
-# later modules stay trainable</code></pre>
-<ol class="cs-notes">
-  <li><span class="cs-n">1</span>Freezes the whole RoBERTa encoder.</li>
-  <li><span class="cs-n">2</span>Wraps the query and value projections of every attention block with LoRA.</li>
-</ol>
-
-    <figure id="fig-lora-count" class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 216" style="max-width:480px" role="img" aria-label="One projection, rank 8: A and B across every layer and projection, a small share of the 125 million parameter model trained"><text class="" x="20" y="22" text-anchor="start" style="font-size:15px;font-weight:700">one projection (q or v), rank 8</text><rect class="mtd-adp-trn" x="20" y="34" width="178" height="34" rx="4"/><text class="mtd-t2" x="109" y="56" text-anchor="middle" style="font-size:15px;font-weight:700">A</text><rect class="mtd-adp-trn" x="202" y="34" width="178" height="34" rx="4"/><text class="mtd-t2" x="291" y="56" text-anchor="middle" style="font-size:15px;font-weight:700">B</text><text class="" x="20" y="102" text-anchor="start" style="font-size:15px;font-weight:700">across every layer and projection</text><text class="" x="20" y="132" text-anchor="start" style="font-size:15px">share of the 125M-parameter model</text><rect class="" x="20" y="142" width="360" height="30" rx="4" style="fill:#eaf2f8;stroke:#1f618d;stroke-width:1.4px"/><rect class="" x="20" y="142" width="3" height="30" rx="2" style="fill:#ca6f1e;stroke:none"/><text class="mtd-t1" x="200" y="162" text-anchor="middle" style="font-size:15px">frozen, never updated</text><text class="mtd-t2" x="20" y="192" text-anchor="start" style="font-size:15px;font-weight:700">a small share trained</text><text class="mtd-sub" x="380" y="192" text-anchor="end" style="font-size:15px">the rest frozen</text></svg><figcaption class="caption"><span class="fignum">Figure 8.</span> LoRA on query and value in RoBERTa-base, rank 8.</figcaption></figure>
-
-    
-
-    <p>The rank <var>\(r\)</var> sets those numbers. A task close to what the model already does, such as sentiment classification, needs little rank; a task far from it, such as reasoning or code, can keep using more.</p>
-    <p>Raising <var>\(r\)</var> gives the update more directions in which to change <var>\(W\)</var>, at <var>\(r \cdot (d + k)\)</var> trainable numbers per matrix; lowering it can miss part of the update, and <var>\(r\)</var> = 0 is the frozen model. At <var>\(r\)</var> = min(<var>\(d\)</var>, <var>\(k\)</var>) the update is as free as full fine-tuning; LoRA's RoBERTa runs use <var>\(r\)</var> = 8 (its Table 9). In LoRA Table 6 (GPT-3 175B) <var>\(r\)</var> of 1 or 2 is enough, and WikiSQL and MultiNLI stay flat up to 64.</p>
-<div class="eq-card" id="loraKnobEq">
-<div class="eq-what">The second knob sets how strongly the learned update is added.</div>
-<div class="eq-line eq-active" data-eqline="0">\(\displaystyle h = Wx + \frac{\alpha}{r} BAx\)</div>
-<div class="eq-why eq-active" data-eqline="0"><var>\(x\)</var> is the layer input and <var>\(h\)</var> its output; <var>\(\alpha/r\)</var> (<code>scale</code> in the code) scales <var>\(BA\)</var>. Raising <var>\(\alpha\)</var> makes every step change the update <var>\(BA\)</var> more, much like a larger learning rate; lowering it shrinks every update, and at <var>\(\alpha\)</var> = 0 the model stays frozen. Because <var>\(\alpha\)</var> acts like the learning rate, the paper sets <var>\(\alpha\)</var> to the first <var>\(r\)</var> it tries and does not tune it (the paper's Section 4.1).</div>
-</div>
-
-    
-
-    <p>At <var>\(r\)</var> = 64 LoRA trains as many parameters as a bottleneck adapter, still only a fraction of the dense matrix. Start at 8, go up only if the loss says so.</p>
-
-    <div class="demo" id="rankDemo">
+    <p>Wider bottleneck, more room to learn, more parameters to train.</p>
+    <div class="demo" id="widthDemo">
       <div class="demo-controls">
-        <label for="rankSlider">Rank <var>\(r\)</var> = <span id="rankVal">8</span></label>
-        <input type="range" id="rankSlider" min="0" max="6" step="1" value="3">
-        <button type="button" class="play-btn" id="rankPlay">Play</button>
-        <button type="button" class="play-btn" id="rankReset">Reset</button>
+        <label for="widthSlider">Bottleneck width = <span id="widthVal">64</span></label>
+        <input type="range" id="widthSlider" min="0" max="2" step="1" value="1">
       </div>
-      <div class="canvas-wrap">
-        <svg class="rank-chart" id="rankChart" viewBox="0 0 640 380" role="img" aria-label="Illustrative accuracy versus LoRA rank for an easy task and a hard task"></svg>
-      </div>
-      <svg class="hw-chart" id="hwChart" viewBox="0 0 640 200" role="img" aria-label="Squeeze flow: the 768-wide input is squeezed through one orange hallway of width r, then expanded back and added to the frozen W">
-        <rect class="hw-frozen" x="30" y="25" width="130" height="130" rx="6"/>
-        <text class="hw-label" x="95" y="174" text-anchor="middle"><tspan class="mvar">W</tspan> frozen</text>
-        <text class="hw-label" x="95" y="190" text-anchor="middle">768 &#215; 768</text>
-        <text class="hw-op" x="184" y="102" text-anchor="middle">+</text>
-        <rect class="hw-train" id="hwB" x="210" y="25" width="23" height="130" rx="4"/>
-        <text class="hw-label" x="275" y="174" text-anchor="middle"><tspan class="mvar">B</tspan> 768 &#215; <tspan class="mvar">r</tspan></text>
-        <text class="hw-op" x="352" y="102" text-anchor="middle">&#215;</text>
-        <rect class="hw-train" id="hwA" x="378" y="83" width="130" height="23" rx="4"/>
-        <text class="hw-label" x="443" y="174" text-anchor="middle"><tspan class="mvar">A</tspan> <tspan class="mvar">r</tspan> &#215; 768</text>
-        <text class="hw-r" id="hwR" x="574" y="96" text-anchor="middle">r = 8</text>
-        <text class="hw-label" x="574" y="116" text-anchor="middle">rank r</text>
+      <svg class="hw-chart" id="bwChart" viewBox="0 0 640 190" role="img" aria-label="The 768-wide signal flows in, squeezes through a bottleneck bar whose width follows the slider, and lifts back to 768">
+        <rect class="hw-frozen" x="20" y="35" width="170" height="120" rx="6"/>
+        <text class="hw-label" x="105" y="100" text-anchor="middle">768 in</text>
+        <text class="hw-op" x="205" y="102" text-anchor="middle">&#8594;</text>
+        <rect class="hw-train" id="bwBar" x="290" y="67" width="60" height="56" rx="4"/>
+        <text class="hw-op" x="365" y="102" text-anchor="middle">&#8594;</text>
+        <rect class="hw-frozen" x="380" y="35" width="170" height="120" rx="6"/>
+        <text class="hw-label" x="465" y="100" text-anchor="middle">768 out</text>
+        <text class="hw-label" x="320" y="178" text-anchor="middle">bottleneck</text>
       </svg>
-      <div class="hw-badge-out" id="hwBadgeOut"><strong><var>\(r\)</var> = 8</strong> &middot; 12,288 params per projection</div>
-      <div class="demo-stats" id="rankStats"></div>
-      
-<p class="caption"><span class="fignum">Figure 9.</span> Illustrative curves; only the hard task keeps gaining.</p>
-</div>
-
-
+      <div class="demo-stats" id="widthStats">Room to learn at a small cost.</div>
+      <p class="caption"><span class="fignum">Figure 6.</span> The bottleneck width sets how much room the update has.</p>
+    </div>
     <script>
     (function() {
-      var D = 768, L = 12, MODEL = 125000000;
-      var ranks = [1, 2, 4, 8, 16, 32, 64];
-      var easy = [88.0, 90.5, 92.0, 92.1, 92.1, 92.1, 92.1];
-      var hard = [70.0, 74.0, 79.0, 84.0, 87.5, 89.5, 90.5];
-            /* Illustrative shapes only: no accuracy number is printed. */
-      var easyFT = 92.5, hardFT = 91.5;
-      var yMin = 68, yMax = 94;
-
-      var svg = document.getElementById('rankChart');
-      var hw = document.getElementById('hwChart');
-      var NS = 'http://www.w3.org/2000/svg';
-      function el(name, attrs) {
-        var e = document.createElementNS(NS, name);
-        for (var k in attrs) e.setAttribute(k, attrs[k]);
-        return e;
-      }
-      function label(x, y, s, cls, anchor) {
-        var t = el('text', {x: x, y: y, 'class': cls, 'text-anchor': anchor || 'middle'});
-        t.textContent = s;
-        return t;
-      }
-      function fmt(n) { return n.toLocaleString('en-US'); }
-
-      /* Sweep (b): measure the widest tick label instead of guessing padL. */
-      var measureCtx = null;
-      function textW(s, px) {
-        try {
-          if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d');
-          measureCtx.font = px + 'px sans-serif';
-          var w = measureCtx.measureText(s).width;
-          if (isFinite(w) && w > 0) return w;
-        } catch (e) {}
-        return s.length * px * 0.62;
-      }
-      /* Center desiredCx, clamped so a w-wide item stays inside [m, VBW-m].
-         Sweep (b): two-line fallback for wide labels is handled by the
-         callers; this keeps one-line labels on the plot. */
-      function clampCx(desiredCx, w, VBW, m) {
-        var lo = m + w / 2, hi = VBW - m - w / 2;
-        if (lo > hi) return VBW / 2;
-        return Math.min(hi, Math.max(lo, desiredCx));
-      }
-
-      /* ---------------- accuracy-vs-rank chart ---------------- */
-      var geom = null, dyn = {};
-      function pathFor(data, X, Y) {
-        return data.map(function(a, i) {
-          return (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(a).toFixed(1);
-        }).join(' ');
-      }
-      function renderChart() {
-        while (svg.firstChild) svg.removeChild(svg.firstChild);
-        var cw = svg.clientWidth || 640;
-        var mobile = cw < 520;
-        /* Sweep (d): the viewBox tracks the measured CSS width, so one unit
-           is one CSS pixel and 13px type is exactly 13px effective at 390px. */
-        var VBW = Math.max(280, Math.round(cw));
-        var VBH = mobile ? Math.round(VBW * 0.74) : Math.round(VBW * 0.5); /* phone: shorter plot (tall-tools 2026-11-01) */
-        svg.setAttribute('viewBox', '0 0 ' + VBW + ' ' + VBH);
-        var yTicks = mobile ? [70, 80, 90] : [70, 75, 80, 85, 90];
-        var maxTickW = 0, i;
-                var tickTxt = function (k) { return k === 0 ? 'lower' : (k === yTicks.length - 1 ? 'higher' : ''); };
-        maxTickW = textW('higher', 13);
-        var ML = Math.ceil(maxTickW) + 14;
-        ML += 22; /* lane for the rotated y-axis title */
-                var ftETxt = 'FT';
-        var ftHTxt = 'FT';
-        var MR = Math.ceil(Math.max(textW(ftETxt, 12), textW(ftHTxt, 12))) + 22;
-        var MT = mobile ? 14 : 16, MB = mobile ? 56 : 46;
-        var PW = VBW - ML - MR, PH = VBH - MT - MB;
-        function X(ii) { return ML + ii * PW / 6; }
-        function Y(a) { return MT + PH - (a - yMin) * PH / (yMax - yMin); }
-        geom = {ML: ML, MR: MR, MT: MT, MB: MB, PW: PW, PH: PH,
-                VBW: VBW, VBH: VBH, mobile: mobile, X: X, Y: Y};
-
-        var a, t;
-        for (i = 0; i < yTicks.length; i++) {
-          a = yTicks[i];
-          svg.appendChild(el('line', {x1: ML, y1: Y(a), x2: VBW - MR, y2: Y(a), 'class': 'grid'}));
-                    t = label(ML - 8, Y(a) + 4.5, tickTxt(i), 'tick-label', 'end');
-          svg.appendChild(t);
-        }
-        for (i = 0; i < ranks.length; i++) {
-          t = label(X(i), VBH - MB + 22, mobile ? String(ranks[i]) : 'r=' + ranks[i], 'tick-label');
-          svg.appendChild(t);
-        }
-        svg.appendChild(label(ML + PW / 2, VBH - 8, 'LoRA rank (log scale)', 'axis-label'));
-        var titleX = Math.max(14, ML - maxTickW - 18);
-        var yl = label(titleX, MT + PH / 2, 'task accuracy', 'axis-label');
-        yl.setAttribute('transform', 'rotate(-90 ' + titleX + ' ' + (MT + PH / 2) + ')');
-        svg.appendChild(yl);
-        /* Dashed full-fine-tune lines, then their direct right-edge labels.
-           Sweep (a): labels are drawn after the marks they annotate. */
-        svg.appendChild(el('line', {x1: ML, y1: Y(easyFT), x2: VBW - MR, y2: Y(easyFT),
-                                   'class': 'ft-line', stroke: '#3498db'}));
-        svg.appendChild(el('line', {x1: ML, y1: Y(hardFT), x2: VBW - MR, y2: Y(hardFT),
-                                   'class': 'ft-line', stroke: '#e67e22'}));
-        var le = label(VBW - MR + 14, Y(easyFT) - 4, ftETxt, 'ft-label', 'start');
-        le.setAttribute('fill', '#2471a3');
-        le.setAttribute('dominant-baseline', 'central');
-        var lh = label(VBW - MR + 14, Y(hardFT) + 5, ftHTxt, 'ft-label', 'start');
-        lh.setAttribute('fill', '#b45309');
-        lh.setAttribute('dominant-baseline', 'central');
-        svg.appendChild(le);
-        svg.appendChild(lh);
-        /* Curves (empty until revealed), then the selection line, then dots, then rings on top.
-           Sweep (c): the accuracy curves are the reveal, so they stay off the
-           chart until Play or the slider calls for them. */
-        dyn.curveE = el('path', {d: '', 'class': 'curve-easy'});
-        dyn.curveH = el('path', {d: '', 'class': 'curve-hard'});
-        svg.appendChild(dyn.curveE);
-        svg.appendChild(dyn.curveH);
-        dyn.selLine = el('line', {'class': 'sel-line'});
-        svg.appendChild(dyn.selLine);
-        dyn.dotsE = [];
-        dyn.dotsH = [];
-        for (i = 0; i < ranks.length; i++) {
-          (function(idx) {
-            var dot1 = el('circle', {cx: X(idx), cy: Y(easy[idx]), r: 4.5, fill: '#3498db'});
-            var dot2 = el('circle', {cx: X(idx), cy: Y(hard[idx]), r: 4.5, fill: '#e67e22'});
-            dot1.style.display = 'none';
-            dot2.style.display = 'none';
-            dyn.dotsE.push(dot1);
-            dyn.dotsH.push(dot2);
-            svg.appendChild(dot1);
-            svg.appendChild(dot2);
-          })(i);
-        }
-        /* Legend in place: the curve names sit beside their curves, the
-           dashed-line name sits above the dashed lines. */
-        var halo = 'paint-order:stroke;stroke:#ffffff;stroke-width:4px;stroke-linejoin:round';
-        var ftKey = label(ML + 4, Y(easyFT) - 8, 'dashed = full fine-tune' + (mobile ? ' (FT)' : ''), 'legend-text', 'start');
-        ftKey.setAttribute('style', halo);
-        svg.appendChild(ftKey);
-        dyn.labE = label(X(0) + 4, Y(easy[0]) + (mobile ? 17 : 24), 'easy task', 'curve-name', 'start');
-        if (mobile) {
-          /* Phone: the shorter plot leaves no room for one line before the
-             hard curve's r=8 ring, so the name wraps onto two lines. */
-          dyn.labE.textContent = '';
-          var te1 = el('tspan', {x: X(0) + 4}); te1.textContent = 'easy';
-          var te2 = el('tspan', {x: X(0) + 4, dy: 15}); te2.textContent = 'task';
-          dyn.labE.appendChild(te1); dyn.labE.appendChild(te2);
-        }
-        dyn.labE.setAttribute('style', 'fill:#2471a3;' + halo);
-        dyn.labH = label(X(3) + 8, Y(hard[3]) + 28, 'hard task', 'curve-name', 'start');
-        dyn.labH.setAttribute('style', 'fill:#b45309;' + halo);
-        dyn.labE.style.display = 'none';
-        dyn.labH.style.display = 'none';
-        svg.appendChild(dyn.labE);
-        svg.appendChild(dyn.labH);
-        dyn.ringE = el('circle', {'class': 'sel-ring', r: 7});
-        dyn.ringH = el('circle', {'class': 'sel-ring', r: 7});
-        dyn.ringE.style.display = 'none';
-        dyn.ringH.style.display = 'none';
-        svg.appendChild(dyn.ringE);
-        svg.appendChild(dyn.ringH);
-      }
-
-      /* Reveal ranks 0..i on the chart; i < 0 clears the curves back to empty. */
-      function drawRankReveal(i) {
-        var g = geom;
-        if (!g || !dyn.curveE) { return; }
-        dyn.curveE.setAttribute('d', i < 0 ? '' : pathFor(easy.slice(0, i + 1), g.X, g.Y));
-        dyn.curveH.setAttribute('d', i < 0 ? '' : pathFor(hard.slice(0, i + 1), g.X, g.Y));
-        var k;
-        for (k = 0; k < ranks.length; k++) {
-          var vis = k <= i ? '' : 'none';
-          dyn.dotsE[k].style.display = vis;
-          dyn.dotsH[k].style.display = vis;
-        }
-        var rv = i < 0 ? 'none' : '';
-        dyn.labE.style.display = rv;
-        dyn.labH.style.display = rv;
-        dyn.ringE.style.display = rv;
-        dyn.ringH.style.display = rv;
-      }
-
-      /* ---------------- squeeze-flow hallway diagram ---------------- */
-      var hwGeom = null, hwDyn = {};
-      var dispH = 40, targetH = 40, targetR = 8;
-      var dots = [];
-      /* Dot positions are generated inside the corridor in placeDots
-         below, so no spread helper is needed: a dot outside the orange
-         hallway would teach the wrong containment. */
-      function renderHallway() {
-        while (hw.firstChild) hw.removeChild(hw.firstChild);
-        dots = [];
-        var cw = hw.clientWidth || 640;
-        var mobile = cw < 520;
-        var VBW = Math.max(280, Math.round(cw));
-        var VBH = mobile ? 128 : 250; /* phone: trimmed top and bottom margins (tall-tools 2026-11-01) */
-        hw.setAttribute('viewBox', '0 0 ' + VBW + ' ' + VBH);
-        var S = mobile ? 72 : 130;
-        var colW = mobile ? 22 : 38;
-        var m = mobile ? 12 : 24, gap = mobile ? 8 : 14;
-        var centerY = mobile ? 46 : 120;
-        var wX = m;
-        var plusX = wX + S + gap + 10;
-        var inX = wX + S + gap + 20 + gap;
-        var cX = inX + colW + gap;
-        var oX = VBW - m - colW;
-        var cLen = oX - gap - cX;
-        var top = centerY - S / 2;
-        var g = {S: S, colW: colW, m: m, centerY: centerY, wX: wX, plusX: plusX,
-                 inX: inX, cX: cX, oX: oX, cLen: cLen, top: top,
-                 VBW: VBW, VBH: VBH, mobile: mobile};
-        hwGeom = g;
-
-        /* Sweep (c): clip the animated dots to the flow region. */
-        var defs = el('defs', {});
-        var clip = el('clipPath', {id: 'hwFlowClip'});
-        clip.appendChild(el('rect', {x: inX - 4, y: top - 6,
-                                     width: (oX + colW + 4) - (inX - 4), height: S + 12}));
-        defs.appendChild(clip);
-        hw.appendChild(defs);
-
-        /* Guide lines at the input's full width: at r=64 the corridor
-           visibly meets them, which is the punchline. */
-        hw.appendChild(el('line', {x1: inX, y1: top, x2: oX + colW, y2: top, 'class': 'hw-guide'}));
-        hw.appendChild(el('line', {x1: inX, y1: top + S, x2: oX + colW, y2: top + S, 'class': 'hw-guide'}));
-
-        hw.appendChild(el('rect', {x: wX, y: top, width: S, height: S, rx: 6, 'class': 'hw-frozen'}));
-        var plus = label(plusX, centerY, '+', 'hw-op');
-        plus.setAttribute('dominant-baseline', 'central');
-        plus.setAttribute('font-size', mobile ? 20 : 26);
-        hw.appendChild(plus);
-        hw.appendChild(el('rect', {x: inX, y: top, width: colW, height: S, rx: 4, 'class': 'hw-col'}));
-        hwDyn.corridor = el('rect', {x: cX, y: centerY - dispH / 2, width: cLen,
-                                     height: dispH, rx: 4, 'class': 'hw-corridor'});
-        hw.appendChild(hwDyn.corridor);
-        hw.appendChild(el('rect', {x: oX, y: top, width: colW, height: S, rx: 4, 'class': 'hw-col'}));
-
-        var dg = el('g', {'clip-path': 'url(#hwFlowClip)'});
-        var nDots = mobile ? 10 : 14, k;
-        for (k = 0; k < nDots; k++) {
-          var dc = el('circle', {r: mobile ? 3 : 3.4, 'class': 'hw-dot'});
-          dg.appendChild(dc);
-          dots.push({el: dc, p: k / nDots, v: 0.20 + (k % 3) * 0.035,
-                     j: (((k * 0.6180339887) % 1) * 2 - 1)});
-        }
-        hw.appendChild(dg);
-
-        /* Sweep (a): every label is drawn after the marks it annotates. */
-        var lx = wX + S / 2;
-        hw.appendChild(label(lx, top + S + 20, 'W frozen', 'hw-label'));
-        hw.appendChild(label(lx, top + S + 38, '768 × 768', 'hw-label'));
-        /* In/out labels sit below their columns on every screen: the rotated
-           in-column labels used to sit on top of the corridor and its dots. */
-        hw.appendChild(label(inX + colW / 2, top + S + 20, '768 in', 'hw-label'));
-        hw.appendChild(label(oX + colW / 2, top + S + 20, '768 out', 'hw-label'));
-        var corrLab = label(cX + cLen / 2, top + S + 38, (mobile ? 'orange width grows with r' : 'trainable, orange width grows with r (log scale)'), 'hw-tag');
-        hw.appendChild(corrLab);
-
-        /* The param badge lives below the diagram as HTML (see #hwBadgeOut):
-           it never overlaps the corridor at any r. */
-
-        /* r=64 punchline tag above the corridor; two lines on mobile. */
-        hwDyn.tag = el('g', {});
-        if (mobile) {
-          var t1 = label(VBW / 2, top - 44, 'largest rank, r = 64:', 'hw-tag');
-          var t2 = label(VBW / 2, top - 28, 'still a fraction of the dense matrix', 'hw-tag');
-          t1.setAttribute('font-size', 12);
-          t2.setAttribute('font-size', 12);
-          hwDyn.tag.appendChild(t1);
-          hwDyn.tag.appendChild(t2);
-        } else {
-          var tagTxt = 'largest rank, r = 64: still a fraction of the dense matrix';
-          var tagW = textW(tagTxt, 13);
-          var t0 = label(clampCx(cX + cLen / 2, tagW, VBW, m), top - 14, tagTxt, 'hw-tag');
-          hwDyn.tag.appendChild(t0);
-        }
-        hwDyn.tag.style.display = 'none';
-        hw.appendChild(hwDyn.tag);
-      }
-
-      var lastT = 0, hwRunning = false;
-      /* Sweep (c): the dots hold fixed positions (no ambient motion at rest);
-         only the corridor height eases toward its target, then the loop stops. */
-      function placeDots() {
-        var g = hwGeom, k;
-        if (!g) { return; }
-        /* Every dot belongs to the update, so every dot is generated
-           inside the orange corridor itself: x stays within the corridor
-           length and y stays within the rank-scaled corridor height
-           (dispH), with the dot radius and a small pad kept inside the
-           stroke. At r = 1 the corridor is thinner than the dot spread
-           used before, so the usable half height floors at 0 and the dots
-           sit on the center line instead of escaping above or below. */
-        for (k = 0; k < dots.length; k++) {
-          var d = dots[k];
-          var rDot = parseFloat(d.el.getAttribute('r')) || 3.4;
-          var pad = rDot + 1;
-          var usableW = Math.max(0, g.cLen - 2 * pad);
-          var usableHalfH = Math.max(0, dispH / 2 - pad);
-          var x = g.cX + pad + d.p * usableW;
-          var y = g.centerY + d.j * usableHalfH;
-          d.el.setAttribute('cx', x.toFixed(1));
-          d.el.setAttribute('cy', y.toFixed(1));
-          d.el.setAttribute('opacity', Math.min(1, d.p * 10, (1 - d.p) * 10).toFixed(2));
-        }
-      }
-      function hwKick() {
-        if (!hwRunning) { hwRunning = true; lastT = 0; requestAnimationFrame(hwTick); }
-      }
-      function hwTick(t) {
-        var dt = Math.min(0.05, ((t - lastT) / 1000) || 0.016);
-        lastT = t;
-        dispH += (targetH - dispH) * Math.min(1, dt * 9);
-        if (Math.abs(targetH - dispH) < 0.3) dispH = targetH;
-        var g = hwGeom;
-        if (g) {
-          hwDyn.corridor.setAttribute('y', (g.centerY - dispH / 2).toFixed(1));
-          hwDyn.corridor.setAttribute('height', Math.max(0.5, dispH).toFixed(1));
-          hwDyn.tag.style.display = (targetR === 64 && dispH > targetH - 1.5) ? '' : 'none';
-          placeDots();
-        }
-        if (dispH !== targetH) {
-          requestAnimationFrame(hwTick);
-        } else {
-          hwRunning = false;
-        }
-      }
-
-      /* (sizeBadge removed: the param badge is now HTML below the diagram.) */
-
-      /* ---------------- wiring ---------------- */
-      var slider = document.getElementById('rankSlider');
-      var rankVal = document.getElementById('rankVal');
-      var statsEl = document.getElementById('rankStats');
-      var hwBadgeOut = document.getElementById('hwBadgeOut');
-      var playBtn = document.getElementById('rankPlay');
-      var playTimer = null;
-      // The curves show at rest (r = 8) and follow the slider.
-      var revealed = true;
-
-      function stopPlay() {
-        if (playTimer) { clearTimeout(playTimer); playTimer = null; }
-        playBtn.textContent = 'Play';
-        playBtn.classList.remove('playing');
-      }
-
-      playBtn.addEventListener('click', function() {
-                if (playTimer) { stopPlay(); return; }
-        if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-          revealed = true; slider.value = 6; update(); return;
-        }
-        /* Always start the sweep from r=1. */
-        revealed = true;
-        slider.value = 0;
-        update();
-        playBtn.textContent = 'Stop';
-        playBtn.classList.add('playing');
-        /* Standing widget-layout rule: the How-to caption sits below the
-           tool, so bring it into view when Play starts. */
-        playScrollEnsure(document.getElementById('rankDemo'));
-        /* Chained timeout: one rank tick every 2600ms, slow enough to read
-           the hallway, chart, and verdict at each stop. */
-        function rankSchedule(){
-          playTimer = setTimeout(function(){
-            var i = parseInt(slider.value, 10);
-            if (isNaN(i)) i = 0;
-            if (i >= 6) { stopPlay(); return; }
-            slider.value = i + 1;
-            update();
-            rankSchedule();
-          }, 2600);
-        }
-        rankSchedule();
-      });
-
-      function verdict(r) {
-        if (r <= 2) return 'Here rank 1 or 2 leaves even the easy task short; on GPT-3, LoRA found 1 or 2 enough.';
-                if (r === 4) return 'The easy task has levelled off. The hard task is still well short of full fine-tuning.';
-        if (r === 8) return 'The easy task sits next to full fine-tuning. The hard task still wants more rank.';
-        if (r === 64) return 'As many trained weights as a bottleneck adapter, still only a fraction of the dense matrix.';
-        var n = Math.round(Math.log(r / 4) / Math.LN2);
-        return 'The easy task stopped improving ' + (n === 2 ? 'two' : 'three') + ' settings ago; the hard task still gains accuracy.';
-      }
-
+      var widths = [8, 64, 256];
+      var heights = [14, 56, 120];
+      var verdicts = [
+        'Narrow and cheap, but the squeeze can underfit the task.',
+        'Room to learn at a small cost.',
+        'Roomier still, but it costs more to train and to serve.'
+      ];
+      var slider = document.getElementById('widthSlider');
+      var valEl = document.getElementById('widthVal');
+      var bar = document.getElementById('bwBar');
+      var statsEl = document.getElementById('widthStats');
       function update() {
         var i = parseInt(slider.value, 10);
         if (isNaN(i) || i < 0) i = 0;
-        if (i > 6) i = 6;
-        var r = ranks[i];
-        var perProj = 2 * r * D;
-        var total = L * 2 * perProj;
-        var share = 100 * total / MODEL;
-        rankVal.textContent = r;        var X = geom.X, Y = geom.Y;
-        dyn.selLine.setAttribute('x1', X(i));
-        dyn.selLine.setAttribute('x2', X(i));
-        dyn.selLine.setAttribute('y1', geom.MT);
-        dyn.selLine.setAttribute('y2', geom.MT + geom.PH);
-        dyn.ringE.setAttribute('cx', X(i));
-        dyn.ringE.setAttribute('cy', Y(easy[i]));
-        dyn.ringH.setAttribute('cx', X(i));
-        dyn.ringH.setAttribute('cy', Y(hard[i]));
-        targetR = r;
-        targetH = hwGeom.S * (Math.log(r) / Math.LN2 + 1) / 7;
-        hwKick();
-        var badgeStr = 'r = ' + r + ' · ' + fmt(perProj) + ' params';
-        hwBadgeOut.innerHTML = '<strong><var>\\(r = ' + r + '\\)</var></strong> &middot; ' + fmt(perProj) + ' params per projection';
-        if (window.siteMath) siteMath.typeset(hwBadgeOut);
-        drawRankReveal(revealed ? i : -1);
-        if (!revealed) {
-          statsEl.innerHTML =
-            'At <var>\\(r = 8\\)</var> the easy task sits next to full fine-tuning while the hard task still wants more rank.';
-          if (window.siteMath) siteMath.typeset(statsEl);
-          reserveRankStats();
-          return;
-        }
-        statsEl.innerHTML = rankStatsHtml(i);
-        reserveRankStats();
+        if (i > 2) i = 2;
+        var h = heights[i];
+        bar.setAttribute('height', h);
+        bar.setAttribute('y', 95 - h / 2);
+        valEl.textContent = widths[i];
+        statsEl.textContent = verdicts[i];
       }
-      function rankStatsHtml(i) {
-        return verdict(ranks[i]);
-      }
-      /* Scroll-stability (2026-10-09): the revealed stats grow as r sweeps
-         and the div grows with them, moving the page mid-Play. Reserve
-         the tallest variant's height. Follows the r3scroll reserve pattern. */
-      function reserveRankStats() {
-        var prev = statsEl.innerHTML, max = 0, i;
-        var rest = 'At <var>\\(r = 8\\)</var> the easy task sits next to full fine-tuning while the hard task still wants more rank.';
-        statsEl.innerHTML = rest;
-        max = Math.max(max, statsEl.getBoundingClientRect().height);
-        for (i = 0; i < ranks.length; i++) {
-          statsEl.innerHTML = rankStatsHtml(i);
-          max = Math.max(max, statsEl.getBoundingClientRect().height);
-        }
-        statsEl.innerHTML = prev;
-        statsEl.style.minHeight = Math.ceil(max) + 'px';
-      }
-      slider.addEventListener('input', function() { stopPlay(); revealed = true; update(); });
-      /* Reset: stop the sweep and put the slider back on r = 8, chart cleared. */
-      document.getElementById('rankReset').addEventListener('click', function() {
-        stopPlay();
-        slider.value = 3;
-        update();
-      });
-
-      var lastCW = 0, lastMode = '', rzT = null;
-      function checkResize() {
-        var cw = svg.clientWidth || 640;
-        var mode = cw < 520 ? 'm' : 'd';
-        if (mode !== lastMode || Math.abs(cw - lastCW) > 40) {
-          lastMode = mode;
-          lastCW = cw;
-          renderChart();
-          renderHallway();
-          update();
-          placeDots();
-        }
-      }
-      if (typeof window !== 'undefined' && window.addEventListener) {
-        window.addEventListener('resize', function() {
-          if (rzT) clearTimeout(rzT);
-          rzT = setTimeout(checkResize, 200);
-        });
-      }
-      lastCW = svg.clientWidth || 640;
-      lastMode = lastCW < 520 ? 'm' : 'd';
-      renderChart();
-      renderHallway();
+      slider.addEventListener('input', update);
       update();
-      placeDots();
-      hwKick();
     })();
-
     </script>
 
-    <p>A quarter of one percent of the model, and it usually lands within a point of full fine-tuning on classification-style tasks. </p>
 
-    <p>After the merge in the folding listing, <em>the model runs exactly as fast as the original;</em> bottleneck adapters cannot merge, because their nonlinearity blocks it, so their extra layers stay forever.</p>
-
-    <h2 id="compacter-cheaper-matrices-inside-the-adapter"><span class="secnum">3</span> Compacter (Kronecker-factored adapters)</h2>
+    <h2 id="compacter-cheaper-matrices-inside-the-adapter"><span class="secnum">3</span> Compacter: cheaper matrices inside the adapter</h2>
 
     <p>Adapters are already small. <strong>Compacter</strong> (Karimi Mahabadi et al. 2021) asks whether the adapter's own matrices can be cheaper. Compacter uses the <strong>Kronecker product</strong>: instead of storing a big dense matrix, store two small factors <var>\(A\)</var> and <var>\(B\)</var> (Compacter's own, not LoRA's) and let their product stand in for it.</p>
+    <p>The idea comes from a way of building big matrices from shared small pieces.</p>
 
     <p>In the Kronecker product <var>\(A \otimes B\)</var>, each element of <var>\(A\)</var> scales a whole copy of <var>\(B\)</var>.</p>
 
-    <figure id="fig-7" class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 352 254" style="max-width:460px" role="img" aria-label="Kronecker product: a 2 by 2 factor A times a 3 by 3 tile B gives a 6 by 6 matrix made of four copies of B, each copy scaled by one entry of A"><text class="mtd-pu" x="44.0" y="36.0" text-anchor="middle" style="font-size:19px;font-weight:700">A</text><rect class="mtd-kron-a" x="8" y="90" width="36" height="36"/><text class="mtd-pu" x="26.0" y="113.0" text-anchor="middle" style="font-size:15px;font-weight:600">a&#8321;&#8321;</text><rect class="mtd-kron-a" x="44" y="90" width="36" height="36"/><text class="mtd-pu" x="62.0" y="113.0" text-anchor="middle" style="font-size:15px;font-weight:600">a&#8321;&#8322;</text><rect class="mtd-kron-a" x="8" y="126" width="36" height="36"/><text class="mtd-pu" x="26.0" y="149.0" text-anchor="middle" style="font-size:15px;font-weight:600">a&#8322;&#8321;</text><rect class="mtd-kron-a" x="44" y="126" width="36" height="36"/><text class="mtd-pu" x="62.0" y="149.0" text-anchor="middle" style="font-size:15px;font-weight:600">a&#8322;&#8322;</text><text class="mtd-sub" x="44.0" y="186.0" text-anchor="middle" style="font-size:16px">2 × 2</text><text class="" x="96.0" y="134.0" text-anchor="middle" style="font-size:24px">⊗</text><text class="mtd-t2" x="140.0" y="36.0" text-anchor="middle" style="font-size:19px;font-weight:700">B</text><rect class="mtd-kron-on" x="116" y="102.0" width="16" height="16"/><rect class="mtd-kron-off" x="132" y="102.0" width="16" height="16"/><rect class="mtd-kron-on" x="148" y="102.0" width="16" height="16"/><rect class="mtd-kron-off" x="116" y="118.0" width="16" height="16"/><rect class="mtd-kron-on" x="132" y="118.0" width="16" height="16"/><rect class="mtd-kron-off" x="148" y="118.0" width="16" height="16"/><rect class="mtd-kron-on" x="116" y="134.0" width="16" height="16"/><rect class="mtd-kron-on" x="132" y="134.0" width="16" height="16"/><rect class="mtd-kron-off" x="148" y="134.0" width="16" height="16"/><text class="mtd-sub" x="140.0" y="186.0" text-anchor="middle" style="font-size:16px">3 × 3</text><text class="" x="186.0" y="134.0" text-anchor="middle" style="font-size:24px">=</text><text class="" x="276.0" y="30.0" text-anchor="middle" style="font-size:19px;font-weight:700">A ⊗ B</text><rect class="mtd-kron-on" x="210" y="66" width="22" height="22" style="opacity:1"/><rect class="mtd-kron-off" x="232" y="66" width="22" height="22"/><rect class="mtd-kron-on" x="254" y="66" width="22" height="22" style="opacity:1"/><rect class="mtd-kron-off" x="210" y="88" width="22" height="22"/><rect class="mtd-kron-on" x="232" y="88" width="22" height="22" style="opacity:1"/><rect class="mtd-kron-off" x="254" y="88" width="22" height="22"/><rect class="mtd-kron-on" x="210" y="110" width="22" height="22" style="opacity:1"/><rect class="mtd-kron-on" x="232" y="110" width="22" height="22" style="opacity:1"/><rect class="mtd-kron-off" x="254" y="110" width="22" height="22"/><rect class="mtd-kron-blk" x="210" y="66" width="66" height="66"/><text class="mtd-pu" x="243.0" y="58.0" text-anchor="middle" style="font-size:15px;font-weight:700">a&#8321;&#8321; B</text><rect class="mtd-kron-on" x="276" y="66" width="22" height="22" style="opacity:0.5"/><rect class="mtd-kron-off" x="298" y="66" width="22" height="22"/><rect class="mtd-kron-on" x="320" y="66" width="22" height="22" style="opacity:0.5"/><rect class="mtd-kron-off" x="276" y="88" width="22" height="22"/><rect class="mtd-kron-on" x="298" y="88" width="22" height="22" style="opacity:0.5"/><rect class="mtd-kron-off" x="320" y="88" width="22" height="22"/><rect class="mtd-kron-on" x="276" y="110" width="22" height="22" style="opacity:0.5"/><rect class="mtd-kron-on" x="298" y="110" width="22" height="22" style="opacity:0.5"/><rect class="mtd-kron-off" x="320" y="110" width="22" height="22"/><rect class="mtd-kron-blk" x="276" y="66" width="66" height="66"/><text class="mtd-pu" x="309.0" y="58.0" text-anchor="middle" style="font-size:15px;font-weight:700">a&#8321;&#8322; B</text><rect class="mtd-kron-on" x="210" y="132" width="22" height="22" style="opacity:0.25"/><rect class="mtd-kron-off" x="232" y="132" width="22" height="22"/><rect class="mtd-kron-on" x="254" y="132" width="22" height="22" style="opacity:0.25"/><rect class="mtd-kron-off" x="210" y="154" width="22" height="22"/><rect class="mtd-kron-on" x="232" y="154" width="22" height="22" style="opacity:0.25"/><rect class="mtd-kron-off" x="254" y="154" width="22" height="22"/><rect class="mtd-kron-on" x="210" y="176" width="22" height="22" style="opacity:0.25"/><rect class="mtd-kron-on" x="232" y="176" width="22" height="22" style="opacity:0.25"/><rect class="mtd-kron-off" x="254" y="176" width="22" height="22"/><rect class="mtd-kron-blk" x="210" y="132" width="66" height="66"/><text class="mtd-pu" x="243.0" y="218.0" text-anchor="middle" style="font-size:15px;font-weight:700">a&#8322;&#8321; B</text><rect class="mtd-kron-off" x="276" y="132" width="22" height="22"/><rect class="mtd-kron-off" x="298" y="132" width="22" height="22"/><rect class="mtd-kron-off" x="320" y="132" width="22" height="22"/><rect class="mtd-kron-off" x="276" y="154" width="22" height="22"/><rect class="mtd-kron-off" x="298" y="154" width="22" height="22"/><rect class="mtd-kron-off" x="320" y="154" width="22" height="22"/><rect class="mtd-kron-off" x="276" y="176" width="22" height="22"/><rect class="mtd-kron-off" x="298" y="176" width="22" height="22"/><rect class="mtd-kron-off" x="320" y="176" width="22" height="22"/><rect class="mtd-kron-blk" x="276" y="132" width="66" height="66"/><text class="mtd-pu" x="309.0" y="218.0" text-anchor="middle" style="font-size:15px;font-weight:700">a&#8322;&#8322; B</text><text class="mtd-sub" x="276.0" y="244.0" text-anchor="middle" style="font-size:16px">6 × 6</text></svg><figcaption class="caption"><span class="fignum">Figure 10.</span> A matrix built from only two small factors.</figcaption></figure>
+    <figure id="fig-7" class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 352 254" style="max-width:460px" role="img" aria-label="Kronecker product: a 2 by 2 factor A times a 3 by 3 tile B gives a 6 by 6 matrix made of four copies of B, each copy scaled by one entry of A"><text class="mtd-pu" x="44.0" y="36.0" text-anchor="middle" style="font-size:19px;font-weight:700">A</text><rect class="mtd-kron-a" x="8" y="90" width="36" height="36"/><text class="mtd-pu" x="26.0" y="113.0" text-anchor="middle" style="font-size:15px;font-weight:600">a&#8321;&#8321;</text><rect class="mtd-kron-a" x="44" y="90" width="36" height="36"/><text class="mtd-pu" x="62.0" y="113.0" text-anchor="middle" style="font-size:15px;font-weight:600">a&#8321;&#8322;</text><rect class="mtd-kron-a" x="8" y="126" width="36" height="36"/><text class="mtd-pu" x="26.0" y="149.0" text-anchor="middle" style="font-size:15px;font-weight:600">a&#8322;&#8321;</text><rect class="mtd-kron-a" x="44" y="126" width="36" height="36"/><text class="mtd-pu" x="62.0" y="149.0" text-anchor="middle" style="font-size:15px;font-weight:600">a&#8322;&#8322;</text><text class="mtd-sub" x="44.0" y="186.0" text-anchor="middle" style="font-size:16px">2 × 2</text><text class="" x="96.0" y="134.0" text-anchor="middle" style="font-size:24px">⊗</text><text class="mtd-t2" x="140.0" y="36.0" text-anchor="middle" style="font-size:19px;font-weight:700">B</text><rect class="mtd-kron-on" x="116" y="102.0" width="16" height="16"/><rect class="mtd-kron-off" x="132" y="102.0" width="16" height="16"/><rect class="mtd-kron-on" x="148" y="102.0" width="16" height="16"/><rect class="mtd-kron-off" x="116" y="118.0" width="16" height="16"/><rect class="mtd-kron-on" x="132" y="118.0" width="16" height="16"/><rect class="mtd-kron-off" x="148" y="118.0" width="16" height="16"/><rect class="mtd-kron-on" x="116" y="134.0" width="16" height="16"/><rect class="mtd-kron-on" x="132" y="134.0" width="16" height="16"/><rect class="mtd-kron-off" x="148" y="134.0" width="16" height="16"/><text class="mtd-sub" x="140.0" y="186.0" text-anchor="middle" style="font-size:16px">3 × 3</text><text class="" x="186.0" y="134.0" text-anchor="middle" style="font-size:24px">=</text><text class="" x="276.0" y="30.0" text-anchor="middle" style="font-size:19px;font-weight:700">A ⊗ B</text><rect class="mtd-kron-on" x="210" y="66" width="22" height="22" style="opacity:1"/><rect class="mtd-kron-off" x="232" y="66" width="22" height="22"/><rect class="mtd-kron-on" x="254" y="66" width="22" height="22" style="opacity:1"/><rect class="mtd-kron-off" x="210" y="88" width="22" height="22"/><rect class="mtd-kron-on" x="232" y="88" width="22" height="22" style="opacity:1"/><rect class="mtd-kron-off" x="254" y="88" width="22" height="22"/><rect class="mtd-kron-on" x="210" y="110" width="22" height="22" style="opacity:1"/><rect class="mtd-kron-on" x="232" y="110" width="22" height="22" style="opacity:1"/><rect class="mtd-kron-off" x="254" y="110" width="22" height="22"/><rect class="mtd-kron-blk" x="210" y="66" width="66" height="66"/><text class="mtd-pu" x="243.0" y="58.0" text-anchor="middle" style="font-size:15px;font-weight:700">a&#8321;&#8321; B</text><rect class="mtd-kron-on" x="276" y="66" width="22" height="22" style="opacity:0.5"/><rect class="mtd-kron-off" x="298" y="66" width="22" height="22"/><rect class="mtd-kron-on" x="320" y="66" width="22" height="22" style="opacity:0.5"/><rect class="mtd-kron-off" x="276" y="88" width="22" height="22"/><rect class="mtd-kron-on" x="298" y="88" width="22" height="22" style="opacity:0.5"/><rect class="mtd-kron-off" x="320" y="88" width="22" height="22"/><rect class="mtd-kron-on" x="276" y="110" width="22" height="22" style="opacity:0.5"/><rect class="mtd-kron-on" x="298" y="110" width="22" height="22" style="opacity:0.5"/><rect class="mtd-kron-off" x="320" y="110" width="22" height="22"/><rect class="mtd-kron-blk" x="276" y="66" width="66" height="66"/><text class="mtd-pu" x="309.0" y="58.0" text-anchor="middle" style="font-size:15px;font-weight:700">a&#8321;&#8322; B</text><rect class="mtd-kron-on" x="210" y="132" width="22" height="22" style="opacity:0.25"/><rect class="mtd-kron-off" x="232" y="132" width="22" height="22"/><rect class="mtd-kron-on" x="254" y="132" width="22" height="22" style="opacity:0.25"/><rect class="mtd-kron-off" x="210" y="154" width="22" height="22"/><rect class="mtd-kron-on" x="232" y="154" width="22" height="22" style="opacity:0.25"/><rect class="mtd-kron-off" x="254" y="154" width="22" height="22"/><rect class="mtd-kron-on" x="210" y="176" width="22" height="22" style="opacity:0.25"/><rect class="mtd-kron-on" x="232" y="176" width="22" height="22" style="opacity:0.25"/><rect class="mtd-kron-off" x="254" y="176" width="22" height="22"/><rect class="mtd-kron-blk" x="210" y="132" width="66" height="66"/><text class="mtd-pu" x="243.0" y="218.0" text-anchor="middle" style="font-size:15px;font-weight:700">a&#8322;&#8321; B</text><rect class="mtd-kron-off" x="276" y="132" width="22" height="22"/><rect class="mtd-kron-off" x="298" y="132" width="22" height="22"/><rect class="mtd-kron-off" x="320" y="132" width="22" height="22"/><rect class="mtd-kron-off" x="276" y="154" width="22" height="22"/><rect class="mtd-kron-off" x="298" y="154" width="22" height="22"/><rect class="mtd-kron-off" x="320" y="154" width="22" height="22"/><rect class="mtd-kron-off" x="276" y="176" width="22" height="22"/><rect class="mtd-kron-off" x="298" y="176" width="22" height="22"/><rect class="mtd-kron-off" x="320" y="176" width="22" height="22"/><rect class="mtd-kron-blk" x="276" y="132" width="66" height="66"/><text class="mtd-pu" x="309.0" y="218.0" text-anchor="middle" style="font-size:15px;font-weight:700">a&#8322;&#8322; B</text><text class="mtd-sub" x="276.0" y="244.0" text-anchor="middle" style="font-size:16px">6 × 6</text></svg><figcaption class="caption"><span class="fignum">Figure 7.</span> A matrix built from only two small factors. The shading is illustrative; the <var>\(a\)</var> entries carry no values here.</figcaption></figure>
 
     <p>One factor pair is enough to build a full adapter matrix:</p>
 <div class="eq-card">
@@ -1716,12 +1133,13 @@ for block in model.encoder.layer:
 <div class="eq-card">
 <div class="eq-what">Compacter's adapter weight: shared slow factors times per-layer fast factors.</div>
 <div class="eq-line eq-active">\(\displaystyle \htmlStyle{color:#2c3e50}{W} = \sum_{i=1}^{n} \htmlStyle{color:#b45309}{A_i} \otimes \htmlStyle{color:#2471a3}{B_i}\)</div>
-<div class="eq-why eq-active">The <span class="eqt" style="color:#b45309"><var>\(A_{i}\)</var></span> are shared "slow" weights, reused across layers; the <span class="eqt" style="color:#2471a3"><var>\(B_{i}\)</var></span> are per-layer "fast" weights; <var>\(\sum\)</var> adds the <var>\(n\)</var> products.</div>
+<div class="eq-why eq-active">The <span class="eqt" style="color:#b45309"><var>\(A_{i}\)</var></span> are shared "slow" weights, reused across layers, so one set serves every layer and changes slowly; the <span class="eqt" style="color:#2471a3"><var>\(B_{i}\)</var></span> are per-layer "fast" weights, free to adapt quickly to each layer; <var>\(\sum\)</var> adds the <var>\(n\)</var> products.</div>
 <div class="eq-line eq-active">\(\displaystyle \htmlStyle{color:#2471a3}{B_i} = \htmlStyle{color:#5d6d7e}{s_i} \htmlStyle{color:#5d6d7e}{t_i^{\mathsf{T}}}\)</div>
 <div class="eq-why eq-active">Each fast factor is rank one, built from a single pair of vectors <span class="eqt" style="color:#5d6d7e"><var>\(s_{i}\)</var></span> and <span class="eqt" style="color:#5d6d7e"><var>\(t_{i}\)</var></span>, where the superscript T, the transpose, lays <var>\(t_{i}\)</var> flat as a row.</div>
 </div>
 
     <p><em>Training only 0.047% of the model's parameters, it matches full fine-tuning on GLUE and beats it on SuperGLUE, GLUE's harder successor suite, and in low-resource settings,</em> where only a little task data is available.</p>
+    <p>Use Compacter when the parameter budget is tighter than a plain bottleneck adapter allows, for example when serving many tasks or when only a little task data is available.</p>
 
     <p>The listing uses one product with a full <var>\(B\)</var>; Compacter sums <var>\(n\)</var> of them and makes each <var>\(B\)</var> rank one. The big matrix is never built.</p>
 
@@ -1738,20 +1156,13 @@ for block in model.encoder.layer:
   <li><span class="cs-n">2</span>Multiplies by the two small factors and flattens back: the same result as the full Kronecker product.</li>
 </ol>
     
-    <figure id="fig-compacter-count" class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 214" style="max-width:480px" role="img" aria-label="Compacter adapter: just the factors, one shared A, one down B and one up B. The same-shaped dense Houlsby adapter holds the full dense matrix, so the Compacter holds far fewer weights"><text class="" x="20" y="22" text-anchor="start" style="font-size:15px;font-weight:700">dense Houlsby adapter, 768 to 64</text><rect class="" x="20" y="32" width="360" height="30" rx="3" style="fill:#7f8c8d;stroke:none"/><text class="" x="200" y="52" text-anchor="middle" style="font-size:15px;font-weight:700;fill:#fff">the full dense matrix</text><text class="mtd-pu" x="20" y="92" text-anchor="start" style="font-size:15px;font-weight:700">Compacter adapter, same shape</text><rect class="" x="20" y="102" width="5.859375" height="30" rx="2" style="fill:#7d3c98;stroke:none"/><text class="mtd-pu" x="36" y="123" text-anchor="start" style="font-size:15px;font-weight:700">just the factors</text><text class="" x="20" y="156" text-anchor="start" style="font-size:15px">one shared A, one down B</text><text class="" x="20" y="176" text-anchor="start" style="font-size:15px">and one up B</text><text class="mtd-pu" x="380" y="204" text-anchor="end" style="font-size:15px;font-weight:700">far fewer weights</text></svg><figcaption class="caption"><span class="fignum">Figure 11.</span> The same 768-to-64 module, weight matrices only.</figcaption></figure>
+    <figure id="fig-compacter-count" class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 214" style="max-width:480px" role="img" aria-label="Compacter adapter: just the factors, one shared A, one down B and one up B. The same-shaped dense Houlsby adapter holds the full dense matrix, so the Compacter holds far fewer weights"><text class="" x="20" y="22" text-anchor="start" style="font-size:15px;font-weight:700">dense Houlsby adapter, 768 to 64</text><rect class="" x="20" y="32" width="360" height="30" rx="3" style="fill:#7f8c8d;stroke:none"/><text class="" x="200" y="52" text-anchor="middle" style="font-size:15px;font-weight:700;fill:#fff">the full dense matrix</text><text class="mtd-pu" x="20" y="92" text-anchor="start" style="font-size:15px;font-weight:700">Compacter adapter, same shape</text><rect class="" x="20" y="102" width="360" height="30" rx="2" style="fill:#eef1f4;stroke:#7f8c8d;stroke-width:1px"/><rect class="" x="20" y="102" width="12" height="30" rx="2" style="fill:#7d3c98;stroke:none"/><text class="mtd-pu" x="36" y="123" text-anchor="start" style="font-size:15px;font-weight:700">just the factors</text><text class="" x="20" y="156" text-anchor="start" style="font-size:15px">one shared A, one down B</text><text class="" x="20" y="176" text-anchor="start" style="font-size:15px">and one up B</text><text class="mtd-pu" x="380" y="204" text-anchor="end" style="font-size:15px;font-weight:700">far fewer weights</text></svg><figcaption class="caption"><span class="fignum">Figure 8.</span> The same 768-to-64 module, weight matrices only.</figcaption></figure>
 
     <p>The cost is that the weight matrix is no longer fully free; it has to factor this way.</p>
 
-    <h2 id="what-happens-on-a-real-task"><span class="secnum">4</span> Results on sentiment classification</h2>
 
-    <p>SST-2 (the Stanford Sentiment Treebank: movie-review sentences labeled positive or negative) accuracy for RoBERTa-base, as reported in the LoRA paper's Table 2. BitFit trains only the bias terms; AdapterDrop (R&#252;ckl&#233; et al. 2021) is a bottleneck adapter that drops the adapters in the lowest layers. The full fine-tuning, BitFit and AdapterDrop numbers are ones LoRA took from prior work (<a href="#fig-sst2">Figure 12</a>).</p>
-
-    <figure id="fig-sst2" class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 262" style="max-width:480px" role="img" aria-label="SST-2 accuracy for RoBERTa-base from LoRA Table 2: full fine-tuning 125M parameters 94.8 percent, BitFit 0.1M 93.7, AdapterDrop 0.3M 94.2 plus or minus 0.1, AdapterDrop 0.9M 94.7 plus or minus 0.3, LoRA rank 8 on query and value 0.3M 95.1 plus or minus 0.2"><line class="mtd-sep" x1="176.0" y1="8" x2="176.0" y2="214"/><text class="mtd-sub" x="176.0" y="232" text-anchor="middle" style="font-size:15px">93%</text><line class="mtd-sep" x1="234.0" y1="8" x2="234.0" y2="214"/><text class="mtd-sub" x="234.0" y="232" text-anchor="middle" style="font-size:15px">94%</text><line class="mtd-sep" x1="292.0" y1="8" x2="292.0" y2="214"/><text class="mtd-sub" x="292.0" y="232" text-anchor="middle" style="font-size:15px">95%</text><text class="mtd-sub" x="248.5" y="254" text-anchor="middle" style="font-size:15px">SST-2 accuracy (axis starts at 93%)</text><text class="" x="8" y="26" text-anchor="start" style="font-size:15px;font-weight:700">Full fine-tuning</text><text class="mtd-sub" x="8" y="43" text-anchor="start" style="font-size:15px">125M trained</text><rect class="" x="176" y="18" width="104.39999999999986" height="24" rx="2" style="fill:#95a5a6;stroke:none"/><text class="" x="286.39999999999986" y="35" text-anchor="start" style="font-size:15px;font-weight:700">94.8</text><text class="" x="8" y="66" text-anchor="start" style="font-size:15px;font-weight:700">BitFit</text><text class="mtd-sub" x="8" y="83" text-anchor="start" style="font-size:15px">0.1M trained</text><rect class="" x="176" y="58" width="40.600000000000165" height="24" rx="2" style="fill:#95a5a6;stroke:none"/><text class="" x="222.60000000000016" y="75" text-anchor="start" style="font-size:15px;font-weight:700">93.7</text><text class="" x="8" y="106" text-anchor="start" style="font-size:15px;font-weight:700">AdapterDrop</text><text class="mtd-sub" x="8" y="123" text-anchor="start" style="font-size:15px">0.3M trained</text><rect class="" x="176" y="98" width="69.60000000000016" height="24" rx="2" style="fill:#95a5a6;stroke:none"/><line class="mtd-s mtd-cg" x1="239.8" y1="110" x2="251.4" y2="110" style="stroke-width:2px"/><text class="" x="257.39999999999986" y="115" text-anchor="start" style="font-size:15px;font-weight:700">94.2 ± 0.1</text><text class="" x="8" y="146" text-anchor="start" style="font-size:15px;font-weight:700">AdapterDrop</text><text class="mtd-sub" x="8" y="163" text-anchor="start" style="font-size:15px">0.9M trained</text><rect class="" x="176" y="138" width="98.60000000000014" height="24" rx="2" style="fill:#95a5a6;stroke:none"/><line class="mtd-s mtd-cg" x1="257.2" y1="150" x2="292.0" y2="150" style="stroke-width:2px"/><text class="" x="298.0" y="155" text-anchor="start" style="font-size:15px;font-weight:700">94.7 ± 0.3</text><text class="mtd-t2" x="8" y="186" text-anchor="start" style="font-size:15px;font-weight:700">LoRA, r = 8, q and v</text><text class="mtd-sub" x="8" y="203" text-anchor="start" style="font-size:15px">0.3M trained</text><rect class="" x="176" y="178" width="121.79999999999967" height="24" rx="2" style="fill:#ca6f1e;stroke:none"/><line class="mtd-s mtd-cg" x1="286.2" y1="190" x2="309.4" y2="190" style="stroke-width:2px"/><text class="mtd-t2" x="315.39999999999986" y="195" text-anchor="start" style="font-size:15px;font-weight:700">95.1 ± 0.2</text></svg><figcaption class="caption"><span class="fignum">Figure 12.</span> LoRA Table 2; <var>\(\pm\)</var> is the spread over random seeds.</figcaption></figure>
-
-    <p>LoRA trains 0.24 percent of the parameters and matches full fine-tuning on this task.</p>
-
-    <h2 id="other-ways-to-shrink-the-update"><span class="secnum">5</span> Other parameter-efficient fine-tuning methods</h2>
-    <p>LoRA and Compacter are not the only way to keep the update small.</p>
+    <h2 id="other-ways-to-shrink-the-update"><span class="secnum">4</span> Other parameter-efficient fine-tuning methods</h2>
+    <p>Bottleneck adapters and Compacter are not the only way to keep the update small.</p>
     <div class="table-scroll"><table class="datatable">
       <thead><tr><th>Method</th><th>What trains</th><th>When it helps</th></tr></thead>
       <tbody>
@@ -1760,56 +1171,53 @@ for block in model.encoder.layer:
         <tr><td>BitFit (Ben Zaken et al. 2022)</td><td>Only the bias terms</td><td>The smallest budget: 93.7% on SST-2 with 0.1M parameters in LoRA Table 2</td></tr>
       </tbody>
     </table></div>
+    <p><strong>AdapterDrop</strong> (R&#252;ckl&#233; et al. 2021) is a bottleneck adapter that drops the adapters in the lowest layers; it trains the rest and helps when serving speed matters.</p>
+    <p><a href="lora.html">LoRA</a> is the contrast: instead of adding a module, it changes the weight itself with a low-rank update that folds away at serving.</p>
 
-        <h2 id="in-practice"><span class="secnum">6</span> LoRA in practice</h2>
-    <p>A LoRA fine-tune is an ordinary training loop on a model whose chosen projections were swapped for <code>LoRALinear</code>, with an optimizer that holds only <var>\(A\)</var>, <var>\(B\)</var> and the task head. Microsoft's <a href="https://github.com/microsoft/LoRA">loralib</a> packages the same steps: build the layer with <code>lora.Linear</code> (shown for one projection), freeze everything else in <code>model</code>, and save only the LoRA weights.</p>
-    <pre class="cs" data-cs="4-6,7-9,11-13"><code class="language-python">import torch
-import loralib as lora
+    <h2 id="adapters-in-practice"><span class="secnum">5</span> Adapters in practice</h2>
 
-# replaces nn.Linear
-q_proj = lora.Linear(768, 768, r=8)
-lora.mark_only_lora_as_trainable(model)
+    <p>Adapters plug in after the attention block and after the feed-forward block, two per layer, in every layer of <a href="transformer-block.html">the Transformer block</a>. Training runs the usual loop over the new task's data, with the optimizer holding only the adapter parameters.</p>
+
+    <p>Training is the usual loop with one filter, so the optimizer keeps no state for the backbone. The learning rate is a placeholder.</p>
+
+<pre class="cs" data-cs="1-3,4-6"><code class="language-python">for name, param in model.named_parameters():
+    # all else frozen
+    param.requires_grad = "adapter" in name
 ps = model.parameters()
 trainable = [p for p in ps if p.requires_grad]
-optimizer = torch.optim.AdamW(trainable, lr=1e-4)
-# ... the usual training loop ...
-# A and B only
-sd = lora.lora_state_dict(model)
-torch.save(sd, "lora.pt")</code></pre>
+optimizer = torch.optim.AdamW(trainable, lr=1e-4)</code></pre>
 <ol class="cs-notes">
-  <li><span class="cs-n">1</span>loralib layer with rank 8, then freeze everything except the LoRA factors.</li>
-  <li><span class="cs-n">2</span>Optimizer over the LoRA factors only.</li>
-  <li><span class="cs-n">3</span>Saves only <var>\(A\)</var> and <var>\(B\)</var>.</li>
+  <li><span class="cs-n">1</span>Freezes every parameter whose name lacks "adapter".</li>
+  <li><span class="cs-n">2</span>Gives the optimizer only the trainable adapter parameters.</li>
 </ol>
+
+    <p>The paper also trains per-task layer-normalization parameters and the classification head (the paper, section 2), so the listing above is a simplified freeze filter showing the adapter-only core, not the paper's full training setup.</p>
+
+    <p>A step costs a full forward and backward pass through the frozen backbone, with gradients and Adam state only for the trained parameters (adapters, layer norms, head). At serving time the extra layers stay in every forward pass, so serving is slower than the frozen model alone.</p>
+
+    <p>The bottleneck sizes the paper uses per task are listed in <a href="#the-bottleneck-adapter">section 2</a>. For an implementation, the adapters library is <a href="https://docs.adapterhub.ml">AdapterHub</a>.</p>
+
+    <h2 id="what-breaks-and-what-to-watch"><span class="secnum">6</span> What breaks and what to watch</h2>
+
     <ul>
-      <li>A step still runs the full forward and backward pass (<a href="#fig-train-serve">Figure 2</a>), so it costs most of a full fine-tuning step; the big saving is memory: no gradients or Adam state for the frozen weights. On GPT-3 175B the <a href="https://arxiv.org/abs/2106.09685">LoRA paper</a> reports 10,000 times fewer trainable parameters and 3 times less GPU memory than fine-tuning with Adam.</li>
-      <li>The loralib examples adapt only the query and value projections; on RoBERTa-base that is 0.8M trainable parameters against 125M for full fine-tuning (loralib README): <a href="#fig-lora-count">Figure 8</a>'s small trained share plus the classifier head.</li>
-      <li>A LoRA checkpoint holds only <var>\(A\)</var> and <var>\(B\)</var>, so load the pretrained weights first and then the LoRA file, both with <code>strict=False</code>.</li>
-      <li>In loralib, <code>model.eval()</code> merges <var>\(BA\)</var> into <var>\(W\)</var> and <code>model.train()</code> splits it out again, so evaluation in the middle of training is safe.</li>
-      <li>A fused <code>qkv</code> projection needs <code>lora.MergedLinear</code> with <code>enable_lora</code>, or each part gets one shared update instead of its own.</li>
+      <li><strong>Unmerged adapters cost latency.</strong> Cause: the nonlinearity blocks merging. Symptom: two extra matrix multiplications per block per token, slower serving. Fix: accept it for small models, or use a mergeable method, <a href="lora.html">LoRA and QLoRA</a>.</li>
+      <li><strong>Full fine-tuning still wins sometimes on big datasets.</strong> Cause: with enough data the full model can use all of its capacity while the adapter bottleneck caps what it can learn. Symptom: adapter accuracy plateaus below full fine-tuning as data grows. Fix: use full fine-tuning when data and compute allow; adapters shine when data or compute is scarce.</li>
+      <li><strong>The adapter can still overfit a small dataset.</strong> Cause: the frozen backbone is safe, the adapter is not. Symptom: training accuracy up, held-out accuracy down. Fix: validate, narrow the bottleneck.</li>
     </ul>
 
-    <h2 id="caveats"><span class="secnum">7</span> Pitfalls</h2>
+    <p>Tips: bottleneck width is the main dial, wider adds room to learn and costs more, narrower is cheaper and can underfit; validate like always.</p>
 
-    <ul>
-      <li>Unmerged adapters cost latency. An unmerged adapter adds two matrix multiplications per block for every token (one unit piece of the input sequence) at serving time.</li>
-      <li>On big datasets, full fine-tuning still wins sometimes. Adapters shine when data or compute is scarce, not when both are plentiful.</li>
-      <li>Adapt query and value first. At a fixed parameter budget, LoRA on the query and value projections together did best (the LoRA paper, section 7.1).</li>
-      <li>Soft prompts need a big model. Prompt tuning trails full fine-tuning on base-size models and closes the gap only as models exceed billions of parameters (the prompt tuning paper).</li>
-      <li>Frozen does not mean forget-proof. The backbone is safe, but the adapter can still overfit a small dataset. Validate like always.</li>
-    </ul>
+    <p>What if the update itself could fold away, so serving costs nothing extra? That is <a href="lora.html">LoRA</a>, taught on the LoRA and QLoRA page.</p>
 
-    <h2 id="what-is-next"><span class="secnum">8</span> Combining adapters with quantization</h2>
-    <p>
-      Adapters shrink what is trained; <a href="quantization.html">Quantization</a>, storing each weight with fewer bits, shrinks the frozen rest that still sits in memory. QLoRA (Dettmers et al. 2023) combines the two: it trains LoRA adapters through a frozen base quantized to 4 bits, enough to fine-tune a 65B-parameter model on one 48 GB GPU. The attention projections LoRA wraps are taught in <a href="transformers.html">Attention</a>.
-    </p>
-
-    <h2 id="references"><span class="secnum">9</span> References</h2>
+    <h2 id="references"><span class="secnum">7</span> References</h2>
     <div class="paper-card">
       <p><span class="pc-authors">Houlsby et al.</span> <span class="pc-title">Parameter-Efficient Transfer Learning for NLP.</span> <span class="pc-venue">ICML 2019.</span> <a href="https://arxiv.org/abs/1902.00751">arXiv:1902.00751</a></p>
     </div>
     <div class="paper-card">
-      <p><span class="pc-authors">Hu et al.</span> <span class="pc-title">LoRA: Low-Rank Adaptation of Large Language Models.</span> <span class="pc-venue">ICLR 2022.</span> <a href="https://arxiv.org/abs/2106.09685">arXiv:2106.09685</a></p>
+      <p><span class="pc-authors">Karimi Mahabadi et al.</span> <span class="pc-title">Compacter: Efficient Low-Rank Hypercomplex Adapter Layers.</span> <span class="pc-venue">NeurIPS 2021.</span> <a href="https://arxiv.org/abs/2106.04647">arXiv:2106.04647</a></p>
+    </div>
+    <div class="paper-card">
+      <p><span class="pc-authors">R&#252;ckl&#233; et al.</span> <span class="pc-title">AdapterDrop: On the Efficiency of Adapters in Transformers.</span> <span class="pc-venue">EMNLP 2021.</span> arXiv:2010.11918</p>
     </div>
     <div class="paper-card">
       <p><span class="pc-authors">Lester et al.</span> <span class="pc-title">The Power of Scale for Parameter-Efficient Prompt Tuning.</span> <span class="pc-venue">EMNLP 2021.</span> arXiv:2104.08691</p>
@@ -1819,15 +1227,6 @@ torch.save(sd, "lora.pt")</code></pre>
     </div>
     <div class="paper-card">
       <p><span class="pc-authors">Ben Zaken et al.</span> <span class="pc-title">BitFit: Simple Parameter-efficient Fine-tuning for Transformer-based Masked Language-models.</span> <span class="pc-venue">ACL 2022 (arXiv 2021).</span> arXiv:2106.10199</p>
-    </div>
-    <div class="paper-card">
-      <p><span class="pc-authors">R&#252;ckl&#233; et al.</span> <span class="pc-title">AdapterDrop: On the Efficiency of Adapters in Transformers.</span> <span class="pc-venue">EMNLP 2021.</span> arXiv:2010.11918</p>
-    </div>
-    <div class="paper-card">
-      <p><span class="pc-authors">Karimi Mahabadi et al.</span> <span class="pc-title">Compacter: Efficient Low-Rank Hypercomplex Adapter Layers.</span> <span class="pc-venue">NeurIPS 2021.</span> <a href="https://arxiv.org/abs/2106.04647">arXiv:2106.04647</a></p>
-    </div>
-    <div class="paper-card">
-      <p><span class="pc-authors">Dettmers et al.</span> <span class="pc-title">QLoRA: Efficient Finetuning of Quantized LLMs.</span> <span class="pc-venue">2023.</span> <a href="https://arxiv.org/abs/2305.14314">arXiv:2305.14314</a></p>
     </div>
 
             <script>

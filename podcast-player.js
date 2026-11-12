@@ -30,7 +30,7 @@
      episode ingests. Do not edit the URLs here; a link that fails its check
      is reported, never swapped. */
   var NOTEBOOKLM = {
-    "rl.html": "https://notebook.google.com/notebook/9ab17498-7fa8-4c4f-b967-2984dc5c3b1b",
+    "rl.html": "https://notebook.google.com/notebook/0628ed91-5235-44b8-84bf-60b6d00fbc45",
     "rl-methods.html": "https://notebook.google.com/notebook/2950992b-0039-4831-9335-ae6812b7ef42",
     "q-learning.html": "https://notebook.google.com/notebook/131bfc47-97bf-408a-b48a-9650b3737fea",
     "rl-policy-gradients.html": "https://notebooklm.google.com/notebook/abe8dd72-cf5a-48c6-82be-db18a27b9f52",
@@ -42,6 +42,7 @@
     "dqn.html": "https://notebook.google.com/notebook/13682d06-d5e6-4fa0-b1dd-64753c16add0",
     "ddpg.html": "https://notebook.google.com/notebook/c823d8d8-34d9-45e6-ad05-2da16eb89022",
     "ddpg-training.html": "https://notebook.google.com/notebook/6ed434ad-6b48-4113-9c4a-b7815e8c03b3",
+    "td3.html": "https://notebook.google.com/notebook/6161bb71-6f03-4a84-986b-025156770282",
     "multi-agent-rl.html": "https://notebook.google.com/notebook/5bc20c6d-4848-4a73-ac05-77a145075b2a",
     "rl-alignment.html": "https://notebook.google.com/notebook/6d73606d-77fb-4188-8e1b-9004fbedb30f"
   };

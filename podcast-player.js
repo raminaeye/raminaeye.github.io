@@ -33,7 +33,8 @@
     "rl-methods.html": "https://notebook.google.com/notebook/2950992b-0039-4831-9335-ae6812b7ef42",
     "rl-policy-gradients.html": "https://notebooklm.google.com/notebook/abe8dd72-cf5a-48c6-82be-db18a27b9f52",
     "rl-continuous-actions.html": "https://notebook.google.com/notebook/93df9d4f-f0a2-4747-8e15-245d5a0d5609",
-    "rl-model-based.html": "https://notebook.google.com/notebook/cb0cc767-392f-4ffe-8e60-c7fc278142d0"
+    "rl-model-based.html": "https://notebook.google.com/notebook/cb0cc767-392f-4ffe-8e60-c7fc278142d0",
+    "dqn.html": "https://notebook.google.com/notebook/13682d06-d5e6-4fa0-b1dd-64753c16add0"
   };
   /* NOTEBOOKLM-END */
 

@@ -22,6 +22,17 @@
   };
   /* EPISODES-END */
 
+  /* NOTEBOOKLM-BEGIN: permanent NotebookLM Audio Overview links, one per
+     tutorial page. Ramin's order 2026-11-11: once a link is at the top of a
+     tutorial page it stays there, never removed, replaced or changed.
+     ingest.py replaces only the EPISODES block above, so this block survives
+     episode ingests. Do not edit the URLs here; a link that fails its check
+     is reported, never swapped. */
+  var NOTEBOOKLM = {
+    "rl.html": "https://notebook.google.com/notebook/a81e76b4-39b6-4ea1-80b4-d4f89d1e7ed0"
+  };
+  /* NOTEBOOKLM-END */
+
   var SELF = document.currentScript;
   var BASE = (SELF && SELF.src) || document.baseURI;
 
@@ -61,6 +72,7 @@
     '.pc-btn svg{width:.8em;height:.8em;flex:none}' +
     '.pc-row audio{width:100%;max-width:560px;height:44px}' +
     '.pc-msg{color:#333}' +
+    '.pc-nb{color:#1f618d}' +
     '@media print{.pc-row{display:none}}';
 
   function svgPlay() {
@@ -97,14 +109,15 @@
     if (document.querySelector('.pc-row')) return;
     var page = pageName(location.pathname);
     var ep = page && EPISODES[page];
-    if (!ep || !ep.src) return;
+    var nb = page && NOTEBOOKLM[page];
+    if ((!ep || !ep.src) && !nb) return;
     var h1 = document.querySelector('h1');
     if (!h1) return;
     var title = (h1.textContent || '').replace(/\s+/g, ' ').trim();
-    var src;
-    try { src = new URL(ep.src, BASE).href; } catch (e) { return; }
+    var src = null;
+    if (ep && ep.src) { try { src = new URL(ep.src, BASE).href; } catch (e) { return; } }
     var key = 'pc:' + page;
-    var ver = String(ep.src);
+    var ver = ep ? String(ep.src) : '';
 
     var st = document.createElement('style');
     st.textContent = CSS;
@@ -119,16 +132,40 @@
     document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden' && current) current(); });
     window.addEventListener('pagehide', function () { if (current) current(); });
 
+    /* Permanent NotebookLM link for this page, if one exists. Ramin's order
+       2026-11-11: once the link is at the top of a tutorial page it stays
+       there, never removed, replaced or changed. */
+    function nbLink() {
+      if (!nb) return null;
+      var w = document.createElement('span');
+      var l = document.createElement('a');
+      l.href = nb;
+      l.target = '_blank';
+      l.rel = 'noopener';
+      l.className = 'pc-nb';
+      l.textContent = 'Listen on NotebookLM';
+      w.appendChild(l);
+      var note = document.createElement('span');
+      note.className = 'pc-msg';
+      note.textContent = ' Opens in NotebookLM, Google sign-in required.';
+      w.appendChild(note);
+      return w;
+    }
+
     function rest() {
       row.textContent = '';
-      var saved = load(key);
-      var t = saved && saved.v === ver && typeof saved.t === 'number' && isFinite(saved.t) ? saved.t : 0;
-      var pos = t > 5 && (!ep.secs || t < ep.secs - 5) ? t : 0;
-      var label = pos ? 'Resume podcast (' + fmt(pos) + ' of ' + mins(ep.secs) + ')'
-                      : 'Listen to the podcast (' + mins(ep.secs) + ')';
-      var b = button(label, true);
-      b.addEventListener('click', function () { open(pos); });
-      row.appendChild(b);
+      if (ep && ep.src) {
+        var saved = load(key);
+        var t = saved && saved.v === ver && typeof saved.t === 'number' && isFinite(saved.t) ? saved.t : 0;
+        var pos = t > 5 && (!ep.secs || t < ep.secs - 5) ? t : 0;
+        var label = pos ? 'Resume podcast (' + fmt(pos) + ' of ' + mins(ep.secs) + ')'
+                        : 'Listen to the podcast (' + mins(ep.secs) + ')';
+        var b = button(label, true);
+        b.addEventListener('click', function () { open(pos); });
+        row.appendChild(b);
+      }
+      var n = nbLink();
+      if (n) row.appendChild(n);
     }
 
     function fail(pos) {
@@ -147,6 +184,8 @@
       });
       row.appendChild(m);
       row.appendChild(again);
+      var n = nbLink();
+      if (n) row.appendChild(n);
       setTimeout(function () { m.textContent = 'The podcast could not load.'; again.focus(); }, 50);
     }
 
@@ -181,6 +220,8 @@
       current = keep;
       au.src = src;
       row.appendChild(au);
+      var n = nbLink();
+      if (n) row.appendChild(n);
       if ('mediaSession' in navigator && window.MediaMetadata) {
         try { navigator.mediaSession.metadata = new MediaMetadata({ title: title, artist: "Ramin's tutorials" }); } catch (e) { /* ignore */ }
       }

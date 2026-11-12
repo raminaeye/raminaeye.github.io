@@ -16,7 +16,8 @@
     ["gaussian.html", "Gaussian", "The Gaussian Distribution", "Math Foundations"],
     ["eigen-svd.html", "Eigenvectors", "Eigenvalues and Eigenvectors", "Math Foundations"],
     ["svd.html", "SVD", "Singular Value Decomposition (SVD)", "Math Foundations"],
-    ["likelihood-em.html", "Likelihood and EM", "Maximum Likelihood and EM", "Classical Machine Learning"],
+    ["likelihood-em.html", "Maximum Likelihood", "Maximum Likelihood Estimation", "Classical Machine Learning"],
+    ["em-algorithm.html", "EM Algorithm", "The EM Algorithm", "Classical Machine Learning"],
     ["regression.html", "Regression", "Linear Regression", "Classical Machine Learning"],
     ["logistic.html", "Logistic Regression", "Logistic Regression", "Classical Machine Learning"],
     ["mlp.html", "MLPs", "Multilayer Perceptrons (MLP)", "Classical Machine Learning"],
@@ -194,7 +195,7 @@
     "gaussian.html": "Gaussian",
     "eigen-svd.html": "Eigenvectors",
     "svd.html": "SVD",
-    "likelihood-em.html": "Likelihood and EM",
+    "likelihood-em.html": "Maximum Likelihood",
     "regression.html": "Regression",
     "logistic.html": "Logistic Regression",
     "mlp.html": "MLPs",
@@ -360,7 +361,8 @@
     "dpo.html": "DPO",
     "grpo.html": "GRPO",
     "darts.html": "DARTS",
-    "deepseek-r1.html": "DeepSeek-R1"
+    "deepseek-r1.html": "DeepSeek-R1",
+    "em-algorithm.html": "EM Algorithm"
   };
   /* TITLES-END */
 

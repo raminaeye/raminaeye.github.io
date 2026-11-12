@@ -111,6 +111,7 @@
     ["constitutional-ai.html", "Constitutional AI", "Constitutional AI: Critique, Revise and AI Feedback", "Reinforcement Learning"],
     ["rlaif.html", "RLAIF", "RLAIF: AI Feedback in Place of Human Labels", "Reinforcement Learning"],
     ["dpo.html", "DPO", "Direct Preference Optimization (DPO)", "Reinforcement Learning"],
+    ["grpo.html", "GRPO", "Group Relative Policy Optimization (GRPO)", "Reinforcement Learning"],
     ["transformers.html", "Attention", "Attention", "Transformers"],
     ["transformer-position-masking.html", "Positional Encoding", "Positional Encoding: Sinusoidal, Learned and ALiBi", "Transformers"],
     ["rope.html", "RoPE", "Rotary Position Embedding (RoPE)", "Transformers"],
@@ -155,7 +156,8 @@
     ["normalization-quantization.html", "Normalization and Quantization", "Normalization and Quantization", "Model Efficiency"],
     ["quantization-debugging.html", "Debugging", "Debugging a Quantized Model", "Model Efficiency"],
     ["nas.html", "NAS", "Neural Architecture Search Basics", "Model Efficiency"],
-    ["nas-one-shot.html", "One-Shot NAS", "One-Shot NAS: Weight Sharing and DARTS", "Model Efficiency"],
+    ["nas-one-shot.html", "One-Shot NAS", "One-Shot NAS: Weight-Sharing Supernets", "Model Efficiency"],
+    ["darts.html", "DARTS", "DARTS: Differentiable Architecture Search", "Model Efficiency"],
     ["kd.html", "Distillation", "Knowledge Distillation", "Model Efficiency"],
     ["prune.html", "Pruning", "Pruning", "Model Efficiency"],
     ["audio-signals.html", "Audio Basics", "Audio & Signals Basics", "Audio & Signals"],
@@ -354,7 +356,9 @@
     "rlhf.html": "RLHF",
     "constitutional-ai.html": "Constitutional AI",
     "rlaif.html": "RLAIF",
-    "dpo.html": "DPO"
+    "dpo.html": "DPO",
+    "grpo.html": "GRPO",
+    "darts.html": "DARTS"
   };
   /* TITLES-END */
 

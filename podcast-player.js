@@ -29,7 +29,9 @@
      episode ingests. Do not edit the URLs here; a link that fails its check
      is reported, never swapped. */
   var NOTEBOOKLM = {
-    "rl.html": "https://notebook.google.com/notebook/a81e76b4-39b6-4ea1-80b4-d4f89d1e7ed0"
+    "rl.html": "https://notebook.google.com/notebook/a81e76b4-39b6-4ea1-80b4-d4f89d1e7ed0",
+    "rl-methods.html": "https://notebook.google.com/notebook/2950992b-0039-4831-9335-ae6812b7ef42",
+    "rl-policy-gradients.html": "https://notebooklm.google.com/notebook/abe8dd72-cf5a-48c6-82be-db18a27b9f52"
   };
   /* NOTEBOOKLM-END */
 

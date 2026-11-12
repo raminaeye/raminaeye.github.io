@@ -34,7 +34,8 @@
     "rl-policy-gradients.html": "https://notebooklm.google.com/notebook/abe8dd72-cf5a-48c6-82be-db18a27b9f52",
     "rl-continuous-actions.html": "https://notebook.google.com/notebook/93df9d4f-f0a2-4747-8e15-245d5a0d5609",
     "rl-model-based.html": "https://notebook.google.com/notebook/cb0cc767-392f-4ffe-8e60-c7fc278142d0",
-    "dqn.html": "https://notebook.google.com/notebook/13682d06-d5e6-4fa0-b1dd-64753c16add0"
+    "dqn.html": "https://notebook.google.com/notebook/13682d06-d5e6-4fa0-b1dd-64753c16add0",
+    "ddpg.html": "https://notebook.google.com/notebook/c823d8d8-34d9-45e6-ad05-2da16eb89022"
   };
   /* NOTEBOOKLM-END */
 

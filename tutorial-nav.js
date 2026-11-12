@@ -16,6 +16,7 @@
     ["gaussian.html", "Gaussian", "The Gaussian Distribution", "Math Foundations"],
     ["eigen-svd.html", "Eigenvectors", "Eigenvalues and Eigenvectors", "Math Foundations"],
     ["svd.html", "SVD", "Singular Value Decomposition (SVD)", "Math Foundations"],
+    ["likelihood-em.html", "Likelihood and EM", "Maximum Likelihood and EM", "Classical Machine Learning"],
     ["regression.html", "Regression", "Linear Regression", "Classical Machine Learning"],
     ["logistic.html", "Logistic Regression", "Logistic Regression", "Classical Machine Learning"],
     ["mlp.html", "MLPs", "Multilayer Perceptrons (MLP)", "Classical Machine Learning"],
@@ -27,7 +28,6 @@
     ["knn.html", "k-NN", "k-Nearest Neighbors (k-NN)", "Classical Machine Learning"],
     ["naive-bayes.html", "Naive Bayes", "Naive Bayes", "Classical Machine Learning"],
     ["kmeans.html", "k-Means", "k-Means Clustering", "Classical Machine Learning"],
-    ["likelihood-em.html", "Likelihood and EM", "Maximum Likelihood and EM", "Classical Machine Learning"],
     ["gmm.html", "GMMs", "Gaussian Mixture Models (GMM)", "Classical Machine Learning"],
     ["hmm.html", "HMMs", "Hidden Markov Models (HMM)", "Classical Machine Learning"],
     ["pca.html", "PCA", "Principal Component Analysis (PCA)", "Classical Machine Learning"],
@@ -112,6 +112,7 @@
     ["rlaif.html", "RLAIF", "RLAIF: AI Feedback in Place of Human Labels", "Reinforcement Learning"],
     ["dpo.html", "DPO", "Direct Preference Optimization (DPO)", "Reinforcement Learning"],
     ["grpo.html", "GRPO", "Group Relative Policy Optimization (GRPO)", "Reinforcement Learning"],
+    ["deepseek-r1.html", "DeepSeek-R1", "DeepSeek-R1: Reasoning from Checkable Rewards", "Reinforcement Learning"],
     ["transformers.html", "Attention", "Attention", "Transformers"],
     ["transformer-position-masking.html", "Positional Encoding", "Positional Encoding: Sinusoidal, Learned and ALiBi", "Transformers"],
     ["rope.html", "RoPE", "Rotary Position Embedding (RoPE)", "Transformers"],
@@ -193,6 +194,7 @@
     "gaussian.html": "Gaussian",
     "eigen-svd.html": "Eigenvectors",
     "svd.html": "SVD",
+    "likelihood-em.html": "Likelihood and EM",
     "regression.html": "Regression",
     "logistic.html": "Logistic Regression",
     "mlp.html": "MLPs",
@@ -204,7 +206,6 @@
     "knn.html": "k-NN",
     "naive-bayes.html": "Naive Bayes",
     "kmeans.html": "k-Means",
-    "likelihood-em.html": "Likelihood and EM",
     "gmm.html": "GMMs",
     "hmm.html": "HMMs",
     "pca.html": "PCA",
@@ -358,7 +359,8 @@
     "rlaif.html": "RLAIF",
     "dpo.html": "DPO",
     "grpo.html": "GRPO",
-    "darts.html": "DARTS"
+    "darts.html": "DARTS",
+    "deepseek-r1.html": "DeepSeek-R1"
   };
   /* TITLES-END */
 

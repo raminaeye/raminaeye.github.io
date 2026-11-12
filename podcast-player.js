@@ -16,6 +16,7 @@
     "mlp.html": {"src": "podcasts/mlp.mp3?v=0c3ea04f", "secs": 676},
     "probability.html": {"src": "podcasts/probability.mp3?v=8d890cce", "secs": 894},
     "regression.html": {"src": "podcasts/regression.mp3?v=304c9f3c", "secs": 723},
+    "rl-methods.html": {"src": "podcasts/rl-methods.mp3?v=cd6e6ccc", "secs": 906},
     "rl.html": {"src": "podcasts/rl.mp3?v=a30eec77", "secs": 851},
     "svm.html": {"src": "podcasts/svm.mp3?v=9445c87c", "secs": 787},
     "trees.html": {"src": "podcasts/trees.mp3?v=234e8a77", "secs": 687}
@@ -35,7 +36,9 @@
     "rl-continuous-actions.html": "https://notebook.google.com/notebook/93df9d4f-f0a2-4747-8e15-245d5a0d5609",
     "rl-model-based.html": "https://notebook.google.com/notebook/cb0cc767-392f-4ffe-8e60-c7fc278142d0",
     "dqn.html": "https://notebook.google.com/notebook/13682d06-d5e6-4fa0-b1dd-64753c16add0",
-    "ddpg.html": "https://notebook.google.com/notebook/c823d8d8-34d9-45e6-ad05-2da16eb89022"
+    "ddpg.html": "https://notebook.google.com/notebook/c823d8d8-34d9-45e6-ad05-2da16eb89022",
+    "ddpg-training.html": "https://notebook.google.com/notebook/6ed434ad-6b48-4113-9c4a-b7815e8c03b3",
+    "multi-agent-rl.html": "https://notebook.google.com/notebook/5bc20c6d-4848-4a73-ac05-77a145075b2a"
   };
   /* NOTEBOOKLM-END */
 
@@ -153,7 +156,7 @@
       w.appendChild(l);
       var note = document.createElement('span');
       note.className = 'pc-msg';
-      note.textContent = ' Opens in NotebookLM, Google sign-in required.';
+      note.textContent = ' Opens in NotebookLM.';
       w.appendChild(note);
       return w;
     }

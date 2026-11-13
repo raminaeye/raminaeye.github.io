@@ -36,13 +36,13 @@
     "rl-policy-gradients.html": "https://notebooklm.google.com/notebook/abe8dd72-cf5a-48c6-82be-db18a27b9f52",
     "reinforce.html": "https://notebook.google.com/notebook/3991f068-bb30-42e7-991c-aef7db4bec57",
     "actor-critic.html": "https://notebook.google.com/notebook/232fcf4a-4a8f-48de-86a6-20da961c85f2",
-    "ppo.html": "https://notebook.google.com/notebook/def5ff98-7637-43b7-8bc2-242678de7394",
+    "ppo.html": "https://notebook.google.com/notebook/4b55cf88-9fa3-4c7b-bd89-ccbad778446a",
     "rl-continuous-actions.html": "https://notebook.google.com/notebook/93df9d4f-f0a2-4747-8e15-245d5a0d5609",
     "rl-model-based.html": "https://notebook.google.com/notebook/cb0cc767-392f-4ffe-8e60-c7fc278142d0",
     "dqn.html": "https://notebook.google.com/notebook/13682d06-d5e6-4fa0-b1dd-64753c16add0",
     "ddpg.html": "https://notebook.google.com/notebook/c823d8d8-34d9-45e6-ad05-2da16eb89022",
     "ddpg-training.html": "https://notebook.google.com/notebook/6ed434ad-6b48-4113-9c4a-b7815e8c03b3",
-    "td3.html": "https://notebook.google.com/notebook/6161bb71-6f03-4a84-986b-025156770282",
+    "td3.html": "https://notebook.google.com/notebook/e26d3ee1-e54a-4c9b-8cec-42e84e6e9950",
     "multi-agent-rl.html": "https://notebook.google.com/notebook/5bc20c6d-4848-4a73-ac05-77a145075b2a",
     "rl-alignment.html": "https://notebook.google.com/notebook/6d73606d-77fb-4188-8e1b-9004fbedb30f"
   };

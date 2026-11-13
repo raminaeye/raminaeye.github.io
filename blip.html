@@ -1,0 +1,1433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BLIP: One Model, Three Objectives, CapFilt</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem;
+      line-height: 1.6;
+      color: #333;
+    }
+    h1, h2, h3, h4 {
+      color: #2c3e50;
+      margin-top: 1.5em;
+      margin-bottom: 0.5em;
+    }
+    h1 { font-size: 2.5em; border-bottom: 2px solid #3498db; padding-bottom: 0.3em;}
+    h2 { font-size: 2em; border-bottom: 1px solid #bdc3c7; padding-bottom: 0.2em;}
+    h3 { font-size: 1.5em; }
+    h4 { font-size: 1.2em; color: #555;}
+
+    /* Shared site nav (matches index.html topnav) */
+    body { padding-top: calc(64px + 1.5rem); }
+    h1, h2, h3 { scroll-margin-top: 84px; }
+    figure, .figure, .demo { scroll-margin-top: 84px; }
+    .topnav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        z-index: 1000;
+        background: rgba(255, 255, 255, 0.65);
+        backdrop-filter: blur(18px) saturate(1.5);
+        -webkit-backdrop-filter: blur(18px) saturate(1.5);
+        border-bottom: 1px solid transparent;
+        transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+    .topnav.scrolled {
+        background: rgba(255, 255, 255, 0.88);
+        border-bottom-color: #dee2e6;
+        box-shadow: 0 6px 24px rgba(33, 37, 41, 0.07);
+    }
+    .nav-inner {
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 0 1.5rem;
+        height: 64px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+    .wordmark {
+        font-weight: 700;
+        color: #212529;
+        text-decoration: none;
+        font-size: 1.05rem;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+    }
+    .nav-links {
+        display: flex;
+        gap: 2px;
+        align-items: center;
+    }
+    .nav-links a {
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        font-size: 0.95rem;
+        padding: 8px 14px;
+        border-radius: 999px;
+        transition: color 0.18s ease, background-color 0.18s ease;
+    }
+    .nav-links a:hover {
+        color: #007bff;
+        background-color: #e7f1ff;
+    }
+    .nav-links a.active {
+        color: #007bff;
+        background-color: #e7f1ff;
+        font-weight: 600;
+    }
+    .nav-links a:focus-visible,
+    .wordmark:focus-visible,
+    .nav-toggle:focus-visible,
+    .panel-link:focus-visible,
+    .panel-social a:focus-visible {
+        outline: 2px solid #007bff;
+        outline-offset: 2px;
+    }
+    @media (hover: hover) {
+        .nav-toggle:hover { background-color: #e7f1ff; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .topnav,
+        .nav-links a,
+        .nav-toggle span,
+        .nav-panel,
+        .nav-panel a.panel-link {
+            transition: none;
+        }
+    }
+    @media (hover: hover) {
+        .nav-toggle:hover { background-color: #e7f1ff; }
+    }
+    .nav-toggle {
+        display: none;
+        width: 42px;
+        height: 42px;
+        padding: 0;
+        background: none;
+        border: 0;
+        border-radius: 10px;
+        cursor: pointer;
+        flex: 0 0 auto;
+    }
+    .nav-panel {
+        display: grid;
+        grid-template-rows: 0fr;
+        visibility: hidden;
+        transition: grid-template-rows 0.32s ease, visibility 0s linear 0.32s;
+    }
+    .nav-panel.open {
+        grid-template-rows: 1fr;
+        visibility: visible;
+        transition: grid-template-rows 0.32s ease, visibility 0s;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner {
+        min-height: 0;
+        overflow: hidden;
+    }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link:hover {
+        background-color: #e7f1ff;
+        color: #007bff;
+    }
+    .nav-panel a.panel-link.active {
+        color: #007bff;
+        font-weight: 600;
+        background-color: #e7f1ff;
+    }
+    .panel-social a:hover {
+        border-color: #007bff;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner {
+        min-height: 0;
+        overflow: hidden;
+    }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link:hover {
+        background-color: #e7f1ff;
+        color: #007bff;
+    }
+    .nav-panel a.panel-link.active {
+        color: #007bff;
+        font-weight: 600;
+        background-color: #e7f1ff;
+    }
+    .panel-social a:hover {
+        border-color: #007bff;
+    }
+    /* Section tab strip: one slim row, scrolls sideways when it overflows. */
+    .tabs-label {
+        float: left;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #6c757d;
+        font-weight: 700;
+        line-height: 1.2;
+        margin: 0;
+        padding: 8px 12px 0 0;
+    }
+    .tab-strip {
+        position: relative;
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 2px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        margin: 0 0 1.25rem;
+        max-width: 100%;
+    }
+    .tab-strip::-webkit-scrollbar { display: none; }
+    .tab-strip a.tab-chip,
+    .tab-strip a.tab-link {
+        display: inline-block;
+        flex: 0 0 auto;
+        padding: 6px 10px;
+        border-radius: 999px;
+        color: #495057;
+        text-decoration: none;
+        font-size: 0.82rem;
+        font-weight: 500;
+        line-height: 1.35;
+        white-space: nowrap;
+    }
+    .tab-strip a.tab-chip:hover,
+    .tab-strip a.tab-link:hover { color: #007bff; }
+    .tab-strip a.tab-chip.active,
+    .tab-strip a.tab-link.active { background: #007bff; color: #ffffff; }
+    @media (max-width: 768px) {
+        .tabs-label { display: none; }
+        .tab-strip {
+            width: 100vw;
+            max-width: 100vw;
+            box-sizing: border-box;
+            margin-left: calc((100% - 100vw) / 2);
+            padding-left: calc((100vw - 100%) / 2);
+        }
+        .tab-strip a.tab-chip,
+        .tab-strip a.tab-link { font-size: 0.75rem; padding: 6px 8px; }
+    }
+        .crumb { margin: 0 0 0.8em; }
+        .crumb a {
+            display: inline-block;
+            padding: 4px 14px;
+            border: 1px solid #dee2e6;
+            border-radius: 999px;
+            background: #f8f9fa;
+            color: #0056b3;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+        .crumb a:hover { border-color: #007bff; color: #007bff; }
+    .nav-panel a.panel-link {
+        display: flex;
+        align-items: center;
+        padding: 0.8rem 0.75rem;
+        margin: 0 0.25rem;
+        border-radius: 10px;
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        min-height: 48px;
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+    .panel-social {
+        display: flex;
+        gap: 0.5rem;
+        padding: 0.9rem 1rem 0.25rem;
+        flex-wrap: wrap;
+    }
+    .panel-social a {
+        color: #007bff;
+        text-decoration: none;
+        font-weight: 500;
+        font-size: 0.9rem;
+        padding: 6px 12px;
+        border: 1px solid #dee2e6;
+        border-radius: 999px;
+        transition: border-color 0.15s ease;
+    }
+    @media (max-width: 768px) {
+        .nav-links { display: none; }
+        .nav-toggle { display: block; }
+    }
+
+    pre {
+      background: #0d1117;
+      color: #e6edf3;
+      padding: 14px 16px;
+      overflow-x: auto;
+      border-radius: 8px;
+      font-size: 0.9em;
+      margin: 1em 0;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+    }
+    /* P52 canonical inline items in prose: numbers and variables wear the body
+       font at body size and read as part of the sentence (keeps P50's quiet
+       treatment, no pill; code blocks and eq-cards keep the mono treatment). */
+    code {
+        font-family: inherit;
+        font-size: 1em;
+        color: #1a1a1a;
+        background: none;
+        padding: 0 0.08em;
+        overflow-wrap: break-word;
+    }
+    pre code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 1em; }
+    .eq-card code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 0.92em; }
+    pre code {
+      background: none;
+      padding: 0;
+      font-size: 1em;
+      color: inherit;
+    }
+    ul, ol {
+      padding-left: 20px;
+    }
+    li {
+      margin-bottom: 0.5em;
+    }
+    strong {
+      color: #2980b9;
+    }
+    hr {
+      border: 0;
+      height: 1px;
+      background: #bdc3c7;
+      margin-top: 2em;
+      margin-bottom: 2em;
+    }
+    /* Rendered output block, not a print() cell */
+    .output {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 1rem 1.2rem;
+      border-radius: 6px;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+      font-size: 0.9em;
+      margin: 1em 0;
+      overflow-x: auto;
+      border-left: 4px solid #22c55e;
+    }
+    .output .dim { color: #94a3b8; }
+    /* Readability sweep: stat cards, data tables, numbered walkthroughs */
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 1.2em 0; }
+    .stat-card { border: 1px solid #bdc3c7; border-radius: 8px; padding: 14px 16px; background: #f7f9fb; }
+    .stat-num { font-size: 1.9em; font-weight: 800; color: #2c3e50; line-height: 1.15; }
+    .stat-unit { font-size: .55em; font-weight: 600; color: #7f8c8d; } .stat-vs { font-size: max(12px, .55em); font-weight: 600; color: #7f8c8d; }
+    .stat-label { font-size: .92em; font-weight: 600; margin-top: 6px; color: #2c3e50; }
+    .stat-note { font-size: .82em; color: #7f8c8d; margin-top: 3px; }
+    .datatable { border-collapse: collapse; margin: 1.2em 0; width: 100%; max-width: 560px; font-size: .95em; }
+    .datatable th, .datatable td { border: 1px solid #bdc3c7; padding: .45em .6em; text-align: center; }
+    .datatable th { background: #2c3e50; color: #fff; font-weight: 600; }
+    .datatable tr:nth-child(even) td { background: #f7f9fb; }
+    .datatable tr td.mask { background: #d8dee3; color: #6b7a89; font-weight: 600; }
+    .datatable caption { caption-side: bottom; text-align: left; font-size: .85em; color: #555; padding: .5em 0 0; border-left: 3px solid #3498db; padding-left: .8em; }
+    .caption {
+      font-size: 0.9em; color: #555; margin-top: 1rem;
+      border-left: 3px solid #3498db; padding-left: 0.8em;
+    }
+    .diagram {
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      padding: 1rem;
+      margin: 1.75rem 0;
+      background: #fbfcfd;
+      overflow-x: auto;
+    }
+    /* Interactive demo */
+    .demo {
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      padding: 1.25rem;
+      margin: 1.75rem 0;
+      background: #fbfcfd;
+    }
+    .demo-controls { margin: 0.8rem 0 1rem; }
+    .demo-controls label { display: block; margin: 0.6em 0 0.3em; color: #2c3e50; }
+    .demo-controls input[type="range"] { width: 100%; }
+    .demo-controls select { font-size: 1em; padding: 0.3em 0.6em; }
+    .attn-toggle { display: inline-flex; border: 1px solid #bdc3c7; border-radius: 6px; overflow: hidden; margin: 0.6rem 0.6rem 1rem 0; flex-wrap: wrap; }
+    .attn-toggle button {
+      border: none; background: #fff; padding: 0.45em 1.0em; cursor: pointer;
+      font-size: 1em; color: #2c3e50; font-family: inherit;
+    }
+    .attn-toggle button.active { background: #1f618d; color: #fff; font-weight: bold; }
+    .table-scroll { overflow-x: auto; margin: 0 auto 1rem; }
+    .attn-mini { border-collapse: collapse; margin: 0 auto; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; font-size: 0.85em; }
+    .attn-mini th, .attn-mini td { border: 1px solid #bdc3c7; padding: 0.35em 0.55em; text-align: center; white-space: nowrap; }
+    .attn-mini th { background: #ecf0f1; color: #2c3e50; }
+    .attn-mini tr.hl td { background: #d6eafb; }
+    .attn-mini tr.hl th.rowhead { background: #1f618d; color: #fff; }
+    .attn-mini td.blocked { background: rgba(231,76,60,0.45); color: #7b241c; font-weight: bold; }
+    #causalDemo .kchip.masked rect, #causalDemo .qchip.masked rect { fill: #f2f4f4; stroke: #d5dbdb; }
+    #causalDemo .kchip.masked text, #causalDemo .qchip.masked text { fill: #566573; }
+    .attn-bars { max-width: 560px; margin: 0 auto; }
+    .attn-bar-row { display: flex; align-items: center; gap: 0.6em; margin: 0.45em 0; }
+    .attn-bar-row .lbl { width: 4.2em; text-align: right; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; color: #2c3e50; flex: none; font-size: 0.9em; }
+    .attn-bar-track { flex: 1; background: #ecf0f1; border-radius: 4px; height: 1.4em; min-width: 0; }
+    .attn-bar-fill { background: #3498db; border-radius: 4px; height: 100%; }
+    .attn-bar-fill.alt { background: #e67e22; }
+    .attn-bar-row .val { width: 2.8em; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; color: #2c3e50; flex: none; }
+    /* headRoles paired bars: both heads side by side per token */
+    .pair-tracks { display: flex; gap: 0.5em; flex: 1; min-width: 0; }
+    .pair-tracks .attn-bar-track.dim { opacity: 0.3; }
+    .attn-bar-row .val.pair { width: 6.6em; font-size: 0.85em; }
+    /* Fit-in-one-page: tighter bar rows for the 12-token headRoles viz. */
+    #headRoles .attn-bar-row { margin: 0.28em 0; }
+    #headRoles .attn-bar-track { height: 1.15em; }
+    .head-key { display: flex; flex-wrap: wrap; gap: 1.2em; justify-content: center; margin: 0.4rem 0 0.6rem; font-size: 0.9em; color: #555; }
+    .head-key .sw { display: inline-block; width: 1.4em; height: 0.9em; border-radius: 3px; margin-right: 0.4em; vertical-align: middle; }
+    .head-key .sw.blue { background: #3498db; }
+    .head-key .sw.orange { background: #e67e22; }
+    /* maskDemo legend key: lives outside the grid, so 0/-inf text never has to fit a cell */
+    .mask-legend { display: flex; flex-wrap: wrap; gap: 1.2em; justify-content: center; margin: 0.6rem 0; font-size: 0.9em; color: #555; }
+    .mask-legend .sw { display: inline-block; width: 1.4em; height: 1em; border-radius: 3px; margin-right: 0.4em; vertical-align: middle; border: 1px solid #bdc3c7; }
+    .mask-legend .sw.allow { background: rgba(46,204,113,0.55); }
+    .mask-legend .sw.block { background: rgba(231,76,60,0.55); }
+    .demo-stats {
+      text-align: center; margin-top: 1rem; font-size: 0.95em; color: #2c3e50;
+    }
+    .demo-stats strong { color: #1f618d; }
+    .big-nums { display: flex; flex-wrap: wrap; gap: 1rem; justify-content: center; margin: 1rem 0; }
+    .big-num { text-align: center; min-width: 140px; }
+    .big-num .v { font-size: 1.5em; font-weight: bold; color: #1f618d; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; }
+    .big-num .k { font-size: 0.85em; color: #555; }
+    .chart-legend { display: flex; flex-wrap: wrap; gap: 1.2em; justify-content: center; margin: 0.4rem 0 0.6rem; font-size: 0.9em; color: #555; }
+    .chart-legend .sw { display: inline-block; width: 24px; height: 0; border-top: 3px solid #3498db; vertical-align: middle; margin-right: 0.4em; }
+    .chart-legend .sw.orange { border-top-color: #e67e22; }
+    .chart-legend .sw.gray { border-top: 3px dashed #95a5a6; }
+    canvas.flopchart { width: 100%; max-width: 600px; height: auto; display: block; margin: 0 auto; }
+    .kvbar-row { display: flex; align-items: center; gap: 0.6em; margin: 0.5em 0; }
+    .kvbar-row .lbl { width: 11em; text-align: right; color: #2c3e50; flex: none; font-size: 0.9em; }
+    .kvbar-track { flex: 1; background: #ecf0f1; border-radius: 4px; height: 1.5em; min-width: 0; position: relative; }
+    .kvbar-fill { background: #e74c3c; border-radius: 4px; height: 100%; }
+    .kvbar-fill.cache { background: #27ae60; }
+    .kvbar-row .val { width: 7em; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; color: #2c3e50; flex: none; font-size: 0.85em; }
+    .kvbar-title { font-weight: bold; color: #2c3e50; margin: 0.7em 0 0.1em; }
+    .mask-grid {
+      border-collapse: collapse;
+      table-layout: fixed;
+      margin: 0 auto;
+    }
+    .mask-grid td {
+      border: 1px solid #7f8c8d;
+      width: 26px; height: 26px;
+      padding: 0;
+    }
+    /* Fit-in-one-page: streamMask uses a slightly tighter grid. */
+    #streamMask .mask-grid td { width: 22px; height: 22px; }
+    #streamMask .ctl-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 1rem; margin: 0.8rem 0 0.2rem; }
+    #streamMask .ctl-row .play-row { margin: 0; }
+    #streamMask .ctl-row .demo-buttons { margin-bottom: 0; justify-content: flex-start; }
+    .mask-grid td.allow { background: #3498db; }
+    .mask-grid td.block { background: #f4f6f7; }
+    .demo-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      justify-content: center;
+      margin-bottom: 1rem;
+    }
+    .demo-buttons button {
+      border: 1px solid #bdc3c7;
+      background: #fff;
+      padding: 0.5em 1.1em;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.9em;
+      color: #2c3e50;
+    }
+    .demo-buttons button.active {
+      background: #1f618d;
+      color: #fff;
+      font-weight: bold;
+      border-color: #1f618d;
+    }
+    /* Play buttons and plain-English walkthroughs */
+    .play-row { margin: 0.8rem 0 0.2rem; display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
+    .play-btn {
+      border: 1px solid #1f618d; background: #1f618d; color: #fff;
+      padding: 0.45em 1.3em; border-radius: 6px; cursor: pointer;
+      font-size: 0.95em; font-weight: bold; font-family: inherit;
+      flex: 0 0 auto;
+    }
+    .play-btn:hover { background: #1a5276; }
+    .play-btn.stop { background: #e74c3c; border-color: #e74c3c; }
+    .play-btn.stop:hover { background: #c0392b; }
+    .howto {
+      background: #eef6fb; border-left: 4px solid #3498db;
+      padding: 0.7em 1em; border-radius: 0 6px 6px 0;
+      font-size: 0.95em; color: #2c3e50; margin: 0.8rem 0;
+    }
+    .howto strong { color: #1f618d; }
+    /* Caption card (refocus round, shared across widgets) */
+    .capcard {
+      background: #ffffff;
+      border: 1px solid #e3e8ee;
+      border-left: 3px solid #2c3e50;
+      border-radius: 10px;
+      padding: 18px;
+      margin-top: 14px;
+      font-size: 15px;
+      line-height: 1.65;
+      color: #2c3e50;
+    }
+    .howto.capcard strong, .caption.capcard strong { color: #2c3e50; }
+    .capcard .cap-title {
+      display: block;
+      font-size: 15px;
+      font-weight: bold;
+      color: #2c3e50;
+      margin-bottom: 8px;
+    }
+    .capcard ul { list-style: none; margin: 0; padding: 0; }
+    .capcard li { position: relative; padding-left: 16px; margin: 0 0 7px; }
+    .capcard li:last-child { margin-bottom: 0; }
+    /* Fit-in-one-page: tighter how-to cards on phones. */
+    @media (max-width: 480px) {
+      .howto.capcard { padding: 12px 13px; font-size: 14px; line-height: 1.55; }
+      .capcard li { margin: 0 0 5px; }
+      .capcard .cap-title { margin-bottom: 6px; }
+    }
+    .capcard li::before {
+      content: ""; position: absolute; left: 2px; top: 0.68em;
+      width: 6px; height: 6px; border-radius: 50%; background: #2c3e50;
+    }
+    .canvas-wrap { position: relative; }
+    
+    /* Same side-by-side treatment for the causal twin. */
+    #causalDemo .canvas-wrap { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 1.25rem; align-items: start; }
+    @media (max-width: 768px) { #causalDemo .canvas-wrap { display: block; } }
+    .attn-bar-fill { transition: width 0.4s ease; }
+    /* KV cache blocks */
+    .kv-blocks { display: flex; flex-wrap: wrap; gap: 3px; margin: 0.8rem 0; }
+    .kv-block { width: 14px; height: 14px; border-radius: 3px; background: #ecf0f1; }
+    .kv-block.on { background: #27ae60; animation: kvpop 0.4s ease; }
+    @keyframes kvpop { from { transform: scale(0.4); } to { transform: scale(1); } }
+    .kv-stage { font-size: 0.9em; color: #555; margin: 0.6rem 0 0.2rem; }
+    /* Pinned-total flash (headParams) */
+    .big-num .v.pinned-flash { animation: pinflash 0.5s ease; }
+    @keyframes pinflash { 0% { color: #117a65; } 100% { color: #1f618d; } }
+    /* Streaming token strips */
+    .stream-strip { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 0.5rem 0; font-size: 0.9em; color: #2c3e50; }
+    .tok {
+      display: inline-block; min-width: 1.8em; padding: 0.25em 0.4em; text-align: center;
+      border-radius: 4px; background: #ecf0f1; color: #7f8c8d;
+      font-family: 'SFMono-Regular', Consolas, Menlo, monospace; font-size: 0.85em;
+    }
+    .tok.arrived { background: #d6eaf8; color: #2c3e50; }
+    .tok.emitted { background: #1e8449; color: #fff; }
+    .mask-grid td.pending { background: #e9ecef; }
+    /* Head slicing visual (headParams): the 512-dim pie being re-sliced */
+    .slice-wrap { max-width: 560px; margin: 0.8rem auto 0.2rem; }
+    .slice-bar { display: flex; height: 34px; border-radius: 6px; overflow: hidden; border: 1px solid #bdc3c7; }
+    .slice-seg {
+      height: 100%; border-right: 1px solid #fff; box-sizing: border-box;
+      transition: width 0.45s ease, background-color 0.45s ease;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; color: #fff; font-weight: bold; min-width: 0; overflow: hidden;
+      white-space: nowrap;
+    }
+    .slice-cap { text-align: center; font-size: 0.9em; color: #555; margin-top: 0.35rem; }
+    /* Param bill bar (headParams): fixed-length bar, constant total, 75/25 QKV vs output-proj */
+    .bill-bar { display: flex; height: 30px; border-radius: 6px; overflow: hidden; border: 2px solid #2c3e50; }
+    .bill-seg { height: 100%; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+      font-size: 12px; color: #fff; font-weight: bold; white-space: nowrap; overflow: hidden; }
+    .bill-bar.bill-pulse { animation: billpulse 0.5s ease; }
+    @keyframes billpulse { 0% { box-shadow: 0 0 0 4px rgba(39,174,96,.55); } 100% { box-shadow: 0 0 0 0 rgba(39,174,96,0); } }
+    .bill-cap { text-align: center; font-size: 0.9em; color: #555; margin-top: 0.35rem; }
+    /* Let wide display equations scroll instead of pushing the page wide */
+    /* Small screens: keep heatmaps and bars usable */
+    @media (max-width: 520px) {
+      .attn-mini { font-size: 0.75em; }
+      .attn-mini th, .attn-mini td { padding: 0.3em 0.45em; }
+      .kvbar-row { flex-wrap: wrap; }
+      .kvbar-row .lbl { width: 100%; text-align: left; margin-bottom: 0.2em; }
+      .kvbar-track { flex: 1 1 55%; }
+      .kvbar-row .val { width: auto; }
+      .big-num { min-width: 110px; }
+      .big-num .v { font-size: 1.25em; }
+    }
+    /* Static paper-figure citation */
+    .fig-cite { border-left: 3px solid #bdc3c7; margin: 1em 0; padding: 0.4em 0 0.4em 1em; color: #555; font-size: 0.9em; }
+
+  
+/* canonical spacing: display math */
+figcaption { margin-top: 1rem; }
+    /* Compact phone walkthrough layout (canonical block, every tutorial page):
+       two-column eq legends, tightened demo spacing, and diagrams capped so
+       controls and diagram share the first phone screen. Phone widths only;
+       desktop rendering and equation typography are unchanged. */
+    @media (max-width:480px){
+      .demo{padding:.75rem}
+      .demo>*{margin-top:.6rem;margin-bottom:.6rem}
+      .demo>*:first-child{margin-top:0}
+      .demo .eq-card{margin:1rem auto;padding:.7rem .8rem}
+      .demo .cap-card,.demo .capcard{padding:.85rem .95rem}
+      .eq-legend{display:grid;grid-template-columns:1fr 1fr;column-gap:.9rem;row-gap:.1rem;line-height:1.5}
+      .eq-legend .eq-item:has(> code ~ code){grid-column:1/-1}
+      .demo svg,.demo canvas{max-height:55vh}
+    }
+/* one-topic qformer split 2026-11-12: prerequisites, walkthrough controls, CapFilt explorer */
+nav.prereq{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem .4rem;margin:.6rem 0 1.1rem}
+nav.prereq .prereq-label{font-size:.82rem;font-weight:600;color:#6c757d;margin-right:.15rem}
+nav.prereq a.prereq-chip{display:inline-block;padding:.15rem .6rem;border:1px solid #ced4da;border-radius:999px;font-size:.85rem;line-height:1.4;color:#0056b3;text-decoration:none}
+nav.prereq a.prereq-chip:hover,nav.prereq a.prereq-chip:focus-visible{background:#e7f1ff;border-color:#007bff}
+.demo .bv-btn{font:inherit;font-size:0.92em;padding:0.35rem 0.8rem;border:1px solid #bdc3c7;border-radius:6px;background:#fff;color:#2c3e50;cursor:pointer}
+.demo .bv-btn.active{background:#2980b9;border-color:#2980b9;color:#fff;font-weight:bold}
+.demo .bv-btn:disabled{opacity:0.45;cursor:default}
+.demo .bv-btn[aria-pressed="true"]{background:#2c3e50;color:#fff;border-color:#2c3e50}
+.demo .walk-lbl{font-weight:600;color:#2c3e50;white-space:nowrap}
+.demo .demo-read{font-size:.95rem;color:#2c3e50;margin:.4rem 0 .2rem;min-height:1.6em}
+/* stepped eq-cards (adagrad pattern): only the active step's line and why show */
+.eq-card.eq-stepped .eq-line{display:none;visibility:hidden}
+.eq-card.eq-stepped .eq-line.eq-active{display:block;opacity:1;visibility:visible}
+.demo .eq-card.eq-stepped .eq-why{display:none}
+.demo .eq-card.eq-stepped .eq-why.eq-active{display:block;visibility:visible}
+.demo .demo-controls .sl-lab{display:block;margin:0.6em 0 0.3em;color:#2c3e50}
+.demo .demo-controls input[type="range"]{width:100%}
+/* walkthrough diagram groups: the active step stays full, the rest dim */
+.wt-col{transition:opacity .35s ease}
+.wt-col.wt-dim{opacity:.35}
+@media (prefers-reduced-motion: reduce){.wt-col{transition:none}}
+/* CapFilt keep-or-drop explorer: the kept card holds a green border, the dropped card greys and fades */
+.cf-pair{display:flex;flex-wrap:wrap;gap:.8rem;margin:.8rem 0}
+.cf-card{flex:1 1 220px;border:2px solid #bdc3c7;border-radius:10px;padding:.8rem 1rem;background:#fff;transition:opacity .6s ease,background-color .6s ease,border-color .6s ease}
+.cf-card p{margin:.3em 0}
+.cf-tag{display:inline-block;font-size:.8em;font-weight:700;color:#555;background:#ecf0f1;border-radius:999px;padding:.15em .7em}
+.cf-cap{font-size:1.05em}
+.cf-verdict{font-size:.9em;font-weight:700;margin-top:.5em}
+.cf-card.kept{border-color:#117a65;background:#e8f8f5}
+.cf-card.kept .cf-verdict{color:#117a65}
+.cf-card.dropped{border-color:#d5dbdb;background:#f4f6f7;opacity:.45}
+.cf-card.dropped .cf-verdict{color:#566573}
+.cf-card.dropped .cf-cap{color:#566573}
+@media (prefers-reduced-motion: reduce){.cf-card{transition:none}}
+@media (max-width:480px){.cf-pair{flex-direction:column}.cf-card{flex-basis:auto}}
+
+/* PREV-NEXT-BEGIN */
+nav.tut-seq{display:flex;align-items:center;gap:0 .75rem;margin:0 0 .25rem;font-size:.85rem;white-space:nowrap}
+nav.tut-seq a{position:relative;display:block;flex:0 1 auto;min-width:0;height:44px;line-height:44px;padding:0 2px;overflow:hidden;text-overflow:ellipsis;color:#0056b3;text-decoration:none}
+nav.tut-seq a.seq-home{flex:0 0 auto}
+nav.tut-seq a.seq-next{margin-left:auto}
+nav.tut-seq .seq-w{font-weight:600}
+nav.tut-seq a:hover{text-decoration:underline}
+nav.tut-seq a:focus-visible{outline:2px solid #0056b3;outline-offset:2px}
+@media (max-width:575px){nav.tut-seq .seq-t{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}}
+@media (forced-colors:active){nav.tut-seq a:focus-visible{outline-color:Highlight}}
+@media print{nav.tut-seq{display:none}}
+/* PREV-NEXT-END */
+
+/* MATH-BEGIN v1 (P88, site-math.js renders KaTeX; byte-identical on every page) */
+.eq-line{overflow-x:auto;overflow-y:hidden;white-space:normal}
+.eq-line .katex{font-size:1.02em;line-height:1.6}
+.eq-line .katex .base{margin:.15em 0}
+var .katex,p .katex,li .katex,td .katex,th .katex,figcaption .katex,.eq-why .katex,.eq-what .katex,.eq-legend .katex{font-size:1.06em}
+var:has(.katex){font-style:normal}
+.katex-display{margin:.6rem 0;overflow-x:auto;overflow-y:hidden}
+/* MATH-END */
+</style>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+<style>
+/* Static teaching diagrams (mtd), shared across tutorials, 2026-11-01 */
+.figure.mtd-fig { margin: 1.75rem 0; }
+.mtd-fig > svg.mtd-svg { display: block; width: 100%; height: auto; margin: 0 auto; }
+.mtd-fig .caption { margin-top: 1rem; }
+.mtd-svg text { fill: #2c3e50; font-family: sans-serif; }
+.mtd-svg .mtd-sub { fill: #555; }
+.mtd-svg .mtd-t1 { fill: #1f618d; }
+.mtd-svg .mtd-t2 { fill: #a04000; }
+.mtd-svg .mtd-pu { fill: #7d3c98; }
+.mtd-svg .mtd-red { fill: #c0392b; }
+.mtd-svg .mtd-grn { fill: #117a65; }
+.mtd-svg line, .mtd-svg path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.mtd-svg .mtd-s.mtd-c1 { stroke: #1f618d; } .mtd-svg .mtd-f.mtd-c1 { fill: #1f618d; }
+.mtd-svg .mtd-s.mtd-c2 { stroke: #a04000; } .mtd-svg .mtd-f.mtd-c2 { fill: #a04000; }
+.mtd-svg .mtd-s.mtd-cp { stroke: #7d3c98; } .mtd-svg .mtd-f.mtd-cp { fill: #7d3c98; }
+.mtd-svg .mtd-s.mtd-cr { stroke: #c0392b; } .mtd-svg .mtd-f.mtd-cr { fill: #c0392b; }
+.mtd-svg .mtd-s.mtd-cg { stroke: #2c3e50; } .mtd-svg .mtd-f.mtd-cg { fill: #2c3e50; }
+.mtd-svg .mtd-sep { stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-pic { fill: #fbfcfd; stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-axis { stroke: #7f8c8d; stroke-width: 1.5px; }
+.mtd-svg .mtd-arc { stroke: #2c3e50; stroke-width: 2px; }
+.mtd-svg .mtd-dot { fill: #2c3e50; }
+.mtd-svg .mtd-guide { stroke: #7f8c8d; stroke-width: 1.4px; stroke-dasharray: 4 4; }
+.mtd-svg .mtd-ring { fill: #fbfcfd; stroke: #e1e4e8; stroke-width: 1px; }
+.mtd-svg .mtd-pt { fill: #1f618d; opacity: .55; }
+.mtd-svg .mtd-cross { stroke: #2c3e50; stroke-width: 2.2px; }
+.mtd-svg .mtd-barbg { fill: #eef1f4; }
+.mtd-svg .mtd-bar { fill: #7d3c98; }
+.mtd-svg .mtd-cart { fill: #ffffff; stroke: #2c3e50; stroke-width: 2px; }
+.mtd-svg .mtd-zero { stroke: #95a5a6; stroke-width: 1.2px; stroke-dasharray: 4 4; }
+.mtd-svg .mtd-axisl { stroke: #7f8c8d; stroke-width: 2px; }
+.mtd-svg .mtd-norm { stroke: #117a65; stroke-width: 4px; }
+.mtd-svg .mtd-read { fill: #ffffff; stroke: #2c3e50; stroke-width: 2.5px; }
+.mtd-svg .mtd-ball { fill: #7d3c98; fill-opacity: .08; stroke: #7d3c98; stroke-width: 1.6px; stroke-dasharray: 5 4; }
+.mtd-svg .mtd-box { fill: #fbfcfd; stroke: #bdc3c7; stroke-width: 1.4px; }
+.mtd-svg .mtd-crossbg { fill: #ffffff; }
+.mtd-svg .mtd-halo { stroke: #ffffff; stroke-width: 5px; stroke-linejoin: round; paint-order: stroke; }
+.mtd-svg .mtd-box.mtd-note { stroke-dasharray: 5 4; }
+</style>
+<style>
+/* maskSwitch (qformer.html): mask grid and Q-Former arrows change together */
+#maskSwitch .ms-stage { display: flex; flex-wrap: wrap; justify-content: center; gap: .5rem 1.5rem; margin-top: .6rem; }
+#maskSwitch .ms-stage svg { flex: 1 1 260px; max-width: 300px; height: auto; display: block; }
+#maskSwitch text { font-family: sans-serif; fill: #2c3e50; }
+#maskSwitch .ms-group { font-size: 15px; font-weight: 700; }
+#maskSwitch .ms-tok { font-size: 13px; fill: #555; }
+#maskSwitch .ms-lab { font-size: 16px; font-weight: 700; }
+#maskSwitch .ms-small { font-size: 13px; }
+#maskSwitch .ms-tiny { font-size: 12px; }
+#maskSwitch .ms-cell { stroke: #7f8c8d; stroke-width: 1px; transition: fill .35s ease; }
+#maskSwitch .ms-cell.allow { fill: #3498db; }
+#maskSwitch .ms-cell.block { fill: #f4f6f7; }
+#maskSwitch .ms-sep { stroke: #2c3e50; stroke-width: 2.5px; }
+#maskSwitch .ms-arrow .ms-line, #maskSwitch .ms-arrow .ms-head { transition: opacity .35s ease; opacity: .4; }
+#maskSwitch .ms-arrow.on .ms-line, #maskSwitch .ms-arrow.on .ms-head { opacity: 1; }
+#maskSwitch .ms-line { fill: none; stroke: #7d3c98; stroke-width: 3px; stroke-linecap: round; stroke-dasharray: 5 5; }
+#maskSwitch .ms-arrow.on .ms-line { stroke-dasharray: none; }
+#maskSwitch .ms-head { fill: #7d3c98; }
+#maskSwitch .ms-alab { fill: #7d3c98; font-weight: 600; }
+/* Phone: buttons on one row right above the grid, both pictures narrower with
+   larger text, so the whole switcher fits one phone screen. */
+@media (max-width: 520px) {
+  #maskSwitch .demo-buttons { flex-wrap: nowrap; gap: .3rem; justify-content: center; }
+  #maskSwitch .demo-buttons button { padding: .35rem .55rem; font-size: .88em; white-space: nowrap; }
+  #maskSwitch .ms-stage { gap: .5rem 1rem; margin-top: .5rem; }
+  #maskSwitch .ms-stage svg.ms-grid { flex-basis: 250px; max-width: 250px; }
+  #maskSwitch .ms-stage svg.ms-block { flex-basis: 290px; max-width: 290px; }
+  #maskSwitch .ms-group { font-size: 17px; }
+  #maskSwitch .ms-tok { font-size: 15px; }
+  #maskSwitch .ms-lab { font-size: 18px; }
+  #maskSwitch .ms-small { font-size: 14px; }
+  #maskSwitch .ms-tiny { font-size: 13px; }
+}
+@media (max-width: 520px) { #maskSwitch .ms-arrow .ms-line, #maskSwitch .ms-arrow .ms-head { opacity: .6; } #maskSwitch .ms-arrow.on .ms-line, #maskSwitch .ms-arrow.on .ms-head { opacity: 1; } }
+@media (max-width: 380px) {
+  #maskSwitch .ms-stage svg.ms-grid { flex-basis: 240px; max-width: 240px; }
+  #maskSwitch .ms-stage svg.ms-block { flex-basis: 262px; max-width: 262px; }
+  #maskSwitch .ms-tiny { font-size: 13px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #maskSwitch .ms-cell, #maskSwitch .ms-arrow .ms-line, #maskSwitch .ms-arrow .ms-head { transition: none; }
+}
+</style>
+<style>
+/* qfStages (qformer.html); the qfRead rules are in the qfRead rev2 block below */
+#maskSwitch .ms-ctl { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: .3rem .7rem; margin-bottom: .4rem; }
+#maskSwitch .ms-ctl .demo-buttons { margin-bottom: 0; }
+#maskSwitch .ms-ctl-lab { font-size: .9em; color: #555; font-weight: 600; }
+#qfStages svg.qs-svg { display: block; width: 100%; max-width: 460px; height: auto; margin: .6rem auto 0; }
+#qfStages text { font-family: sans-serif; fill: #2c3e50; }
+#qfStages .demo-buttons { margin-bottom: .2rem; }
+#qfStages .qs-name { font-size: 15px; font-weight: 700; }
+#qfStages .qs-sub { font-size: 14px; fill: #555; }
+#qfStages .qs-shape { font-size: 14px; font-weight: 600; fill: #7d3c98; }
+#qfStages .qs-arr { stroke: #2c3e50; stroke-width: 2px; }
+#qfStages .qs-head { fill: #2c3e50; }
+#qfStages .qs-grad { fill: none; stroke: #c0392b; stroke-width: 2.2px; stroke-dasharray: 6 4; }
+#qfStages .qs-gh { fill: #c0392b; }
+#qfStages .qs-gl { font-size: 14px; font-weight: 600; fill: #c0392b; }
+#qfStages .qs-s1, #qfStages .qs-s2, #qfStages .qs-late { transition: opacity .35s ease; }
+#qfStages[data-stage="1"] .qs-s2 { opacity: 0; }
+#qfStages[data-stage="2"] .qs-s1 { opacity: 0; }
+#qfStages[data-stage="1"] .qs-late > :not(text):not(.qs-s2) { opacity: .3; }
+#qfStages[data-stage="1"] .qs-late text:not(.qs-s2):not(.qs-s1) { fill: #566573 !important; }
+#qfStages #qsTr, #qfStages #qsFr { transition: width .35s ease; }
+@media (max-width: 520px) {
+  #qfStages .demo-buttons { gap: .3rem; }
+  #qfStages .demo-buttons button { padding: .35rem .5rem; font-size: .86em; }
+  #qfStages .demo-buttons { flex-wrap: nowrap; }
+  #qfStages .demo-buttons button { white-space: nowrap; font-size: .82em; padding: .35rem .45rem; }
+  #qfStages .qs-sub, #qfStages .qs-shape, #qfStages .qs-gl { font-size: 15px; }
+}
+@media (max-width: 380px) { #qfStages .demo-buttons { flex-wrap: wrap; } }
+@media (max-width: 480px) {
+  #qfStages svg.qs-svg { width: calc(100% + 1.5rem); max-width: none; margin-left: -.75rem; margin-right: -.75rem; }
+  #qfStages .qs-name, #qfStages .qs-sub, #qfStages .qs-shape, #qfStages .qs-gl { font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #qfStages .qs-s1, #qfStages .qs-s2, #qfStages .qs-late, #qfStages #qsTr, #qfStages #qsFr { transition: none; }
+}
+<style>
+/* Series and page map (B-TF, 2026-11-02) */
+.sermap { margin: .5rem 0 1.1rem; font-size: .8rem; line-height: 1.3; }
+.sermap ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; row-gap: 5px; }
+.sermap li { display: flex; align-items: center; margin: 0; padding: 0; line-height: 1.25; }
+.sermap li + li::before { content: "\2192"; color: #95a5a6; margin: 0 5px; }
+.sermap a, .sermap .sm-here { display: inline-block; padding: 2px 7px; line-height: 1.25; border-radius: 6px; text-decoration: none; }
+.sermap .sm-series a { padding: 1px 2px; color: #1f618d; text-decoration: underline; text-decoration-color: #a9cce3; text-underline-offset: 2px; }
+.sermap .sm-series .sm-here { padding: 1px 6px; background: #117a65; color: #fff; font-weight: 600; }
+.sermap .sm-series { row-gap: 0; }
+.sermap .sm-series a, .sermap .sm-series .sm-here, .sermap .sm-also a { display: inline-flex; align-items: center; min-height: 44px; box-sizing: border-box; }
+.sermap .sm-flow { margin-top: 6px; padding-left: 8px; border-left: 3px solid #117a65; }
+.sermap .sm-flow a { border: 1px solid #d5dbdb; background: #f8f9fa; color: #2c3e50; }
+.sermap .sm-also { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin: 6px 0 0; line-height: 1.25; color: #566573; }
+.sermap .sm-also a { border: 1px dashed #a9cce3; color: #1f618d; background: #fff; }
+.sermap a:hover { border-color: #1f618d; }
+@media (max-width: 400px) { .sermap { font-size: .72rem; } .sermap a, .sermap .sm-here { padding: 2px 5px; } .sermap li + li::before { margin: 0 3px; } }
+/* qfRead rev2 (P86): drag query 1 over a toy image's patch keys; slide the image width. Plan: tool-depth-2026-11-05/plans/qformer/PLAN.md */
+#qfRead .qr-ctl { display: flex; flex-direction: column; align-items: center; gap: .3rem; margin-bottom: .4rem; }
+#qfRead .qr-ctl, #qfRead svg.qr-svg { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+#qfRead .qr-lab { font-size: .9em; color: #2c3e50; font-weight: 700; }
+#qfRead .qr-lab span { color: #a04000; font-weight: 400; }
+#qfRead input[type=range] { width: 100%; max-width: 300px; height: 30px; margin: 0; accent-color: #a04000; touch-action: pan-y; }
+#qfRead svg.qr-svg { display: block; width: 100%; max-width: 400px; height: auto; margin: .4rem auto 0; }
+#qfRead text { font-family: sans-serif; font-size: 17px; font-weight: 700; fill: #2c3e50; }
+#qfRead .qr-n { font-weight: 400; }
+#qfRead .qr-mk { fill: #2c3e50; }
+#qfRead .qr-hit { fill: #fff; fill-opacity: 0; pointer-events: all; touch-action: none; cursor: grab; }
+#qfRead .qr-handle { fill: #7d3c98; stroke: #fff; stroke-width: 2px; cursor: grab; touch-action: none; }
+#qfRead .qr-handle.qr-ring { fill-opacity: 0.35; stroke: #7d3c98; stroke-width: 2.5px; }
+#qfRead .qr-handle:focus { outline: none; }
+#qfRead .qr-handle:focus-visible { stroke: #1f618d; stroke-width: 4px; }
+#qfRead #qrReadout { min-height: 1.6em; }
+.mk{display:inline-block;min-width:1.25em;height:1.25em;line-height:1.25em;border-radius:50%;background:#2c3e50;color:#fff;font-family:sans-serif;font-weight:700;font-size:max(12px,.78em);line-height:1.25em;text-align:center;vertical-align:.08em;margin:0 .22em 0 .05em;font-style:normal}
+@media (max-width: 480px) {
+  #qfRead svg.qr-svg { width: calc(100% + 1.5rem); max-width: none; margin-left: -.75rem; margin-right: -.75rem; }
+  #qfRead #qrReadout { margin-left: -.75rem; margin-right: -.75rem; }   /* qfRead fix 1: one readout line at 360 */
+}
+</style>
+<style>
+/* 12 px floor for subscripts, superscripts and nested exponents (owner ruling 2026-11-03, as audio fix wave 11).
+   Same em sizes as the canonical rules, never under 12 px; html raises specificity by one type.
+   The canonical eq-card block is not edited. */
+html sub,html sup{font-size:max(12px,.83em)}
+html var sub,html var sup,html .mvar sub,html .mvar sup{font-size:max(12px,.72em)}
+</style>
+  <script src="site-math.js" defer></script>
+</head>
+<body>
+      <nav class="topnav" aria-label="Site">
+    <div class="nav-inner">
+        <a class="wordmark" href="index.html">Ramin Anushiravani</a>
+        <div class="nav-links">
+            <a href="tutorial.html" class="active">Tutorials</a>
+            <a href="pubs.html">Publications</a>
+            <a href="index.html">About</a>
+            <a href="work.html">Projects</a>
+        </div>
+        <button class="nav-toggle" id="navToggle" aria-expanded="false" aria-controls="navPanel" aria-label="Menu"><span></span><span></span><span></span></button>
+    </div>
+    <div class="nav-panel" id="navPanel">
+        <div class="nav-panel-inner">
+            <div class="nav-panel-body">
+                <a class="panel-link active" href="tutorial.html">Tutorials</a>
+                <a class="panel-link" href="pubs.html">Publications</a>
+                <a class="panel-link" href="index.html">About</a>
+                <a class="panel-link" href="work.html">Projects</a>
+                <div class="panel-social">
+                    <a href="https://linkedin.com/in/raminanushiravani" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+                    <a href="https://github.com/raminaeye/" target="_blank" rel="noopener noreferrer">GitHub</a>
+                    <a href="https://scholar.google.com/citations?user=kouXx8gAAAAJ&hl=en" target="_blank" rel="noopener noreferrer">Google Scholar</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</nav>
+
+    <p class="crumb"><a href="tutorial.html">&larr; All tutorials</a></p>
+    <script src="tutorial-nav.js"></script>
+
+  <h1>BLIP: One Model, Three Objectives, CapFilt</h1>
+
+
+  <nav class="sermap" aria-label="The path to this page and its parts">
+      <ol class="sm-series">
+        <li><a href="transformers.html">Attention</a></li>
+        <li><a href="cross-attention.html">Cross-Attention</a></li>
+        <li><span class="sm-here" aria-current="page">BLIP: One Model, Three Objectives, CapFilt</span></li>
+      </ol>
+    </nav>
+
+<nav class="prereq" aria-label="Before you start">
+  <span class="prereq-label">Before you start</span><a class="prereq-chip" href="cross-attention.html#one-stream-asks" title="Cross-Attention, section 1" aria-label="What cross-attention does, taught in Cross-Attention, section 1">Cross-attention</a><a class="prereq-chip" href="clip.html#two-encoders" title="CLIP, section 2" aria-label="Contrastive image-text matching, taught in CLIP, section 2">Contrastive matching</a><a class="prereq-chip" href="transformers.html#who-should-each-token-listen-to" title="Transformers, section 2" aria-label="Self-attention, taught in Transformers, section 2">Self-attention</a></nav>
+  <p class="tabs-label">On this page</p>
+  <div class="tab-strip">
+    <a class="tab-chip" href="#problem"><span class="secnum">1</span> The problem BLIP solves</a>
+    <a class="tab-chip" href="#blip"><span class="secnum">2</span> One text model, three objectives, almost all weights shared</a>
+    <a class="tab-chip" href="#capfilt"><span class="secnum">3</span> The model cleans its own captions</a>
+    <a class="tab-chip" href="#failures"><span class="secnum">4</span> Failure modes and practical tips</a>
+    <a class="tab-chip" href="#in-practice"><span class="secnum">5</span> In practice</a>
+    <a class="tab-chip" href="#references"><span class="secnum">6</span> References</a>
+  </div>
+
+  <h2 id="problem"><span class="secnum">1</span> The problem BLIP solves</h2>
+  <p>
+    Some models understand images and text together, and others write text about images, but one model rarely did both well.
+    An understanding model could match a caption to a picture but not write one; a generation model could write but not retrieve.
+    And both learned from web captions, which often miss the picture.
+  </p>
+  <p>
+    BLIP (Li et al. 2022) fixes both at once. It trains one text model three ways, so the same weights match, compare and caption: it retrieves captions for a COCO photo, writes a caption for it, and answers a question about it.
+    The two ideas are called MED, one text model trained three ways, and CapFilt, the model cleaning its own captions, in the paper <a href="https://arxiv.org/abs/2201.12086">BLIP: Bootstrapping Language-Image Pre-training for Unified Vision-Language Understanding and Generation</a>.
+  </p>
+  <p>
+    A ViT (vision transformer, which cuts an image into patch tokens) reads the image.
+    CapFilt runs once, before pre-training, over the web images; the three losses run together at every pre-training step, on image-caption pairs.
+  </p>
+
+
+  <hr>
+
+  <h2 id="blip"><span class="secnum">2</span> One text model, three objectives, almost all weights shared</h2>
+  <p>
+    BLIP trains one <strong>multimodal mixture of encoder-decoder</strong> (<strong>MED</strong>) on image-caption pairs.
+    One text Transformer, started from BERT-base (a 12-layer text encoder), runs in three modes.
+  </p>
+  <h3><span class="secnum">2.1</span> The three modes</h3>
+  <p>
+    The <strong>unimodal encoder</strong> reads the caption alone and trains with the <strong>image-text contrastive</strong> loss (<strong>ITC</strong>), which pulls a matched image vector and caption vector together and pushes the batch's other captions apart, as in <a href="clip.html">Image-Text Contrastive Learning (CLIP)</a> (Radford et al., 2021).
+    The <strong>image-grounded encoder</strong> also reads the image and trains with the <strong>image-text matching</strong> loss (<strong>ITM</strong>), a head that says matched or not.
+    The <strong>image-grounded decoder</strong> writes the caption under <a href="attention-masks.html#causal-mask">causal</a> self-attention and trains with the <strong>language modeling</strong> loss (<strong>LM</strong>).
+  </p>
+<figure class="figure mtd-fig" id="fig-blip-s-three"><svg class="mtd-svg" viewBox="0 0 400 372" style="max-width:460px" role="img" aria-label="BLIP's three modes side by side, where ITC uses bi-directional self-attention and the FFN with no cross-attention, and compares the [CLS] output with the image; ITM adds cross-attention to the image; LM swaps in causal self-attention and keeps the same cross-attention and FFN. One image encoder pass is used by all three.">
+    <text x="68" y="18" text-anchor="middle" style="font-size:16.5px;font-weight:700">ITC</text>
+    <text x="200" y="18" text-anchor="middle" style="font-size:16.5px;font-weight:700">ITM</text>
+    <text x="332" y="18" text-anchor="middle" style="font-size:16.5px;font-weight:700">LM</text>
+    <text class="mtd-sub" x="68" y="36" text-anchor="middle" style="font-size:16.5px">contrastive</text>
+    <text class="mtd-sub" x="200" y="36" text-anchor="middle" style="font-size:16.5px">matching</text>
+    <text class="mtd-sub" x="332" y="36" text-anchor="middle" style="font-size:16.5px">next word</text>
+    <rect x="12" y="46" width="112" height="36" rx="5" style="fill:#e8f8f5;stroke:#117a65;stroke-width:2px"/>
+    <rect x="146" y="46" width="108" height="36" rx="5" style="fill:#e8f8f5;stroke:#117a65;stroke-width:2px"/>
+    <rect x="276" y="46" width="112" height="36" rx="5" style="fill:#e8f8f5;stroke:#117a65;stroke-width:2px"/>
+    <text x="68" y="69" text-anchor="middle" style="font-size:16.5px;font-weight:700;fill:#117a65">FFN</text>
+    <text x="200" y="69" text-anchor="middle" style="font-size:16.5px;font-weight:700;fill:#117a65">FFN</text>
+    <text x="332" y="69" text-anchor="middle" style="font-size:16.5px;font-weight:700;fill:#117a65">FFN</text>
+    <rect x="12" y="94" width="112" height="40" rx="5" style="fill:#fbfcfd;stroke:#bdc3c7;stroke-width:1.4px;stroke-dasharray:5 4"/>
+    <text class="mtd-sub" x="68" y="111" text-anchor="middle" style="font-size:16.5px">no cross-</text>
+    <text class="mtd-sub" x="68" y="127" text-anchor="middle" style="font-size:16.5px">attention</text>
+    <rect x="146" y="94" width="108" height="40" rx="5" style="fill:#fdf2e9;stroke:#a04000;stroke-width:2px"/>
+    <rect x="276" y="94" width="112" height="40" rx="5" style="fill:#fdf2e9;stroke:#a04000;stroke-width:2px"/>
+    <text x="200" y="111" text-anchor="middle" style="font-size:16.5px;font-weight:700;fill:#a04000">cross-</text>
+    <text x="200" y="127" text-anchor="middle" style="font-size:16.5px;font-weight:700;fill:#a04000">attention</text>
+    <text x="332" y="111" text-anchor="middle" style="font-size:16.5px;font-weight:700;fill:#a04000">cross-</text>
+    <text x="332" y="127" text-anchor="middle" style="font-size:16.5px;font-weight:700;fill:#a04000">attention</text>
+    <rect x="12" y="146" width="112" height="40" rx="5" style="fill:#f4ecf7;stroke:#7d3c98;stroke-width:2px"/>
+    <rect x="146" y="146" width="108" height="40" rx="5" style="fill:#f4ecf7;stroke:#7d3c98;stroke-width:2px"/>
+    <rect x="276" y="146" width="112" height="40" rx="5" style="fill:#fdedec;stroke:#c0392b;stroke-width:2px"/>
+    <text x="68" y="163" text-anchor="middle" style="font-size:16.5px;font-weight:700;fill:#7d3c98">self-attention</text>
+    <text x="68" y="179" text-anchor="middle" style="font-size:16.5px;fill:#7d3c98">bi-directional</text>
+    <text x="200" y="163" text-anchor="middle" style="font-size:16.5px;font-weight:700;fill:#7d3c98" textLength="98.5" lengthAdjust="spacingAndGlyphs">self-attention</text>
+    <text x="200" y="179" text-anchor="middle" style="font-size:16.5px;fill:#7d3c98">bi-directional</text>
+    <text x="332" y="163" text-anchor="middle" style="font-size:16.5px;font-weight:700;fill:#c0392b">self-attention</text>
+    <text x="332" y="179" text-anchor="middle" style="font-size:16.5px;fill:#c0392b">causal</text>
+    <text x="68" y="206" text-anchor="middle" style="font-size:16.5px">[CLS] + text</text>
+    <text x="200" y="206" text-anchor="middle" style="font-size:16.5px">[Encode] + text</text>
+    <text x="332" y="206" text-anchor="middle" style="font-size:16.5px">[Decode] + text</text>
+    <rect x="146" y="222" width="242" height="40" rx="6" style="fill:#fdf2e9;stroke:#a04000;stroke-width:2px"/>
+    <text x="267" y="239" text-anchor="middle" style="font-size:16.5px;font-weight:700;fill:#a04000">image encoder (ViT)</text>
+    <text x="267" y="255" text-anchor="middle" style="font-size:16.5px;fill:#a04000">one pass, used by all three</text>
+    <text x="68" y="236" text-anchor="middle" style="font-size:16.5px;fill:#a04000">[CLS] compared</text>
+    <text x="68" y="254" text-anchor="middle" style="font-size:16.5px;fill:#a04000">with the image</text>
+    <path d="M146,242 H135 V114 H140" style="fill:none;stroke:#a04000;stroke-width:2px"/>
+    <polygon points="146,114 138,109.6 138,118.4" style="fill:#a04000"/>
+    <path d="M265,222 V114 H270" style="fill:none;stroke:#a04000;stroke-width:2px"/>
+    <polygon points="276,114 268,109.6 268,118.4" style="fill:#a04000"/>
+    <text x="200" y="290" text-anchor="middle" style="font-size:16.5px;font-weight:600">same color, same weights</text>
+    <line x1="12" y1="304" x2="388" y2="304" style="stroke:#d5dbdb;stroke-width:1.2px"/>
+    <text class="mtd-sub" x="200" y="322" text-anchor="middle" style="font-size:16.5px">for example a dog photo, &#8220;a dog runs on the sand&#8221;</text>
+    <text x="68" y="344" text-anchor="middle" style="font-size:16.5px">same direction</text>
+    <text x="68" y="362" text-anchor="middle" style="font-size:16.5px">as the image?</text>
+    <text x="200" y="344" text-anchor="middle" style="font-size:16.5px">&#8220;on the grass&#8221;</text>
+    <text x="200" y="362" text-anchor="middle" style="font-size:16.5px">must fail</text>
+    <text x="332" y="344" text-anchor="middle" style="font-size:16.5px">write it</text>
+    <text x="332" y="362" text-anchor="middle" style="font-size:16.5px">word by word</text>
+  </svg><figcaption class="caption"><span class="fignum">Figure 1.</span> Encoder and decoder share everything except self-attention; a first token picks the mode.</figcaption></figure>
+  <p>BLIP's three passes over one image and caption, with one self-attention and one cross-attention layer standing in for the text Transformer, plus the decoder's own causal self-attention.</p>
+<!-- C1: 15 lines, over the 12-line P55 default; kept because it is one three-pass function, P80-sectioned like C2. -->
+<pre class="cs" data-cs="4-10,12,13,14-15"><code class="language-python">import torch
+import torch.nn as nn
+
+D, N_PATCH, N_TXT, H = 768, 197, 12, 12
+img = torch.randn(1, N_PATCH, D)  # ViT patch features
+txt = torch.randn(1, N_TXT, D)    # caption token vectors
+self_attn = nn.MultiheadAttention(D, H, batch_first=True)
+causal_self_attn = nn.MultiheadAttention(D, H, batch_first=True)
+cross = nn.MultiheadAttention(D, H, batch_first=True)
+causal = torch.ones(N_TXT, N_TXT, dtype=torch.bool).triu(1)
+
+itc, _ = self_attn(txt, txt, txt)  # ITC, text only
+itm, _ = cross(itc, img, img)      # ITM, reads img
+y, _ = causal_self_attn(txt, txt, txt, attn_mask=causal)
+lm, _ = cross(y, img, img)         # LM, causal, reads img</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>Image features, caption tokens, the shared layers and the decoder's own causal self-attention, the three columns of <a href="#fig-blip-s-three">Figure 1</a>.</li>
+  <li><span class="cs-n">2</span>ITC, text attends only to itself, the left column of <a href="#fig-blip-s-three">Figure 1</a>.</li>
+  <li><span class="cs-n">3</span>ITM, text also reads the image, the middle column of <a href="#fig-blip-s-three">Figure 1</a>.</li>
+  <li><span class="cs-n">4</span>LM, causal text reading the image, the right column of <a href="#fig-blip-s-three">Figure 1</a>.</li>
+</ol>
+  <h3><span class="secnum">2.2</span> What is shared and what is not</h3>
+  <p>
+    The encoder and the decoder share all parameters except for self-attention (BLIP section 3.2): the embedding layers, the cross-attention layers and the feed-forward networks are one set of weights.
+    Self-attention stays separate because encoding looks both ways while decoding may only look back.
+    A first token tells the model which mode it is in: <strong>[Encode]</strong> for matching, <strong>[Decode]</strong> for writing (BLIP section 3.1).
+  </p>
+  <h3><span class="secnum">2.3</span> The three losses</h3>
+  <p>
+    Each image-caption pair needs one forward pass through the image encoder and three through the text model, one per loss (BLIP section 3.2).
+    The contrastive loss compares the image and caption summaries; it learns from a momentum encoder, a slow copy of the model whose soft targets keep captions that may also match from being fully punished.
+    The matching loss asks a head whether the pair matches, and it trains on hard negatives, wrong captions that scored high.
+    The captioning loss predicts each word from the image and the words so far, with label smoothing of 0.1.
+  </p>
+  <div class="eq-card" id="blipItcEq">
+    <div class="eq-what">An image and a caption score as high as the match between their two summary vectors.</div>
+    <div class="eq-line eq-active">\(\displaystyle s(I, C) = \operatorname{sim}(\htmlStyle{color:#1f618d}{v}, \htmlStyle{color:#2c3e50}{t})\)</div>
+    <div class="eq-why eq-active"><var>\(s(I, C)\)</var> is the score for this pair. <var>\(v\)</var> is the image summary, the image [CLS] vector after its projection, normalized to length 1; <var>\(t\)</var> is the caption summary, the text [CLS] vector after its projection, normalized to length 1; <var>\(\operatorname{sim}\)</var> is the cosine comparison, the dot of two length-1 vectors. The cosine form comes from ALBEF section 3.2, the ITC lineage BLIP section 3.2 builds on. Training raises this score for matched pairs and, through the momentum soft targets, does not fully punish captions that may also match, because some nominal negatives may be positives. BLIP-2's version keeps the best of 32 query outputs instead (<a href="qformer.html#three-masks">BLIP-2 and the Q-Former, Section 3</a>).</div>
+    <div class="eq-legend"><span class="eq-item"><span class="eq-sw" style="background:#1f618d"></span><var>\(v\)</var> image summary</span><span class="eq-item"><span class="eq-sw" style="background:#2c3e50"></span><var>\(t\)</var> caption summary</span><span class="eq-item"><span class="eq-sw" style="background:#2c3e50"></span><var>\(s(I, C)\)</var> the score for this pair</span></div>
+  </div>
+  <div class="eq-card" id="blipLmEq">
+    <div class="eq-what">The captioning loss is low when the decoder, reading the image, predicts each caption word well.</div>
+    <div class="eq-line eq-active">\(\displaystyle L = -\frac{1}{T}\sum_{t=1}^{T} \log P(\htmlStyle{color:#2c3e50}{w_{t}} | \htmlStyle{color:#a04000}{I}, \htmlStyle{color:#2c3e50}{w_{&lt;t}})\)</div>
+    <div class="eq-why eq-active">The displayed line is the cross-entropy core of the loss, and the targets are softened by 0.1: label smoothing 0.1 is part of the loss, so the model is never trained to put all its weight on one word. <var>\(L\)</var> is the loss for one caption; <var>\(T\)</var> is the caption length; <var>\(w_{t}\)</var> is the true word at position <var>\(t\)</var>; <var>\(I\)</var> is the image the decoder reads through cross-attention; <var>\(w_{&lt;t}\)</var> is the words written so far; the minus sign turns higher probabilities into lower loss; the sum adds one per-word term for each caption word, and log turns each word probability into a score where a probability of 1 is best; averaging keeps long and short captions on one scale. Same shape as the Stage 2 loss on <a href="qformer.html#llm-prompts">BLIP-2 and the Q-Former, Section 4</a>, with the image in place of the 32 prompts.</div>
+    <div class="eq-legend"><span class="eq-item"><span class="eq-sw" style="background:#2c3e50"></span><var>\(w_{t}\)</var> true word</span><span class="eq-item"><span class="eq-sw" style="background:#a04000"></span><var>\(I\)</var> image</span><span class="eq-item"><span class="eq-sw" style="background:#2c3e50"></span><var>\(w_{&lt;t}\)</var> words so far</span><span class="eq-item"><span class="eq-sw" style="background:#2c3e50"></span><var>\(L\)</var> loss for one caption</span></div>
+  </div>
+  <h3><span class="secnum">2.4</span> One image-caption pair through the three passes</h3>
+  <p>One set of weights, three jobs, switched by the mask and the first token.</p>
+  <div class="demo" id="blipWalk">
+    <div class="demo-controls">
+      <button type="button" class="bv-btn" id="blipWalkPrev">Prev</button>
+      <button type="button" class="bv-btn" id="blipWalkNext">Next</button>
+      <button type="button" class="bv-btn" id="blipWalkReset">Reset</button>
+      <button type="button" class="bv-btn" id="blipWalkPlay" aria-pressed="false">Play</button>
+      <span class="walk-lbl" id="blipWalkLbl">Step 1 of 4</span>
+    </div>
+    <div class="demo-controls">
+      <label class="sl-lab" for="blipStep">Step <span id="blipStepV">1, image forward</span></label>
+      <input type="range" id="blipStep" min="1" max="4" step="1" value="1" aria-label="Walkthrough step">
+    </div>
+    <div class="demo-buttons" role="group" aria-label="Text mode">
+      <button type="button" data-step="2" aria-pressed="false">ITC</button>
+      <button type="button" data-step="3" aria-pressed="false">ITM</button>
+      <button type="button" data-step="4" aria-pressed="false">LM</button>
+    </div>
+<svg class="mtd-svg" id="blipWtSvg" viewBox="0 0 400 420" style="max-width:460px" role="img" aria-label="One image-caption pair through the three passes: the image encoder reads the image once, then the ITC, ITM and LM columns run in turn.">
+    <g class="wt-col" id="blipWtStrip">
+      <rect x="12" y="10" width="376" height="48" rx="6" style="fill:#fdf2e9;stroke:#a04000;stroke-width:2px"/>
+      <text x="200" y="29" text-anchor="middle" style="font-size:16.5px;font-weight:700;fill:#a04000">image encoder (ViT): one pass</text>
+      <text x="200" y="48" text-anchor="middle" style="font-size:16.5px;fill:#a04000">image features feed all three passes</text>
+      <g><line x1="68" y1="58" x2="68" y2="70" style="stroke:#a04000;stroke-width:2px"/><polygon points="68,78 63.6,70 72.4,70" style="fill:#a04000"/></g>
+      <g><line x1="200" y1="58" x2="200" y2="70" style="stroke:#a04000;stroke-width:2px"/><polygon points="200,78 195.6,70 204.4,70" style="fill:#a04000"/></g>
+      <g><line x1="332" y1="58" x2="332" y2="70" style="stroke:#a04000;stroke-width:2px"/><polygon points="332,78 327.6,70 336.4,70" style="fill:#a04000"/></g>
+    </g>
+    <g class="wt-col" id="blipWtItc">
+      <text x="68" y="100" text-anchor="middle" style="font-size:16.5px;font-weight:700">ITC</text>
+      <text class="mtd-sub" x="68" y="118" text-anchor="middle" style="font-size:16.5px">contrastive</text>
+      <rect x="12" y="128" width="112" height="36" rx="5" style="fill:#e8f8f5;stroke:#117a65;stroke-width:2px"/>
+      <text x="68" y="151" text-anchor="middle" style="font-size:16.5px;font-weight:700;fill:#117a65">FFN</text>
+      <rect x="12" y="176" width="112" height="40" rx="5" style="fill:#fbfcfd;stroke:#bdc3c7;stroke-width:1.4px;stroke-dasharray:5 4"/>
+      <text class="mtd-sub" x="68" y="193" text-anchor="middle" style="font-size:16.5px">no cross-</text>
+      <text class="mtd-sub" x="68" y="209" text-anchor="middle" style="font-size:16.5px">attention</text>
+      <rect x="12" y="228" width="112" height="40" rx="5" style="fill:#f4ecf7;stroke:#7d3c98;stroke-width:2px"/>
+      <text x="68" y="245" text-anchor="middle" style="font-size:16.5px;font-weight:700;fill:#7d3c98">self-attention</text>
+      <text x="68" y="261" text-anchor="middle" style="font-size:16.5px;fill:#7d3c98">bi-directional</text>
+      <text x="68" y="288" text-anchor="middle" style="font-size:16.5px">[CLS] + text</text>
+      <text x="68" y="344" text-anchor="middle" style="font-size:16.5px">same direction</text>
+      <text x="68" y="362" text-anchor="middle" style="font-size:16.5px">as the image?</text>
+    </g>
+    <g class="wt-col" id="blipWtItm">
+      <text x="200" y="100" text-anchor="middle" style="font-size:16.5px;font-weight:700">ITM</text>
+      <text class="mtd-sub" x="200" y="118" text-anchor="middle" style="font-size:16.5px">matching</text>
+      <rect x="146" y="128" width="108" height="36" rx="5" style="fill:#e8f8f5;stroke:#117a65;stroke-width:2px"/>
+      <text x="200" y="151" text-anchor="middle" style="font-size:16.5px;font-weight:700;fill:#117a65">FFN</text>
+      <rect x="146" y="176" width="108" height="40" rx="5" style="fill:#fdf2e9;stroke:#a04000;stroke-width:2px"/>
+      <text x="200" y="193" text-anchor="middle" style="font-size:16.5px;font-weight:700;fill:#a04000">cross-</text>
+      <text x="200" y="209" text-anchor="middle" style="font-size:16.5px;font-weight:700;fill:#a04000">attention</text>
+      <rect x="146" y="228" width="108" height="40" rx="5" style="fill:#f4ecf7;stroke:#7d3c98;stroke-width:2px"/>
+      <text x="200" y="245" text-anchor="middle" style="font-size:16.5px;font-weight:700;fill:#7d3c98" textLength="98.5" lengthAdjust="spacingAndGlyphs">self-attention</text>
+      <text x="200" y="261" text-anchor="middle" style="font-size:16.5px;fill:#7d3c98">bi-directional</text>
+      <text x="200" y="288" text-anchor="middle" style="font-size:16.5px">[Encode] + text</text>
+      <text x="200" y="344" text-anchor="middle" style="font-size:16.5px">&#8220;on the grass&#8221;</text>
+      <text x="200" y="362" text-anchor="middle" style="font-size:16.5px">must fail</text>
+    </g>
+    <g class="wt-col" id="blipWtLm">
+      <text x="332" y="100" text-anchor="middle" style="font-size:16.5px;font-weight:700">LM</text>
+      <text class="mtd-sub" x="332" y="118" text-anchor="middle" style="font-size:16.5px">next word</text>
+      <rect x="276" y="128" width="112" height="36" rx="5" style="fill:#e8f8f5;stroke:#117a65;stroke-width:2px"/>
+      <text x="332" y="151" text-anchor="middle" style="font-size:16.5px;font-weight:700;fill:#117a65">FFN</text>
+      <rect x="276" y="176" width="112" height="40" rx="5" style="fill:#fdf2e9;stroke:#a04000;stroke-width:2px"/>
+      <text x="332" y="193" text-anchor="middle" style="font-size:16.5px;font-weight:700;fill:#a04000">cross-</text>
+      <text x="332" y="209" text-anchor="middle" style="font-size:16.5px;font-weight:700;fill:#a04000">attention</text>
+      <rect x="276" y="228" width="112" height="40" rx="5" style="fill:#fdedec;stroke:#c0392b;stroke-width:2px"/>
+      <text x="332" y="245" text-anchor="middle" style="font-size:16.5px;font-weight:700;fill:#c0392b">self-attention</text>
+      <text x="332" y="261" text-anchor="middle" style="font-size:16.5px;fill:#c0392b">causal</text>
+      <text x="332" y="288" text-anchor="middle" style="font-size:16.5px">[Decode] + text</text>
+      <text x="332" y="344" text-anchor="middle" style="font-size:16.5px">write it</text>
+      <text x="332" y="362" text-anchor="middle" style="font-size:16.5px">word by word</text>
+    </g>
+    <text x="200" y="386" text-anchor="middle" style="font-size:16.5px;font-weight:600">same color, same weights</text>
+    <line x1="12" y1="394" x2="388" y2="394" style="stroke:#d5dbdb;stroke-width:1.2px"/>
+    <text class="mtd-sub" x="200" y="408" text-anchor="middle" style="font-size:16.5px">for example a dog photo, &#8220;a dog runs on the sand&#8221;</text>
+  </svg>
+
+    <p class="demo-read" id="blipWalkRead" aria-live="polite"></p>
+    <div class="eq-card eq-stepped" id="blipWalkCard">
+      <div class="eq-what">This step</div>
+      <div class="eq-why eq-active" data-eqline="0">The image is read once. Its features feed all three passes, and the [CLS] summary feeds ITC only.</div>
+      <div class="eq-line" data-eqline="1">\(\displaystyle s(I, C) = \operatorname{sim}(\htmlStyle{color:#1f618d}{v}, \htmlStyle{color:#2c3e50}{t})\)</div>
+      <div class="eq-why" data-eqline="1">The caption alone scores against the image: high when the two summaries point the same way.</div>
+      <div class="eq-why" data-eqline="2">The text reads the image and the head says matched or not.</div>
+      <div class="eq-line" data-eqline="3">\(\displaystyle L = -\frac{1}{T}\sum_{t=1}^{T} \log P(\htmlStyle{color:#2c3e50}{w_{t}} | \htmlStyle{color:#a04000}{I}, \htmlStyle{color:#2c3e50}{w_{&lt;t}})\)</div>
+      <div class="eq-why" data-eqline="3">Each next word is predicted from the image and the words so far.</div>
+    </div>
+  </div>
+
+
+  <hr>
+
+  <h2 id="capfilt"><span class="secnum">3</span> The model cleans its own captions</h2>
+  <p>
+    Web captions (alt-text) often miss the picture.
+    <strong>CapFilt</strong> (captioning and filtering) cleans them with two copies of the MED, each fine-tuned on COCO's human-written captions.
+  </p>
+  <p>
+    The <strong>captioner</strong>, the decoder fine-tuned with LM, writes one caption per web image by <a href="sampling.html#topp"><strong>nucleus sampling</strong></a> (each word drawn from the likeliest words covering 90% of the probability; a higher share allows rarer words and more varied captions, a lower one stays with safe common words); the <strong>filter</strong>, the encoder fine-tuned with ITC and ITM, drops captions its ITM head calls unmatched.
+    The gain is measured by text recall@1, how often an image's top-ranked caption is the right one.
+  </p>
+  <h3><span class="secnum">3.1</span> Captioner and filter</h3>
+  <p>
+    Both are fine-tuned copies of the same pre-trained model, trained on COCO's human-written captions.
+    The filter drops captions its matching head calls unmatched, from the web texts and from the synthetic ones alike.
+    More diverse captions give larger gains (BLIP section 1): the synthetic captions add words the web texts never used.
+  </p>
+<figure class="figure mtd-fig" id="fig-in-capfilt-a"><svg class="mtd-svg" viewBox="0 0 400 388" style="max-width:460px" role="img" aria-label="In CapFilt, a web image comes with its caption; the captioner writes a synthetic caption from the image; the filter keeps only captions its matching head accepts. In BLIP Fig. 4 the web caption from bridge near my house is rejected and the synthetic caption a flock of birds flying over a lake at sunset is accepted. The kept pairs plus human-written pairs pre-train a new model, measured by text recall@1">
+    <rect x="10" y="8" width="380" height="40" rx="6" style="fill:#f4f6f7;stroke:#95a5a6;stroke-width:1.8px"/>
+    <text x="200" y="33" text-anchor="middle" style="font-size:16.5px;font-weight:600">web image + its web caption</text>
+    <g><line x1="300" y1="48" x2="300" y2="68" style="stroke:#2c3e50;stroke-width:2px"/><polygon points="300,76 295.6,68 304.4,68" style="fill:#2c3e50"/></g>
+    <text class="mtd-sub" x="308" y="66" text-anchor="start" style="font-size:16.5px">image</text>
+    <rect x="210" y="78" width="180" height="58" rx="6" style="fill:#fdedec;stroke:#c0392b;stroke-width:2px"/>
+    <text x="300" y="100" text-anchor="middle" style="font-size:16.5px;font-weight:700;fill:#c0392b">captioner</text>
+    <text x="300" y="122" text-anchor="middle" style="font-size:16.5px;fill:#c0392b">decoder, LM, COCO</text>
+    <g><line x1="100" y1="48" x2="100" y2="154" style="stroke:#2c3e50;stroke-width:2px"/><polygon points="100,162 95.6,154 104.4,154" style="fill:#2c3e50"/></g>
+    <text class="mtd-sub" x="108" y="100" text-anchor="start" style="font-size:16.5px">web caption</text>
+    <g><line x1="300" y1="136" x2="300" y2="154" style="stroke:#2c3e50;stroke-width:2px"/><polygon points="300,162 295.6,154 304.4,154" style="fill:#2c3e50"/></g>
+    <text class="mtd-sub" x="292" y="152" text-anchor="end" style="font-size:16.5px">synthetic caption</text>
+    <rect x="10" y="164" width="380" height="114" rx="6" style="fill:#f4ecf7;stroke:#7d3c98;stroke-width:2px"/>
+    <text x="200" y="185" text-anchor="middle" style="font-size:16.5px;font-weight:700;fill:#7d3c98">filter</text>
+    <text x="200" y="207" text-anchor="middle" style="font-size:16.5px;fill:#7d3c98">encoder, ITC + ITM, COCO</text>
+    <text x="22" y="230" text-anchor="start" style="font-size:16.5px;fill:#c0392b">&#10007; web, &#8220;from bridge near my house&#8221;</text>
+    <text x="22" y="250" text-anchor="start" style="font-size:16.5px;fill:#1e8449">&#10003; synthetic, &#8220;a flock of birds flying over</text>
+    <text x="40" y="268" text-anchor="start" style="font-size:16.5px;fill:#1e8449">a lake at sunset&#8221;</text>
+    <g><line x1="200" y1="278" x2="200" y2="290" style="stroke:#2c3e50;stroke-width:2px"/><polygon points="200,298 195.6,290 204.4,290" style="fill:#2c3e50"/></g>
+    <rect x="10" y="300" width="380" height="50" rx="6" style="fill:#e8f8f5;stroke:#117a65;stroke-width:2px"/>
+    <text x="200" y="320" text-anchor="middle" style="font-size:16.5px;font-weight:700;fill:#117a65">kept captions + human-written pairs</text>
+    <text x="200" y="340" text-anchor="middle" style="font-size:16.5px;fill:#117a65">pre-train a new model on this</text>
+    <text x="200" y="364" text-anchor="middle" style="font-size:16.5px">fine-tuned COCO</text><text x="200" y="384" text-anchor="middle" style="font-size:16.5px">text recall@1</text>
+  </svg><figcaption class="caption"><span class="fignum">Figure 2.</span> The model writes and filters its own captions; pair from BLIP Fig. 4.</figcaption></figure>
+  <h3><span class="secnum">3.2</span> What CapFilt buys and where it breaks</h3>
+  <p>
+    CapFilt buys cleaner training data: the filter throws out captions that do not match, and the captioner adds captions the web never wrote.
+    It breaks in two places. The filter sometimes keeps a wrong caption, and the model then learns a wrong match.
+    And the captioner sometimes writes safe generic captions (<a href="beam-search.html">beam search</a> writes the caption the dataset repeats most), which teach the next model little.
+  </p>
+  <p>The filter keeps captions that match the picture and drops the rest.</p>
+  <div class="demo" id="capfiltTool">
+    <div class="cf-pair">
+      <div class="cf-card dropped" id="cfWeb">
+        <span class="cf-tag">web caption</span>
+        <p class="cf-cap">&ldquo;from bridge near my house&rdquo;</p>
+        <p class="cf-verdict" id="cfWebV">ITM head: unmatched, dropped</p>
+      </div>
+      <div class="cf-card kept" id="cfSyn">
+        <span class="cf-tag">synthetic caption</span>
+        <p class="cf-cap">&ldquo;a flock of birds flying over a lake at sunset&rdquo;</p>
+        <p class="cf-verdict" id="cfSynV">ITM head: matched, kept</p>
+      </div>
+    </div>
+    <div class="demo-controls">
+      <button type="button" class="bv-btn" id="cfRun">Run the filter again</button>
+    </div>
+    <p class="demo-read" id="cfRead" aria-live="polite">Kept: the synthetic caption. Dropped: the web caption.</p>
+    <p class="caption"><span class="fignum">Figure 3.</span> The filter keeps the matching caption and drops the rest.</p>
+  </div>
+
+
+  <hr>
+
+  <h2 id="failures"><span class="secnum">4</span> Failure modes and practical tips</h2>
+  <div class="table-scroll">
+  <table class="datatable">
+    <caption>Three ways CapFilt goes wrong, and what to do about each.</caption>
+    <tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr>
+    <tr><td>retrieval learns a wrong match</td><td>the filter keeps a wrong caption</td><td>use a stricter matching threshold, and add more human-written captions</td></tr>
+    <tr><td>captions fit any image</td><td>the captioner writes safe generic captions; <a href="beam-search.html">beam search</a> writes the caption the dataset repeats most</td><td>sample with nucleus sampling at the paper's p=0.9 (BLIP section 4.3 and Table 2)</td></tr>
+    <tr><td>a good caption ranks below the match</td><td>ITC treats a good caption as a negative</td><td>keep the momentum encoder and its soft labels; do not train ITC on hard labels alone</td></tr>
+  </table>
+  </div>
+
+
+  <hr>
+
+  <h2 id="in-practice"><span class="secnum">5</span> In practice</h2>
+  <p>
+    The released code and checkpoints live in the <a href="https://github.com/salesforce/BLIP">salesforce/BLIP repo</a>, with the pre-trained models the paper reports.
+    BLIP-2 builds on this page: it freezes the image encoder and the language model and trains a small Q-Former between them, in <a href="qformer.html">BLIP-2 and the Q-Former</a>.
+  </p>
+
+
+  <hr>
+
+  <h2 id="references"><span class="secnum">6</span> References</h2>
+  <ol class="brefs">
+    <li>Li, J., et al. (2022). BLIP: Bootstrapping Language-Image Pre-training for Unified Vision-Language Understanding and Generation. ICML 2022. <a href="https://arxiv.org/abs/2201.12086">arXiv:2201.12086</a>.</li>
+    <li>Radford, A., et al. (2021). Learning Transferable Visual Models From Natural Language Supervision. ICML 2021. <a href="https://arxiv.org/abs/2103.00020">arXiv:2103.00020</a>.</li>
+    <li>Devlin, J., et al. (2019). BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding. NAACL 2019. <a href="https://arxiv.org/abs/1810.04805">arXiv:1810.04805</a>.</li>
+  </ol>
+
+
+            <script>
+        (function () {
+            var nav = document.querySelector('.topnav');
+            function onNavScroll() {
+                nav.classList.toggle('scrolled', window.scrollY > 4);
+            }
+            window.addEventListener('scroll', onNavScroll, { passive: true });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            window.addEventListener('resize', function () {
+                if (window.innerWidth > 768) {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            onNavScroll();
+            var toggle = document.getElementById('navToggle');
+            var panel = document.getElementById('navPanel');
+            if (toggle && panel) {
+                toggle.addEventListener('click', function () {
+                    var open = panel.classList.toggle('open');
+                    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                });
+                panel.addEventListener('click', function (e) {
+                    if (e.target && e.target.classList && e.target.classList.contains('panel-link')) {
+                        panel.classList.remove('open');
+                        toggle.setAttribute('aria-expanded', 'false');
+                    }
+                });
+            }
+            var links = Array.prototype.slice.call(document.querySelectorAll('.tab-strip a.tab-chip[href^="#"]'));
+            if (!links.length) return;
+            var tabMap = {};
+            links.forEach(function (a) { tabMap[a.getAttribute('href').slice(1)] = a; });
+            var current = null;
+            function centerTab(tab) {
+                var strip = tab.parentElement;
+                if (!strip || !strip.classList.contains('tab-strip')) return;
+                var sr = strip.getBoundingClientRect();
+                var pr = tab.getBoundingClientRect();
+                strip.scrollLeft += (pr.width >= sr.width) ? (pr.left - sr.left) : (pr.left - sr.left) - (sr.width - pr.width) / 2;
+            }
+            function setActive(id) {
+                if (!tabMap[id] || id === current) return;
+                current = id;
+                links.forEach(function (a) {
+                    a.classList.toggle('active', a.getAttribute('href') === '#' + id);
+                });
+                centerTab(tabMap[id]);
+            }
+            links.forEach(function (a) {
+                a.addEventListener('click', function () {
+                    setActive(a.getAttribute('href').slice(1));
+                });
+            });
+            setActive(links[0].getAttribute('href').slice(1));
+            if ('IntersectionObserver' in window) {
+                var obs = new IntersectionObserver(function (entries) {
+                    entries.forEach(function (en) {
+                        if (en.isIntersecting) setActive(en.target.id);
+                    });
+                }, { rootMargin: '-35% 0px -55% 0px' });
+                Object.keys(tabMap).forEach(function (id) {
+                    var el = document.getElementById(id);
+                    if (el) obs.observe(el);
+                });
+                window.addEventListener('scroll', function () {
+                    if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) {
+                        setActive(links[links.length - 1].getAttribute('href').slice(1));
+                    }
+                }, { passive: true });
+            }
+            window.addEventListener('load', function () {
+                var act = document.querySelector('.tab-strip a.active');
+                if (act) centerTab(act);
+            });
+        })();
+    </script>
+<script>
+/* P80 code sections (CODE-SECTIONS.md) */
+(function(){
+  var C=['121,184,255','255,171,112','133,232,157','210,168,255','255,161,152','118,227,234'];
+  function lay(pre){
+    var code=pre.querySelector('code'); if(!code) return;
+    var lh=parseFloat(getComputedStyle(code).lineHeight);
+    var pt=parseFloat(getComputedStyle(pre).paddingTop);
+    var old=pre.querySelectorAll('.cs-g'); for(var j=0;j<old.length;j++) pre.removeChild(old[j]);
+    var imgs=[],sizes=[],pos=[];
+    (pre.getAttribute('data-cs')||'').split(',').forEach(function(r,i){
+      var m=r.trim().match(/^(\d+)(?:-(\d+))?$/); if(!m) return;
+      var a=+m[1],b=+(m[2]||m[1]),c=C[i%C.length],top=pt+(a-1)*lh,h=(b-a+1)*lh;
+      imgs.push('linear-gradient(rgba('+c+',.55),rgba('+c+',.55))','linear-gradient(rgba('+c+',.13),rgba('+c+',.13))');
+      sizes.push('3px '+h+'px','100% '+h+'px'); pos.push('0 '+top+'px','0 '+top+'px');
+      var g=document.createElement('span'); g.className='cs-g'; g.setAttribute('aria-hidden','true');
+      g.setAttribute('data-n',String(i+1)); g.style.top=(top+(lh-11)/2)+'px'; g.style.color='rgb('+c+')';
+      pre.insertBefore(g,code);
+    });
+    pre.style.backgroundImage=imgs.join(','); pre.style.backgroundSize=sizes.join(',');
+    pre.style.backgroundPosition=pos.join(','); pre.style.backgroundRepeat='no-repeat';
+  }
+  function all(){ var p=document.querySelectorAll('pre.cs'); for(var i=0;i<p.length;i++) lay(p[i]); }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',all); else all();
+  window.addEventListener('load',all);
+  window.addEventListener('resize',all);
+  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(all);
+})();
+</script>
+  <script>
+  function makeWalk(cfg) {
+    var root = document.getElementById(cfg.id);
+    if (!root) return;
+    var cur = 0, timer = 0;
+    var prev = document.getElementById(cfg.id + 'Prev'), next = document.getElementById(cfg.id + 'Next');
+    var reset = document.getElementById(cfg.id + 'Reset'), play = document.getElementById(cfg.id + 'Play');
+    var lbl = document.getElementById(cfg.id + 'Lbl'), read = document.getElementById(cfg.id + 'Read');
+    var card = document.getElementById(cfg.card);
+    var slider = cfg.slider ? document.getElementById(cfg.slider) : null;
+    var sliderV = cfg.sliderV ? document.getElementById(cfg.sliderV) : null;
+    var modeBtns = root.querySelectorAll('[data-step]');
+    function stop() {
+      if (timer) { clearInterval(timer); timer = 0; }
+      if (play) { play.textContent = 'Play'; play.setAttribute('aria-pressed', 'false'); }
+    }
+    function show(i) {
+      cur = Math.max(0, Math.min(cfg.steps.length - 1, i));
+      lbl.textContent = 'Step ' + (cur + 1) + ' of ' + cfg.steps.length;
+      read.textContent = cfg.steps[cur].read;
+      cfg.groups.forEach(function (g, gi) {
+        var el = document.getElementById(g);
+        if (el) el.classList.toggle('wt-dim', gi !== cur);
+      });
+      if (card) {
+        var nodes = card.querySelectorAll('[data-eqline]');
+        Array.prototype.forEach.call(nodes, function (n) {
+          n.classList.toggle('eq-active', +n.getAttribute('data-eqline') === cur);
+        });
+      }
+      if (slider) slider.value = String(cur + 1);
+      if (sliderV) sliderV.textContent = cfg.steps[cur].label;
+      Array.prototype.forEach.call(modeBtns, function (b) {
+        var on = +b.getAttribute('data-step') - 1 === cur;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+      if (prev) prev.disabled = cur === 0;
+      if (next) next.disabled = cur === cfg.steps.length - 1;
+    }
+    if (prev) prev.addEventListener('click', function () { stop(); show(cur - 1); });
+    if (next) next.addEventListener('click', function () { stop(); show(cur + 1); });
+    if (reset) reset.addEventListener('click', function () { stop(); show(0); });
+    if (play) play.addEventListener('click', function () {
+      if (timer) { stop(); return; }
+      if (cur === cfg.steps.length - 1) show(0);
+      play.textContent = 'Stop'; play.setAttribute('aria-pressed', 'true');
+      timer = setInterval(function () {
+        if (cur >= cfg.steps.length - 1) { stop(); return; }
+        show(cur + 1);
+      }, 2200);
+    });
+    if (slider) slider.addEventListener('input', function () { stop(); show(+slider.value - 1); });
+    Array.prototype.forEach.call(modeBtns, function (b) {
+      b.addEventListener('click', function () { stop(); show(+b.getAttribute('data-step') - 1); });
+    });
+    show(0);
+  }
+  makeWalk({
+    id: 'blipWalk', card: 'blipWalkCard', slider: 'blipStep', sliderV: 'blipStepV',
+    groups: ['blipWtStrip', 'blipWtItc', 'blipWtItm', 'blipWtLm'],
+    steps: [
+      { label: '1, image forward', read: 'One image pass; the image features feed all three passes, and the [CLS] summary is for ITC only.' },
+      { label: '2, contrastive score', read: 'The caption alone scores against the image.' },
+      { label: '3, matching verdict', read: 'ITM verdict: not matched.' },
+      { label: '4, caption writing', read: 'The decoder writes the caption, one word at a time.' }
+    ]
+  });
+  /* CapFilt keep-or-drop explorer: the verdict shows at rest; the button replays it. */
+  (function () {
+    var root = document.getElementById('capfiltTool');
+    if (!root) return;
+    var web = document.getElementById('cfWeb'), syn = document.getElementById('cfSyn');
+    var webV = document.getElementById('cfWebV'), synV = document.getElementById('cfSynV');
+    var out = document.getElementById('cfRead'), btn = document.getElementById('cfRun');
+    var t = 0;
+    btn.addEventListener('click', function () {
+      if (t) return;
+      web.classList.remove('dropped'); syn.classList.remove('kept');
+      webV.textContent = ''; synV.textContent = '';
+      out.textContent = 'Running the filter...';
+      t = setTimeout(function () {
+        t = 0;
+        web.classList.add('dropped'); syn.classList.add('kept');
+        webV.textContent = 'ITM head: unmatched, dropped';
+        synV.textContent = 'ITM head: matched, kept';
+        out.textContent = 'Kept: the synthetic caption. Dropped: the web caption.';
+      }, 600);
+    });
+  })();
+  </script>
+</body>
+</html>

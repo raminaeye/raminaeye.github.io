@@ -1170,11 +1170,11 @@ nav.prereq span.prereq-chip{display:inline-block;padding:.15rem .6rem;border:1px
       <p>Shapes: per-token log-probabilities <code>(num_answers, length)</code> with a mask for padding; <code>group_advantages</code> returns one row of K advantages per question, and <code>adv</code> holds one value per answer in the same order as the answers. The function returns the negative of <var>\(\mathcal{J}\)</var>, so minimizing it maximizes <var>\(\mathcal{J}\)</var>. <code>logp_old</code> and <code>logp_ref</code> come from frozen models and are computed without gradients; only <code>logp</code> carries the policy&rsquo;s gradient. With one update per batch, <code>ratio</code> is one in value, but the ratio is the exponential of the gap between the new and old log-probabilities, so a small change in the log-probability changes the ratio by the ratio times that change, and at ratio one that factor is one, so the two nudges are the same size and <code>ratio</code> still carries that gradient, as the GRPO objective card explains. The code line <code>ratio = torch.exp(logp - logp_old)</code> is the same fact in code.</p>
             <p>The code below computes the muffin question&rsquo;s group advantages and loss: the reward row is the group&rsquo;s marks, right or wrong, and the log-probability rows are the policy&rsquo;s chances for each answer&rsquo;s tokens.</p>
 <pre class="cs" data-cs="2-5,8,10,12,14"><code class="language-python">import torch
-def group_advantages(rewards, eps=1e-6):          # rewards: (num_questions, K)
+def group_advantages(rewards, eps=EPS_GUARD):          # rewards: (num_questions, K)
     mean = rewards.mean(dim=1, keepdim=True)
     std = rewards.std(dim=1, keepdim=True, unbiased=False)
     return (rewards - mean) / (std + eps)         # [1] the group advantage card; all-equal group gives zeros
-def grpo_loss(logp, logp_old, logp_ref, adv, mask, eps_clip=0.2, beta=0.04):
+def grpo_loss(logp, logp_old, logp_ref, adv, mask, eps_clip=CLIP_EPS, beta=KL_BETA):
     logp_old, logp_ref = logp_old.detach(), logp_ref.detach()  # no gradient
     ratio = torch.exp(logp - logp_old)            # [2] the token ratio card, per token
     a = adv.unsqueeze(-1)                         # every token shares its answer's advantage
@@ -1209,9 +1209,9 @@ def grpo_loss(logp, logp_old, logp_ref, adv, mask, eps_clip=0.2, beta=0.04):
           <div>
             <div class="grpo-knob-label">Group size K</div>
             <div class="grpo-toggle" role="group" aria-label="Group size K">
-              <button type="button" data-k="4" aria-pressed="false"><span class="grpo-beta-name">4</span><span class="grpo-beta-note">noisier arrows</span></button>
-              <button type="button" data-k="8" aria-pressed="true"><span class="grpo-beta-name">8</span><span class="grpo-beta-note">steadier than 4</span></button>
-              <button type="button" data-k="16" aria-pressed="false"><span class="grpo-beta-name">16</span><span class="grpo-beta-note">steadiest arrows</span></button>
+              <button type="button" data-k="4" aria-pressed="false"><span class="grpo-beta-name">small</span><span class="grpo-beta-note">noisier arrows</span></button>
+              <button type="button" data-k="8" aria-pressed="true"><span class="grpo-beta-name">medium</span><span class="grpo-beta-note">steadier arrows</span></button>
+              <button type="button" data-k="16" aria-pressed="false"><span class="grpo-beta-name">large</span><span class="grpo-beta-note">steadiest arrows</span></button>
             </div>
           </div>
           <div>
@@ -1224,12 +1224,12 @@ def grpo_loss(logp, logp_old, logp_ref, adv, mask, eps_clip=0.2, beta=0.04):
           </div>
         </div>
         <svg id="grpoToolSvg" class="mtd-svg stat-svg" viewBox="0 0 640 370" role="img" aria-label="A group of answers around their average line. Right answers sit above the line with up arrows, wrong ones below it with down arrows, and a strip underneath shows how much each of the twelve groups pushed."></svg>
-        <p class="grpo-lean">Try medium against easy, and K 16 against 4, and watch which groups push the most and which arrows hold steadiest.</p>
+        <p class="grpo-lean">Try a harder question against an easier one, and a larger group against a smaller one, and watch which groups push the most and which arrows hold steadiest.</p>
         <p class="grpo-readout" id="grpoReadout">Right answers are pushed up, wrong answers down, from the group average.</p>
         <figcaption class="caption"><span class="fignum">Figure 5.</span> Right answers sit above the group average, wrong ones below, each pushed by its distance from the line.</figcaption>
       </figure>
       <p class="grpo-runline" id="grpoRunline">Each new group is drawn from the same model; nothing is trained here.</p>
-      <p class="grpo-runline">The run draws twelve groups and stops.</p>
+      <p class="grpo-runline">The run draws group after group, then stops.</p>
     </section>
 
     <section>

@@ -909,7 +909,7 @@ table.qtab code { white-space: nowrap; overflow-wrap: normal; }
     <figure class="figure mtd-fig" id="fig-1"><svg class="mtd-svg" viewBox="0 0 400 260" style="max-width:480px" role="img" aria-label="Every step the simulation sends the agent the arm's state and a reward, and the agent sends back four torques, each from -1 to 1."><rect class="mtd-box " x="40" y="8" width="320" height="58" rx="7"/><text class="" x="200.0" y="32.0" text-anchor="middle" style="font-size:17px;font-weight:700">Physics simulation</text><text class="mtd-sub" x="200.0" y="54.0" text-anchor="middle" style="font-size:17px">arm, ball, a small reward per step on the goal</text><rect class="mtd-box " x="40" y="194" width="320" height="58" rx="7"/><text class="" x="200.0" y="218.0" text-anchor="middle" style="font-size:17px;font-weight:700">Agent</text><text class="mtd-sub" x="200.0" y="240.0" text-anchor="middle" style="font-size:17px">reads numbers, not pixels</text><line class="mtd-s mtd-c1" x1="310.0" y1="66.0" x2="310.0" y2="183.0" style="stroke-width:3px"/><polygon class="mtd-f mtd-c1" points="310.0,194.0 304.5,183.0 315.5,183.0"/><line class="mtd-s mtd-c2" x1="90.0" y1="194.0" x2="90.0" y2="77.0" style="stroke-width:3px"/><polygon class="mtd-f mtd-c2" points="90.0,66.0 95.5,77.0 84.5,77.0"/><text class="mtd-t1" x="298.0" y="104.0" text-anchor="end" style="font-size:17px;font-weight:700">33 numbers</text><text class="mtd-t1" x="298.0" y="126.0" text-anchor="end" style="font-size:17px">reward</text><text class="mtd-t2" x="102.0" y="150.0" text-anchor="start" style="font-size:17px;font-weight:700">4 torques</text><text class="mtd-t2" x="102.0" y="172.0" text-anchor="start" style="font-size:17px">each -1 to 1</text></svg><figcaption class="caption"><span class="fignum">Figure 3.</span> Each step, 33 numbers and a reward in, 4 torques out.</figcaption></figure>
 
 <pre class="cs" data-cs="1-7,8-16"><code class="language-python">import numpy as np
-NUM_ARMS = 20
+NUM_ARMS = N_ARMS
 
 out = env.reset(train_mode=True)
 info = out[brain_name]
@@ -1062,16 +1062,16 @@ while True:
 import torch.nn as nn
 import torch.nn.functional as F
 
-S, A = 33, 4
+S, A = STATE_DIM, ACT_DIM
 L = nn.Linear
 actor = nn.Sequential()
-actor.append(L(S, 256))
+actor.append(L(S, H1))
 actor.append(nn.ReLU())
-actor.append(L(256, 128))
+actor.append(L(H1, H2))
 actor.append(nn.ReLU())
-actor.append(L(128, 64))
+actor.append(L(H2, H3))
 actor.append(nn.ReLU())
-actor.append(L(64, A))
+actor.append(L(H3, A))
 actor.append(nn.Tanh())</code></pre>
 <ol class="cs-notes">
   <li><span class="cs-n">1</span>The tanh function squashes any number into -1 to 1, the torque range. (<a href="rl-continuous-actions.html#continuous">Continuous-Action RL</a>)</li>
@@ -1082,10 +1082,10 @@ actor.append(nn.Tanh())</code></pre>
 <pre class="cs" data-cs="3-7,9-14"><code class="language-python">class Critic(nn.Module):
     def __init__(self):
         super().__init__()
-        self.fs = L(S, 256)
-        self.f1 = L(256 + A, 128)
-        self.f2 = L(128, 64)
-        self.out = L(64, 1)
+        self.fs = L(S, H1)
+        self.f1 = L(H1 + A, H2)
+        self.f2 = L(H2, H3)
+        self.out = L(H3, 1)
 
     def forward(self, s, a):
         h = F.relu(self.fs(s))
@@ -1287,7 +1287,7 @@ def critic_update(batch):
       <p class="climb-knob">The learning rate <var>\(\eta\)</var> sets how big a step each update takes. (<a href="rl.html#how-it-learns">RL Basics</a>) Here that is the actor step size.</p>
       <canvas id="climbCanvas" class="climb-canvas" role="img" aria-label="The critic's score curve for one arm state, with the actor's torque as a dot climbing uphill. A dashed curve shows the true score."></canvas>
       <p class="caption"><span class="fignum">Figure 8.</span> One torque for one arm state climbs the critic's curve and stops; a real actor moves its weights the same way (Equation 4).</p>
-      <p class="climb-run">The actor takes forty small steps up the curve and stops.</p>
+      <p class="climb-run">The actor takes small steps up the curve and stops.</p>
       <p class="demo-stats" id="climbStats" aria-live="polite"></p>
     </div>
 
@@ -1321,12 +1321,12 @@ critic_target = deepcopy(critic)
 pairs = [(actor_target, actor),
          (critic_target, critic)]
 actor_opt = Adam(
-    actor.parameters(), lr=1e-3)
+    actor.parameters(), lr=LEARNING_RATE)
 critic_opt = Adam(
-    critic.parameters(), lr=1e-3)
-gamma, tau = 0.99, 1e-3
-buf = deque(maxlen=100_000)
-last100 = deque(maxlen=100)</code></pre>
+    critic.parameters(), lr=LEARNING_RATE)
+gamma, tau = DISCOUNT, SOFT_UPDATE
+buf = deque(maxlen=BUFFER_SIZE)
+last100 = deque(maxlen=WINDOW)</code></pre>
 <ol class="cs-notes">
   <li><span class="cs-n">1</span>Imports for the buffer, the target copies and the optimizers.</li>
   <li><span class="cs-n">2</span>Makes the critic from the <code>Critic</code> class of <a href="#ddpg-networks">An actor network and a scoring network</a>, a slow target copy of each network, and <code>pairs</code> to match each target copy with its live network.</li>
@@ -1360,9 +1360,9 @@ def soft_update(tgt, live):
 </ol>
 
 <pre class="cs" data-cs="1-3,4-10,11-12,13-14"><code class="language-python">def learn():
-    if len(buf) &lt;= 256:
+    if len(buf) &lt;= BATCH_SIZE:
         return
-    rows = random.sample(buf, 256)
+    rows = random.sample(buf, BATCH_SIZE)
     cols = [to_tensor(c)
             for c in zip(*rows)]
     s, a, r, s_next, done = cols
@@ -1381,9 +1381,9 @@ def soft_update(tgt, live):
 </ol>
 
 <pre class="cs" data-cs="1-4,6-12,13-22,23-28"><code class="language-python">def solved():
-    if len(last100) &lt; 100:
+    if len(last100) &lt; WINDOW:
         return False
-    return np.mean(last100) &gt;= 30
+    return np.mean(last100) &gt;= SOLVE_BAR
 
 step = 0
 while not solved():
@@ -1402,15 +1402,15 @@ while not solved():
         s = store(s, act, info)
         returns += info.rewards
         step += 1
-        if step % 256 == 0:
-            for _ in range(64):
+        if step % LEARN_INTERVAL == 0:
+            for _ in range(N_UPDATES):
                 learn()
         if any(info.local_done):
             break
     last100.append(returns.mean())</code></pre>
 <ol class="cs-notes">
   <li><span class="cs-n">1</span>The loop runs until the average return passes the solve bar in Table 1.</li>
-  <li><span class="cs-n">2</span>Each episode resets all 20 arms and zeroes their total rewards, as in <a href="#ddpg-arm">Many robot arms reaching for a moving goal</a>; <code>step</code> counts steps across episodes.</li>
+  <li><span class="cs-n">2</span>Each episode resets all the arms and zeroes their total rewards, as in <a href="#ddpg-arm">Many robot arms reaching for a moving goal</a>; <code>step</code> counts steps across episodes.</li>
   <li><span class="cs-n">3</span>Every step all 20 arms act and store one transition each. The repo adds exploration noise, a small random nudge so the arm tries new moves, inside its act step, which this listing leaves out, taught in <a href="ddpg-training.html#ddpg-noise">the noise section of Training DDPG: Target Networks, Replay and Noise</a>.</li>
   <li><span class="cs-n">4</span>Every so often, a burst of updates runs (Table 2).</li>
 </ol>

@@ -790,7 +790,7 @@ from torch.distributions import Categorical
 
 gym.register_envs(ale_py)
 MOVES = [2, 0, 3]   # Atari action numbers: 2 moves the paddle up, 0 stays, 3 moves it down
-n_envs, n_steps, gamma, lam, c_v, c_h = 16, 5, 0.99, 0.95, 0.5, 0.01
+n_envs, n_steps, gamma, lam, c_v, c_h = N_ENVS, N_STEPS, DISCOUNT, LAMBDA, C_VALUE, C_ENTROPY
 
 def make_pong():
     env = gym.make("ALE/Pong-v5", frameskip=1)   # the emulator itself skips no frames
@@ -803,11 +803,11 @@ class ActorCritic(nn.Module):
     def __init__(self):
         super().__init__()
         self.body = nn.Sequential(
-            nn.Conv2d(4, 16, 8, stride=4), nn.ReLU(),
-            nn.Conv2d(16, 32, 4, stride=2), nn.ReLU(),
-            nn.Flatten(), nn.Linear(32 * 9 * 9, 256), nn.ReLU())
-        self.policy_head = nn.Linear(256, 3)   # actor: up, stay, down
-        self.value_head = nn.Linear(256, 1)    # critic: V_phi(s)
+            nn.Conv2d(FRAMES, C1, 8, stride=4), nn.ReLU(),
+            nn.Conv2d(C1, C2, 4, stride=2), nn.ReLU(),
+            nn.Flatten(), nn.Linear(FLAT, HIDDEN), nn.ReLU())
+        self.policy_head = nn.Linear(HIDDEN, N_MOVES)   # actor: up, stay, down
+        self.value_head = nn.Linear(HIDDEN, 1)    # critic: V_phi(s)
     def forward(self, x):
         h = self.body(x)
         return self.policy_head(h), self.value_head(h).squeeze(-1)   # squeeze drops the extra size-one axis, so each screen gets one guess
@@ -823,7 +823,7 @@ def compute_gae(rewards, values, dones, gamma, lam):
     return adv
 
 net = ActorCritic()
-opt = torch.optim.RMSprop(net.parameters(), lr=7e-4, eps=1e-5)   # eps is a tiny floor that keeps the update from dividing by zero
+opt = torch.optim.RMSprop(net.parameters(), lr=LEARNING_RATE, eps=EPS_FLOOR)   # eps is a tiny floor that keeps the update from dividing by zero
 obs, info = envs.reset()
 while True:
     R, D, logps, Vs, ents = [], [], [], [], []
@@ -846,14 +846,14 @@ while True:
     critic_loss = (returns.detach() - V).pow(2).mean()
     loss = actor_loss + c_v * critic_loss - c_h * torch.stack(ents).mean()
     opt.zero_grad(); loss.backward()
-    nn.utils.clip_grad_norm_(net.parameters(), 0.5)
+    nn.utils.clip_grad_norm_(net.parameters(), GRAD_CAP)
     opt.step()
 </code></pre>
     <ol class="cs-notes">
-      <li><span class="cs-n">1</span>Sixteen copies of Pong in one batch, each played by the same network; a finished game restarts within the same step, so every step is a real move.</li>
+      <li><span class="cs-n">1</span>Copies of Pong in one batch, each played by the same network; a finished game restarts within the same step, so every step is a real move.</li>
       <li><span class="cs-n">2</span>One shared body with two outputs: the actor&#8217;s raw outputs, called <code>logits</code>, for the three moves, and the critic&#8217;s guess <var>\(V_\phi(s)\)</var>.</li>
       <li><span class="cs-n">3</span><a href="#acGaeEq">GAE</a>, added up backward: each step&#8217;s surprise <code>delta</code>, then the blend; <code>(1 - dones[t])</code> drops the next guess when the game ended.</li>
-      <li><span class="cs-n">4</span>The stretch of play: the network and its RMSProp optimizer (<a href="adaptive-optimizers.html#rmsprop">Adaptive Optimizers: AdaGrad, RMSProp and Adam</a>) are built first, then each game plays five steps and the moves, rewards and guesses are collected for the <a href="#acLossEq">two losses</a>.</li>
+      <li><span class="cs-n">4</span>The stretch of play: the network and its RMSProp optimizer (<a href="adaptive-optimizers.html#rmsprop">Adaptive Optimizers: AdaGrad, RMSProp and Adam</a>) are built first, then each game plays a few steps and the moves, rewards and guesses are collected for the <a href="#acLossEq">two losses</a>.</li>
       <li><span class="cs-n">5</span>The <a href="#acLossEq">two losses</a>: <code>returns</code> is <var>\(\hat R_t\)</var>, and <code>detach()</code> holds <var>\(\hat A_t\)</var> and <var>\(\hat R_t\)</var> fixed. The code averages over steps where the equations sum; only the step size changes.</li>
       <li><span class="cs-n">6</span>The <a href="#acTotalEq">whole loss</a>, then one step with the optimizer built in code section 4; <code>clip_grad_norm_</code> caps the size of the gradient (<a href="backpropagation.html#autograd">Backpropagation and Gradient Checking</a>).</li>
     </ol>
@@ -865,8 +865,8 @@ while True:
     <figure id="fig-gaetool" class="figure tool-fig">
     <div class="demo" id="acTool">
       <div class="rl-ctl">
-        <label for="atLam"><var>\(\lambda\)</var> = <span id="atLamVal">0.9</span>, how slowly long lookaheads fade</label>
-        <input type="range" id="atLam" min="0" max="1" step="0.05" value="0.9" aria-valuetext="0.9">
+        <label for="atLam"><var>\(\lambda\)</var>, how slowly long lookaheads fade</label>
+        <input type="range" id="atLam" min="0" max="1" step="0.05" value="0.9" aria-valuetext="in between">
         <div class="rl-ends"><span>one step</span><span>full return</span></div>
       </div>
       <div class="qw-row">
@@ -1008,7 +1008,7 @@ while True:
       var c=est>=0?'#196f3d':'#b03a2e';
       bracket(bPath,X(0),x1,180); bPath.style.stroke=c; dia(bDia,x1,180);
       bGuess.setAttribute('x',x1+11);
-      bTxt.setAttribute('x',(X(0)+x1)/2); bTxt.style.fill=c; bTxt.textContent= n===1?'one step':'four steps';
+      bTxt.setAttribute('x',(X(0)+x1)/2); bTxt.style.fill=c; bTxt.textContent= n===1?'a short lookahead':'a longer lookahead';
     }
     out.textContent=READ[st];
     var lines=card.querySelectorAll('.eq-line, .eq-why');
@@ -1117,7 +1117,7 @@ function s3Faint(seed,n){var rnd=mulberry32(seed),a=[];for(var s=0;s<(n||30);s++
     return 'Little bias left: the bold arrows nearly reach the true push, but the faint arrows spread wide.';
   }
   function draw(){
-    var lam=+slider.value; slider.setAttribute('aria-valuetext',lam<=0?'one step':(lam>=1?'full return':String(lam)));
+    var lam=+slider.value; slider.setAttribute('aria-valuetext',lam<=0?'one step':(lam>=1?'full return':'in between'));
     var lv=document.getElementById('atLamVal'); if(lv) lv.textContent=slider.value;
     while(gFaint.firstChild) gFaint.removeChild(gFaint.firstChild); while(gBold.firstChild) gBold.removeChild(gBold.firstChild);
     var runs=s3Faint(seed,30);

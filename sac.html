@@ -846,7 +846,7 @@ nav.prereq span.prereq-chip{display:inline-block;padding:.15rem .6rem;border:1px
     <section>
       <h2 id="sac"><span class="secnum">2</span> A range of torques instead of one torque</h2>
       <p>A policy is the agent's rule for choosing a move in each state; it may always pick the same move or pick by chance. (<a href="rl.html#the-loop">RL Basics</a>) SAC's actor draws its torques from a bell.</p>
-      <p>A Gaussian actor outputs one centre and one width per torque and draws each torque from that bell. We write SAC's actor as <var>\(\pi_\theta\)</var>, with weights <var>\(\theta\)</var>, because it draws its torques by chance; <var>\(\mu_\theta\)</var> is the actor that outputs one action every time. For the Reacher that is four centres and four widths. The actor learns all eight numbers itself, so the width is not a noise size set by hand.</p>
+      <p>A Gaussian actor outputs one centre and one width per torque and draws each torque from that bell. We write SAC's actor as <var>\(\pi_\theta\)</var>, with weights <var>\(\theta\)</var>, because it draws its torques by chance; <var>\(\mu_\theta\)</var> is the actor that outputs one action every time. For the Reacher that is one centre and one width per torque. The actor learns all these numbers itself, so the width is not a noise size set by hand.</p>
       <p>The tanh function squashes any number into -1 to 1, the torque range. (<a href="rl-continuous-actions.html#continuous">Continuous-Action RL</a>) Each draw is then squashed, so every torque stays in range.</p>
       <p>Entropy <var>\(\mathcal{H}\)</var> is how undecided the policy is; for a bell of torques, it is how wide the bell is. (<a href="reinforce.html#entropy">REINFORCE and the Baseline</a>) Staying undecided keeps several good ways of moving alive, so the actor does not lock onto one fragile gait (a way of walking) too early. The entropy bonus is a small extra term that rewards the policy for staying undecided between moves, so it keeps trying the others for longer. (<a href="reinforce.html#entropy">REINFORCE and the Baseline</a>) SAC adds this bonus to each step's reward, and a wider bell earns more of it, so the critic's score also counts the bonus still to come.</p>
       <p>The critic learns by being pulled toward a target, the step's reward plus its own score for what comes next, counted a little less. (<a href="rl-continuous-actions.html#stored-steps">Continuous-Action RL</a>) That target moves whenever the critic moves. SAC also keeps TD3's two critics but not its other two changes.</p>
@@ -1060,9 +1060,9 @@ nav.prereq span.prereq-chip{display:inline-block;padding:.15rem .6rem;border:1px
       <pre class="cs" data-cs="1-10,15-16,17-17"><code class="language-python">class SquashedGaussianActor(nn.Module):
     def __init__(self, state_dim, act_dim):
         super().__init__()
-        self.net = nn.Sequential(nn.Linear(state_dim, 256), nn.ReLU(), nn.Linear(256, 256), nn.ReLU())
-        self.mean = nn.Linear(256, act_dim)
-        self.log_std = nn.Linear(256, act_dim)
+        self.net = nn.Sequential(nn.Linear(state_dim, HIDDEN), nn.ReLU(), nn.Linear(HIDDEN, HIDDEN), nn.ReLU())
+        self.mean = nn.Linear(HIDDEN, act_dim)
+        self.log_std = nn.Linear(HIDDEN, act_dim)
 
     def forward(self, s):
         h = self.net(s)
@@ -1073,12 +1073,12 @@ def sample_action(actor, s):
     std = log_std.exp()
     u = m + std * torch.randn_like(m)
     a = torch.tanh(u)
-    logp = Normal(m, std).log_prob(u).sum(-1) - torch.log(1 - a.pow(2) + 1e-6).sum(-1)
+    logp = Normal(m, std).log_prob(u).sum(-1) - torch.log(1 - a.pow(2) + EPS_GUARD).sum(-1)
     return a, logp</code></pre>
       <ol class="cs-notes">
         <li><span class="cs-n">1</span>First, the network: it returns one centre and one log width per torque. The network outputs the log of the width, so the width stays positive.</li>
         <li><span class="cs-n">2</span>Next, the draw of Equation 3: a fresh random draw is scaled by the width, shifted by the centre and squashed into the torque range.</li>
-        <li><span class="cs-n">3</span>Last, the log-probability of the squashed draw from Equation 3. Squashing piles torques up near -1 and 1, so the likelihood of a squashed torque is corrected by the second term. <code>1e-6</code> is a tiny number that avoids the log of zero.</li>
+        <li><span class="cs-n">3</span>Last, the log-probability of the squashed draw from Equation 3. Squashing piles torques up near -1 and 1, so the likelihood of a squashed torque is corrected by the second term. A tiny guard constant is added that avoids the log of zero.</li>
       </ol>
       <p>One update step uses both blocks.</p>
       <pre class="cs" data-cs="4-12,13-24"><code class="language-python">def sac_update(batch, actor, q1, q2, q1_t, q2_t, log_alpha, target_entropy):
@@ -1121,7 +1121,7 @@ def sample_action(actor, s):
             <span class="sac-cap">Raising the temperature makes the bell jump from one region to one bell over both; too high, it ignores the critic.</span>
           </label>
           <label class="sac-ctl sac-auto"><span class="sac-auto-row"><input type="checkbox" id="sacAuto"> automatic</span>
-            <span class="sac-cap">Automatic tuning takes sixty small steps and stops.</span>
+            <span class="sac-cap">Automatic tuning steps the temperature a little at a time, then stops.</span>
           </label>
         </div>
         <p class="sac-plot-label">illustrative, equally good ways to turn the shoulder about one axis</p>

@@ -865,7 +865,7 @@ from torch.distributions import Categorical
 
 gym.register_envs(ale_py)
 MOVES = [2, 0, 3]   # Atari action numbers: 2 moves the paddle up, 0 stays, 3 moves it down
-n_envs, n_steps = 8, 128   # eight workers, each plays 128 steps per batch
+n_envs, n_steps = N_ENVS, N_STEPS   # workers, each plays a batch of steps
 
 def make_pong():
     env = gym.make("ALE/Pong-v5", frameskip=1)   # the emulator itself skips no frames
@@ -878,17 +878,17 @@ class ActorCritic(nn.Module):
     def __init__(self):
         super().__init__()
         self.body = nn.Sequential(
-            nn.Conv2d(4, 16, 8, stride=4), nn.ReLU(),
-            nn.Conv2d(16, 32, 4, stride=2), nn.ReLU(),
-            nn.Flatten(), nn.Linear(32 * 9 * 9, 256), nn.ReLU())
-        self.policy_head = nn.Linear(256, 3)   # actor: up, stay, down
-        self.value_head = nn.Linear(256, 1)    # critic: V_phi(s)
+            nn.Conv2d(FRAMES, C1, 8, stride=4), nn.ReLU(),
+            nn.Conv2d(C1, C2, 4, stride=2), nn.ReLU(),
+            nn.Flatten(), nn.Linear(FLAT, HIDDEN), nn.ReLU())
+        self.policy_head = nn.Linear(HIDDEN, N_MOVES)   # actor: up, stay, down
+        self.value_head = nn.Linear(HIDDEN, 1)    # critic: V_phi(s)
     def forward(self, x):
         h = self.body(x)
         return self.policy_head(h), self.value_head(h).squeeze(-1)   # squeeze drops the extra size-one axis, so each screen gets one guess
 
-settings = {"clip_eps": 0.1, "n_epochs": 3, "minibatch_size": 256,
-            "c_v": 1, "c_h": 0.01, "lr": 2.5e-4, "max_grad_norm": 0.5}
+settings = {"clip_eps": CLIP_EPS, "n_epochs": N_EPOCHS, "minibatch_size": MINIBATCH_SIZE,
+            "c_v": C_VALUE, "c_h": C_ENTROPY, "lr": LEARNING_RATE, "max_grad_norm": GRAD_CAP}
 clip_eps, n_epochs, minibatch_size = settings["clip_eps"], settings["n_epochs"], settings["minibatch_size"]
 c_v, c_h, max_grad_norm = settings["c_v"], settings["c_h"], settings["max_grad_norm"]
 
@@ -898,7 +898,7 @@ opt = torch.optim.Adam(agent.parameters(), lr=settings["lr"])
 obs, _ = envs.reset()
 while True:
     obs_b, act_b, logp_b, rew_b, done_b, val_b = [], [], [], [], [], []
-    for _ in range(n_steps):                          # each worker plays 128 steps
+    for _ in range(n_steps):                          # each worker plays a batch of steps
         x = torch.as_tensor(obs, dtype=torch.float32) / 255
         logits, v = agent(x)
         dist = Categorical(logits=logits)   # turns the raw outputs into the move chances
@@ -922,7 +922,7 @@ while True:
     actions = actions.reshape(-1)
     for epoch in range(n_epochs):
         for mb in torch.randperm(len(obs_f)).split(minibatch_size):
-            adv_mb = (advantages[mb] - advantages[mb].mean()) / (advantages[mb].std() + 1e-8)   # shift and scale the advantages so each minibatch averages zero with a similar size
+            adv_mb = (advantages[mb] - advantages[mb].mean()) / (advantages[mb].std() + EPS_GUARD)   # shift and scale the advantages so each minibatch averages zero with a similar size
             new_logits, new_value = agent(obs_f[mb])
             dist_mb = Categorical(logits=new_logits)
             new_logp = dist_mb.log_prob(actions[mb])
@@ -937,12 +937,12 @@ while True:
             opt.step()
 </code></pre>
     <ol class="cs-notes">
-      <li><span class="cs-n">1</span>Eight copies of Pong in one batch, each played by the same network for 128 steps; a finished game restarts within the same step, so every step is a real move. Done marks the step at which a game ended, so nothing after it is counted.</li>
+      <li><span class="cs-n">1</span>Copies of Pong in one batch, each played by the same network for a batch of steps; a finished game restarts within the same step, so every step is a real move. Done marks the step at which a game ended, so nothing after it is counted.</li>
       <li><span class="cs-n">2</span>GAE, from <a href="actor-critic.html#gae">Actor-Critic: A2C and A3C</a>: the advantage estimate, built backward from the rewards, the critic&#8217;s guesses and the done flags. The blend masks with <code>(1 - dones[t])</code>, so a game that ended contributes nothing after it; do not use CleanRL&#8217;s shifted done index.</li>
       <li><span class="cs-n">3</span>The ratio, line 1 of the clip card: the new chance of each move taken, divided by its old chance.</li>
       <li><span class="cs-n">4</span>The clipped ratio and the clipped objective, lines 3 and 4 of the clip card: the ratio held between the two edges, and the smaller of the plain and clipped terms, averaged over the minibatch. The minus sign turns the objective the code maximises into a loss.</li>
       <li><span class="cs-n">5</span>The full objective card: the critic&#8217;s loss, the squared gap between its guess and the return it is trained to predict, plus the entropy bonus. The gradient-norm cap is a separate cap on the size of each gradient step, unrelated to the ratio clip.</li>
-      <li><span class="cs-n">6</span>Epochs and minibatches: the batch tensors are flattened first, so each minibatch index picks one step; the batch is shuffled and cut into minibatches of 256, and the update runs over each minibatch three times. The advantages are shifted and scaled per minibatch so each averages zero with a similar size.</li>
+      <li><span class="cs-n">6</span>Epochs and minibatches: the batch tensors are flattened first, so each minibatch index picks one step; the batch is shuffled and cut into minibatches, and the update runs over each minibatch several times. The advantages are shifted and scaled per minibatch so each averages zero with a similar size.</li>
     </ol>
 
     <h2 id="clip-tool"><span class="secnum">7</span> Where the clip stops the push</h2>
@@ -975,10 +975,10 @@ while True:
       <div class="ppo-pips" id="ptPips"><span class="ppo-pip"></span><span class="ppo-pip"></span><span class="ppo-pip"></span><span class="ppo-pip"></span><span class="ppo-pip"></span><span class="ppo-pip"></span><span class="ppo-pip"></span><span class="ppo-pip"></span><span class="ppo-pip"></span><span class="ppo-pip"></span></div>
       <p class="rl-out" id="ptOut" aria-live="polite"></p>
     </div>
-      <figcaption class="caption"><span class="fignum">Figure 5.</span> Step size is the learning rate <var>\(\eta\)</var>. One batch is reused for ten passes. The toggle picks a move that scored well or badly.</figcaption>
+      <figcaption class="caption"><span class="fignum">Figure 5.</span> Step size is the learning rate <var>\(\eta\)</var>. One batch is reused for several passes. The toggle picks a move that scored well or badly.</figcaption>
     </figure>
 
-    <p class="rf-p78">Over the ten passes, larger steps reach the clip edge in fewer passes.</p>
+    <p class="rf-p78">Over the passes, larger steps reach the clip edge in fewer passes.</p>
     <p class="rf-p78">With a badly scored move the picture mirrors. Pushing the move down stops at the clip edge, but a change that made it more likely keeps its full penalty.</p>
     <p class="rf-p78">A step can still overshoot the edge; the clip only stops further pushing.</p>
 

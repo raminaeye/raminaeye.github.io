@@ -40,7 +40,7 @@
     "rl-continuous-actions.html": "https://notebook.google.com/notebook/61a9cecc-4161-460c-bda5-972f31d09f0d",
     "rl-model-based.html": "https://notebook.google.com/notebook/7b1bdc43-e1d0-4ace-b9ee-77d7b48f139f",
     "dqn.html": "https://notebook.google.com/notebook/b3b91b6b-d9b3-43a8-ab8c-9d8ee203e28c",
-    "ddpg.html": "https://notebook.google.com/notebook/c823d8d8-34d9-45e6-ad05-2da16eb89022",
+    "ddpg.html": "https://notebook.google.com/notebook/d06953e2-2987-4bad-b507-94f7e8b340aa",
     "ddpg-training.html": "https://notebook.google.com/notebook/6ed434ad-6b48-4113-9c4a-b7815e8c03b3",
     "td3.html": "https://notebook.google.com/notebook/e26d3ee1-e54a-4c9b-8cec-42e84e6e9950",
     "multi-agent-rl.html": "https://notebook.google.com/notebook/5bc20c6d-4848-4a73-ac05-77a145075b2a",

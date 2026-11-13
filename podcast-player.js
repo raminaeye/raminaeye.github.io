@@ -44,7 +44,7 @@
     "ddpg-training.html": "https://notebooklm.google.com/notebook/cd7fd0a9-f891-44ce-91e0-0214b26e9867",
     "td3.html": "https://notebook.google.com/notebook/e26d3ee1-e54a-4c9b-8cec-42e84e6e9950",
     "multi-agent-rl.html": "https://notebook.google.com/notebook/403ab1af-31ac-4ff9-9ce2-a3fb780b940a",
-    "rl-alignment.html": "https://notebook.google.com/notebook/6d73606d-77fb-4188-8e1b-9004fbedb30f"
+    "rl-alignment.html": "https://notebook.google.com/notebook/c4a39eb7-a380-4ee7-9ffc-be787553d4c7"
   };
   /* NOTEBOOKLM-END */
 

@@ -32,7 +32,7 @@
   var NOTEBOOKLM = {
     "rl.html": "https://notebook.google.com/notebook/0628ed91-5235-44b8-84bf-60b6d00fbc45",
     "rl-methods.html": "https://notebook.google.com/notebook/2950992b-0039-4831-9335-ae6812b7ef42",
-    "q-learning.html": "https://notebook.google.com/notebook/131bfc47-97bf-408a-b48a-9650b3737fea",
+    "q-learning.html": "https://notebook.google.com/notebook/4fb9abb2-e1fe-41b2-9c5c-02a92b2e817f",
     "rl-policy-gradients.html": "https://notebooklm.google.com/notebook/abe8dd72-cf5a-48c6-82be-db18a27b9f52",
     "reinforce.html": "https://notebook.google.com/notebook/1d06684b-0d33-4b11-880a-8ea2a4cc56aa",
     "actor-critic.html": "https://notebook.google.com/notebook/553dc46b-7650-49ed-9f37-571d96570c52",

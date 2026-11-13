@@ -62,6 +62,29 @@
   css.href = BASE + 'katex.min.css';
   document.head.appendChild(css);
 
+  /* Contain KaTeX's hidden accessibility span (2026-11-13, contrast-leftovers).
+     KaTeX renders each formula as <span class="katex"><span class="katex-mathml">
+     (position:absolute, clipped to 1px, screen-reader only) + <span
+     class="katex-html"> (the visible math). .katex itself is unpositioned,
+     so the mathml span's containing block is the document: inside a
+     horizontal scroll container (.qtab-wrap, table:has(td code), any
+     overflow-x:auto wrapper that is itself unpositioned) the visible math
+     is clipped by the wrapper but the invisible span escapes it and
+     expands the document scrollWidth. Seen live at 360 px on tsne.html
+     (29 px, span inside a diag-table cell in .qtab-wrap) and svm.html
+     (25 px, span inside a diag-table cell in a display:block table with
+     overflow-x:auto); a site-wide render survey of all 183 pages found
+     no other instance, and the tab-strip case (DIV.tab-strip, already
+     position:relative) proves the positioned-container fix. Making .katex
+     position:relative (no offsets, so no visual change) makes each
+     formula its span's containing block, so the wrapper clips the span
+     exactly like the visible math. The rule lives here, in the one shared
+     include, so it covers every present and future instance; without JS
+     there is no KaTeX and no overflow, so the rule is inert there. */
+  var contain = document.createElement('style');
+  contain.textContent = '.katex{position:relative}';
+  document.head.appendChild(contain);
+
   load('katex.min.js');
   load('contrib/auto-render.min.js', function () {
     function go() {

@@ -931,7 +931,7 @@ var var{background:none;padding:0;color:inherit;border-radius:0}
   <p>Builds on <a href="distributions.html#gaussian">sampling from a Gaussian</a> (Common Probability Distributions, section 5)</p>
 </nav>
 
-  <p>The noise <var>\(z\)</var> is a vector of, for example, 100 random numbers drawn from a fixed distribution <var>\(p_{z}\)</var>. The deep convolutional GAN (DCGAN) draws <var>\(z\)</var> uniformly (Radford et al. 2016). Common PyTorch code draws <var>\(z\)</var> from <var>\(N(0, I)\)</var>, the standard Gaussian, 100 independent numbers of mean 0 and variance 1, with <code>torch.randn</code>. Either works because the generator <var>\(G\)</var> learns to reshape whatever <var>\(p_{z}\)</var> gives it.</p>
+  <p>The noise <var>\(z\)</var> is a vector of random numbers drawn from a fixed distribution <var>\(p_{z}\)</var>. The deep convolutional GAN (DCGAN) draws <var>\(z\)</var> uniformly (Radford et al. 2016). Common PyTorch code draws <var>\(z\)</var> from <var>\(N(0, I)\)</var>, the standard Gaussian, independent numbers of mean 0 and variance 1, with <code>torch.randn</code>. Either works because the generator <var>\(G\)</var> learns to reshape whatever <var>\(p_{z}\)</var> gives it.</p>
 
   <figure id="fig-1" class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 360 266" style="max-width:460px" role="img" aria-label="Noise z, marker 1, goes into the generator G, marker 2, which outputs a generated digit, marker 3. A real digit, marker 4, and the generated one both go into the discriminator D, marker 5, whose output, marker 6, is a number from 0 to 1">
 <g><rect x="16" y="40" width="22" height="14" class="box-b"/><rect x="16" y="56" width="22" height="14" class="box-b"/><rect x="16" y="72" width="22" height="14" class="box-b"/><rect x="16" y="88" width="22" height="14" class="box-b"/><text x="27" y="122" class="ts mid">noise <tspan class="mvar">z</tspan></text><g class="fig-mk"><circle cx="27" cy="142" r="11"/><text x="27" y="142">1</text></g></g>
@@ -1268,31 +1268,32 @@ var var{background:none;padding:0;color:inherit;border-radius:0}
   <p>Builds on <a href="adaptive-optimizers.html#adam">Adam</a> (Adaptive Optimizers: AdaGrad, RMSProp and Adam, section 4)</p>
 </nav>
 
-  <p>Each training step is <a href="#walkthrough">the loop of Section&nbsp;6</a>, run once per batch; it carries the two networks and their optimizers and costs about three forward and backward passes. The original GAN paper trained with stochastic gradient descent plus momentum, a running average of past gradients; Adam arrives with DCGAN.</p>
+  <p>Each training step is <a href="#walkthrough">the loop of Section&nbsp;6</a>, run once per batch; it carries the two networks and their optimizers and costs several forward and backward passes. The original GAN paper trained with stochastic gradient descent plus momentum, a running average of past gradients; Adam arrives with DCGAN.</p>
 
   <p>One training step of a tiny DCGAN, on a random stand-in batch for real digits.</p>
 
-  <pre class="cs" data-cs="1-12,14-15,16-16,18-18,19-19"><code class="language-python">import torch, torch.nn as nn
-G = nn.Sequential(  # noise to a 28x28 image: 7 to 14 to 28
-    nn.Linear(100, 128 * 7 * 7), nn.Unflatten(1, (128, 7, 7)),
-    nn.ConvTranspose2d(128, 64, 4, 2, 1), nn.BatchNorm2d(64), nn.ReLU(),
-    nn.ConvTranspose2d(64, 1, 4, 2, 1), nn.Tanh())
-D = nn.Sequential(  # image to one logit
-    nn.Conv2d(1, 64, 4, 2, 1), nn.LeakyReLU(0.2),
-    nn.Conv2d(64, 128, 4, 2, 1), nn.BatchNorm2d(128), nn.LeakyReLU(0.2),
-    nn.Flatten(), nn.Linear(128 * 7 * 7, 1))
-opt_D, opt_G = [torch.optim.Adam(m.parameters(), lr=2e-4, betas=(0.5, 0.999)) for m in (D, G)]
-bce, real = nn.BCEWithLogitsLoss(), torch.rand(128, 1, 28, 28) * 2 - 1
-ones, zeros = torch.ones(128, 1), torch.zeros(128, 1)
+  <pre class="cs" data-cs="2-13,15-16,17-17,19-19,20-20"><code class="language-python">def run(NOISE_DIM, CH, S, CH_HALF, KERNEL, STRIDE, PAD, SLOPE, LR, BETA1, BETA2, BATCH, IMG):  # pass your own sizes and settings
+    import torch, torch.nn as nn
+    G = nn.Sequential(  # noise to an image, growing by doubling
+        nn.Linear(NOISE_DIM, CH * S * S), nn.Unflatten(1, (CH, S, S)),
+        nn.ConvTranspose2d(CH, CH_HALF, KERNEL, STRIDE, PAD), nn.BatchNorm2d(CH_HALF), nn.ReLU(),
+        nn.ConvTranspose2d(CH_HALF, 1, KERNEL, STRIDE, PAD), nn.Tanh())
+    D = nn.Sequential(  # image to one logit
+        nn.Conv2d(1, CH_HALF, KERNEL, STRIDE, PAD), nn.LeakyReLU(SLOPE),
+        nn.Conv2d(CH_HALF, CH, KERNEL, STRIDE, PAD), nn.BatchNorm2d(CH), nn.LeakyReLU(SLOPE),
+        nn.Flatten(), nn.Linear(CH * S * S, 1))
+    opt_D, opt_G = [torch.optim.Adam(m.parameters(), lr=LR, betas=(BETA1, BETA2)) for m in (D, G)]
+    bce, real = nn.BCEWithLogitsLoss(), torch.rand(BATCH, 1, IMG, IMG) * 2 - 1
+    ones, zeros = torch.ones(BATCH, 1), torch.zeros(BATCH, 1)
 
-fake = G(torch.randn(128, 100))
-loss_D = bce(D(real), ones) + bce(D(fake.detach()), zeros)
-opt_D.zero_grad(); loss_D.backward(); opt_D.step()
+    fake = G(torch.randn(BATCH, NOISE_DIM))
+    loss_D = bce(D(real), ones) + bce(D(fake.detach()), zeros)
+    opt_D.zero_grad(); loss_D.backward(); opt_D.step()
 
-loss_G = bce(D(G(torch.randn(128, 100))), ones)  # fresh noise
-opt_G.zero_grad(); loss_G.backward(); opt_G.step()</code></pre>
+    loss_G = bce(D(G(torch.randn(BATCH, NOISE_DIM))), ones)  # fresh noise
+    opt_G.zero_grad(); loss_G.backward(); opt_G.step()</code></pre>
 <ol class="cs-notes">
-  <li><span class="cs-n">1</span>A tiny DCGAN for 28x28 digits whose G projects and reshapes <var>\(z\)</var> with <code>nn.Linear</code>, then grows 7 to 14 to 28, the doubling of <a href="#fig-11">Figure&nbsp;11</a>, and whose D returns a logit; Adam for each network; the targets <code>ones</code> (real) and <code>zeros</code> (generated).</li>
+  <li><span class="cs-n">1</span>A tiny DCGAN for digits whose G projects and reshapes <var>\(z\)</var> with <code>nn.Linear</code>, then grows by doubling, the doubling of <a href="#fig-11">Figure&nbsp;11</a>, and whose D returns a logit; Adam for each network; the targets <code>ones</code> (real) and <code>zeros</code> (generated).</li>
   <li><span class="cs-n">2</span>D&#8217;s loss, real images against 1 and generated ones against 0, <a href="#d-loss">the value V</a> with its sign flipped.</li>
   <li><span class="cs-n">3</span>The D step.</li>
   <li><span class="cs-n">4</span>G&#8217;s loss on fresh noise, <a href="#nonsat">the generator loss <var>\(L_{G}\)</var></a>.</li>

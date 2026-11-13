@@ -907,7 +907,7 @@ a.prereq-chip:hover{color:#007bff}
       <input type="range" id="dinoTau" min="0" max="100" value="100" step="1">
     </div>
     <svg class="mtd-svg" id="dinoSvg" viewBox="0 0 300 300" style="max-width:420px" role="img" aria-label="Teacher output shares for three toy images, eight outputs each"></svg>
-    <p class="caption"><span class="fignum">Figure 2.</span> Three toy images, <var>\(K = 8\)</var> outputs; the center is their mean.</p>
+    <p class="caption"><span class="fignum">Figure 2.</span> Toy images and their outputs; the center is their mean.</p>
     <div class="demo-stats" id="dinoStats"></div>
 
   </div>
@@ -984,38 +984,39 @@ a.prereq-chip:hover{color:#007bff}
   <h2 id="dino-in-practice"><span class="secnum">3</span> One DINO training step, in code</h2>
 
   <p>A DINO step trains the student, then moves the teacher toward it by EMA and the center <var>\(c\)</var> toward the batch mean.</p>
-<pre class="cs" data-cs="6-9,11-19,21-25,26-28,30-31,32"><code class="language-python">import copy, math
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+<pre class="cs" data-cs="7-10,12-20,22-26,27-29,31-32,33"><code class="language-python">def run(TAU_STUDENT, TAU_TEACHER, OUT_DIM, LAM_START, CENTER_MOMENTUM, TOTAL_STEPS, INPUT_DIM, LR, BATCH, IMG):  # pass your own sizes and settings
+    import copy, math
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
 
-def dino_loss(s_out, t_out, c, tau_s=0.1, tau_t=0.04):
-    P_t = F.softmax((t_out - c) / tau_t, dim=-1)     # center, sharpen
-    log_P_s = F.log_softmax(s_out / tau_s, dim=-1)
-    return -(P_t * log_P_s).sum(dim=-1).mean()
+    def dino_loss(s_out, t_out, c, tau_s=TAU_STUDENT, tau_t=TAU_TEACHER):
+        P_t = F.softmax((t_out - c) / tau_t, dim=-1)     # center, sharpen
+        log_P_s = F.log_softmax(s_out / tau_s, dim=-1)
+        return -(P_t * log_P_s).sum(dim=-1).mean()
 
-K_OUT, LAM_BASE, M_C = 1024, 0.996, 0.9   # toy K; DINO uses 65,536
-WD_START, WD_END = 0.04, 0.4
-k, K_STEPS = 0, 1000                      # step k
-lam = 1 - (1 - LAM_BASE) * (math.cos(math.pi * k / K_STEPS) + 1) / 2
-wd = WD_END - (WD_END - WD_START) * (math.cos(math.pi * k / K_STEPS) + 1) / 2
-student = nn.Sequential(nn.Flatten(), nn.Linear(3 * 32 * 32, K_OUT))
-teacher = copy.deepcopy(student).requires_grad_(False)
-c = torch.zeros(K_OUT)
-opt = torch.optim.AdamW(student.parameters(), lr=5e-4, weight_decay=wd)
+    K_OUT, LAM_BASE, M_C = OUT_DIM, LAM_START, CENTER_MOMENTUM   # DINO uses 65,536 outputs
+    WD_START, WD_END = 0.04, 0.4
+    k, K_STEPS = 0, TOTAL_STEPS                 # step k
+    lam = 1 - (1 - LAM_BASE) * (math.cos(math.pi * k / K_STEPS) + 1) / 2
+    wd = WD_END - (WD_END - WD_START) * (math.cos(math.pi * k / K_STEPS) + 1) / 2
+    student = nn.Sequential(nn.Flatten(), nn.Linear(INPUT_DIM, K_OUT))
+    teacher = copy.deepcopy(student).requires_grad_(False)
+    c = torch.zeros(K_OUT)
+    opt = torch.optim.AdamW(student.parameters(), lr=LR, weight_decay=wd)
 
-x1, x2 = torch.rand(64, 3, 32, 32), torch.rand(64, 3, 32, 32)
-s1, s2 = student(x1), student(x2)
-with torch.no_grad():
-    t1, t2 = teacher(x1), teacher(x2)
-L = (dino_loss(s1, t2, c) + dino_loss(s2, t1, c)) / 2
-opt.zero_grad()
-L.backward()
-opt.step()
-with torch.no_grad():
-    for p_t, p_s in zip(teacher.parameters(), student.parameters()):
-        p_t.mul_(lam).add_(p_s, alpha=1 - lam)
-    c = M_C * c + (1 - M_C) * torch.cat([t1, t2]).mean(dim=0)</code></pre>
+    x1, x2 = torch.rand(BATCH, 3, IMG, IMG), torch.rand(BATCH, 3, IMG, IMG)
+    s1, s2 = student(x1), student(x2)
+    with torch.no_grad():
+        t1, t2 = teacher(x1), teacher(x2)
+    L = (dino_loss(s1, t2, c) + dino_loss(s2, t1, c)) / 2
+    opt.zero_grad()
+    L.backward()
+    opt.step()
+    with torch.no_grad():
+        for p_t, p_s in zip(teacher.parameters(), student.parameters()):
+            p_t.mul_(lam).add_(p_s, alpha=1 - lam)
+        c = M_C * c + (1 - M_C) * torch.cat([t1, t2]).mean(dim=0)</code></pre>
 <ol class="cs-notes">
   <li><span class="cs-n">1</span>Loss with centered, sharpened teacher shares, <a href="#dino">Section 2</a> eq line 1.</li>
   <li><span class="cs-n">2</span>Student, teacher copy, center <var>\(c\)</var> and optimizer (AdamW, an optimizer that applies weight decay separately from the gradient step), the DINO panel of <a href="#dinoWalk">Figure 1</a>; DINO raises the weight decay <code>wd</code> from 0.04 to 0.4 on a cosine schedule.</li>

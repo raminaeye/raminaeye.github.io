@@ -1291,20 +1291,21 @@ html var sub,html var sup,html .mvar sub,html .mvar sup{font-size:max(12px,.72em
   </table>
 
 <p>The first snippet checks one batch of <var>\(d\)</var>-number embeddings; <code>eff_rank</code> counts the directions in use (Roy and Vetterli 2007).</p>
-<pre class="cs" data-cs="5-9,10,11,12-14"><code class="language-python">import torch
-import torch.nn as nn
-import torch.nn.functional as F
+<pre class="cs" data-cs="6-10,11,12,13-15"><code class="language-python">def run(BATCH, EMBED_DIM, INPUT_DIM):  # pass your own sizes and settings
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
 
-N, d = 256, 128
-encoder = nn.Linear(32, d)                       # stand-in
-x = torch.randn(N, 32)
-with torch.no_grad():
-    Z = F.normalize(encoder(x), dim=1)           # [N, d], unit rows
-spread = Z.std(dim=0).mean()                     # near 1/sqrt(d)
-C = torch.cov(Z.T, correction=0)                 # divide by N
-lam = torch.linalg.svdvals(C)
-shares = lam / lam.sum()
-eff_rank = torch.special.entr(shares).sum().exp()   # 1 to d</code></pre>
+    N, d = BATCH, EMBED_DIM
+    encoder = nn.Linear(INPUT_DIM, d)                 # stand-in
+    x = torch.randn(N, INPUT_DIM)
+    with torch.no_grad():
+        Z = F.normalize(encoder(x), dim=1)           # [N, d], unit rows
+    spread = Z.std(dim=0).mean()                     # near 1/sqrt(d)
+    C = torch.cov(Z.T, correction=0)                 # divide by N
+    lam = torch.linalg.svdvals(C)
+    shares = lam / lam.sum()
+    eff_rank = torch.special.entr(shares).sum().exp()   # 1 to d</code></pre>
 <ol class="cs-notes">
   <li><span class="cs-n">1</span>One batch of unit embeddings <var>\(Z\)</var>, the <var>\(z_{i}\)</var> of <a href="#collapse">Section 2</a> eq line 1.</li>
   <li><span class="cs-n">2</span>Spread per dimension, the first row of <a href="#fig-11">Figure 11</a>.</li>
@@ -1312,39 +1313,41 @@ eff_rank = torch.special.entr(shares).sum().exp()   # 1 to d</code></pre>
   <li><span class="cs-n">4</span>Singular values and the effective rank, the bars in <a href="#specDemo">Figure 6</a>.</li>
 </ol>
   <p>The second follows that paper&#8217;s code; both numbers fall as training works.</p>
-<pre class="cs" data-cs="4-7,8,9-10"><code class="language-python">import torch
-import torch.nn.functional as F
+<pre class="cs" data-cs="5-8,9,10-11"><code class="language-python">def run(ALPHA_VAL, UNIF_T_VAL, BATCH, EMBED_DIM, NOISE_SCALE):  # pass your own sizes and settings
+    import torch
+    import torch.nn.functional as F
 
-ALPHA, UNIF_T = 2, 2                             # the paper's defaults
-N, d = 256, 128
-z1 = F.normalize(torch.randn(N, d), dim=1)
-z2 = F.normalize(z1 + 0.1 * torch.randn(N, d), dim=1)
-align = (z1 - z2).norm(dim=1).pow(ALPHA).mean()
-sq = torch.pdist(z1).pow(2)                      # every pair, squared
-uniform = torch.exp(-UNIF_T * sq).mean().log()   # at most 0</code></pre>
+    ALPHA, UNIF_T = ALPHA_VAL, UNIF_T_VAL               # the paper's defaults
+    N, d = BATCH, EMBED_DIM
+    z1 = F.normalize(torch.randn(N, d), dim=1)
+    z2 = F.normalize(z1 + NOISE_SCALE * torch.randn(N, d), dim=1)
+    align = (z1 - z2).norm(dim=1).pow(ALPHA).mean()
+    sq = torch.pdist(z1).pow(2)                      # every pair, squared
+    uniform = torch.exp(-UNIF_T * sq).mean().log()   # at most 0</code></pre>
 <ol class="cs-notes">
   <li><span class="cs-n">1</span>Toy positive pairs, two views per image, the pairs measured in the alignment row of <a href="#fig-11">Figure 11</a>.</li>
-  <li><span class="cs-n">2</span>Alignment, the positive-pair distance, the third row of <a href="#fig-11">Figure 11</a>. A larger <code>ALPHA</code> weights pairs that sit far apart more; at 2 it is the squared distance.</li>
+  <li><span class="cs-n">2</span>Alignment, the positive-pair distance, the third row of <a href="#fig-11">Figure 11</a>. A larger <code>ALPHA</code> weights pairs that sit far apart more; as set here it is the squared distance.</li>
   <li><span class="cs-n">3</span>Uniformity over all pairs, the fourth row of <a href="#fig-11">Figure 11</a>. A larger <code>UNIF_T</code> scores only the closest pairs; a smaller one scores all pairs evenly. <var>\(t\)</var> is tuned per dataset.</li>
 </ol>
 
-<p>The third is <a href="knn.html#how">k-NN accuracy</a>, a majority vote of the 20 nearest training embeddings.</p>
-<pre class="cs" data-cs="4-8,10-13"><code class="language-python">import torch
-import torch.nn.functional as F
+<p>The third is <a href="knn.html#how">k-NN accuracy</a>, a majority vote of the nearest training embeddings.</p>
+<pre class="cs" data-cs="5-9,11-14"><code class="language-python">def run(KNN_K, N_TRAIN, N_VAL, EMBED_DIM, N_CLASSES):  # pass your own sizes and settings
+    import torch
+    import torch.nn.functional as F
 
-K_NEIGHBORS, n_train, n_val, d = 20, 1000, 200, 128
-bank = F.normalize(torch.randn(n_train, d), dim=1)
-train_y = torch.randint(0, 10, (n_train,))
-query = F.normalize(torch.randn(n_val, d), dim=1)
-val_y = torch.randint(0, 10, (n_val,))
+    K_NEIGHBORS, n_train, n_val, d = KNN_K, N_TRAIN, N_VAL, EMBED_DIM
+    bank = F.normalize(torch.randn(n_train, d), dim=1)
+    train_y = torch.randint(0, N_CLASSES, (n_train,))
+    query = F.normalize(torch.randn(n_val, d), dim=1)
+    val_y = torch.randint(0, N_CLASSES, (n_val,))
 
-sim = query @ bank.T                             # [n_val, n_train]
-top = sim.topk(K_NEIGHBORS, dim=1)
-pred = train_y[top.indices].mode(dim=1).values   # majority vote
-knn_acc = (pred == val_y).float().mean()</code></pre>
+    sim = query @ bank.T                             # [n_val, n_train]
+    top = sim.topk(K_NEIGHBORS, dim=1)
+    pred = train_y[top.indices].mode(dim=1).values   # majority vote
+    knn_acc = (pred == val_y).float().mean()</code></pre>
 <ol class="cs-notes">
   <li><span class="cs-n">1</span>A bank of labeled training embeddings and queries to classify, for the last row of <a href="#fig-11">Figure 11</a>.</li>
-  <li><span class="cs-n">2</span>Cosine, top 20, majority vote and accuracy, the last row of <a href="#fig-11">Figure 11</a>. More neighbors give a smoother but blurrier vote; at 1 a single noisy neighbor decides. A plain majority vote is the simplest version.</li>
+  <li><span class="cs-n">2</span>Cosine, the nearest neighbors, majority vote and accuracy, the last row of <a href="#fig-11">Figure 11</a>. More neighbors give a smoother but blurrier vote; at 1 a single noisy neighbor decides. A plain majority vote is the simplest version.</li>
 </ol>
 
   <p><a href="kd.html">Knowledge Distillation</a>, a trained encoder teaching a smaller student, is a related tutorial.</p>

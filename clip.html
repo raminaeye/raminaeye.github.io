@@ -817,11 +817,11 @@ html var sub,html var sup,html .mvar sub,html .mvar sup{font-size:max(12px,.72em
         <button type="button" class="demo-btn cg-stage" data-stage="1" aria-pressed="false">Rows pick</button>
         <button type="button" class="demo-btn cg-stage" data-stage="2" aria-pressed="false">Columns pick</button>
       </span>
-      <span class="cg-step"><label for="cgStep">Training step <span id="cgStepVal">40</span> of 100</label>
+      <span class="cg-step"><label for="cgStep">Training step</label>
       <input type="range" id="cgStep" min="0" max="100" value="40" step="1"></span>
     </div>
     <svg id="cgSvg" class="cg-svg" viewBox="0 0 340 372" role="img" aria-label="Six photos as rows and six captions as columns; cell shade shows the score or the softmax share"></svg>
-    <p class="caption"><span class="fignum">Figure 4.</span> Six toy pairs; the dashed diagonal darkens as training runs.</p>
+    <p class="caption"><span class="fignum">Figure 4.</span> The dashed diagonal darkens as training runs.</p>
     <div class="demo-stats cg-read" id="cgRead" aria-live="polite"></div>
 
   </div>
@@ -877,7 +877,7 @@ html var sub,html var sup,html .mvar sub,html .mvar sup{font-size:max(12px,.72em
     function argmaxRow(r){ var m = 0; for (var j = 1; j < r.length; j++) if (r[j] > r[m]) m = j; return m; }
     function draw(){
       var step = +slider.value, C = frames[step];
-      sval.textContent = step;
+      if (sval) sval.textContent = step;
       var S = C.map(function(r){ return r.map(function(x){ return K*x; }); });
       var V, win = [];
       if (stage === 0){ V = C.map(function(r){ var lo = Math.min.apply(null, r), hi = Math.max.apply(null, r); return r.map(function(x){ return 0.08 + 0.92 * Math.pow((x - lo) / ((hi - lo) || 1), 3); }); }); }
@@ -936,25 +936,26 @@ html var sub,html var sup,html .mvar sub,html .mvar sup{font-size:max(12px,.72em
   <p>CLIP learns <var>\(\tau\)</var> as one more weight, updated by every gradient step with the encoders. It starts at 0.07, so the score multiplier starts small; the multiplier is capped at 100 (<var>\(\tau\)</var> = 0.01) because larger ones made training unstable. <a href="kd.html#soft-predictions-what-the-teacher-really-knows">Knowledge Distillation</a> uses the same temperature in the opposite direction, raising it to soften a teacher&#8217;s output probabilities.</p>
 
 <p>The snippet defines the loss <var>\(L\)</var> as <code>clip_loss</code> and calls it on toy features.</p>
-<pre class="cs" data-cs="5-6,7-8,9-10,11,12,14-19"><code class="language-python">import torch
-import torch.nn.functional as F
+<pre class="cs" data-cs="6-7,8-9,10-11,12,13,15-20"><code class="language-python">def run(MAX_SCALE, BATCH, IMG_DIM, TXT_DIM, PROJ_DIM, TAU):  # pass your own sizes and settings
+    import torch
+    import torch.nn.functional as F
 
-def clip_loss(img_feat, txt_feat, proj_img, proj_txt, log_scale):
-    I = F.normalize(img_feat @ proj_img, dim=1)   # [N, D]
-    T = F.normalize(txt_feat @ proj_txt, dim=1)
-    scale = log_scale.exp().clamp(max=100.0)      # inverse temperature, capped at 100
-    s = scale * I @ T.T                           # [N, N]
-    diag = torch.arange(len(s))                   # true pairs
-    l_img = F.cross_entropy(s, diag)
-    l_txt = F.cross_entropy(s.T, diag)
-    return (l_img + l_txt) / 2
+    def clip_loss(img_feat, txt_feat, proj_img, proj_txt, log_scale):
+        I = F.normalize(img_feat @ proj_img, dim=1)   # [N, D]
+        T = F.normalize(txt_feat @ proj_txt, dim=1)
+        scale = log_scale.exp().clamp(max=MAX_SCALE)      # inverse temperature, capped
+        s = scale * I @ T.T                           # [N, N]
+        diag = torch.arange(len(s))                   # true pairs
+        l_img = F.cross_entropy(s, diag)
+        l_txt = F.cross_entropy(s.T, diag)
+        return (l_img + l_txt) / 2
 
-N, D_IMG, D_TXT, D = 8, 2048, 512, 64
-img_feat, txt_feat = torch.randn(N, D_IMG), torch.randn(N, D_TXT)
-proj_img = torch.randn(D_IMG, D, requires_grad=True)
-proj_txt = torch.randn(D_TXT, D, requires_grad=True)
-log_scale = torch.tensor(1 / 0.07).log().requires_grad_()
-L = clip_loss(img_feat, txt_feat, proj_img, proj_txt, log_scale)</code></pre>
+    N, D_IMG, D_TXT, D = BATCH, IMG_DIM, TXT_DIM, PROJ_DIM
+    img_feat, txt_feat = torch.randn(N, D_IMG), torch.randn(N, D_TXT)
+    proj_img = torch.randn(D_IMG, D, requires_grad=True)
+    proj_txt = torch.randn(D_TXT, D, requires_grad=True)
+    log_scale = torch.tensor(1 / TAU).log().requires_grad_()
+    L = clip_loss(img_feat, txt_feat, proj_img, proj_txt, log_scale)</code></pre>
 <ol class="cs-notes">
   <li><span class="cs-n">1</span>Projects and scales to length 1, giving <var>\(I\)</var> and <var>\(T\)</var> of <a href="#matrix">Section 3</a> eq line 1.</li>
   <li><span class="cs-n">2</span>Scores <var>\(s_{i,j}\)</var> with the capped 1/<var>\(\tau\)</var>, <a href="#matrix">Section 3</a> eq line 1.</li>
@@ -968,25 +969,26 @@ L = clip_loss(img_feat, txt_feat, proj_img, proj_txt, log_scale)</code></pre>
 
   <p>To classify a photo with no training on the task, <strong>zero-shot</strong>, write each class as a caption and ask which caption the photo matches best.</p>
 
-  <figure class="figure mtd-fig" id="zero-shot-fig"><svg class="mtd-svg" viewBox="0 0 400 228" style="max-width:460px" role="img" aria-label="A dog photo compared with four prompts. The bar for a photo of a dog is longest and green; a photo of a cat is short; a photo of a car and a photo of a tree are tiny"><rect class="mtd-pic" x="8" y="64" width="84" height="84" rx="8" style="stroke:#7f8c8d;stroke-width:2px"/><g transform="translate(18,74) scale(2.0)"><circle cx="16" cy="17" r="9.5" style="fill:#d4ac6e;stroke:#2c3e50;stroke-width:2px"/><ellipse cx="5.5" cy="16" rx="3.6" ry="8" style="fill:#8e6e3e;stroke:#2c3e50;stroke-width:2px"/><ellipse cx="26.5" cy="16" rx="3.6" ry="8" style="fill:#8e6e3e;stroke:#2c3e50;stroke-width:2px"/><circle cx="12.5" cy="15" r="1.6" style="fill:#2c3e50"/><circle cx="19.5" cy="15" r="1.6" style="fill:#2c3e50"/><ellipse cx="16" cy="21" rx="2.6" ry="2" style="fill:#2c3e50"/></g><text x="50" y="176" text-anchor="middle" style="font-size:17px;font-weight:700">new photo</text><text x="116" y="28" text-anchor="start" style="font-size:17px;font-weight:700">a photo of a dog.</text><rect class="mtd-barbg" x="116" y="36" width="272" height="14" rx="4"/><rect x="116" y="36" width="233.9" height="14" rx="4" style="fill:#1e8449"/><text x="116" y="82" text-anchor="start" style="font-size:17px;font-weight:600">a photo of a cat.</text><rect class="mtd-barbg" x="116" y="90" width="272" height="14" rx="4"/><rect x="116" y="90" width="27.2" height="14" rx="4" style="fill:#95a5a6"/><text x="116" y="136" text-anchor="start" style="font-size:17px;font-weight:600">a photo of a car.</text><rect class="mtd-barbg" x="116" y="144" width="272" height="14" rx="4"/><rect x="116" y="144" width="8.2" height="14" rx="4" style="fill:#95a5a6"/><text x="116" y="190" text-anchor="start" style="font-size:17px;font-weight:600">a photo of a tree.</text><rect class="mtd-barbg" x="116" y="198" width="272" height="14" rx="4"/><rect x="116" y="198" width="3.0" height="14" rx="4" style="fill:#95a5a6"/></svg><figcaption class="caption"><span class="fignum">Figure 5.</span> Toy shares over four prompts; the dog prompt wins.</figcaption></figure>
+  <figure class="figure mtd-fig" id="zero-shot-fig"><svg class="mtd-svg" viewBox="0 0 400 228" style="max-width:460px" role="img" aria-label="A dog photo compared with four prompts. The bar for a photo of a dog is longest and green; a photo of a cat is short; a photo of a car and a photo of a tree are tiny"><rect class="mtd-pic" x="8" y="64" width="84" height="84" rx="8" style="stroke:#7f8c8d;stroke-width:2px"/><g transform="translate(18,74) scale(2.0)"><circle cx="16" cy="17" r="9.5" style="fill:#d4ac6e;stroke:#2c3e50;stroke-width:2px"/><ellipse cx="5.5" cy="16" rx="3.6" ry="8" style="fill:#8e6e3e;stroke:#2c3e50;stroke-width:2px"/><ellipse cx="26.5" cy="16" rx="3.6" ry="8" style="fill:#8e6e3e;stroke:#2c3e50;stroke-width:2px"/><circle cx="12.5" cy="15" r="1.6" style="fill:#2c3e50"/><circle cx="19.5" cy="15" r="1.6" style="fill:#2c3e50"/><ellipse cx="16" cy="21" rx="2.6" ry="2" style="fill:#2c3e50"/></g><text x="50" y="176" text-anchor="middle" style="font-size:17px;font-weight:700">new photo</text><text x="116" y="28" text-anchor="start" style="font-size:17px;font-weight:700">a photo of a dog.</text><rect class="mtd-barbg" x="116" y="36" width="272" height="14" rx="4"/><rect x="116" y="36" width="233.9" height="14" rx="4" style="fill:#1e8449"/><text x="116" y="82" text-anchor="start" style="font-size:17px;font-weight:600">a photo of a cat.</text><rect class="mtd-barbg" x="116" y="90" width="272" height="14" rx="4"/><rect x="116" y="90" width="27.2" height="14" rx="4" style="fill:#95a5a6"/><text x="116" y="136" text-anchor="start" style="font-size:17px;font-weight:600">a photo of a car.</text><rect class="mtd-barbg" x="116" y="144" width="272" height="14" rx="4"/><rect x="116" y="144" width="8.2" height="14" rx="4" style="fill:#95a5a6"/><text x="116" y="190" text-anchor="start" style="font-size:17px;font-weight:600">a photo of a tree.</text><rect class="mtd-barbg" x="116" y="198" width="272" height="14" rx="4"/><rect x="116" y="198" width="3.0" height="14" rx="4" style="fill:#95a5a6"/></svg><figcaption class="caption"><span class="fignum">Figure 5.</span> Toy shares over the prompts; the dog prompt wins.</figcaption></figure>
 
 <p>The snippet uses OpenAI&#8217;s <code>clip</code> package to classify one photo with four caption prompts.</p>
-<pre class="cs" data-cs="6-7,8-10,11-12,13-15,16"><code class="language-python">import clip
-import torch
-import torch.nn.functional as F
-from PIL import Image
+<pre class="cs" data-cs="7-8,9-11,12-13,14-16,17"><code class="language-python">def run(PHOTO):  # pass your own sizes and settings
+    import clip
+    import torch
+    import torch.nn.functional as F
+    from PIL import Image
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
-model, preprocess = clip.load("RN50", device=device)
-names = ["dog", "cat", "car", "tree"]
-prompts = [f"a photo of a {c}." for c in names]
-tokens = clip.tokenize(prompts).to(device)
-photo = Image.new("RGB", (224, 224))       # toy photo
-x = preprocess(photo).unsqueeze(0).to(device)
-with torch.no_grad():
-    W = F.normalize(model.encode_text(tokens), dim=-1)  # [4, D]
-    h = F.normalize(model.encode_image(x), dim=-1)      # [1, D]
-pred = names[(h @ W.T).argmax()]</code></pre>
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model, preprocess = clip.load("RN50", device=device)
+    names = ["dog", "cat", "car", "tree"]
+    prompts = [f"a photo of a {c}." for c in names]
+    tokens = clip.tokenize(prompts).to(device)
+    photo = Image.new("RGB", (PHOTO, PHOTO))       # toy photo
+    x = preprocess(photo).unsqueeze(0).to(device)
+    with torch.no_grad():
+        W = F.normalize(model.encode_text(tokens), dim=-1)  # [PROMPTS, D]
+        h = F.normalize(model.encode_image(x), dim=-1)      # [1, D]
+    pred = names[(h @ W.T).argmax()]</code></pre>
 <ol class="cs-notes">
   <li><span class="cs-n">1</span>Loads a trained CLIP, the two encoders of <a href="#towers-fig">Figure 3</a>.</li>
   <li><span class="cs-n">2</span>Class names become caption prompts, the text side of <a href="#zero-shot-fig">Figure 5</a>.</li>
@@ -1002,24 +1004,25 @@ pred = names[(h @ W.T).argmax()]</code></pre>
   <h2 id="clip-in-practice"><span class="secnum">5</span> CLIP in practice</h2>
 
   <p>One training step reuses <code>clip_loss</code>, the sizes and the parameters of the <a href="#learned-temperature">Section 3.1</a> snippet, with small stand-ins for the ResNet and the Transformer.</p>
-<pre class="cs" data-cs="4-6,7-11,13-15,16-18"><code class="language-python">import torch
-import torch.nn as nn
+<pre class="cs" data-cs="5-7,8-12,14-16,17-19"><code class="language-python">def run(VOCAB_SIZE, CTX_LEN, INPUT_DIM, D_IMG, D_TXT, proj_img, proj_txt, log_scale, DECAY, NO_DECAY, LR, N, IMG, clip_loss):  # pass your own sizes and settings
+    import torch
+    import torch.nn as nn
 
-VOCAB, CTX = 49408, 76
-image_tower = nn.Sequential(nn.Flatten(), nn.Linear(3 * 64 * 64, D_IMG))
-text_tower = nn.EmbeddingBag(VOCAB, D_TXT)      # stand-in Transformer
-towers = [*image_tower.parameters(), *text_tower.parameters(), proj_img, proj_txt]
-decay = [p for p in towers if p.ndim >= 2]
-no_decay = [p for p in towers if p.ndim < 2] + [log_scale]
-groups = [dict(params=decay, weight_decay=0.2), dict(params=no_decay, weight_decay=0.0)]
-opt = torch.optim.AdamW(groups, lr=5e-4)
+    VOCAB, CTX = VOCAB_SIZE, CTX_LEN
+    image_tower = nn.Sequential(nn.Flatten(), nn.Linear(INPUT_DIM, D_IMG))
+    text_tower = nn.EmbeddingBag(VOCAB, D_TXT)      # stand-in Transformer
+    towers = [*image_tower.parameters(), *text_tower.parameters(), proj_img, proj_txt]
+    decay = [p for p in towers if p.ndim >= 2]
+    no_decay = [p for p in towers if p.ndim < 2] + [log_scale]
+    groups = [dict(params=decay, weight_decay=DECAY), dict(params=no_decay, weight_decay=NO_DECAY)]
+    opt = torch.optim.AdamW(groups, lr=LR)
 
-photos = torch.rand(N, 3, 64, 64)               # one batch of pairs
-tokens = torch.randint(0, VOCAB, (N, CTX))
-L = clip_loss(image_tower(photos), text_tower(tokens), proj_img, proj_txt, log_scale)
-opt.zero_grad()
-L.backward()
-opt.step()</code></pre>
+    photos = torch.rand(N, 3, IMG, IMG)               # one batch of pairs
+    tokens = torch.randint(0, VOCAB, (N, CTX))
+    L = clip_loss(image_tower(photos), text_tower(tokens), proj_img, proj_txt, log_scale)
+    opt.zero_grad()
+    L.backward()
+    opt.step()</code></pre>
 <ol class="cs-notes">
   <li><span class="cs-n">1</span>Stand-in image and text encoders, the two towers of <a href="#towers-fig">Figure 3</a>.</li>
   <li><span class="cs-n">2</span>AdamW with weight decay 0.2 on matrices and 0 on biases and gains (sec. 2.5) and on log(1/<var>\(\tau\)</var>), the <var>\(\tau\)</var> of <a href="#matrix">Section 3</a> eq line 1, as open_clip does.</li>

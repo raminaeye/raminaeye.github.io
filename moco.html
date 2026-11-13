@@ -837,7 +837,7 @@ function vText(c, s, x, y){ var base = c.font, al = c.textAlign, w = vWidth(c, s
       <span class="mf-range" aria-hidden="true"><span>0.90</span><span>0.999</span></span>
       <span class="mf-btnrow"><button type="button" class="demo-btn" id="mfStep">Step</button><span class="mf-batch" id="mfBatch">Batch 0</span><button type="button" class="demo-btn" id="mfReset">Reset</button></span>
     </div>
-    <p class="mf-window">A 32-key window into the 65,536-key queue, newest on the right.</p>
+    <p class="mf-window">A window into the queue, newest on the right.</p>
     <div class="mf-strip" id="mfStrip" role="img" aria-label="One query dot and 32 key dots. Fresh keys are solid blue, fading keys pale blue, stale keys grey with a dashed ring."></div>
     <p class="mf-legend"><span class="mf-dot"></span> fresh, still matches <span class="mf-dot mf-fading"></span> fading, drifting <span class="mf-dot mf-stale"></span> stale, no longer matches</p>
     <p class="caption"><span class="fignum">Figure 2.</span> Drift is age in batches times 1 minus <var>\(m\)</var>; the rule is the tool's own model, not a paper number.</p>
@@ -1015,34 +1015,35 @@ function vText(c, s, x, y){ var base = c.font, al = c.textAlign, w = vWidth(c, s
   <h2 id="in-practice"><span class="secnum">4</span> MoCo in practice</h2>
 
 <p>This snippet runs one MoCo training step, then moves the key encoder toward the query encoder by EMA (exponential moving average, <a href="#sslMocoEqStatic">Section 2</a> eq line 1) and puts the batch&#8217;s keys in the queue.</p>
-<pre class="cs" data-cs="6-10,12-15,16-20,21-23,25-27,28"><code class="language-python">import copy
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+<pre class="cs" data-cs="7-11,13-16,17-21,22-24,26-28,29"><code class="language-python">def run(EMBED_DIM, QUEUE_SIZE, MOMENTUM_EMA, TEMPERATURE, INPUT_DIM, LR, MOMENTUM, WEIGHT_DECAY, BATCH, IMG):  # pass your own sizes and settings
+    import copy
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
 
-D, K, M_EMA, TAU = 128, 65536, 0.999, 0.07
-enc_q = nn.Sequential(nn.Flatten(), nn.Linear(3 * 32 * 32, D))
-enc_k = copy.deepcopy(enc_q).requires_grad_(False)
-queue = F.normalize(torch.randn(K, D), dim=1)
-opt = torch.optim.SGD(enc_q.parameters(), lr=0.03, momentum=0.9, weight_decay=1e-4)
+    D, K, M_EMA, TAU = EMBED_DIM, QUEUE_SIZE, MOMENTUM_EMA, TEMPERATURE
+    enc_q = nn.Sequential(nn.Flatten(), nn.Linear(INPUT_DIM, D))
+    enc_k = copy.deepcopy(enc_q).requires_grad_(False)
+    queue = F.normalize(torch.randn(K, D), dim=1)
+    opt = torch.optim.SGD(enc_q.parameters(), lr=LR, momentum=MOMENTUM, weight_decay=WEIGHT_DECAY)
 
-x1, x2 = torch.rand(256, 3, 32, 32), torch.rand(256, 3, 32, 32)
-q = F.normalize(enc_q(x1), dim=1)              # queries, [256, D]
-with torch.no_grad():
-    k = F.normalize(enc_k(x2), dim=1)          # keys, no gradient
-pos = (q * k).sum(dim=1, keepdim=True)         # [256, 1]
-neg = q @ queue.T                              # [256, K]
-logits = torch.cat([pos, neg], dim=1) / TAU
-labels = torch.zeros(len(q), dtype=torch.long) # positive is column 0
-loss = F.cross_entropy(logits, labels)
-opt.zero_grad()
-loss.backward()
-opt.step()
+    x1, x2 = torch.rand(BATCH, 3, IMG, IMG), torch.rand(BATCH, 3, IMG, IMG)
+    q = F.normalize(enc_q(x1), dim=1)              # queries, [BATCH, D]
+    with torch.no_grad():
+        k = F.normalize(enc_k(x2), dim=1)          # keys, no gradient
+    pos = (q * k).sum(dim=1, keepdim=True)         # [BATCH, 1]
+    neg = q @ queue.T                              # [BATCH, K]
+    logits = torch.cat([pos, neg], dim=1) / TAU
+    labels = torch.zeros(len(q), dtype=torch.long) # positive is column 0
+    loss = F.cross_entropy(logits, labels)
+    opt.zero_grad()
+    loss.backward()
+    opt.step()
 
-with torch.no_grad():
-    for p_k, p_q in zip(enc_k.parameters(), enc_q.parameters()):
-        p_k.mul_(M_EMA).add_(p_q, alpha=1 - M_EMA)
-    queue = torch.cat([k, queue[:-len(k)]])    # newest in, oldest out</code></pre>
+    with torch.no_grad():
+        for p_k, p_q in zip(enc_k.parameters(), enc_q.parameters()):
+            p_k.mul_(M_EMA).add_(p_q, alpha=1 - M_EMA)
+        queue = torch.cat([k, queue[:-len(k)]])    # newest in, oldest out</code></pre>
 <ol class="cs-notes">
   <li><span class="cs-n">1</span>Query encoder, key encoder copy, queue of <var>\(K\)</var> keys and optimizer, the parts of <a href="#fig-10">Figure 1</a>.</li>
   <li><span class="cs-n">2</span>Toy views <code>x1</code> and <code>x2</code>, made by the <code>augment</code> pipeline in <a href="simclr.html#augmentations">SimCLR, Section 3</a>, give query <var>\(q\)</var> and key <var>\(k\)</var>, the two encoders in <a href="#fig-10">Figure 1</a>.</li>

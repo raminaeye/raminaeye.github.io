@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ReAct: Thinking and Acting in One Loop</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+            line-height: 1.6;
+            color: #333;
+        }
+        h1, h2, h3, h4 {
+            color: #2c3e50;
+            margin-top: 1.5em;
+            margin-bottom: 0.5em;
+        }
+        h1 { font-size: 2em; border-bottom: 2px solid #3498db; padding-bottom: 0.3em;}
+        .dek { font-size: 1.15em; color: #555; margin-top: 0.2em; }
+        .crumb { margin: 0 0 0.8em; }
+        .crumb a {
+            display: inline-block;
+            padding: 4px 14px;
+            border: 1px solid #dee2e6;
+            border-radius: 999px;
+            background: #f8f9fa;
+            color: #0056b3;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+        .crumb a:hover { border-color: #007bff; color: #007bff; }
+    /* Section tab strip: one slim row, scrolls sideways when it overflows. */
+    .tabs-label {
+        float: left;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #6c757d;
+        font-weight: 700;
+        line-height: 1.2;
+        margin: 0;
+        padding: 8px 12px 0 0;
+    }
+    .tab-strip {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 2px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        margin: 0 0 1.25rem;
+        max-width: 100%;
+    }
+    .tab-strip::-webkit-scrollbar { display: none; }
+    .tab-strip a.tab-link {
+        display: inline-block;
+        flex: 0 0 auto;
+        padding: 6px 10px;
+        border-radius: 999px;
+        color: #495057;
+        text-decoration: none;
+        font-size: 0.82rem;
+        font-weight: 500;
+        line-height: 1.35;
+        white-space: nowrap;
+    }
+    .tab-strip a.tab-link:hover { color: #007bff; }
+    .tab-strip a.tab-link.active { background: #007bff; color: #ffffff; }
+    @media (max-width: 768px) {
+        .tabs-label { display: none; }
+        .tab-strip {
+            width: 100vw;
+            max-width: 100vw;
+            box-sizing: border-box;
+            margin-left: calc((100% - 100vw) / 2);
+            padding-left: calc((100vw - 100%) / 2);
+        }
+        .tab-strip a.tab-link { font-size: 0.75rem; padding: 6px 8px; }
+    }
+        h2 { font-size: 1.5em; border-bottom: 1px solid #bdc3c7; padding-bottom: 0.2em;}
+        h3 { font-size: 1em; }
+
+    /* Shared site nav (matches index.html topnav) */
+    body { padding-top: calc(64px + 1.5rem); }
+    h1, h2, h3 { scroll-margin-top: 84px; }
+    .topnav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        z-index: 1000;
+        background: rgba(255, 255, 255, 0.65);
+        backdrop-filter: blur(18px) saturate(1.5);
+        -webkit-backdrop-filter: blur(18px) saturate(1.5);
+        border-bottom: 1px solid transparent;
+        transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+    .topnav.scrolled {
+        background: rgba(255, 255, 255, 0.88);
+        border-bottom-color: #dee2e6;
+        box-shadow: 0 6px 24px rgba(33, 37, 41, 0.07);
+    }
+    .nav-inner {
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 0 1.5rem;
+        height: 64px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+    .wordmark {
+        font-weight: 700;
+        color: #212529;
+        text-decoration: none;
+        font-size: 1.05rem;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+    }
+    .nav-links {
+        display: flex;
+        gap: 2px;
+        align-items: center;
+    }
+    .nav-links a {
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        font-size: 0.95rem;
+        padding: 8px 14px;
+        border-radius: 999px;
+        transition: color 0.18s ease, background-color 0.18s ease;
+    }
+    .nav-links a:hover { color: #007bff; background-color: #e7f1ff; }
+    .nav-links a.active { color: #007bff; background-color: #e7f1ff; font-weight: 600; }
+    .nav-toggle {
+        display: none;
+        width: 42px;
+        height: 42px;
+        padding: 0;
+        background: none;
+        border: 0;
+        border-radius: 10px;
+        cursor: pointer;
+        flex: 0 0 auto;
+    }
+    .nav-panel {
+        display: grid;
+        grid-template-rows: 0fr;
+        visibility: hidden;
+        transition: grid-template-rows 0.32s ease, visibility 0s linear 0.32s;
+    }
+    .nav-panel.open {
+        grid-template-rows: 1fr;
+        visibility: visible;
+        transition: grid-template-rows 0.32s ease, visibility 0s;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner { min-height: 0; overflow: hidden; }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link {
+        display: flex;
+        align-items: center;
+        padding: 0.8rem 0.75rem;
+        margin: 0 0.25rem;
+        border-radius: 10px;
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        min-height: 48px;
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+    .nav-panel a.panel-link:hover { background-color: #e7f1ff; color: #007bff; }
+    .nav-panel a.panel-link.active { color: #007bff; font-weight: 600; background-color: #e7f1ff; }
+    .panel-social { display: flex; gap: 0.5rem; padding: 0.9rem 1rem 0.25rem; flex-wrap: wrap; }
+    .panel-social a {
+        color: #007bff;
+        text-decoration: none;
+        font-weight: 500;
+        font-size: 0.9rem;
+        padding: 6px 12px;
+        border: 1px solid #dee2e6;
+        border-radius: 999px;
+        transition: border-color 0.15s ease;
+    }
+    .panel-social a:hover { border-color: #007bff; }
+    .nav-links a:focus-visible,
+    .wordmark:focus-visible,
+    .nav-toggle:focus-visible,
+    .panel-link:focus-visible,
+    .panel-social a:focus-visible { outline: 2px solid #007bff; outline-offset: 2px; }
+    @media (hover: hover) { .nav-toggle:hover { background-color: #e7f1ff; } }
+    @media (prefers-reduced-motion: reduce) {
+        .topnav, .nav-links a, .nav-toggle span, .nav-panel, .nav-panel a.panel-link { transition: none; }
+    }
+    @media (max-width: 768px) {
+        .nav-links { display: none; }
+        .nav-toggle { display: block; }
+    }
+
+        pre {
+          background: #0d1117;
+          color: #e6edf3;
+          padding: 14px 16px;
+          overflow-x: auto;
+          border-radius: 8px;
+          font-size: 0.9em;
+          margin: 1em 0;
+          font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+        }
+        pre code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 1em; background: none; padding: 0; color: inherit; }
+        @media (max-width: 480px) { pre { font-size: .82em; white-space: pre; overflow-x: auto; } }
+        ul, ol { padding-left: 20px; }
+        li { margin-bottom: 0.5em; }
+        strong { color: #2980b9; }
+        .caption {
+            max-width: 640px;
+            margin: 1rem auto 1.5em auto;
+            font-size: 0.9em;
+            color: #555;
+            text-align: center;
+        }
+        /* Interactive demo */
+        .demo {
+            border: 1px solid #e1e4e8;
+            border-radius: 8px;
+            padding: 1.25rem;
+            margin: 1.75rem 0;
+            background: #fdfefe;
+        }
+        /* Shared walkthrough equation-card contract (verbatim, all pages) */
+        .eq-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+          padding:1rem 1.2rem;margin:1.75rem auto;max-width:640px;overflow-x:auto}
+        .eq-what{font-size:.95rem;color:#334155;margin:0 0 .6rem;line-height:1.55}
+        .eq-line{font-size:1.38rem;line-height:2.0;letter-spacing:.015em;padding:.5rem .6rem;white-space:normal;font-weight:500;opacity:.38;border-left:3px solid transparent}
+        .eq-line.eq-active{opacity:1;border-left-color:#2c3e50}
+      .eq-why{display:none;visibility:hidden;font-size:1rem;color:#475569;padding:.15rem .35rem .4rem;line-height:1.65}
+      .eq-why.eq-active{display:block;visibility:visible}
+        .eqt{font-weight:600;padding:0 .1em;border-radius:3px}
+        .katex .eqt{font-weight:inherit;padding:0}
+        @media (max-width:480px){.eq-card{padding:.85rem .9rem}.eq-line{font-size:1.24rem;line-height:1.95}}
+/* P70 inline variables and inline code, one style site-wide (VAR-STYLE.md v2) */
+var,.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic;font-weight:400;font-size:1em;color:#1d4e89;background:#edf3fa;border-radius:3px;padding:0 .18em;white-space:nowrap;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+pre var,code var,.eq-line var{font:inherit;color:inherit;background:none;padding:0}
+:not(pre)>code:not(.eq-line code){font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,Courier,monospace;font-size:.86em;color:#24292f;background:#f1f3f5;border:1px solid #dfe3e8;border-radius:4px;padding:.06em .32em;white-space:normal;overflow-wrap:anywhere}
+/* P79 numbering (NUMBERING.md) */
+.secnum{font-variant-numeric:tabular-nums;margin-right:.4em;color:inherit;font-weight:inherit}
+.tab-strip .secnum{margin-right:.3em;opacity:.75}
+.fignum{font-weight:600;margin-right:.3em;font-variant-numeric:tabular-nums}
+/* P80 code sections (CODE-SECTIONS.md) */
+pre.cs{position:relative;background-attachment:local;padding-left:20px}
+pre.cs code{display:block;line-height:1.55}
+pre.cs .cs-g{position:absolute;left:3px;width:11px;text-align:center;font:700 11px/1 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;-webkit-user-select:none;user-select:none;pointer-events:none}
+pre.cs .cs-g::before{content:attr(data-n)}
+ol.cs-notes{list-style:none;padding-left:0;margin:-.4em 0 1em}
+ol.cs-notes li{margin:0 0 .3em;padding-left:1.9em;position:relative}
+ol.cs-notes .cs-n{position:absolute;left:0;top:.1em;min-width:1.35em;padding:0 .25em;border-radius:4px;font:700 .8em/1.45 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;text-align:center;color:#0d1117}
+ol.cs-notes li:nth-child(6n+1) .cs-n{background:#79b8ff}
+ol.cs-notes li:nth-child(6n+2) .cs-n{background:#ffab70}
+ol.cs-notes li:nth-child(6n+3) .cs-n{background:#85e89d}
+ol.cs-notes li:nth-child(6n+4) .cs-n{background:#d2a8ff}
+    @media (max-width:480px){
+      .demo{padding:.75rem}
+      .demo>*{margin-top:.6rem;margin-bottom:.6rem}
+      .demo>*:first-child{margin-top:0}
+      .demo svg{max-height:55vh}
+    }
+.figure.tool-fig { margin: 1.75rem 0; }
+.figure.tool-fig > .demo { margin-top: 0; margin-bottom: 0; }
+nav.prereq{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem .4rem;margin:.6rem 0 1.1rem}
+nav.prereq .prereq-label{font-size:.82rem;font-weight:600;color:#6c757d;margin-right:.15rem}
+nav.prereq a.prereq-chip{display:inline-block;padding:.15rem .6rem;border:1px solid #ced4da;border-radius:999px;font-size:.85rem;line-height:1.4;color:#0056b3;text-decoration:none}
+nav.prereq a.prereq-chip:hover,nav.prereq a.prereq-chip:focus-visible{background:#e7f1ff;border-color:#007bff}
+/* MATH-BEGIN v1 (P88, site-math.js renders KaTeX; byte-identical on every page) */
+.eq-line{overflow-x:auto;overflow-y:hidden;white-space:normal}
+.eq-line .katex{font-size:1.02em;line-height:1.6}
+.eq-line .katex .base{margin:.15em 0}
+var .katex,p .katex,li .katex,td .katex,th .katex,figcaption .katex,.eq-why .katex,.eq-what .katex,.eq-legend .katex{font-size:1.06em}
+var:has(.katex){font-style:normal}
+.katex-display{margin:.6rem 0;overflow-x:auto;overflow-y:hidden}
+/* MATH-END */
+</style>
+    <script src="site-math.js" defer></script>
+
+<style>
+/* Static teaching diagrams (mtd), shared across tutorials, 2026-11-01 */
+.figure.mtd-fig { margin: 1.75rem 0; }
+.mtd-fig > svg.mtd-svg { display: block; width: 100%; height: auto; margin: 0 auto; }
+.mtd-fig .caption { margin-top: 1rem; }
+.mtd-svg text { fill: #2c3e50; font-family: sans-serif; }
+.mtd-svg .mtd-sub { fill: #555; }
+.mtd-svg .mtd-t1 { fill: #1f618d; }
+.mtd-svg .mtd-t2 { fill: #a04000; }
+.mtd-svg .mtd-pu { fill: #8e44ad; }
+.mtd-svg .mtd-red { fill: #c0392b; }
+.mtd-svg .mtd-grn { fill: #0e6b59; }
+.mtd-svg .mtd-gold { fill: #7d6608; }
+.mtd-svg line, .mtd-svg path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.mtd-svg .mtd-s.mtd-c1 { stroke: #1f618d; } .mtd-svg .mtd-f.mtd-c1 { fill: #1f618d; }
+.mtd-svg .mtd-s.mtd-c2 { stroke: #a04000; } .mtd-svg .mtd-f.mtd-c2 { fill: #a04000; }
+.mtd-svg .mtd-s.mtd-cp { stroke: #8e44ad; } .mtd-svg .mtd-f.mtd-cp { fill: #8e44ad; }
+.mtd-svg .mtd-s.mtd-cg { stroke: #2c3e50; } .mtd-svg .mtd-f.mtd-cg { fill: #2c3e50; }
+.mtd-svg .mtd-s.mtd-cgold { stroke: #7d6608; } .mtd-svg .mtd-f.mtd-cgold { fill: #7d6608; }
+.mtd-svg .mtd-s.mtd-cgr { stroke: #0e6b59; } .mtd-svg .mtd-f.mtd-cgr { fill: #0e6b59; }
+.mtd-svg .mtd-box { fill: #fbfcfd; stroke: #bdc3c7; stroke-width: 1.4px; }
+.mtd-svg .mtd-box.mtd-note { stroke-dasharray: 5 4; }
+/* stepped eq-card: only the active line and its legend items show (grpo pattern) */
+.eq-card.eq-stepped .eq-line{display:none;visibility:hidden}
+.eq-card.eq-stepped .eq-line.eq-active{display:block;opacity:1;visibility:visible}
+.eq-card.eq-stepped .eq-legend .eq-item{display:none;visibility:hidden}
+.eq-card.eq-stepped .eq-legend .eq-item.eq-active{display:block;visibility:visible}
+.eq-legend{font-size:.85rem;color:#475569;margin-top:.6rem;line-height:1.75}
+.eq-legend .eq-item{display:block}
+.eq-legend .eq-item code{white-space:nowrap}
+.eq-sw{display:inline-block;width:.7em;height:.7em;border-radius:2px;margin:0 .25em 0 .6em;vertical-align:baseline}
+@media (max-width:480px){.eq-legend{display:grid;grid-template-columns:1fr 1fr;column-gap:.9rem;row-gap:.1rem;line-height:1.5}}
+.eqt.eqt-active{background:#fef9c3}
+ol.brefs li { margin-bottom: .6em; }
+/* ReAct page: trace bands, stepper, search choice */
+.ra-round{border:1px solid #d6dbdf;border-radius:10px;padding:.6rem .8rem;background:#fbfcfd;margin:.5rem 0;transition:opacity .2s ease}
+.ra-row{display:flex;gap:.55rem;align-items:baseline;margin:.3rem 0;font-size:.92rem;line-height:1.55}
+.ra-tag{flex:0 0 6.8em;font-weight:700;font-size:.78rem;text-transform:uppercase;letter-spacing:.04em}
+.ra-t{color:#8e44ad}
+.ra-a{color:#2471a3}
+.ra-o{color:#0e6b59}
+.ra-q{border:1px solid #bdc3c7;border-radius:8px;padding:.6rem .8rem;background:#fbfcfd;font-size:.95rem;margin:.4rem 0}
+.ra-q b{color:#2c3e50}
+/* walkthrough (Figure 3): step controls, diagram, readout, eq-card last */
+.wt-ctl{display:flex;align-items:center;gap:.6rem;justify-content:center;margin:0 0 .6rem}
+.wt-ctl button{padding:.35rem .9rem;border:1px solid #ced4da;border-radius:999px;background:#f8f9fa;color:#0056b3;font-weight:600;font-size:.9rem;cursor:pointer}
+.wt-ctl button:disabled{opacity:.4;cursor:default}
+.wt-ctl button:hover:not(:disabled){border-color:#007bff;background:#e7f1ff}
+#raCount{font-size:.9rem;color:#555;min-width:7.5em;text-align:center}
+.wt-out{text-align:center;font-size:15px;color:#2c3e50;margin:8px 0 0;min-height:2.9em;line-height:1.45}
+.wt-out b{color:#a04000}
+.eq-dim{opacity:.35}
+.eq-hl{opacity:1}
+.ra-round.ra-cur{outline:2px solid #2471a3;outline-offset:2px}
+@media (max-width:480px){.wt-ctl button{padding:.35rem .7rem}.ra-row{flex-direction:column;gap:0}.ra-tag{flex:none}}
+/* search choice tool (Figure 4) */
+.ra-seg{display:flex;gap:.4rem;justify-content:center;margin:0 0 .7rem;flex-wrap:wrap}
+.ra-seg button{padding:.35rem .9rem;border:1px solid #ced4da;border-radius:999px;background:#fff;color:#495057;font-size:.88rem;font-weight:600;cursor:pointer}
+.ra-seg button.active{background:#007bff;color:#fff;border-color:#007bff}
+.ra-seg button:hover:not(.active){border-color:#007bff;color:#007bff}
+.ra-state{background:#f8f9fa;border:1px solid #dee2e6;border-radius:8px;padding:.7rem .85rem;font-size:.92rem;line-height:1.55;margin:.4rem 0}
+.ra-state .ra-o{font-weight:700}
+.ra-obs{border:1px solid #0e6b59;border-left:4px solid #0e6b59;border-radius:8px;padding:.7rem .85rem;background:#eafaf1;font-size:.92rem;line-height:1.55;margin:.4rem 0;min-height:3.2em}
+.ra-obs .ra-empty{color:#95a5a6;font-weight:400}
+.ra-lab{font-size:.8rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#6c757d;margin:.7rem 0 .1rem}
+.ra-steps{margin:.2rem 0}
+.ra-step{display:flex;gap:.6rem;align-items:baseline;border:1px solid #d6dbdf;border-radius:10px;padding:.55rem .8rem;background:#fbfcfd;font-size:.92rem;line-height:1.55}
+.ra-n{flex:0 0 auto;width:1.5em;height:1.5em;border-radius:50%;background:#2471a3;color:#fff;font-weight:700;font-size:.85rem;line-height:1.5em;text-align:center}
+.ra-step:nth-child(9) .ra-n{background:#0e6b59}
+.ra-arrow{text-align:center;color:#7f8c8d;font-size:1.1rem;line-height:1.2;margin:.05rem 0}
+</style>
+</head>
+<body>
+        <nav class="topnav" aria-label="Site">
+    <div class="nav-inner">
+        <a class="wordmark" href="index.html">Ramin Anushiravani</a>
+        <div class="nav-links">
+            <a href="tutorial.html" class="active">Tutorials</a>
+            <a href="pubs.html">Publications</a>
+            <a href="index.html">About</a>
+            <a href="work.html">Projects</a>
+        </div>
+        <button class="nav-toggle" id="navToggle" aria-expanded="false" aria-controls="navPanel" aria-label="Menu"><span></span><span></span><span></span></button>
+    </div>
+    <div class="nav-panel" id="navPanel">
+        <div class="nav-panel-inner">
+            <div class="nav-panel-body">
+                <a class="panel-link active" href="tutorial.html">Tutorials</a>
+                <a class="panel-link" href="pubs.html">Publications</a>
+                <a class="panel-link" href="index.html">About</a>
+                <a class="panel-link" href="work.html">Projects</a>
+                <div class="panel-social">
+                    <a href="https://linkedin.com/in/raminanushiravani" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+                    <a href="https://github.com/raminaeye/" target="_blank" rel="noopener noreferrer">GitHub</a>
+                    <a href="https://scholar.google.com/citations?user=kouXx8gAAAAJ&hl=en" target="_blank" rel="noopener noreferrer">Google Scholar</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</nav>
+    <p class="crumb"><a href="tutorial.html">&larr; All tutorials</a></p>
+    <h1>ReAct: Thinking and Acting in One Loop</h1>
+    <p class="dek">Thoughts stop the model guessing from memory and let facts steer the next move.</p>
+    <nav class="prereq" aria-label="Before you start"><span class="prereq-label">Before you start</span><a class="prereq-chip" href="chain-of-thought.html#triple" title="Chain of Thought, section 2" aria-label="The prompt triple, taught in Chain of Thought, section 2">The prompt triple</a><a class="prereq-chip" href="rl.html#policy" title="RL Basics, section 5" aria-label="The policy, taught in RL Basics, section 5">The policy</a></nav>
+
+    <p class="tabs-label">On this page</p>
+    <div class="tab-strip">
+        <a class="tab-link" href="#guessing"><span class="secnum">1</span> Thinking alone guesses</a>
+        <a class="tab-link" href="#loop"><span class="secnum">2</span> One loop for thoughts and actions</a>
+        <a class="tab-link" href="#equations"><span class="secnum">3</span> The loop in equations</a>
+        <a class="tab-link" href="#colorado"><span class="secnum">4</span> The Colorado orogeny walk</a>
+        <a class="tab-link" href="#sparse"><span class="secnum">5</span> When thoughts stay sparse</a>
+        <a class="tab-link" href="#practice"><span class="secnum">6</span> Practice</a>
+        <a class="tab-link" href="#failures"><span class="secnum">7</span> Failure modes</a>
+        <a class="tab-link" href="#what-next"><span class="secnum">8</span> What comes next</a>
+        <a class="tab-link" href="#references"><span class="secnum">9</span> References</a>
+    </div>
+
+    <h2 id="guessing"><span class="secnum">1</span> Thinking alone guesses</h2>
+
+    <p>Ask a language model a question that needs a fact it never saw, and it answers anyway. The chain of thought helps it work through what it knows, but it cannot fetch what it does not know. More steps will not invent a missing fact, and a guess written early carries through to the answer.</p>
+
+    <p>ReAct gives the model a way out of its own memory. Between thoughts it acts: it searches, it looks a fact up, it reads what comes back. Each observation is a new fact from outside the model, and the next thought can build on it instead of on a guess.</p>
+
+    <p>It runs at inference, one step at a time until the answer. Nothing is trained. The full history of thoughts, actions and observations is the state the loop carries, and every new step reads the whole history back.</p>
+
+    <h2 id="loop"><span class="secnum">2</span> One loop for thoughts and actions</h2>
+
+    <p>The loop has three parts, and they take turns. A thought plans or reads. An action reaches outside. An observation answers.</p>
+
+    <p>A <strong>thought</strong> is a sentence of reasoning the model writes to itself. It plans the next move, breaks the question apart, or reads an observation and says what follows from it. A thought changes nothing outside the model. It only joins the history, where later steps can use it.</p>
+
+    <p>An <strong>action</strong> is a call to the outside world. The question answering setup in the paper has three: <strong>Search</strong>, which returns the opening lines of a page; <strong>Lookup</strong>, which finds a sentence inside a page; and <strong>Finish</strong>, which ends the task with the answer.</p>
+
+    <p>An <strong>observation</strong> is what comes back after an action. It is text from the outside world, not from the model's memory: the lines a search returned, the sentence a lookup found. It is the only new fact in the loop. Everything else in the history, the model wrote itself.</p>
+
+    <figure id="fig-1" class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 322" style="max-width:480px" role="img" aria-label="One round of the loop. A thought at the top picks the next move. An arrow runs down to an action on the right, which reaches outside. An arrow runs left to an observation, what came back. An arrow runs back up to the thought. A finish arrow runs down from the action to end the task with the answer.">
+      <rect class="mtd-box" x="110" y="14" width="180" height="54" rx="8" style="stroke:#8e44ad;stroke-width:2px"/><text class="mtd-pu" x="200" y="36" text-anchor="middle" style="font-size:15px;font-weight:700">Thought</text><text class="mtd-sub" x="200" y="55" text-anchor="middle" style="font-size:12px">plan, read, decide</text>
+      <line class="mtd-s mtd-cp" x1="252" y1="68" x2="288" y2="140" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cp" points="295,150 279,138 292,132"/>
+      <rect class="mtd-box" x="210" y="150" width="170" height="54" rx="8" style="stroke:#2471a3;stroke-width:2px"/><text class="mtd-t1" x="295" y="172" text-anchor="middle" style="font-size:15px;font-weight:700">Action</text><text class="mtd-sub" x="295" y="191" text-anchor="middle" style="font-size:12px">search, look up, finish</text>
+      <line class="mtd-s mtd-c1" x1="210" y1="177" x2="198" y2="177" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-c1" points="190,177 202,171 202,183"/>
+      <rect class="mtd-box" x="20" y="150" width="170" height="54" rx="8" style="stroke:#0e6b59;stroke-width:2px"/><text class="mtd-grn" x="105" y="172" text-anchor="middle" style="font-size:15px;font-weight:700">Observation</text><text class="mtd-sub" x="105" y="191" text-anchor="middle" style="font-size:12px">what came back</text>
+      <line class="mtd-s mtd-cgr" x1="148" y1="150" x2="112" y2="78" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cgr" points="105,68 108,84 121,78"/>
+      <line class="mtd-s mtd-c1" x1="295" y1="204" x2="295" y2="240" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-c1" points="295,250 289,240 301,240"/>
+      <rect class="mtd-box" x="210" y="250" width="170" height="54" rx="8" style="stroke:#2471a3;stroke-width:2px"/><text class="mtd-t1" x="295" y="272" text-anchor="middle" style="font-size:15px;font-weight:700">Finish</text><text class="mtd-sub" x="295" y="291" text-anchor="middle" style="font-size:12px">end with the answer</text>
+    </svg><figcaption class="caption"><span class="fignum">Figure 1.</span> One round of the loop. A thought picks the next move, the action reaches outside, and the observation comes back to be read.</figcaption></figure>
+
+    <p>The two directions feed each other. Thoughts say what to look up next, so the search lands on the right page. Observations say what the next thought can trust, so the plan stops guessing. That is the whole method: reason to act, and act to reason.</p>
+
+    <h2 id="equations"><span class="secnum">3</span> The loop in equations</h2>
+
+    <p>Three lines carry the loop. The first says how the next step is picked. The second says what the choice is picked from. The third says what can be picked at all. The first line leans on the two after it. The thought step is the chain of thought from <a href="chain-of-thought.html">Chain of Thought: Thinking Before Answering</a>, now used as one kind of action.</p>
+
+    <h3 id="policy-picks"><span class="secnum">3.1</span> The policy picks the next step</h3>
+
+    <p>A policy is the agent's rule for choosing a move, taught in <a href="rl.html#policy">RL Basics</a>. Here the move is the next thought or the next action, and the situation it is chosen in is the whole history so far. The model itself plays the policy: prompted with the history, it writes the next step.</p>
+
+    <div class="eq-card" id="raPolicyEq">
+        <div class="eq-what"><b>The policy over actions given context.</b> How the next step is picked.</div>
+        <div class="eq-line eq-active" data-eqline="0">\(\displaystyle \htmlClass{eqt}{\htmlStyle{color:#2471a3}{\pi}} ( \htmlClass{eqt}{\htmlStyle{color:#2471a3}{\hat{a}_{t}}} \mid \htmlClass{eqt}{\htmlStyle{color:#5d6d7e}{c_{t}}} ) \)</div>
+        <div class="eq-why eq-active" data-eqline="0">Read it as a sentence: given the context so far, the policy gives a chance to each possible next step, and the next step is drawn from those chances. <var>\(\pi\)</var> is the policy, the prompted model. <var>\(\hat{a}_{t}\)</var> is the next step at step <var>\(t\)</var>, a thought in words or an ordinary action. The bar reads given. <var>\(c_{t}\)</var> is the context, the full history, defined in the next line. Nothing here is trained: the frozen model plays the policy by continuing the prompt.</div>
+        <div class="eq-legend">
+          <span class="eq-item"><span class="eq-sw" style="background:#2471a3"></span><var>\(\pi\)</var> the policy, the prompted model</span>
+          <span class="eq-item"><span class="eq-sw" style="background:#2471a3"></span><var>\(\hat{a}_{t}\)</var> the next step, thought or action</span>
+          <span class="eq-item"><span class="eq-sw" style="background:#5d6d7e"></span><var>\(c_{t}\)</var> the context, the history so far</span>
+        </div>
+    </div>
+
+    <h3 id="context-history"><span class="secnum">3.2</span> The context is the whole history</h3>
+
+    <p>The context is not a summary and not a state the model compresses. It is the trace itself, every step in order, and it grows by one entry each round.</p>
+
+    <div class="eq-card" id="raContextEq">
+        <div class="eq-what"><b>The context as the full history.</b> Everything the policy sees.</div>
+        <div class="eq-line eq-active" data-eqline="0">\(\displaystyle \htmlClass{eqt}{\htmlStyle{color:#5d6d7e}{c_{t}}} = ( \htmlClass{eqt}{\htmlStyle{color:#0e6b59}{o_{1}}}, \htmlClass{eqt}{\htmlStyle{color:#2471a3}{a_{1}}}, \dots, \htmlClass{eqt}{\htmlStyle{color:#0e6b59}{o_{t-1}}}, \htmlClass{eqt}{\htmlStyle{color:#2471a3}{a_{t-1}}}, \htmlClass{eqt}{\htmlStyle{color:#0e6b59}{o_{t}}} ) \)</div>
+        <div class="eq-why eq-active" data-eqline="0">Read it as a sentence: the context at step <var>\(t\)</var> is the whole history in order, ending with the latest observation. <var>\(o\)</var> is an observation, what the world sent back. <var>\(a\)</var> is an action the model made. The small <var>\(t\)</var> counts steps. The first entries are the earliest: the first observation, the first action, and so on down to <var>\(o_{t}\)</var>, the observation that just arrived. Each round appends to this list, and the next call to the model reads the longer list. An action here covers a thought too, since the next line makes thoughts actions.</div>
+        <div class="eq-legend">
+          <span class="eq-item"><span class="eq-sw" style="background:#5d6d7e"></span><var>\(c_{t}\)</var> the context at step <var>\(t\)</var></span>
+          <span class="eq-item"><span class="eq-sw" style="background:#0e6b59"></span><var>\(o\)</var> an observation, from the world</span>
+          <span class="eq-item"><span class="eq-sw" style="background:#2471a3"></span><var>\(a\)</var> an action, thought or call</span>
+        </div>
+    </div>
+
+    <h3 id="thoughts-actions"><span class="secnum">3.3</span> Thoughts are actions too</h3>
+
+    <p>This is the line that makes the loop possible. Ordinary actions reach the outside world. Thoughts do not, but the loop treats them as actions anyway, so the same policy that picks a search can pick a sentence of reasoning.</p>
+
+    <div class="eq-card" id="raAugEq">
+        <div class="eq-what"><b>The augmented action space.</b> Language joins the ordinary actions.</div>
+        <div class="eq-line eq-active" data-eqline="0">\(\displaystyle \htmlClass{eqt}{\htmlStyle{color:#2471a3}{\hat{\mathcal{A}}}} = \htmlClass{eqt}{\htmlStyle{color:#2471a3}{\mathcal{A}}} \cup \htmlClass{eqt}{\htmlStyle{color:#8e44ad}{\mathcal{L}}} \)</div>
+        <div class="eq-why eq-active" data-eqline="0">Read it as a sentence: the augmented action space is the ordinary actions together with all of language. <var>\(\hat{\mathcal{A}}\)</var>, read A hat, is the augmented space, everything the policy can pick. <var>\(\mathcal{A}\)</var> is the ordinary action space: Search, Lookup, Finish. The cup sign reads union, everything in either side. <var>\(\mathcal{L}\)</var> is the space of language, every sentence the model could write. A thought is an action from <var>\(\mathcal{L}\)</var>: it changes nothing outside, but it joins the context and steers the next pick. Language is open ended, so the method leans on a large model's feel for words rather than on training.</div>
+        <div class="eq-legend">
+          <span class="eq-item"><span class="eq-sw" style="background:#2471a3"></span><var>\(\hat{\mathcal{A}}\)</var> the augmented space, all picks</span>
+          <span class="eq-item"><span class="eq-sw" style="background:#2471a3"></span><var>\(\mathcal{A}\)</var> ordinary actions: Search, Lookup, Finish</span>
+          <span class="eq-item"><span class="eq-sw" style="background:#8e44ad"></span><var>\(\mathcal{L}\)</var> language, every sentence</span>
+        </div>
+    </div>
+
+    <p class="code-lead">One loop in code: the context grows by a thought, an action and an observation each round, and the search call is a real Wikipedia lookup.</p>
+<pre class="cs" data-cs="2-4,5-8,9-12"><code class="language-python">import requests
+def search(query):
+    resp = requests.get("https://en.wikipedia.org/w/api.php", params={"action": "query", "list": "search", "srsearch": query, "format": "json"})
+    return resp.json()["query"]["search"][0]["snippet"]
+context = question
+while True:
+    ids = tok(context + "\nThought:", return_tensors="pt").input_ids
+    step = tok.decode(model.generate(ids, max_new_tokens=LIMIT)[0], skip_special_tokens=True)
+    action = step.split("Action:")[-1].strip().split("\n")[0]
+    if action.startswith("Finish"):
+        break
+    context += "\n" + step + "\nObservation: " + search(action[action.index("[") + 1:action.index("]")])</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>The search call, the paper's Wikipedia lookup in miniature.</li>
+  <li><span class="cs-n">2</span>The starting context and the model call: context starts as the question alone, tok turns text into token ids and back, model is the prompted model, and LIMIT caps how much it may write in one step.</li>
+  <li><span class="cs-n">3</span>The rest of the round: read the action out of the reply, stop on Finish, run the search and append the observation.</li>
+</ol>
+
+    <h2 id="colorado"><span class="secnum">4</span> The Colorado orogeny walk</h2>
+
+    <p>Here is the loop on a real question from the paper. The model gets the question only, with no passages attached. Every fact has to come through Search, Lookup or Finish, and the prompt shows a few full traces in this shape before the new question.</p>
+
+    <div class="ra-q"><b>Question:</b> What is the elevation range for the area that the eastern sector of the Colorado orogeny extends into?</div>
+
+    <figure id="fig-2" class="figure mtd-fig">
+      <div class="ra-steps">
+        <div class="ra-step"><span class="ra-n">1</span><span><b>Search Colorado orogeny.</b> Mountain building in Colorado, with no eastern sector named.</span></div>
+        <div class="ra-arrow" aria-hidden="true">&darr;</div>
+        <div class="ra-step"><span class="ra-n">2</span><span><b>Lookup eastern sector.</b> It extends into the High Plains.</span></div>
+        <div class="ra-arrow" aria-hidden="true">&darr;</div>
+        <div class="ra-step"><span class="ra-n">3</span><span><b>Search High Plains.</b> Vague: two regions share the name.</span></div>
+        <div class="ra-arrow" aria-hidden="true">&darr;</div>
+        <div class="ra-step"><span class="ra-n">4</span><span><b>Search High Plains (United States).</b> The range is 1,800 to 7,000 ft.</span></div>
+        <div class="ra-arrow" aria-hidden="true">&darr;</div>
+        <div class="ra-step"><span class="ra-n">5</span><span><b>Finish.</b> The answer is 1,800 to 7,000 ft.</span></div>
+      </div>
+    <figcaption class="caption"><span class="fignum">Figure 2.</span> The trace in five steps. Each step moves the question one fact closer to the answer.</figcaption></figure>
+
+    <p>Watch what the thoughts do. The first plans the whole route. The second reads the observation and spots what is missing. The third turns a found fact into the next search. The fourth fixes a search that came back vague. The fifth reads the range off the last observation and finishes. No thought guesses a fact; each one points at the next lookup.</p>
+
+    <figure id="fig-3" class="figure tool-fig">
+    <div class="demo" id="raWalk">
+      <div class="wt-ctl">
+        <button type="button" id="raPrev" aria-label="Previous step">&larr; Prev</button>
+        <span id="raCount" aria-live="polite">Step 1 of 6</span>
+        <button type="button" id="raNext" aria-label="Next step">Next &rarr;</button>
+      </div>
+      <div class="ra-q"><b>Question:</b> What is the elevation range for the area that the eastern sector of the Colorado orogeny extends into?</div>
+      <div class="ra-round eq-hl" id="raR1">
+        <div class="ra-row"><span class="ra-tag ra-t">Thought 1</span><span>I need to search Colorado orogeny, find the area that the eastern sector of the Colorado orogeny extends into, then find the elevation range of the area.</span></div>
+        <div class="ra-row"><span class="ra-tag ra-a">Action 1</span><span>Search[Colorado orogeny]</span></div>
+        <div class="ra-row"><span class="ra-tag ra-o">Observation 1</span><span>The Colorado orogeny was an episode of mountain building (an orogeny) in Colorado and surrounding areas.</span></div>
+      </div>
+      <div class="ra-round eq-dim" id="raR2">
+        <div class="ra-row"><span class="ra-tag ra-t">Thought 2</span><span>It does not mention the eastern sector. So I need to look up eastern sector.</span></div>
+        <div class="ra-row"><span class="ra-tag ra-a">Action 2</span><span>Lookup[eastern sector]</span></div>
+        <div class="ra-row"><span class="ra-tag ra-o">Observation 2</span><span>The eastern sector extends into the High Plains and is called the Central Plains orogeny.</span></div>
+      </div>
+      <div class="ra-round eq-dim" id="raR3">
+        <div class="ra-row"><span class="ra-tag ra-t">Thought 3</span><span>The eastern sector of Colorado orogeny extends into the High Plains. So I need to search High Plains and find its elevation range.</span></div>
+        <div class="ra-row"><span class="ra-tag ra-a">Action 3</span><span>Search[High Plains]</span></div>
+        <div class="ra-row"><span class="ra-tag ra-o">Observation 3</span><span>High Plains refers to one of two distinct land regions</span></div>
+      </div>
+      <div class="ra-round eq-dim" id="raR4">
+        <div class="ra-row"><span class="ra-tag ra-t">Thought 4</span><span>I need to instead search High Plains (United States).</span></div>
+        <div class="ra-row"><span class="ra-tag ra-a">Action 4</span><span>Search[High Plains (United States)]</span></div>
+        <div class="ra-row"><span class="ra-tag ra-o">Observation 4</span><span>The High Plains are a subregion of the Great Plains. From east to west, the High Plains rise in elevation from around 1,800 to 7,000 ft (550 to 2,130 m).</span></div>
+      </div>
+      <div class="ra-round eq-dim" id="raR5">
+        <div class="ra-row"><span class="ra-tag ra-t">Thought 5</span><span>High Plains rise in elevation from around 1,800 to 7,000 ft, so the answer is 1,800 to 7,000 ft.</span></div>
+        <div class="ra-row"><span class="ra-tag ra-a">Action 5</span><span>Finish[1,800 to 7,000 ft]</span></div>
+        <div class="ra-row"><span class="ra-tag ra-o">Observation 5</span><span>No observation. Finish ends the task with the answer.</span></div>
+      </div>
+      <p class="wt-out" id="raOut" aria-live="polite"></p>
+    </div>
+    <div class="eq-card" id="raWalkEq">
+        <div class="eq-line eq-active" data-eqline="0">\(\displaystyle \htmlClass{eqt}{\htmlStyle{color:#5d6d7e}{c_{t}}} = ( \htmlClass{eqt}{\htmlStyle{color:#0e6b59}{o_{1}}}, \htmlClass{eqt}{\htmlStyle{color:#2471a3}{a_{1}}}, \dots, \htmlClass{eqt}{\htmlStyle{color:#0e6b59}{o_{t-1}}}, \htmlClass{eqt}{\htmlStyle{color:#2471a3}{a_{t-1}}}, \htmlClass{eqt}{\htmlStyle{color:#0e6b59}{o_{t}}} ) \)</div>
+        <div class="eq-why eq-active" data-eqline="0">The context starts as the question alone. Nothing has been searched yet, so the history holds one entry.</div>
+        <div class="eq-why" data-eqline="1">Round 1 appends a thought, a search and its observation. The context now holds the question, the plan, the call and the first fact.</div>
+        <div class="eq-why" data-eqline="2">Round 2 appends the lookup and what it found. The context grows again, and the next thought can use the new fact.</div>
+        <div class="eq-why" data-eqline="3">Round 3 searches the new name. The observation comes back vague, and that vagueness joins the context too.</div>
+        <div class="eq-why" data-eqline="4">Round 4 fixes the search. The thought names the exact page, and the observation finally carries the range.</div>
+        <div class="eq-why" data-eqline="5">Round 5 adds the last thought and the finish. The answer is read off the observation, not guessed.</div>
+        <div class="eq-legend">
+          <span class="eq-item"><span class="eq-sw" style="background:#5d6d7e"></span><var>\(c_{t}\)</var> the context, the whole history</span>
+          <span class="eq-item"><span class="eq-sw" style="background:#0e6b59"></span><var>\(o\)</var> an observation, from the world</span>
+          <span class="eq-item"><span class="eq-sw" style="background:#2471a3"></span><var>\(a\)</var> an action, thought or call</span>
+        </div>
+    </div>
+      <figcaption class="caption"><span class="fignum">Figure 3.</span> Step through the trace one round at a time. The full trace stays on screen, the rounds already run stay lit, and a ring marks the round just run.</figcaption>
+    </figure>
+
+    <figure id="fig-4" class="figure tool-fig">
+    <div class="demo" id="raTool">
+      <p class="ra-lab">Where the loop stands</p>
+      <div class="ra-state"><span class="ra-o">Observation 3:</span> High Plains refers to one of two distinct land regions</div>
+      <p class="ra-lab">Pick the next search</p>
+      <div class="ra-seg" role="group" aria-label="Next search">
+        <button type="button" id="raDeadBtn" aria-pressed="false">Search[High Plains]</button>
+        <button type="button" id="raSharpBtn" aria-pressed="false">Search[High Plains (United States)]</button>
+      </div>
+      <p class="ra-lab">What comes back</p>
+      <div class="ra-obs" id="raToolObs" aria-live="polite"><span class="ra-empty">Pick a search to see what comes back.</span></div>
+      <p class="wt-out" id="raToolOut" aria-live="polite"></p>
+    </div>
+      <figcaption class="caption"><span class="fignum">Figure 4.</span> Pick the next search after the vague observation. One returns the same line; the other moves the loop forward.</figcaption>
+    </figure>
+
+    <p>A good search names the exact thing the thought needs. The vague search repeats the question's own words; the sharp one adds the words that pick out one region.</p>
+
+    <h2 id="sparse"><span class="secnum">5</span> When thoughts stay sparse</h2>
+
+    <p>The loop alternates thought and action every round, because each fact needs a fresh decision about what to fetch next. The trace above thinks at every step.</p>
+
+    <p>Long tasks cannot afford that. In a text game or a shop, the agent may take dozens of actions in a row: walking room to room, opening pages, picking options. Thoughts appear only where they help: breaking the goal into parts, tracking which parts are done, picking the next part, and using commonsense about where things are found. The model itself decides when to think and when to just act.</p>
+
+    <p>The trade is cost against control. A thought costs a model call and lengthens the history, so thinking everywhere would drown a long task. Thinking nowhere would leave the agent with no plan at all. Sparse thoughts keep the plan where it matters and let the actions run between them.</p>
+
+    <h2 id="practice"><span class="secnum">6</span> Practice</h2>
+
+    <p>Each step costs one model call and one search. The context grows every round, so later calls read a longer prompt and cost more. There is no training run in the prompting setup: the model is frozen, and a few-shot prompt, one that shows a few full traces before the new question, does the teaching.</p>
+
+    <p>The headline setting is few-shot prompting with Thought, Action, Observation trajectories and a search API, from section 2 of the paper. The question answering runs use six hand-written traces as exemplars and a Wikipedia API with three actions: Search, Lookup and Finish.</p>
+
+    <p>The paper's own repository holds the prompts and the code behind the results, at <a href="https://github.com/ysymyth/ReAct">github.com/ysymyth/ReAct</a>. To try it, write a few traces in the Thought, Action, Observation shape, point the actions at a search API, and let the frozen model continue the trace.</p>
+
+    <h2 id="failures"><span class="secnum">7</span> Failure modes</h2>
+
+    <p>Three failures cover most of what goes wrong. Each has a cause, a visible symptom, and a fix.</p>
+
+    <h3 id="repeats"><span class="secnum">7.1</span> The loop repeats itself</h3>
+
+    <p>Cause: the model writes the same thought and the same action again, instead of reasoning about what the last observation said. Symptom: the same search returns the same lines round after round, and the trace never moves on. Fix: stop the loop, rewrite the thought to say what the observation is missing, or fall back to a plain chain of thought for the answer.</p>
+
+    <h3 id="empty-search"><span class="secnum">7.2</span> The search returns nothing useful</h3>
+
+    <p>Cause: the search names the wrong thing, or a name that covers more than one thing. Symptom: an observation with no fact the question needs, like the vague High Plains line in round 3. Fix: reformulate the search from the observation, as the trace does in round 4, adding the words that pick out the right page.</p>
+
+    <h3 id="stray-thought"><span class="secnum">7.3</span> A thought strays from the facts</h3>
+
+    <p>Cause: a thought is written from memory before any observation supports it, and the plan builds on the guess. Symptom: the trace reads smoothly while the facts underneath are wrong, and later searches chase the wrong thing. Fix: check each thought against the last observation before acting on it, and let an observation, not a hunch, set the next search.</p>
+
+    <h2 id="what-next"><span class="secnum">8</span> What comes next</h2>
+
+    <p>ReAct shows the loop works from a hand-written prompt and a few examples. But who teaches the model when to reach for a tool, instead of showing it in the prompt? <a href="toolformer.html">Toolformer: A Model That Teaches Itself to Use Tools</a> lets the model learn that choice from its own text, keeping only the tool calls that make the next words easier to predict.</p>
+
+    <h2 id="references"><span class="secnum">9</span> References</h2>
+
+    <ol class="brefs">
+        <li>Yao, S., et al. ReAct: Synergizing Reasoning and Acting in Language Models. <a href="https://arxiv.org/abs/2210.03629">arXiv:2210.03629</a>.</li>
+        <li>ReAct repository, the paper's own code and prompts. <a href="https://github.com/ysymyth/ReAct">github.com/ysymyth/ReAct</a>.</li>
+    </ol>
+
+<script>
+        (function () {
+            var nav = document.querySelector('.topnav');
+            function onNavScroll() {
+                nav.classList.toggle('scrolled', window.scrollY > 4);
+            }
+            window.addEventListener('scroll', onNavScroll, { passive: true });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            window.addEventListener('resize', function () {
+                if (window.innerWidth > 768) {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            onNavScroll();
+            var toggle = document.getElementById('navToggle');
+            var panel = document.getElementById('navPanel');
+            if (toggle && panel) {
+                toggle.addEventListener('click', function () {
+                    var open = panel.classList.toggle('open');
+                    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                });
+                panel.addEventListener('click', function (e) {
+                    if (e.target && e.target.classList && e.target.classList.contains('panel-link')) {
+                        panel.classList.remove('open');
+                        toggle.setAttribute('aria-expanded', 'false');
+                    }
+                });
+            }
+            var links = Array.prototype.slice.call(document.querySelectorAll('.tab-strip a.tab-link[href^="#"]'));
+            if (!links.length) return;
+            var tabEls = {};
+            links.forEach(function (a) { tabEls[a.getAttribute('href').slice(1)] = a; });
+            var current = null;
+            function centerTab(tab) {
+                var strip = tab.parentElement;
+                if (!strip || !strip.classList.contains('tab-strip')) return;
+                var sr = strip.getBoundingClientRect();
+                var pr = tab.getBoundingClientRect();
+                strip.scrollLeft += (pr.width >= sr.width) ? (pr.left - sr.left) : (pr.left - sr.left) - (sr.width - pr.width) / 2;
+            }
+            function setActive(id) {
+                if (!tabEls[id] || id === current) return;
+                current = id;
+                links.forEach(function (a) {
+                    a.classList.toggle('active', a.getAttribute('href') === '#' + id);
+                });
+                centerTab(tabEls[id]);
+            }
+            links.forEach(function (a) {
+                a.addEventListener('click', function () {
+                    setActive(a.getAttribute('href').slice(1));
+                });
+            });
+            setActive(links[0].getAttribute('href').slice(1));
+            if ('IntersectionObserver' in window) {
+                var obs = new IntersectionObserver(function (entries) {
+                    entries.forEach(function (en) {
+                        if (en.isIntersecting) setActive(en.target.id);
+                    });
+                }, { rootMargin: '-35% 0px -55% 0px' });
+                Object.keys(tabEls).forEach(function (id) {
+                    var el = document.getElementById(id);
+                    if (el) obs.observe(el);
+                });
+                window.addEventListener('scroll', function () {
+                    if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) {
+                        setActive(links[links.length - 1].getAttribute('href').slice(1));
+                    }
+                }, { passive: true });
+            }
+            window.addEventListener('load', function () {
+                var act = document.querySelector('.tab-strip a.active');
+                if (act) centerTab(act);
+            });
+        })();
+    </script>
+    <script>
+    /* ReAct stepper (Figure 3): step the fixed trace one round at a time. */
+    (function () {
+      var STEPS = [
+        {round: 0, out: 'The question goes in. Nothing is known yet.'},
+        {round: 1, out: 'First search lands. The orogeny is mountain building in Colorado, but the eastern sector is not named.'},
+        {round: 2, out: 'The lookup finds it: the eastern sector extends into the High Plains.'},
+        {round: 3, out: 'The search comes back vague: High Plains names two regions, not one.'},
+        {round: 4, out: 'The sharper search lands. The High Plains rise from around 1,800 to 7,000 ft.'},
+        {round: 5, out: 'The answer comes from the last observation: 1,800 to 7,000 ft.'}
+      ];
+      var cur = 0;
+      var prev = document.getElementById('raPrev');
+      var next = document.getElementById('raNext');
+      var count = document.getElementById('raCount');
+      var out = document.getElementById('raOut');
+      var rounds = [1, 2, 3, 4, 5].map(function (n) { return document.getElementById('raR' + n); });
+      var card = document.getElementById('raWalkEq');
+      function show(i) {
+        cur = Math.max(0, Math.min(STEPS.length - 1, i));
+        var st = STEPS[cur];
+        rounds.forEach(function (r, k) {
+          var lit = (k + 1) <= st.round;
+          r.classList.toggle('eq-dim', !lit);
+          r.classList.toggle('eq-hl', lit);
+          r.classList.toggle('ra-cur', (k + 1) === st.round);
+        });
+        var whys = card.querySelectorAll('.eq-why');
+        whys.forEach(function (w) {
+          w.classList.toggle('eq-active', +w.getAttribute('data-eqline') === cur);
+        });
+        out.textContent = st.out;
+        count.textContent = 'Step ' + (cur + 1) + ' of ' + STEPS.length;
+        prev.disabled = cur === 0;
+        next.disabled = cur === STEPS.length - 1;
+      }
+      prev.addEventListener('click', function () { show(cur - 1); });
+      next.addEventListener('click', function () { show(cur + 1); });
+      show(0);
+      document.addEventListener('sitemath:ready', function () { show(cur); });
+    })();
+    </script>
+    <script>
+    /* Search choice (Figure 4): pick the next search after the vague observation. */
+    (function () {
+      var deadBtn = document.getElementById('raDeadBtn');
+      var sharpBtn = document.getElementById('raSharpBtn');
+      var obs = document.getElementById('raToolObs');
+      var out = document.getElementById('raToolOut');
+      function setMode(sharp) {
+        deadBtn.classList.toggle('active', sharp === false);
+        sharpBtn.classList.toggle('active', sharp === true);
+        deadBtn.setAttribute('aria-pressed', String(sharp === false));
+        sharpBtn.setAttribute('aria-pressed', String(sharp === true));
+        if (sharp === false) {
+          obs.textContent = 'High Plains refers to one of two distinct land regions';
+          out.textContent = 'Same line back. The loop learned nothing new, and the next thought has nothing to work with.';
+        } else if (sharp === true) {
+          obs.textContent = 'The High Plains are a subregion of the Great Plains. From east to west, the High Plains rise in elevation from around 1,800 to 7,000 ft (550 to 2,130 m).';
+          out.textContent = 'The observation names the range. The next thought can finish from here.';
+        }
+      }
+      deadBtn.addEventListener('click', function () { setMode(false); });
+      sharpBtn.addEventListener('click', function () { setMode(true); });
+    })();
+    </script>
+    </script>
+<script>
+/* P80 code sections (CODE-SECTIONS.md) */
+(function(){
+  var C=['121,184,255','255,171,112','133,232,157','210,168,255','255,161,152','118,227,234'];
+  function lay(pre){
+    var code=pre.querySelector('code'); if(!code) return;
+    var lh=parseFloat(getComputedStyle(code).lineHeight);
+    var pt=parseFloat(getComputedStyle(pre).paddingTop);
+    var old=pre.querySelectorAll('.cs-g'); for(var j=0;j<old.length;j++) pre.removeChild(old[j]);
+    var imgs=[],sizes=[],pos=[];
+    (pre.getAttribute('data-cs')||'').split(',').forEach(function(r,i){
+      var m=r.trim().match(/^(\d+)(?:-(\d+))?$/); if(!m) return;
+      var a=+m[1],b=+(m[2]||m[1]),c=C[i%C.length],top=pt+(a-1)*lh,h=(b-a+1)*lh;
+      imgs.push('linear-gradient(rgba('+c+',.55),rgba('+c+',.55))','linear-gradient(rgba('+c+',.13),rgba('+c+',.13))');
+      sizes.push('3px '+h+'px','100% '+h+'px'); pos.push('0 '+top+'px','0 '+top+'px');
+      var g=document.createElement('span'); g.className='cs-g'; g.setAttribute('aria-hidden','true');
+      g.setAttribute('data-n',String(i+1)); g.style.top=(top+(lh-11)/2)+'px'; g.style.color='rgb('+c+')';
+      pre.insertBefore(g,code);
+    });
+    pre.style.backgroundImage=imgs.join(','); pre.style.backgroundSize=sizes.join(','); pre.style.backgroundPosition=pos.join(','); pre.style.backgroundRepeat='no-repeat';
+  }
+  function all(){ var p=document.querySelectorAll('pre.cs'); for(var i=0;i<p.length;i++) lay(p[i]); }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',all); else all();
+  window.addEventListener('load',all);
+  window.addEventListener('resize',all);
+  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(all);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>MRKL: Routing Requests to the Right Expert</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+            line-height: 1.6;
+            color: #333;
+        }
+        h1, h2, h3, h4 {
+            color: #2c3e50;
+            margin-top: 1.5em;
+            margin-bottom: 0.5em;
+        }
+        h1 { font-size: 2em; border-bottom: 2px solid #3498db; padding-bottom: 0.3em;}
+        .dek { font-size: 1.15em; color: #555; margin-top: 0.2em; }
+        .crumb { margin: 0 0 0.8em; }
+        .crumb a {
+            display: inline-block;
+            padding: 4px 14px;
+            border: 1px solid #dee2e6;
+            border-radius: 999px;
+            background: #f8f9fa;
+            color: #0056b3;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+        .crumb a:hover { border-color: #007bff; color: #007bff; }
+    /* Section tab strip: one slim row, scrolls sideways when it overflows. */
+    .tabs-label {
+        float: left;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #6c757d;
+        font-weight: 700;
+        line-height: 1.2;
+        margin: 0;
+        padding: 8px 12px 0 0;
+    }
+    .tab-strip {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 2px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        margin: 0 0 1.25rem;
+        max-width: 100%;
+    }
+    .tab-strip::-webkit-scrollbar { display: none; }
+    .tab-strip a.tab-link {
+        display: inline-block;
+        flex: 0 0 auto;
+        padding: 6px 10px;
+        border-radius: 999px;
+        color: #495057;
+        text-decoration: none;
+        font-size: 0.82rem;
+        font-weight: 500;
+        line-height: 1.35;
+        white-space: nowrap;
+    }
+    .tab-strip a.tab-link:hover { color: #007bff; }
+    .tab-strip a.tab-link.active { background: #007bff; color: #ffffff; }
+    @media (max-width: 768px) {
+        .tabs-label { display: none; }
+        .tab-strip {
+            width: 100vw;
+            max-width: 100vw;
+            box-sizing: border-box;
+            margin-left: calc((100% - 100vw) / 2);
+            padding-left: calc((100vw - 100%) / 2);
+        }
+        .tab-strip a.tab-link { font-size: 0.75rem; padding: 6px 8px; }
+    }
+        h2 { font-size: 1.5em; border-bottom: 1px solid #bdc3c7; padding-bottom: 0.2em;}
+        h3 { font-size: 1em; }
+
+    /* Shared site nav (matches index.html topnav) */
+    body { padding-top: calc(64px + 1.5rem); }
+    h1, h2, h3 { scroll-margin-top: 84px; }
+    .topnav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        z-index: 1000;
+        background: rgba(255, 255, 255, 0.65);
+        backdrop-filter: blur(18px) saturate(1.5);
+        -webkit-backdrop-filter: blur(18px) saturate(1.5);
+        border-bottom: 1px solid transparent;
+        transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+    .topnav.scrolled {
+        background: rgba(255, 255, 255, 0.88);
+        border-bottom-color: #dee2e6;
+        box-shadow: 0 6px 24px rgba(33, 37, 41, 0.07);
+    }
+    .nav-inner {
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 0 1.5rem;
+        height: 64px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+    .wordmark {
+        font-weight: 700;
+        color: #212529;
+        text-decoration: none;
+        font-size: 1.05rem;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+    }
+    .nav-links {
+        display: flex;
+        gap: 2px;
+        align-items: center;
+    }
+    .nav-links a {
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        font-size: 0.95rem;
+        padding: 8px 14px;
+        border-radius: 999px;
+        transition: color 0.18s ease, background-color 0.18s ease;
+    }
+    .nav-links a:hover { color: #007bff; background-color: #e7f1ff; }
+    .nav-links a.active { color: #007bff; background-color: #e7f1ff; font-weight: 600; }
+    .nav-toggle {
+        display: none;
+        width: 42px;
+        height: 42px;
+        padding: 0;
+        background: none;
+        border: 0;
+        border-radius: 10px;
+        cursor: pointer;
+        flex: 0 0 auto;
+    }
+    .nav-panel {
+        display: grid;
+        grid-template-rows: 0fr;
+        visibility: hidden;
+        transition: grid-template-rows 0.32s ease, visibility 0s linear 0.32s;
+    }
+    .nav-panel.open {
+        grid-template-rows: 1fr;
+        visibility: visible;
+        transition: grid-template-rows 0.32s ease, visibility 0s;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner { min-height: 0; overflow: hidden; }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link {
+        display: flex;
+        align-items: center;
+        padding: 0.8rem 0.75rem;
+        margin: 0 0.25rem;
+        border-radius: 10px;
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        min-height: 48px;
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+    .nav-panel a.panel-link:hover { background-color: #e7f1ff; color: #007bff; }
+    .nav-panel a.panel-link.active { color: #007bff; font-weight: 600; background-color: #e7f1ff; }
+    .panel-social { display: flex; gap: 0.5rem; padding: 0.9rem 1rem 0.25rem; flex-wrap: wrap; }
+    .panel-social a {
+        color: #007bff;
+        text-decoration: none;
+        font-weight: 500;
+        font-size: 0.9rem;
+        padding: 6px 12px;
+        border: 1px solid #dee2e6;
+        border-radius: 999px;
+        transition: border-color 0.15s ease;
+    }
+    .panel-social a:hover { border-color: #007bff; }
+    .nav-links a:focus-visible,
+    .wordmark:focus-visible,
+    .nav-toggle:focus-visible,
+    .panel-link:focus-visible,
+    .panel-social a:focus-visible { outline: 2px solid #007bff; outline-offset: 2px; }
+    @media (hover: hover) { .nav-toggle:hover { background-color: #e7f1ff; } }
+    @media (prefers-reduced-motion: reduce) {
+        .topnav, .nav-links a, .nav-toggle span, .nav-panel, .nav-panel a.panel-link { transition: none; }
+    }
+    @media (max-width: 768px) {
+        .nav-links { display: none; }
+        .nav-toggle { display: block; }
+    }
+
+        pre {
+          background: #0d1117;
+          color: #e6edf3;
+          padding: 14px 16px;
+          overflow-x: auto;
+          border-radius: 8px;
+          font-size: 0.9em;
+          margin: 1em 0;
+          font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+        }
+        pre code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 1em; background: none; padding: 0; color: inherit; }
+        @media (max-width: 480px) { pre { font-size: .82em; white-space: pre; overflow-x: auto; } }
+        ul, ol { padding-left: 20px; }
+        li { margin-bottom: 0.5em; }
+        strong { color: #2980b9; }
+        .caption {
+            max-width: 640px;
+            margin: 1rem auto 1.5em auto;
+            font-size: 0.9em;
+            color: #555;
+            text-align: center;
+        }
+        /* Interactive demo */
+        .demo {
+            border: 1px solid #e1e4e8;
+            border-radius: 8px;
+            padding: 1.25rem;
+            margin: 1.75rem 0;
+            background: #fdfefe;
+        }
+        /* Shared walkthrough equation-card contract (verbatim, all pages) */
+        .eq-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+          padding:1rem 1.2rem;margin:1.75rem auto;max-width:640px;overflow-x:auto}
+        .eq-what{font-size:.95rem;color:#334155;margin:0 0 .6rem;line-height:1.55}
+        .eq-line{font-size:1.38rem;line-height:2.0;letter-spacing:.015em;padding:.5rem .6rem;white-space:normal;font-weight:500;opacity:.38;border-left:3px solid transparent}
+        .eq-line.eq-active{opacity:1;border-left-color:#2c3e50}
+      .eq-why{display:none;visibility:hidden;font-size:1rem;color:#475569;padding:.15rem .35rem .4rem;line-height:1.65}
+      .eq-why.eq-active{display:block;visibility:visible}
+        .eqt{font-weight:600;padding:0 .1em;border-radius:3px}
+        .katex .eqt{font-weight:inherit;padding:0}
+        @media (max-width:480px){.eq-card{padding:.85rem .9rem}.eq-line{font-size:1.24rem;line-height:1.95}}
+/* P70 inline variables and inline code, one style site-wide (VAR-STYLE.md v2) */
+var,.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic;font-weight:400;font-size:1em;color:#1d4e89;background:#edf3fa;border-radius:3px;padding:0 .18em;white-space:nowrap;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+pre var,code var,.eq-line var{font:inherit;color:inherit;background:none;padding:0}
+:not(pre)>code:not(.eq-line code){font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,Courier,monospace;font-size:.86em;color:#24292f;background:#f1f3f5;border:1px solid #dfe3e8;border-radius:4px;padding:.06em .32em;white-space:normal;overflow-wrap:anywhere}
+/* P79 numbering (NUMBERING.md) */
+.secnum{font-variant-numeric:tabular-nums;margin-right:.4em;color:inherit;font-weight:inherit}
+.tab-strip .secnum{margin-right:.3em;opacity:.75}
+.fignum{font-weight:600;margin-right:.3em;font-variant-numeric:tabular-nums}
+/* P80 code sections (CODE-SECTIONS.md) */
+pre.cs{position:relative;background-attachment:local;padding-left:20px}
+pre.cs code{display:block;line-height:1.55}
+pre.cs .cs-g{position:absolute;left:3px;width:11px;text-align:center;font:700 11px/1 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;-webkit-user-select:none;user-select:none;pointer-events:none}
+pre.cs .cs-g::before{content:attr(data-n)}
+ol.cs-notes{list-style:none;padding-left:0;margin:-.4em 0 1em}
+ol.cs-notes li{margin:0 0 .3em;padding-left:1.9em;position:relative}
+ol.cs-notes .cs-n{position:absolute;left:0;top:.1em;min-width:1.35em;padding:0 .25em;border-radius:4px;font:700 .8em/1.45 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;text-align:center;color:#0d1117}
+ol.cs-notes li:nth-child(6n+1) .cs-n{background:#79b8ff}
+ol.cs-notes li:nth-child(6n+2) .cs-n{background:#ffab70}
+ol.cs-notes li:nth-child(6n+3) .cs-n{background:#85e89d}
+ol.cs-notes li:nth-child(6n+4) .cs-n{background:#d2a8ff}
+    @media (max-width:480px){
+      .demo{padding:.75rem}
+      .demo>*{margin-top:.6rem;margin-bottom:.6rem}
+      .demo>*:first-child{margin-top:0}
+      .demo svg{max-height:55vh}
+    }
+.figure.tool-fig { margin: 1.75rem 0; }
+.figure.tool-fig > .demo { margin-top: 0; margin-bottom: 0; }
+nav.prereq{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem .4rem;margin:.6rem 0 1.1rem}
+nav.prereq .prereq-label{font-size:.82rem;font-weight:600;color:#6c757d;margin-right:.15rem}
+nav.prereq a.prereq-chip{display:inline-block;padding:.15rem .6rem;border:1px solid #ced4da;border-radius:999px;font-size:.85rem;line-height:1.4;color:#0056b3;text-decoration:none}
+nav.prereq a.prereq-chip:hover,nav.prereq a.prereq-chip:focus-visible{background:#e7f1ff;border-color:#007bff}
+/* MATH-BEGIN v1 (P88, site-math.js renders KaTeX; byte-identical on every page) */
+.eq-line{overflow-x:auto;overflow-y:hidden;white-space:normal}
+.eq-line .katex{font-size:1.02em;line-height:1.6}
+.eq-line .katex .base{margin:.15em 0}
+var .katex,p .katex,li .katex,td .katex,th .katex,figcaption .katex,.eq-why .katex,.eq-what .katex,.eq-legend .katex{font-size:1.06em}
+var:has(.katex){font-style:normal}
+.katex-display{margin:.6rem 0;overflow-x:auto;overflow-y:hidden}
+/* MATH-END */
+</style>
+    <script src="site-math.js" defer></script>
+
+<style>
+/* Static teaching diagrams (mtd), shared across tutorials, 2026-11-01 */
+.figure.mtd-fig { margin: 1.75rem 0; }
+.mtd-fig > svg.mtd-svg { display: block; width: 100%; height: auto; margin: 0 auto; }
+.mtd-fig .caption { margin-top: 1rem; }
+.mtd-svg text { fill: #2c3e50; font-family: sans-serif; }
+.mtd-svg .mtd-sub { fill: #555; }
+.mtd-svg .mtd-t1 { fill: #1f618d; }
+.mtd-svg .mtd-t2 { fill: #a04000; }
+.mtd-svg .mtd-pu { fill: #8e44ad; }
+.mtd-svg .mtd-red { fill: #c0392b; }
+.mtd-svg .mtd-grn { fill: #0e6b59; }
+.mtd-svg .mtd-gold { fill: #7d6608; }
+.mtd-svg line, .mtd-svg path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.mtd-svg .mtd-s.mtd-c1 { stroke: #1f618d; } .mtd-svg .mtd-f.mtd-c1 { fill: #1f618d; }
+.mtd-svg .mtd-s.mtd-c2 { stroke: #a04000; } .mtd-svg .mtd-f.mtd-c2 { fill: #a04000; }
+.mtd-svg .mtd-s.mtd-cp { stroke: #8e44ad; } .mtd-svg .mtd-f.mtd-cp { fill: #8e44ad; }
+.mtd-svg .mtd-s.mtd-cg { stroke: #2c3e50; } .mtd-svg .mtd-f.mtd-cg { fill: #2c3e50; }
+.mtd-svg .mtd-s.mtd-cgold { stroke: #7d6608; } .mtd-svg .mtd-f.mtd-cgold { fill: #7d6608; }
+.mtd-svg .mtd-s.mtd-cgr { stroke: #0e6b59; } .mtd-svg .mtd-f.mtd-cgr { fill: #0e6b59; }
+.mtd-svg .mtd-box { fill: #fbfcfd; stroke: #bdc3c7; stroke-width: 1.4px; }
+.mtd-svg .mtd-box.mtd-note { stroke-dasharray: 5 4; }
+/* stepped eq-card: only the active line and its legend items show (grpo pattern) */
+.eq-card.eq-stepped .eq-line{display:none;visibility:hidden}
+.eq-card.eq-stepped .eq-line.eq-active{display:block;opacity:1;visibility:visible}
+.eq-card.eq-stepped .eq-legend .eq-item{display:none;visibility:hidden}
+.eq-card.eq-stepped .eq-legend .eq-item.eq-active{display:block;visibility:visible}
+.eq-legend{font-size:.85rem;color:#475569;margin-top:.6rem;line-height:1.75}
+.eq-legend .eq-item{display:block}
+.eq-legend .eq-item code{white-space:nowrap}
+.eq-sw{display:inline-block;width:.7em;height:.7em;border-radius:2px;margin:0 .25em 0 .6em;vertical-align:baseline}
+@media (max-width:480px){.eq-legend{display:grid;grid-template-columns:1fr 1fr;column-gap:.9rem;row-gap:.1rem;line-height:1.5}}
+.eqt.eqt-active{background:#fef9c3}
+ol.brefs li { margin-bottom: .6em; }
+/* MRKL page: routing stepper and phrasing picker */
+.wt-ctl{display:flex;align-items:center;gap:.6rem;justify-content:center;margin:0 0 .6rem}
+.wt-ctl button{padding:.35rem .9rem;border:1px solid #ced4da;border-radius:999px;background:#f8f9fa;color:#0056b3;font-weight:600;font-size:.9rem;cursor:pointer;white-space:nowrap}
+.wt-ctl button:disabled{opacity:.4;cursor:default}
+.wt-ctl button:hover:not(:disabled){border-color:#007bff;background:#e7f1ff}
+#mkCount{font-size:.9rem;color:#555;min-width:7.5em;text-align:center}
+.wt-out{text-align:center;font-size:15px;color:#2c3e50;margin:8px 0 0;min-height:2.9em;line-height:1.45}
+.wt-out b{color:#a04000}
+.eq-dim{opacity:.35}
+.eq-hl{opacity:1}
+@media (max-width:480px){.wt-ctl button{padding:.35rem .7rem}}
+.mk-stages{display:flex;gap:.35rem;flex-wrap:wrap;justify-content:center;margin:.2rem 0 .6rem}
+.mk-stage{font-size:.8rem;font-weight:700;padding:.25rem .6rem;border:1px solid #ced4da;border-radius:999px;color:#495057;background:#fff}
+.mk-stage.mk-cur{outline:2px solid #8e44ad;outline-offset:1px;color:#8e44ad;border-color:#8e44ad}
+.mk-stage.eq-dim{opacity:.45}
+.mk-flow{display:flex;flex-direction:column;align-items:stretch;gap:0;margin:.5rem 0}
+.mk-box{border:1px solid #bdc3c7;border-radius:10px;padding:.55rem .8rem;background:#fbfcfd;font-size:.95rem;line-height:1.5;text-align:center;transition:opacity .2s ease}
+.mk-box b{display:block;font-size:.85rem;letter-spacing:.04em;text-transform:uppercase;color:#6c757d;margin-bottom:.1rem}
+.mk-box.mk-cur{border-color:#8e44ad;border-width:2px;outline:2px solid #8e44ad;outline-offset:1px}
+.mk-box.eq-dim{opacity:.45}
+.mk-box.mk-fb{border-style:dashed;border-color:#7d6608;margin-top:.6rem}
+.mk-box.mk-fb.mk-cur{border-color:#7d6608;outline-color:#7d6608}
+.mk-arrow{text-align:center;color:#6c757d;font-size:1.1rem;line-height:1.2}
+.mk-tool-note{font-size:.92rem;color:#2c3e50;line-height:1.55;margin:.3rem 0 .6rem;text-align:center}
+.mk-picks{display:flex;gap:.5rem;justify-content:center;margin:.2rem 0 .4rem}
+.mk-pick{padding:.4rem 1.1rem;border:1px solid #ced4da;border-radius:999px;background:#fff;color:#0056b3;font-weight:600;font-size:.92rem;cursor:pointer}
+.mk-pick:hover{border-color:#007bff;background:#e7f1ff}
+.mk-pick-cur{background:#007bff;color:#fff;border-color:#007bff}
+.mk-tool-svg{display:block;width:100%;height:auto;margin:.2rem auto 0}
+</style>
+</head>
+<body>
+        <nav class="topnav" aria-label="Site">
+    <div class="nav-inner">
+        <a class="wordmark" href="index.html">Ramin Anushiravani</a>
+        <div class="nav-links">
+            <a href="tutorial.html" class="active">Tutorials</a>
+            <a href="pubs.html">Publications</a>
+            <a href="index.html">About</a>
+            <a href="work.html">Projects</a>
+        </div>
+        <button class="nav-toggle" id="navToggle" aria-expanded="false" aria-controls="navPanel" aria-label="Menu"><span></span><span></span><span></span></button>
+    </div>
+    <div class="nav-panel" id="navPanel">
+        <div class="nav-panel-inner">
+            <div class="nav-panel-body">
+                <a class="panel-link active" href="tutorial.html">Tutorials</a>
+                <a class="panel-link" href="pubs.html">Publications</a>
+                <a class="panel-link" href="index.html">About</a>
+                <a class="panel-link" href="work.html">Projects</a>
+                <div class="panel-social">
+                    <a href="https://linkedin.com/in/raminanushiravani" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+                    <a href="https://github.com/raminaeye/" target="_blank" rel="noopener noreferrer">GitHub</a>
+                    <a href="https://scholar.google.com/citations?user=kouXx8gAAAAJ&hl=en" target="_blank" rel="noopener noreferrer">Google Scholar</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</nav>
+    <p class="crumb"><a href="tutorial.html">&larr; All tutorials</a></p>
+    <h1>MRKL: Routing Requests to the Right Expert</h1>
+    <p class="dek">A wrong handoff sends the exact tool the wrong numbers.</p>
+    <nav class="prereq" aria-label="Before you start"><span class="prereq-label">Before you start</span><a class="prereq-chip" href="chain-of-thought.html#guessing" title="Chain of Thought, section 1" aria-label="Working through a question instead of guessing, taught in Chain of Thought, section 1">Thinking before answering</a><a class="prereq-chip" href="decoding.html#generate-loop" title="Decoding, section 3" aria-label="The generate loop, taught in Decoding, section 3">The generate loop</a></nav>
+
+    <p class="tabs-label">On this page</p>
+    <div class="tab-strip">
+        <a class="tab-link" href="#one-model"><span class="secnum">1</span> One model cannot know everything</a>
+        <a class="tab-link" href="#router"><span class="secnum">2</span> The router and the experts</a>
+        <a class="tab-link" href="#handoff"><span class="secnum">3</span> The handoff that breaks</a>
+        <a class="tab-link" href="#new-expert"><span class="secnum">4</span> Adding a new expert</a>
+        <a class="tab-link" href="#practice"><span class="secnum">5</span> Practice</a>
+        <a class="tab-link" href="#failures"><span class="secnum">6</span> Failure modes</a>
+        <a class="tab-link" href="#what-next"><span class="secnum">7</span> What comes next</a>
+        <a class="tab-link" href="#references"><span class="secnum">8</span> References</a>
+    </div>
+
+    <h2 id="one-model"><span class="secnum">1</span> One model cannot know everything</h2>
+
+    <p>A language model answers from what it learned in training. It cannot know what changed since, what lives in a private database, or what today is. And it slips on arithmetic it should never have to do in its head. A bigger model helps with none of these: the facts are outside it, and a sum is exact work, not a guess.</p>
+
+    <p>MRKL, short for Modular Reasoning, Knowledge and Language, is the routing family on the <a href="agents-intro.html">section map</a>. It keeps one large language model and surrounds it with a set of <strong>experts</strong>. An expert is a module that does one job well: a calculator, a currency converter, a lookup in a database, or a smaller model trained for one task. A <strong>router</strong> is a small trained model that reads each request and picks the expert that fits it. <a href="toolformer.html">Toolformer</a> teaches one model to call tools as it writes; MRKL splits the job across experts instead, and the router decides who gets asked.</p>
+
+    <p>MRKL runs at inference, once per request, with no memory between requests. Each request is routed fresh, and nothing carries over to the next one. The router itself is trained beforehand to recognise requests and pull out their arguments, but at run time nothing is learned.</p>
+
+    <h2 id="router"><span class="secnum">2</span> The router and the experts</h2>
+
+    <h3 id="router-decides"><span class="secnum">2.1</span> The router decides</h3>
+
+    <p>Every request goes to the router first. The router reads the words and picks one expert. A sum goes to the calculator. A question about a live price goes to a database lookup. A question no expert fits goes to the general model. The router is itself a language model, and it writes out its choice and the arguments as text, one token at a time, the way <a href="decoding.html#generate-loop">Decoding</a> teaches.</p>
+
+    <p>The router's choice is the whole system working or failing. Pick right and the expert answers exactly. Pick wrong and the best expert never gets asked. Unlike the <a href="react.html">ReAct</a> loop, which thinks and acts step by step, the router decides once per request.</p>
+
+    <figure id="fig-1" class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 360" style="max-width:360px" role="img" aria-label="The architecture, top to bottom. A request goes to the router. The router sends it to one of three experts: the calculator, a database lookup, or the general model. The general model is the fallback, for requests no expert fits. The chosen expert answers.">
+      <rect class="mtd-box" x="120" y="10" width="160" height="46" rx="8" style="stroke:#2471a3;stroke-width:2px"/><text class="mtd-t1" x="200" y="28" text-anchor="middle" style="font-size:15px;font-weight:700">Request</text><text class="mtd-sub" x="200" y="46" text-anchor="middle" style="font-size:12px">a question in words</text>
+      <line class="mtd-s mtd-c1" x1="200" y1="56" x2="200" y2="70" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-c1" points="200,80 194,70 206,70"/>
+      <rect class="mtd-box" x="120" y="80" width="160" height="46" rx="8" style="stroke:#8e44ad;stroke-width:2px"/><text class="mtd-pu" x="200" y="98" text-anchor="middle" style="font-size:15px;font-weight:700">Router</text><text class="mtd-sub" x="200" y="116" text-anchor="middle" style="font-size:12px">picks one expert</text>
+      <line class="mtd-s mtd-cp" x1="160" y1="126" x2="80" y2="150" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-cp" points="75,158 88,148 84,160"/>
+      <line class="mtd-s mtd-cp" x1="200" y1="126" x2="200" y2="140" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-cp" points="200,150 194,140 206,140"/>
+      <line class="mtd-s mtd-cp" x1="240" y1="126" x2="320" y2="150" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-cp" points="325,158 316,160 312,148"/>
+      <rect class="mtd-box" x="10" y="150" width="120" height="52" rx="8" style="stroke:#2471a3;stroke-width:2px"/><text class="mtd-t1" x="70" y="172" text-anchor="middle" style="font-size:14px;font-weight:700">Calculator</text><text class="mtd-sub" x="70" y="190" text-anchor="middle" style="font-size:12px">exact sums</text>
+      <rect class="mtd-box" x="140" y="150" width="120" height="52" rx="8" style="stroke:#2471a3;stroke-width:2px"/><text class="mtd-t1" x="200" y="172" text-anchor="middle" style="font-size:14px;font-weight:700">Database</text><text class="mtd-sub" x="200" y="190" text-anchor="middle" style="font-size:12px">live facts</text>
+      <rect class="mtd-box mtd-note" x="270" y="150" width="120" height="52" rx="8" style="stroke:#7d6608;stroke-width:2px"/><text class="mtd-gold" x="330" y="172" text-anchor="middle" style="font-size:14px;font-weight:700">General model</text><text class="mtd-sub" x="330" y="190" text-anchor="middle" style="font-size:12px">fallback</text>
+      <line class="mtd-s mtd-c1" x1="70" y1="202" x2="170" y2="240" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-c1" points="178,244 168,238 172,248"/>
+      <line class="mtd-s mtd-c1" x1="200" y1="202" x2="200" y2="240" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-c1" points="200,250 194,240 206,240"/>
+      <line class="mtd-s mtd-c1" x1="330" y1="202" x2="230" y2="240" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-c1" points="222,244 228,248 232,238"/>
+      <rect class="mtd-box" x="120" y="250" width="160" height="46" rx="8" style="stroke:#0e6b59;stroke-width:2px"/><text class="mtd-grn" x="200" y="268" text-anchor="middle" style="font-size:15px;font-weight:700">Answer</text><text class="mtd-sub" x="200" y="286" text-anchor="middle" style="font-size:12px">the chosen expert replies</text>
+      <text class="mtd-sub" x="200" y="326" text-anchor="middle" style="font-size:12px">A request no expert fits goes to the general model.</text>
+    </svg><figcaption class="caption"><span class="fignum">Figure 1.</span> Every request passes the router. The router sends it to one expert, and a request no expert fits falls back to the general model.</figcaption></figure>
+
+    <h3 id="two-kinds"><span class="secnum">2.2</span> Two kinds of expert</h3>
+
+    <p>A <strong>neural</strong> expert is a model: the general-purpose language model, or a smaller model trained for one job. A <strong>symbolic</strong> expert is a rule, not a model: a calculator, a currency converter, a database lookup. Symbolic means it follows fixed rules and gives the same answer every time for the same input. The calculator never guesses. That split is the point: the system keeps the language model for language and hands exact work to exact tools.</p>
+
+    <h3 id="travel-on"><span class="secnum">2.3</span> The answer can travel on</h3>
+
+    <p>An expert's answer can be the reply, or it can go to another expert. A lookup can feed a sum. The paper calls this <strong>compositionality</strong>: answers chain from one expert to the next, so a request with two parts gets both answered.</p>
+
+    <h2 id="handoff"><span class="secnum">3</span> The handoff that breaks</h2>
+
+    <p>Picking the expert is only half the job. The router must also hand the expert the right inputs. For a calculator those inputs are the operation and the numbers it works on. The <strong>operation</strong> is what to do: add, subtract, multiply, divide. The numbers are the <strong>operands</strong>, the values the operation works on. Pulling those out of words is called <strong>argument extraction</strong>: turning a sentence into the exact inputs a tool needs.</p>
+
+    <p>That handoff is where the system breaks. The calculator is exact, so when the answer is wrong, the fault is never the arithmetic. It is the handoff: the wrong operation, or the wrong numbers, handed to a tool that does exactly what it is told.</p>
+
+    <p>The words make it hard. The same sum arrives as digits, as words, as synonyms, or as a story. "3 - 1" and "How much is three minus 1" ask the same sum, and "twelve", "12" and "a dozen" all name the same number. A story hides the sum further: "I lost one ball" needs world knowledge to read as a subtraction, since losing means taking away. The router must read meaning, not match symbols, and <a href="chain-of-thought.html#guessing">working through what the words ask</a> is what lets it do that.</p>
+
+    <figure id="fig-2" class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 260" style="max-width:360px" role="img" aria-label="The handoff. The request reads How much is three minus 1. The word three maps to the first number 3, minus maps to the operation minus, and 1 maps to the second number 1. The three inputs go to the calculator, which never sees the words.">
+      <text x="200" y="28" text-anchor="middle" style="font-size:15px">How much is <tspan class="mtd-t1" style="font-weight:700">three</tspan> <tspan class="mtd-t2" style="font-weight:700">minus</tspan> <tspan class="mtd-grn" style="font-weight:700">1</tspan></text>
+      <line class="mtd-s mtd-c1" x1="213" y1="38" x2="80" y2="108" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-c1" points="76,116 86,106 82,118"/>
+      <line class="mtd-s mtd-c2" x1="255" y1="38" x2="205" y2="108" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-c2" points="203,116 211,106 208,118"/>
+      <line class="mtd-s mtd-cgr" x1="283" y1="38" x2="325" y2="108" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-cgr" points="327,116 319,106 322,118"/>
+      <rect class="mtd-box" x="10" y="116" width="120" height="48" rx="8" style="stroke:#2471a3;stroke-width:2px"/><text class="mtd-t1" x="70" y="136" text-anchor="middle" style="font-size:13px;font-weight:700">first number</text><text x="70" y="154" text-anchor="middle" style="font-size:15px;font-weight:700">3</text>
+      <rect class="mtd-box" x="140" y="116" width="120" height="48" rx="8" style="stroke:#a04000;stroke-width:2px"/><text class="mtd-t2" x="200" y="136" text-anchor="middle" style="font-size:13px;font-weight:700">operation</text><text x="200" y="154" text-anchor="middle" style="font-size:15px;font-weight:700">minus</text>
+      <rect class="mtd-box" x="270" y="116" width="120" height="48" rx="8" style="stroke:#0e6b59;stroke-width:2px"/><text class="mtd-grn" x="330" y="136" text-anchor="middle" style="font-size:13px;font-weight:700">second number</text><text x="330" y="154" text-anchor="middle" style="font-size:15px;font-weight:700">1</text>
+      <line class="mtd-s mtd-c1" x1="200" y1="164" x2="200" y2="182" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-c1" points="200,190 194,180 206,180"/>
+      <rect class="mtd-box" x="120" y="190" width="160" height="40" rx="8" style="stroke:#2471a3;stroke-width:2px"/><text class="mtd-t1" x="200" y="215" text-anchor="middle" style="font-size:15px;font-weight:700">Calculator</text>
+      <text class="mtd-sub" x="200" y="250" text-anchor="middle" style="font-size:12px">The calculator never sees the words.</text>
+    </svg><figcaption class="caption"><span class="fignum">Figure 2.</span> The router turns words into the calculator's inputs: one operation and two numbers. The calculator itself never sees the words.</figcaption></figure>
+
+    <p class="code-lead">The router call as code: one call returns the expert and its arguments.</p>
+<pre class="cs" data-cs="1-4,5-7"><code class="language-python">request = (
+    "How much is three minus 1")
+(expert, operation,
+ first, second) = route(request)
+answer = call(expert, operation,
+    first, second)
+reply = answer</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span><code>route</code> is the router. It reads the request and returns the expert name with the operation and the two numbers: calculator, minus, 3, 1.</li>
+  <li><span class="cs-n">2</span><code>call</code> runs the named expert on those arguments, and its answer becomes the reply.</li>
+</ol>
+
+    <figure id="fig-3" class="figure tool-fig">
+    <div class="demo" id="mkWalk">
+      <div class="wt-ctl">
+        <button type="button" id="mkPrev" aria-label="Previous step">&larr; Prev</button>
+        <span id="mkCount" aria-live="polite">Step 1 of 5</span>
+        <button type="button" id="mkNext" aria-label="Next step">Next &rarr;</button>
+      </div>
+      <div class="mk-stages" id="mkStages">
+        <span class="mk-stage mk-cur" id="mkStage0">Request</span>
+        <span class="mk-stage eq-dim" id="mkStage1">Router</span>
+        <span class="mk-stage eq-dim" id="mkStage2">Handoff</span>
+        <span class="mk-stage eq-dim" id="mkStage3">Answer</span>
+        <span class="mk-stage eq-dim" id="mkStage4">Fallback</span>
+      </div>
+      <div class="mk-flow">
+        <div class="mk-box mk-cur" id="mkReq"><b>Request</b><span id="mkReqText">How much is three minus 1</span></div>
+        <div class="mk-arrow" aria-hidden="true">&darr;</div>
+        <div class="mk-box eq-dim" id="mkRouter"><b>Router</b><span id="mkRouterText">reads the request</span></div>
+        <div class="mk-arrow" aria-hidden="true">&darr;</div>
+        <div class="mk-box eq-dim" id="mkExpert"><b>Calculator</b><span id="mkExpertText">waits for its inputs</span></div>
+        <div class="mk-arrow" aria-hidden="true">&darr;</div>
+        <div class="mk-box eq-dim" id="mkAnswer"><b>Answer</b><span id="mkAnswerText">nothing yet</span></div>
+        <div class="mk-box mk-fb eq-dim" id="mkFallback"><b>Fallback: general model</b><span id="mkFallbackText">for requests no expert fits</span></div>
+      </div>
+      <p class="wt-out" id="mkOut" aria-live="polite"></p>
+    </div>
+      <figcaption class="caption"><span class="fignum">Figure 3.</span> Step one request through the system. The last step shows a request no expert fits falling back to the general model.</figcaption>
+    </figure>
+
+    <figure id="fig-4" class="figure tool-fig">
+    <div class="demo" id="mkTool">
+      <p class="mk-tool-note">Pick a phrasing. The words change; the three inputs stay the same.</p>
+      <div class="mk-picks" role="group" aria-label="Word problem phrasing">
+        <button type="button" class="mk-pick mk-pick-cur" id="mkPick0" aria-pressed="true">Digits</button>
+        <button type="button" class="mk-pick" id="mkPick1" aria-pressed="false">Words</button>
+        <button type="button" class="mk-pick" id="mkPick2" aria-pressed="false">Story</button>
+      </div>
+      <svg class="mtd-svg mk-tool-svg" viewBox="0 0 400 210" role="img" aria-label="The handoff diagram. The words of the chosen phrasing map to the same three inputs: the first number 3, the operation minus, and the second number 1.">
+        <g id="mkPhrase0">
+          <text x="200" y="28" text-anchor="middle" style="font-size:15px">How much is <tspan class="mtd-t1" style="font-weight:700">3</tspan> <tspan class="mtd-t2" style="font-weight:700">minus</tspan> <tspan class="mtd-grn" style="font-weight:700">1</tspan></text>
+          <line class="mtd-s mtd-c1" x1="210" y1="38" x2="80" y2="88" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-c1" points="76,96 86,86 82,98"/>
+          <line class="mtd-s mtd-c2" x1="238" y1="38" x2="205" y2="88" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-c2" points="203,96 211,86 208,98"/>
+          <line class="mtd-s mtd-cgr" x1="266" y1="38" x2="325" y2="88" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-cgr" points="327,96 319,86 322,98"/>
+        </g>
+        <g id="mkPhrase1" style="display:none">
+          <text x="200" y="28" text-anchor="middle" style="font-size:15px">How much is <tspan class="mtd-t1" style="font-weight:700">three</tspan> <tspan class="mtd-t2" style="font-weight:700">minus</tspan> <tspan class="mtd-grn" style="font-weight:700">1</tspan></text>
+          <line class="mtd-s mtd-c1" x1="213" y1="38" x2="80" y2="88" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-c1" points="76,96 86,86 82,98"/>
+          <line class="mtd-s mtd-c2" x1="255" y1="38" x2="205" y2="88" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-c2" points="203,96 211,86 208,98"/>
+          <line class="mtd-s mtd-cgr" x1="283" y1="38" x2="325" y2="88" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-cgr" points="327,96 319,86 322,98"/>
+        </g>
+        <g id="mkPhrase2" style="display:none">
+          <text x="200" y="28" text-anchor="middle" style="font-size:15px">I had <tspan class="mtd-t1" style="font-weight:700">three</tspan> balls and <tspan class="mtd-t2" style="font-weight:700">lost</tspan> <tspan class="mtd-grn" style="font-weight:700">one</tspan></text>
+          <line class="mtd-s mtd-c1" x1="154" y1="38" x2="80" y2="88" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-c1" points="76,96 86,86 82,98"/>
+          <line class="mtd-s mtd-c2" x1="263" y1="38" x2="205" y2="88" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-c2" points="203,96 211,86 208,98"/>
+          <line class="mtd-s mtd-cgr" x1="294" y1="38" x2="325" y2="88" style="stroke-width:2.5px"/><polygon class="mtd-f mtd-cgr" points="327,96 319,86 322,98"/>
+        </g>
+        <rect class="mtd-box" x="10" y="96" width="120" height="48" rx="8" style="stroke:#2471a3;stroke-width:2px"/><text class="mtd-t1" x="70" y="116" text-anchor="middle" style="font-size:13px;font-weight:700">first number</text><text x="70" y="134" text-anchor="middle" style="font-size:15px;font-weight:700">3</text>
+        <rect class="mtd-box" x="140" y="96" width="120" height="48" rx="8" style="stroke:#a04000;stroke-width:2px"/><text class="mtd-t2" x="200" y="116" text-anchor="middle" style="font-size:13px;font-weight:700">operation</text><text x="200" y="134" text-anchor="middle" style="font-size:15px;font-weight:700">minus</text>
+        <rect class="mtd-box" x="270" y="96" width="120" height="48" rx="8" style="stroke:#0e6b59;stroke-width:2px"/><text class="mtd-grn" x="330" y="116" text-anchor="middle" style="font-size:13px;font-weight:700">second number</text><text x="330" y="134" text-anchor="middle" style="font-size:15px;font-weight:700">1</text>
+        <text class="mtd-sub" x="200" y="176" text-anchor="middle" style="font-size:12px">The calculator gets the same three inputs every time.</text>
+      </svg>
+      <p class="wt-out" id="mkToolOut" aria-live="polite"></p>
+    </div>
+      <figcaption class="caption"><span class="fignum">Figure 4.</span> Pick a phrasing and watch the arrows move. The words change, but the calculator still gets minus, 3 and 1.</figcaption>
+    </figure>
+
+    <h2 id="new-expert"><span class="secnum">4</span> Adding a new expert</h2>
+
+    <p>Adding a capability takes three steps. First, build the expert on its own: train a small model for the job, or write the rule. Second, teach the router to recognise requests for the new expert and pull out the arguments each one needs. Third, change nothing else. The existing experts are untouched, and only the router is retrained.</p>
+
+    <p>Compare that with fine tuning one big model on a new task. The new task can push out old skills, a failure called <strong>catastrophic forgetting</strong>: the model forgets what it knew when it learns something new. Avoiding it means retraining the whole model on everything at once, which is far too costly to repeat for every new task. Adding an expert avoids that entirely, since the old experts never change.</p>
+
+    <h2 id="practice"><span class="secnum">5</span> Practice</h2>
+
+    <p>Each request costs one router call and one expert call. In the paper's test case the router is trained by <strong>prompt tuning</strong>, which trains a small set of prompt tokens while the large model stays fixed (paper section 3.2).</p>
+
+    <p>The headline setting is router only retraining (MRKL paper section 3). When an expert is added, only the router is retrained; the experts and the general model stay as they are.</p>
+
+    <p>The paper released no official implementation code, so there is no official code to link here. The experiment data was released as a public data set on <a href="https://github.com/AI21Labs/MRKL_synthetic_data">GitHub</a>.</p>
+
+    <h2 id="failures"><span class="secnum">6</span> Failure modes</h2>
+
+    <p>Three failures cover most of what goes wrong. Each has a cause, a visible symptom, and a fix.</p>
+
+    <h3 id="wrong-expert"><span class="secnum">6.1</span> Routed to the wrong expert</h3>
+
+    <p>Cause: the router reads the request and picks the wrong module. Symptom: a sum goes to the general model, which guesses instead of calculating, or a live question goes to the calculator, which cannot answer it. Fix: train the router on more varied phrasings of the requests it gets wrong, so it learns the boundary between experts.</p>
+
+    <h3 id="wrong-arguments"><span class="secnum">6.2</span> Right expert, wrong arguments</h3>
+
+    <p>Cause: the handoff pulls the wrong operation or the wrong numbers from the words. Symptom: the calculator answers a different sum than the one asked, exactly and confidently. Fix: train and test the router's argument extraction for that expert on its own, with varied phrasings, before trusting it.</p>
+
+    <h3 id="never-saw"><span class="secnum">6.3</span> A phrasing or operation the router never saw</h3>
+
+    <p>Cause: the router only handles the phrasings and operations its training covered. Symptom: a request written with number words fails where the same request in digits works, and a new operation fails where a trained one works. Fix: train on both forms of every number and on every operation the expert offers. Training on words also covers digits, but the reverse does not hold.</p>
+
+
+    <h2 id="what-next"><span class="secnum">7</span> What comes next</h2>
+
+    <p>MRKL routes each request to one expert that answers on its own. But some questions need a model that thinks longer before it answers, checking its own work as it goes. <a href="reasoning-models.html">Reasoning Models: Long Thinking Inside an Agent</a> shows how rewarding only a correct final answer can still teach a model to pause and check itself.</p>
+
+    <h2 id="references"><span class="secnum">8</span> References</h2>
+
+    <ol class="brefs">
+        <li>Karpas, E., et al. MRKL Systems: A modular, neuro-symbolic architecture that combines large language models, external knowledge sources and discrete reasoning. <a href="https://arxiv.org/abs/2205.00445">arXiv:2205.00445</a>.</li>
+    </ol>
+
+<script>
+        (function () {
+            var nav = document.querySelector('.topnav');
+            function onNavScroll() {
+                nav.classList.toggle('scrolled', window.scrollY > 4);
+            }
+            window.addEventListener('scroll', onNavScroll, { passive: true });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            window.addEventListener('resize', function () {
+                if (window.innerWidth > 768) {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            onNavScroll();
+            var toggle = document.getElementById('navToggle');
+            var panel = document.getElementById('navPanel');
+            if (toggle && panel) {
+                toggle.addEventListener('click', function () {
+                    var open = panel.classList.toggle('open');
+                    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                });
+                panel.addEventListener('click', function (e) {
+                    if (e.target && e.target.classList && e.target.classList.contains('panel-link')) {
+                        panel.classList.remove('open');
+                        toggle.setAttribute('aria-expanded', 'false');
+                    }
+                });
+            }
+            var links = Array.prototype.slice.call(document.querySelectorAll('.tab-strip a.tab-link[href^="#"]'));
+            if (!links.length) return;
+            var tabEls = {};
+            links.forEach(function (a) { tabEls[a.getAttribute('href').slice(1)] = a; });
+            var current = null;
+            function centerTab(tab) {
+                var strip = tab.parentElement;
+                if (!strip || !strip.classList.contains('tab-strip')) return;
+                var sr = strip.getBoundingClientRect();
+                var pr = tab.getBoundingClientRect();
+                strip.scrollLeft += (pr.width >= sr.width) ? (pr.left - sr.left) : (pr.left - sr.left) - (sr.width - pr.width) / 2;
+            }
+            function setActive(id) {
+                if (!tabEls[id] || id === current) return;
+                current = id;
+                links.forEach(function (a) {
+                    a.classList.toggle('active', a.getAttribute('href') === '#' + id);
+                });
+                centerTab(tabEls[id]);
+            }
+            links.forEach(function (a) {
+                a.addEventListener('click', function () {
+                    setActive(a.getAttribute('href').slice(1));
+                });
+            });
+            setActive(links[0].getAttribute('href').slice(1));
+            if ('IntersectionObserver' in window) {
+                var obs = new IntersectionObserver(function (entries) {
+                    entries.forEach(function (en) {
+                        if (en.isIntersecting) setActive(en.target.id);
+                    });
+                }, { rootMargin: '-35% 0px -55% 0px' });
+                Object.keys(tabEls).forEach(function (id) {
+                    var el = document.getElementById(id);
+                    if (el) obs.observe(el);
+                });
+                window.addEventListener('scroll', function () {
+                    if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) {
+                        setActive(links[links.length - 1].getAttribute('href').slice(1));
+                    }
+                }, { passive: true });
+            }
+            window.addEventListener('load', function () {
+                var act = document.querySelector('.tab-strip a.active');
+                if (act) centerTab(act);
+            });
+        })();
+    </script>
+    <script>
+    /* MRKL stepper (Figure 3): step one request through router, expert, fallback. */
+    (function () {
+      var STEPS = [
+        {out: 'A request arrives in words. Nothing has been routed yet.',
+         req: 'How much is three minus 1', router: 'reads the request',
+         expert: 'waits for its inputs', answer: 'nothing yet',
+         fallback: 'for requests no expert fits'},
+        {out: 'The router reads the request and picks the calculator. A sum is exact work, not a guess.',
+         req: 'How much is three minus 1', router: 'picks the calculator',
+         expert: 'waits for its inputs', answer: 'nothing yet',
+         fallback: 'for requests no expert fits'},
+        {out: 'The router hands over the operation and the two numbers: minus, 3, 1. The calculator never sees the words.',
+         req: 'How much is three minus 1', router: 'picked the calculator',
+         expert: 'gets minus, 3 and 1', answer: 'nothing yet',
+         fallback: 'for requests no expert fits'},
+        {out: 'The calculator returns its answer, and the system gives it back as the reply.',
+         req: 'How much is three minus 1', router: 'picked the calculator',
+         expert: 'got minus, 3 and 1', answer: '2',
+         fallback: 'for requests no expert fits'},
+        {out: 'A second request has no matching expert, so the router falls back to the general model, which answers from what it learned.',
+         req: 'What is the weather in Vancouver', router: 'no expert fits',
+         expert: 'not used this time', answer: 'not used this time',
+         fallback: 'the general model answers'}
+      ];
+      var cur = 0;
+      var prev = document.getElementById('mkPrev');
+      var next = document.getElementById('mkNext');
+      var count = document.getElementById('mkCount');
+      var out = document.getElementById('mkOut');
+      var stages = [0, 1, 2, 3, 4].map(function (n) { return document.getElementById('mkStage' + n); });
+      var boxes = {
+        req: document.getElementById('mkReq'),
+        router: document.getElementById('mkRouter'),
+        expert: document.getElementById('mkExpert'),
+        answer: document.getElementById('mkAnswer'),
+        fallback: document.getElementById('mkFallback')
+      };
+      var texts = {
+        req: document.getElementById('mkReqText'),
+        router: document.getElementById('mkRouterText'),
+        expert: document.getElementById('mkExpertText'),
+        answer: document.getElementById('mkAnswerText'),
+        fallback: document.getElementById('mkFallbackText')
+      };
+      var highlight = [['req'], ['router'], ['expert'], ['answer'], ['fallback']];
+      function show(i) {
+        cur = Math.max(0, Math.min(STEPS.length - 1, i));
+        var s = STEPS[cur];
+        stages.forEach(function (el, k) {
+          el.classList.toggle('mk-cur', k === cur);
+          el.classList.toggle('eq-dim', k !== cur);
+        });
+        Object.keys(boxes).forEach(function (key) {
+          var on = highlight[cur].indexOf(key) >= 0;
+          boxes[key].classList.toggle('mk-cur', on);
+          boxes[key].classList.toggle('eq-dim', !on);
+        });
+        texts.req.textContent = s.req;
+        texts.router.textContent = s.router;
+        texts.expert.textContent = s.expert;
+        texts.answer.textContent = s.answer;
+        texts.fallback.textContent = s.fallback;
+        out.textContent = s.out;
+        count.textContent = 'Step ' + (cur + 1) + ' of ' + STEPS.length;
+        prev.disabled = cur === 0;
+        next.disabled = cur === STEPS.length - 1;
+      }
+      prev.addEventListener('click', function () { show(cur - 1); });
+      next.addEventListener('click', function () { show(cur + 1); });
+      show(0);
+    })();
+    </script>
+    <script>
+    /* Phrasing picker (Figure 4): change the wording, watch the arrows move. */
+    (function () {
+      var NOTES = [
+        'Digits map straight across: the symbols are already numbers.',
+        'Words need turning into numbers: three becomes 3.',
+        'The story needs world knowledge: lost means subtract, and three balls is the starting count.'
+      ];
+      var cur = 0;
+      var out = document.getElementById('mkToolOut');
+      var picks = [0, 1, 2].map(function (n) { return document.getElementById('mkPick' + n); });
+      var groups = [0, 1, 2].map(function (n) { return document.getElementById('mkPhrase' + n); });
+      function show(i) {
+        cur = i;
+        picks.forEach(function (b, k) {
+          b.classList.toggle('mk-pick-cur', k === cur);
+          b.setAttribute('aria-pressed', k === cur ? 'true' : 'false');
+        });
+        groups.forEach(function (g, k) { g.style.display = k === cur ? '' : 'none'; });
+        out.textContent = NOTES[cur];
+      }
+      picks.forEach(function (b, k) { b.addEventListener('click', function () { show(k); }); });
+      show(0);
+    })();
+    </script>
+<script>
+/* P80 code sections (CODE-SECTIONS.md) */
+(function(){
+  var C=['121,184,255','255,171,112','133,232,157','210,168,255','255,161,152','118,227,234'];
+  function lay(pre){
+    var code=pre.querySelector('code'); if(!code) return;
+    var lh=parseFloat(getComputedStyle(code).lineHeight);
+    var pt=parseFloat(getComputedStyle(pre).paddingTop);
+    var old=pre.querySelectorAll('.cs-g'); for(var j=0;j<old.length;j++) pre.removeChild(old[j]);
+    var imgs=[],sizes=[],pos=[];
+    (pre.getAttribute('data-cs')||'').split(',').forEach(function(r,i){
+      var m=r.trim().match(/^(\d+)(?:-(\d+))?$/); if(!m) return;
+      var a=+m[1],b=+(m[2]||m[1]),c=C[i%C.length],top=pt+(a-1)*lh,h=(b-a+1)*lh;
+      imgs.push('linear-gradient(rgba('+c+',.55),rgba('+c+',.55))','linear-gradient(rgba('+c+',.13),rgba('+c+',.13))');
+      sizes.push('3px '+h+'px','100% '+h+'px'); pos.push('0 '+top+'px','0 '+top+'px');
+      var g=document.createElement('span'); g.className='cs-g'; g.setAttribute('aria-hidden','true');
+      g.setAttribute('data-n',String(i+1)); g.style.top=(top+(lh-11)/2)+'px'; g.style.color='rgb('+c+')';
+      pre.insertBefore(g,code);
+    });
+    pre.style.backgroundImage=imgs.join(','); pre.style.backgroundSize=sizes.join(','); pre.style.backgroundPosition=pos.join(','); pre.style.backgroundRepeat='no-repeat';
+  }
+  function all(){ var p=document.querySelectorAll('pre.cs'); for(var i=0;i<p.length;i++) lay(p[i]); }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',all); else all();
+  window.addEventListener('load',all);
+  window.addEventListener('resize',all);
+  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(all);
+})();
+</script>

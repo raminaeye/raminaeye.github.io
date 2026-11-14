@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Chain of Thought: Thinking Before Answering</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+            line-height: 1.6;
+            color: #333;
+        }
+        h1, h2, h3, h4 {
+            color: #2c3e50;
+            margin-top: 1.5em;
+            margin-bottom: 0.5em;
+        }
+        h1 { font-size: 2em; border-bottom: 2px solid #3498db; padding-bottom: 0.3em;}
+        .dek { font-size: 1.15em; color: #555; margin-top: 0.2em; }
+        .crumb { margin: 0 0 0.8em; }
+        .crumb a {
+            display: inline-block;
+            padding: 4px 14px;
+            border: 1px solid #dee2e6;
+            border-radius: 999px;
+            background: #f8f9fa;
+            color: #0056b3;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+        .crumb a:hover { border-color: #007bff; color: #007bff; }
+    /* Section tab strip: one slim row, scrolls sideways when it overflows. */
+    .tabs-label {
+        float: left;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #6c757d;
+        font-weight: 700;
+        line-height: 1.2;
+        margin: 0;
+        padding: 8px 12px 0 0;
+    }
+    .tab-strip {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 2px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        margin: 0 0 1.25rem;
+        max-width: 100%;
+    }
+    .tab-strip::-webkit-scrollbar { display: none; }
+    .tab-strip a.tab-link {
+        display: inline-block;
+        flex: 0 0 auto;
+        padding: 6px 10px;
+        border-radius: 999px;
+        color: #495057;
+        text-decoration: none;
+        font-size: 0.82rem;
+        font-weight: 500;
+        line-height: 1.35;
+        white-space: nowrap;
+    }
+    .tab-strip a.tab-link:hover { color: #007bff; }
+    .tab-strip a.tab-link.active { background: #007bff; color: #ffffff; }
+    @media (max-width: 768px) {
+        .tabs-label { display: none; }
+        .tab-strip {
+            width: 100vw;
+            max-width: 100vw;
+            box-sizing: border-box;
+            margin-left: calc((100% - 100vw) / 2);
+            padding-left: calc((100vw - 100%) / 2);
+        }
+        .tab-strip a.tab-link { font-size: 0.75rem; padding: 6px 8px; }
+    }
+        h2 { font-size: 1.5em; border-bottom: 1px solid #bdc3c7; padding-bottom: 0.2em;}
+        h3 { font-size: 1em; }
+
+    /* Shared site nav (matches index.html topnav) */
+    body { padding-top: calc(64px + 1.5rem); }
+    h1, h2, h3 { scroll-margin-top: 84px; }
+    .topnav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        z-index: 1000;
+        background: rgba(255, 255, 255, 0.65);
+        backdrop-filter: blur(18px) saturate(1.5);
+        -webkit-backdrop-filter: blur(18px) saturate(1.5);
+        border-bottom: 1px solid transparent;
+        transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+    .topnav.scrolled {
+        background: rgba(255, 255, 255, 0.88);
+        border-bottom-color: #dee2e6;
+        box-shadow: 0 6px 24px rgba(33, 37, 41, 0.07);
+    }
+    .nav-inner {
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 0 1.5rem;
+        height: 64px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+    .wordmark {
+        font-weight: 700;
+        color: #212529;
+        text-decoration: none;
+        font-size: 1.05rem;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+    }
+    .nav-links {
+        display: flex;
+        gap: 2px;
+        align-items: center;
+    }
+    .nav-links a {
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        font-size: 0.95rem;
+        padding: 8px 14px;
+        border-radius: 999px;
+        transition: color 0.18s ease, background-color 0.18s ease;
+    }
+    .nav-links a:hover { color: #007bff; background-color: #e7f1ff; }
+    .nav-links a.active { color: #007bff; background-color: #e7f1ff; font-weight: 600; }
+    .nav-toggle {
+        display: none;
+        width: 42px;
+        height: 42px;
+        padding: 0;
+        background: none;
+        border: 0;
+        border-radius: 10px;
+        cursor: pointer;
+        flex: 0 0 auto;
+    }
+    .nav-panel {
+        display: grid;
+        grid-template-rows: 0fr;
+        visibility: hidden;
+        transition: grid-template-rows 0.32s ease, visibility 0s linear 0.32s;
+    }
+    .nav-panel.open {
+        grid-template-rows: 1fr;
+        visibility: visible;
+        transition: grid-template-rows 0.32s ease, visibility 0s;
+    }
+    .nav-toggle span {
+        display: block;
+        width: 20px;
+        height: 2px;
+        margin: 0 auto;
+        background-color: #212529;
+        border-radius: 2px;
+        transition: transform 0.25s ease, opacity 0.2s ease;
+    }
+    .nav-toggle span + span { margin-top: 5px; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+    .nav-panel-inner { min-height: 0; overflow: hidden; }
+    .nav-panel-body {
+        background: #ffffff;
+        border-bottom: 1px solid #dee2e6;
+        box-shadow: 0 16px 32px rgba(33, 37, 41, 0.10);
+        padding: 0.5rem 1rem 1rem;
+    }
+    .nav-panel a.panel-link {
+        display: flex;
+        align-items: center;
+        padding: 0.8rem 0.75rem;
+        margin: 0 0.25rem;
+        border-radius: 10px;
+        text-decoration: none;
+        color: #343a40;
+        font-weight: 500;
+        min-height: 48px;
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+    .nav-panel a.panel-link:hover { background-color: #e7f1ff; color: #007bff; }
+    .nav-panel a.panel-link.active { color: #007bff; font-weight: 600; background-color: #e7f1ff; }
+    .panel-social { display: flex; gap: 0.5rem; padding: 0.9rem 1rem 0.25rem; flex-wrap: wrap; }
+    .panel-social a {
+        color: #007bff;
+        text-decoration: none;
+        font-weight: 500;
+        font-size: 0.9rem;
+        padding: 6px 12px;
+        border: 1px solid #dee2e6;
+        border-radius: 999px;
+        transition: border-color 0.15s ease;
+    }
+    .panel-social a:hover { border-color: #007bff; }
+    .nav-links a:focus-visible,
+    .wordmark:focus-visible,
+    .nav-toggle:focus-visible,
+    .panel-link:focus-visible,
+    .panel-social a:focus-visible { outline: 2px solid #007bff; outline-offset: 2px; }
+    @media (hover: hover) { .nav-toggle:hover { background-color: #e7f1ff; } }
+    @media (prefers-reduced-motion: reduce) {
+        .topnav, .nav-links a, .nav-toggle span, .nav-panel, .nav-panel a.panel-link { transition: none; }
+    }
+    @media (max-width: 768px) {
+        .nav-links { display: none; }
+        .nav-toggle { display: block; }
+    }
+
+        pre {
+          background: #0d1117;
+          color: #e6edf3;
+          padding: 14px 16px;
+          overflow-x: auto;
+          border-radius: 8px;
+          font-size: 0.9em;
+          margin: 1em 0;
+          font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+        }
+        pre code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 1em; background: none; padding: 0; color: inherit; }
+        @media (max-width: 480px) { pre { font-size: .82em; white-space: pre; overflow-x: auto; } }
+        ul, ol { padding-left: 20px; }
+        li { margin-bottom: 0.5em; }
+        strong { color: #2980b9; }
+        .caption {
+            max-width: 640px;
+            margin: 1rem auto 1.5em auto;
+            font-size: 0.9em;
+            color: #555;
+            text-align: center;
+        }
+        /* Interactive demo */
+        .demo {
+            border: 1px solid #e1e4e8;
+            border-radius: 8px;
+            padding: 1.25rem;
+            margin: 1.75rem 0;
+            background: #fdfefe;
+        }
+        /* Shared walkthrough equation-card contract (verbatim, all pages) */
+        .eq-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+          padding:1rem 1.2rem;margin:1.75rem auto;max-width:640px;overflow-x:auto}
+        .eq-what{font-size:.95rem;color:#334155;margin:0 0 .6rem;line-height:1.55}
+        .eq-line{font-size:1.38rem;line-height:2.0;letter-spacing:.015em;padding:.5rem .6rem;white-space:normal;font-weight:500;opacity:.38;border-left:3px solid transparent}
+        .eq-line.eq-active{opacity:1;border-left-color:#2c3e50}
+      .eq-why{display:none;visibility:hidden;font-size:1rem;color:#475569;padding:.15rem .35rem .4rem;line-height:1.65}
+      .eq-why.eq-active{display:block;visibility:visible}
+        .eqt{font-weight:600;padding:0 .1em;border-radius:3px}
+        .katex .eqt{font-weight:inherit;padding:0}
+        @media (max-width:480px){.eq-card{padding:.85rem .9rem}.eq-line{font-size:1.24rem;line-height:1.95}}
+/* P70 inline variables and inline code, one style site-wide (VAR-STYLE.md v2) */
+var,.mvar{font-family:Georgia,'Times New Roman','Nimbus Roman',serif;font-style:italic;font-weight:400;font-size:1em;color:#1d4e89;background:#edf3fa;border-radius:3px;padding:0 .18em;white-space:nowrap;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+pre var,code var,.eq-line var{font:inherit;color:inherit;background:none;padding:0}
+:not(pre)>code:not(.eq-line code){font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,Courier,monospace;font-size:.86em;color:#24292f;background:#f1f3f5;border:1px solid #dfe3e8;border-radius:4px;padding:.06em .32em;white-space:normal;overflow-wrap:anywhere}
+/* P79 numbering (NUMBERING.md) */
+.secnum{font-variant-numeric:tabular-nums;margin-right:.4em;color:inherit;font-weight:inherit}
+.tab-strip .secnum{margin-right:.3em;opacity:.75}
+.fignum{font-weight:600;margin-right:.3em;font-variant-numeric:tabular-nums}
+/* P80 code sections (CODE-SECTIONS.md) */
+pre.cs{position:relative;background-attachment:local;padding-left:20px}
+pre.cs code{display:block;line-height:1.55}
+pre.cs .cs-g{position:absolute;left:3px;width:11px;text-align:center;font:700 11px/1 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;-webkit-user-select:none;user-select:none;pointer-events:none}
+pre.cs .cs-g::before{content:attr(data-n)}
+ol.cs-notes{list-style:none;padding-left:0;margin:-.4em 0 1em}
+ol.cs-notes li{margin:0 0 .3em;padding-left:1.9em;position:relative}
+ol.cs-notes .cs-n{position:absolute;left:0;top:.1em;min-width:1.35em;padding:0 .25em;border-radius:4px;font:700 .8em/1.45 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;text-align:center;color:#0d1117}
+ol.cs-notes li:nth-child(6n+1) .cs-n{background:#79b8ff}
+ol.cs-notes li:nth-child(6n+2) .cs-n{background:#ffab70}
+ol.cs-notes li:nth-child(6n+3) .cs-n{background:#85e89d}
+ol.cs-notes li:nth-child(6n+4) .cs-n{background:#d2a8ff}
+    @media (max-width:480px){
+      .demo{padding:.75rem}
+      .demo>*{margin-top:.6rem;margin-bottom:.6rem}
+      .demo>*:first-child{margin-top:0}
+      .demo svg{max-height:55vh}
+    }
+.figure.tool-fig { margin: 1.75rem 0; }
+.figure.tool-fig > .demo { margin-top: 0; margin-bottom: 0; }
+nav.prereq{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem .4rem;margin:.6rem 0 1.1rem}
+nav.prereq .prereq-label{font-size:.82rem;font-weight:600;color:#6c757d;margin-right:.15rem}
+nav.prereq a.prereq-chip{display:inline-block;padding:.15rem .6rem;border:1px solid #ced4da;border-radius:999px;font-size:.85rem;line-height:1.4;color:#0056b3;text-decoration:none}
+nav.prereq a.prereq-chip:hover,nav.prereq a.prereq-chip:focus-visible{background:#e7f1ff;border-color:#007bff}
+/* MATH-BEGIN v1 (P88, site-math.js renders KaTeX; byte-identical on every page) */
+.eq-line{overflow-x:auto;overflow-y:hidden;white-space:normal}
+.eq-line .katex{font-size:1.02em;line-height:1.6}
+.eq-line .katex .base{margin:.15em 0}
+var .katex,p .katex,li .katex,td .katex,th .katex,figcaption .katex,.eq-why .katex,.eq-what .katex,.eq-legend .katex{font-size:1.06em}
+var:has(.katex){font-style:normal}
+.katex-display{margin:.6rem 0;overflow-x:auto;overflow-y:hidden}
+/* MATH-END */
+</style>
+    <script src="site-math.js" defer></script>
+
+<style>
+/* Static teaching diagrams (mtd), shared across tutorials, 2026-11-01 */
+.figure.mtd-fig { margin: 1.75rem 0; }
+.mtd-fig > svg.mtd-svg { display: block; width: 100%; height: auto; margin: 0 auto; }
+.mtd-fig .caption { margin-top: 1rem; }
+.mtd-svg text { fill: #2c3e50; font-family: sans-serif; }
+.mtd-svg .mtd-sub { fill: #555; }
+.mtd-svg .mtd-t1 { fill: #1f618d; }
+.mtd-svg .mtd-t2 { fill: #a04000; }
+.mtd-svg .mtd-pu { fill: #8e44ad; }
+.mtd-svg .mtd-red { fill: #c0392b; }
+.mtd-svg .mtd-grn { fill: #0e6b59; }
+.mtd-svg .mtd-gold { fill: #7d6608; }
+.mtd-svg line, .mtd-svg path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.mtd-svg .mtd-s.mtd-c1 { stroke: #1f618d; } .mtd-svg .mtd-f.mtd-c1 { fill: #1f618d; }
+.mtd-svg .mtd-s.mtd-c2 { stroke: #a04000; } .mtd-svg .mtd-f.mtd-c2 { fill: #a04000; }
+.mtd-svg .mtd-s.mtd-cp { stroke: #8e44ad; } .mtd-svg .mtd-f.mtd-cp { fill: #8e44ad; }
+.mtd-svg .mtd-s.mtd-cg { stroke: #2c3e50; } .mtd-svg .mtd-f.mtd-cg { fill: #2c3e50; }
+.mtd-svg .mtd-s.mtd-cgold { stroke: #7d6608; } .mtd-svg .mtd-f.mtd-cgold { fill: #7d6608; }
+.mtd-svg .mtd-s.mtd-cgr { stroke: #0e6b59; } .mtd-svg .mtd-f.mtd-cgr { fill: #0e6b59; }
+.mtd-svg .mtd-box { fill: #fbfcfd; stroke: #bdc3c7; stroke-width: 1.4px; }
+.mtd-svg .mtd-box.mtd-note { stroke-dasharray: 5 4; }
+/* stepped eq-card: only the active line and its legend items show (grpo pattern) */
+.eq-card.eq-stepped .eq-line{display:none;visibility:hidden}
+.eq-card.eq-stepped .eq-line.eq-active{display:block;opacity:1;visibility:visible}
+.eq-card.eq-stepped .eq-legend .eq-item{display:none;visibility:hidden}
+.eq-card.eq-stepped .eq-legend .eq-item.eq-active{display:block;visibility:visible}
+.eq-legend{font-size:.85rem;color:#475569;margin-top:.6rem;line-height:1.75}
+.eq-legend .eq-item{display:block}
+.eq-legend .eq-item code{white-space:nowrap}
+.eq-sw{display:inline-block;width:.7em;height:.7em;border-radius:2px;margin:0 .25em 0 .6em;vertical-align:baseline}
+@media (max-width:480px){.eq-legend{display:grid;grid-template-columns:1fr 1fr;column-gap:.9rem;row-gap:.1rem;line-height:1.5}}
+.eqt.eqt-active{background:#fef9c3}
+ol.brefs li { margin-bottom: .6em; }
+/* chain-of-thought page: comparison panels, stepper, toggle */
+.cot-compare{display:flex;gap:.75rem;margin:1.75rem 0}
+.cot-compare .cot-panel{flex:1 1 0;border:1px solid #d6dbdf;border-radius:10px;padding:.8rem .9rem;background:#fbfcfd;min-width:0}
+.cot-compare .cot-panel h3{margin:.1rem 0 .5rem;font-size:1em}
+.cot-compare .cot-panel p{margin:.35rem 0;font-size:.92rem;line-height:1.55}
+.cot-compare .cot-chain{border-color:#a04000;background:#fdf6ef}
+.cot-compare .cot-chain h3{color:#a04000}
+.cot-compare .cot-step{border-left:3px solid #a04000;padding-left:.55rem}
+.cot-compare .cot-ans{font-weight:700}
+.cot-compare .cot-note{color:#555;font-size:.85rem}
+@media (max-width:560px){.cot-compare{flex-direction:column}}
+/* walkthrough (Figure 3): step controls, diagram, readout, eq-card last */
+.wt-ctl{display:flex;align-items:center;gap:.6rem;justify-content:center;margin:0 0 .6rem}
+.wt-ctl button{padding:.35rem .9rem;border:1px solid #ced4da;border-radius:999px;background:#f8f9fa;color:#0056b3;font-weight:600;font-size:.9rem;cursor:pointer}
+.wt-ctl button:disabled{opacity:.4;cursor:default}
+.wt-ctl button:hover:not(:disabled){border-color:#007bff;background:#e7f1ff}
+#cotCount{font-size:.9rem;color:#555;min-width:7.5em;text-align:center}
+.wt-q{border:1px solid #bdc3c7;border-radius:8px;padding:.6rem .8rem;background:#fbfcfd;font-size:.95rem;margin:.4rem 0}
+.wt-sent{border:1px solid #a04000;border-left:4px solid #a04000;border-radius:8px;padding:.55rem .8rem;background:#fdf6ef;font-size:.95rem;margin:.5rem 0;transition:opacity .2s ease}
+.wt-ans{border:1px solid #0e6b59;border-left:4px solid #0e6b59;border-radius:8px;padding:.55rem .8rem;background:#eafaf1;font-size:.95rem;margin:.5rem 0;min-height:2.6em;transition:opacity .2s ease}
+.wt-ans .wt-empty{color:#95a5a6;font-weight:400}
+.eq-dim{opacity:.35}
+.eq-hl{opacity:1}
+.wt-arrow{text-align:center;color:#7f8c8d;font-size:1.1rem;line-height:1;margin:.1rem 0}
+.wt-out{text-align:center;font-size:15px;color:#2c3e50;margin:8px 0 0;min-height:2.9em;line-height:1.45}
+.wt-out b{color:#a04000}
+@media (max-width:480px){.wt-ctl button{padding:.35rem .7rem}}
+/* prompt toggle tool (Figure 4) */
+.cot-seg{display:flex;gap:.4rem;justify-content:center;margin:0 0 .7rem;flex-wrap:wrap}
+.cot-seg button{padding:.35rem .9rem;border:1px solid #ced4da;border-radius:999px;background:#fff;color:#495057;font-size:.88rem;font-weight:600;cursor:pointer}
+.cot-seg button.active{background:#007bff;color:#fff;border-color:#007bff}
+.cot-seg button:hover:not(.active){border-color:#007bff;color:#007bff}
+.cot-prompt{background:#f8f9fa;border:1px solid #dee2e6;border-radius:8px;padding:.7rem .85rem;font-size:.88rem;line-height:1.55;margin:.4rem 0;white-space:pre-wrap}
+.cot-prompt .cot-hl{background:#fdebd0;border-radius:3px;padding:0 .15em}
+.cot-reply{border:1px solid #d6dbdf;border-radius:8px;padding:.7rem .85rem;background:#fff;font-size:.92rem;line-height:1.55;margin:.4rem 0;min-height:3.2em}
+.cot-reply .cot-hl{background:#fdebd0;border-radius:3px;padding:0 .15em}
+.cot-reply .cot-ans{font-weight:700;color:#0e6b59}
+.cot-lab{font-size:.8rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#6c757d;margin:.7rem 0 .1rem}
+</style>
+</head>
+<body>
+        <nav class="topnav" aria-label="Site">
+    <div class="nav-inner">
+        <a class="wordmark" href="index.html">Ramin Anushiravani</a>
+        <div class="nav-links">
+            <a href="tutorial.html" class="active">Tutorials</a>
+            <a href="pubs.html">Publications</a>
+            <a href="index.html">About</a>
+            <a href="work.html">Projects</a>
+        </div>
+        <button class="nav-toggle" id="navToggle" aria-expanded="false" aria-controls="navPanel" aria-label="Menu"><span></span><span></span><span></span></button>
+    </div>
+    <div class="nav-panel" id="navPanel">
+        <div class="nav-panel-inner">
+            <div class="nav-panel-body">
+                <a class="panel-link active" href="tutorial.html">Tutorials</a>
+                <a class="panel-link" href="pubs.html">Publications</a>
+                <a class="panel-link" href="index.html">About</a>
+                <a class="panel-link" href="work.html">Projects</a>
+                <div class="panel-social">
+                    <a href="https://linkedin.com/in/raminanushiravani" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+                    <a href="https://github.com/raminaeye/" target="_blank" rel="noopener noreferrer">GitHub</a>
+                    <a href="https://scholar.google.com/citations?user=kouXx8gAAAAJ&hl=en" target="_blank" rel="noopener noreferrer">Google Scholar</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</nav>
+    <p class="crumb"><a href="tutorial.html">&larr; All tutorials</a></p>
+    <h1>Chain of Thought: Thinking Before Answering</h1>
+    <p class="dek">Showing the steps before the answer lets the model work through a problem instead of guessing.</p>
+    <nav class="prereq" aria-label="Before you start"><span class="prereq-label">Before you start</span><a class="prereq-chip" href="decoding.html#generate-loop" title="Decoding, section 3" aria-label="The generate loop, taught in Decoding, section 3">The generate loop</a><a class="prereq-chip" href="sampling.html#sampling" title="Sampling the Next Token, section 1" aria-label="Draw instead of search, taught in Sampling the Next Token, section 1">Draw instead of search</a></nav>
+
+    <p class="tabs-label">On this page</p>
+    <div class="tab-strip">
+        <a class="tab-link" href="#guessing"><span class="secnum">1</span> Guessing the answer against working through it</a>
+        <a class="tab-link" href="#triple"><span class="secnum">2</span> The prompt triple</a>
+        <a class="tab-link" href="#what-chain-does"><span class="secnum">3</span> What the chain does for the model</a>
+        <a class="tab-link" href="#practice"><span class="secnum">4</span> Practice</a>
+        <a class="tab-link" href="#failures"><span class="secnum">5</span> Where chains fail</a>
+        <a class="tab-link" href="#what-next"><span class="secnum">6</span> What comes next</a>
+        <a class="tab-link" href="#references"><span class="secnum">7</span> References</a>
+    </div>
+
+    <h2 id="guessing"><span class="secnum">1</span> Guessing the answer against working through it</h2>
+
+    <p>Ask a language model a question that needs two steps and it answers in one breath. Sometimes that works. Often the model guesses, because it has to do all the reasoning inside one leap from question to answer, with nowhere to put the middle.</p>
+
+    <p>Chain of thought gives the model somewhere to put the middle. The model writes the steps out before it answers, one sentence at a time, and each sentence can use the ones before it. The answer comes last, built on the working.</p>
+
+    <p>It runs at inference, once per question. Nothing is trained and nothing is carried between questions. The prompt goes in, the model writes the chain and the answer, and the next question starts fresh.</p>
+
+    <p>Here is the paper&rsquo;s own illustration, a question about giving flowers away. Jane has 12 flowers. She gives 2 flowers to her mom and 3 flowers to her dad. How many flowers does Jane have now?</p>
+
+    <figure id="fig-1" class="figure mtd-fig"><div class="cot-compare">
+      <div class="cot-panel">
+        <h3>Direct answer</h3>
+        <p>Q: Jane has 12 flowers. She gives 2 flowers to her mom and 3 flowers to her dad. How many flowers does Jane have now?</p>
+        <p>A: <span class="cot-ans">The answer is 7.</span></p>
+        <p class="cot-note">The answer arrives with no working to check.</p>
+      </div>
+      <div class="cot-panel cot-chain">
+        <h3>Chained answer</h3>
+        <p>Q: Jane has 12 flowers. She gives 2 flowers to her mom and 3 flowers to her dad. How many flowers does Jane have now?</p>
+        <p class="cot-step">A: After Jane gives 2 flowers to her mom she has 10.</p>
+        <p class="cot-step">Then after she gives 3 to her dad she will have 7.</p>
+        <p class="cot-step">So <span class="cot-ans">the answer is 7.</span></p>
+        <p class="cot-note">Each sentence uses the count the last one left.</p>
+      </div>
+    </div><figcaption class="caption"><span class="fignum">Figure 1.</span> The same question, the same answer. Only the chained side shows its working, so a wrong step can be found and fixed.</figcaption></figure>
+
+    <p>The two sides differ in one place only: the chained side writes the steps first. That is the whole method, and the rest of the page is what that change buys and where it breaks.</p>
+
+    <h2 id="triple"><span class="secnum">2</span> The prompt triple</h2>
+
+    <p>A <strong>prompt</strong> is the text the model is given before it writes. <strong>Few-shot prompting</strong> means the prompt holds a few worked examples of the task before the new question, so the model copies the shape of the examples. An <strong>exemplar</strong> is one of those worked examples.</p>
+
+    <p>Chain of thought prompting changes what the examples contain. Each example is a triple: the input, the chain of thought, and the output, in that order.</p>
+
+    <div class="eq-card" id="cotTripleEq">
+        <div class="eq-what"><b>The prompt triple.</b> Each example in the prompt has three parts, in this order.</div>
+        <div class="eq-line eq-active" data-eqline="0">\(\displaystyle \langle \htmlClass{eqt}{\htmlStyle{color:#2471a3}{x}}, \htmlClass{eqt}{\htmlStyle{color:#a04000}{c}}, \htmlClass{eqt}{\htmlStyle{color:#0e6b59}{y}} \rangle\)</div>
+        <div class="eq-why eq-active" data-eqline="0">Read it as a sentence: the prompt shows the model an input, the chain of thought that leads from it, and the output it ends at. <var>\(x\)</var> is the input, the question as asked. <var>\(c\)</var> is the chain of thought, a series of short sentences that work through the question one step at a time. <var>\(y\)</var> is the output, the final answer, written after the chain. The order is the method: the chain comes before the answer, never after it, so the answer can build on the steps. Standard few-shot prompting shows pairs with no middle, <var>\(\langle x, y \rangle\)</var>; chain of thought prompting inserts <var>\(c\)</var> between them.</div>
+        <div class="eq-legend">
+          <span class="eq-item"><span class="eq-sw" style="background:#2471a3"></span><var>\(x\)</var> the input, the question</span>
+          <span class="eq-item"><span class="eq-sw" style="background:#a04000"></span><var>\(c\)</var> the chain of thought, the steps</span>
+          <span class="eq-item"><span class="eq-sw" style="background:#0e6b59"></span><var>\(y\)</var> the output, the final answer</span>
+        </div>
+    </div>
+
+    <p>The model is never told to reason. It copies the shape it was shown: question, steps, answer. The new question ends open, and the model writes a chain in the same shape before it answers.</p>
+
+    <p class="code-lead">One prompt, built from a worked example and a new question, then passed to the model to continue.</p>
+<pre class="cs" data-cs="5-6,8-9,10-12"><code class="language-python">from transformers import AutoModelForCausalLM, AutoTokenizer
+
+tok = AutoTokenizer.from_pretrained(MODEL_NAME)
+model = AutoModelForCausalLM.from_pretrained(MODEL_NAME)
+prompt = """Q: Roger has 5 tennis balls. He buys 2 more cans of tennis balls. Each can has 3 tennis balls. How many tennis balls does he have now?
+A: Roger started with 5 balls. 2 cans of 3 tennis balls each is 6 tennis balls. 5 + 6 = 11. The answer is 11.
+
+Q: Jane has 12 flowers. She gives 2 flowers to her mom and 3 flowers to her dad. How many flowers does Jane have now?
+A:"""
+ids = tok(prompt, return_tensors="pt").input_ids
+out = model.generate(ids, max_new_tokens=LIMIT)
+print(tok.decode(out[0], skip_special_tokens=True))</code></pre>
+<ol class="cs-notes">
+  <li><span class="cs-n">1</span>The worked example shows the triple: question, chain, answer.</li>
+  <li><span class="cs-n">2</span>The new question ends open, so the model writes the chain itself.</li>
+  <li><span class="cs-n">3</span>Generate continues the text token by token, as in <a href="decoding.html#generate-loop">Decoding</a>. The capital names are placeholders.</li>
+</ol>
+
+    <h2 id="what-chain-does"><span class="secnum">3</span> What the chain does for the model</h2>
+
+    <p>The chain is ordinary text, written one token at a time like any other reply, and each token can look back at the steps already written. That is why the trick works through the same machinery <a href="decoding.html#generate-loop">Decoding</a> teaches, with the next token drawn as in <a href="sampling.html#sampling">Sampling the Next Token</a>. What changes is only what the model writes before the answer, and that buys four things.</p>
+
+    <p>First, it splits a hard problem into steps. A question that needs two gifts given away becomes two short counts, one after the other, and a problem that needs more steps gets more writing to work with.</p>
+
+    <p>Second, it leaves a window into the answer. The steps show how the model might have reached its answer, so when the answer is wrong the faulty step can be found instead of guessed at.</p>
+
+    <p>Third, it travels. The same shape works for math word problems, commonsense questions, and symbol puzzles, and in principle for any task a person can solve by talking through it.</p>
+
+    <p>Fourth, it needs no training. A ready-made large model picks it up just from chain examples in the prompt, with its weights untouched.</p>
+
+    <figure id="fig-2" class="figure mtd-fig"><svg class="mtd-svg" viewBox="0 0 400 332" style="max-width:480px" role="img" aria-label="The chain grows one sentence at a time. The question comes first, then one sentence counts what is left after the first gift, the next updates the count after the second gift, and the last sentence turns the final count into the answer.">
+      <rect class="mtd-box" x="20" y="8" width="360" height="72" rx="8"/><text x="200" y="30" text-anchor="middle" style="font-size:13.5px">Q: Jane has 12 flowers. She gives 2 to her mom</text><text x="200" y="48" text-anchor="middle" style="font-size:13.5px">and 3 flowers to her dad. How many flowers</text><text x="200" y="66" text-anchor="middle" style="font-size:13.5px">does Jane have now?</text>
+      <line class="mtd-s mtd-cg" x1="200" y1="80" x2="200" y2="92" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-cg" points="200,98 194,88 206,88"/>
+      <rect class="mtd-box" x="20" y="98" width="360" height="66" rx="8" style="stroke:#a04000;stroke-width:2px"/><text class="mtd-t2" x="200" y="120" text-anchor="middle" style="font-size:13.5px;font-weight:700">After Jane gives 2 flowers to her mom</text><text class="mtd-t2" x="200" y="138" text-anchor="middle" style="font-size:13.5px;font-weight:700">she has 10.</text><text class="mtd-sub" x="200" y="157" text-anchor="middle" style="font-size:12px">counts what is left after the first gift</text>
+      <line class="mtd-s mtd-c2" x1="200" y1="164" x2="200" y2="176" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-c2" points="200,182 194,172 206,172"/>
+      <rect class="mtd-box" x="20" y="182" width="360" height="66" rx="8" style="stroke:#a04000;stroke-width:2px"/><text class="mtd-t2" x="200" y="204" text-anchor="middle" style="font-size:13.5px;font-weight:700">Then after she gives 3 to her dad</text><text class="mtd-t2" x="200" y="222" text-anchor="middle" style="font-size:13.5px;font-weight:700">she will have 7.</text><text class="mtd-sub" x="200" y="241" text-anchor="middle" style="font-size:12px">updates the count after the second gift</text>
+      <line class="mtd-s mtd-c2" x1="200" y1="248" x2="200" y2="260" style="stroke-width:3.5px"/><polygon class="mtd-f mtd-c2" points="200,266 194,256 206,256"/>
+      <rect class="mtd-box" x="20" y="266" width="360" height="58" rx="8" style="stroke:#0e6b59;stroke-width:2px"/><text class="mtd-grn" x="200" y="290" text-anchor="middle" style="font-size:13.5px;font-weight:700">So the answer is 7.</text><text class="mtd-sub" x="200" y="309" text-anchor="middle" style="font-size:12px">the last count becomes the answer</text>
+    </svg><figcaption class="caption"><span class="fignum">Figure 2.</span> The chain grows one sentence at a time. Each sentence uses the count the last one left, and the answer only appears once the counting is done.</figcaption></figure>
+
+    <p>Notice what each sentence does. The first fixes the count after one gift. The second updates it after the next. The third turns the last count into the answer. No sentence does the whole problem, and no sentence repeats one before it.</p>
+
+    <figure id="fig-3" class="figure tool-fig">
+    <div class="demo" id="cotWalk">
+      <div class="wt-ctl">
+        <button type="button" id="cotPrev" aria-label="Previous step">&larr; Prev</button>
+        <span id="cotCount" aria-live="polite">Step 1 of 4</span>
+        <button type="button" id="cotNext" aria-label="Next step">Next &rarr;</button>
+      </div>
+      <div class="wt-q">Q: Jane has 12 flowers. She gives 2 flowers to her mom and 3 flowers to her dad. How many flowers does Jane have now?</div>
+      <div class="wt-arrow" aria-hidden="true">&darr;</div>
+      <div class="wt-sent eq-dim" id="cotS1">After Jane gives 2 flowers to her mom she has 10.</div>
+      <div class="wt-arrow" aria-hidden="true">&darr;</div>
+      <div class="wt-sent eq-dim" id="cotS2">Then after she gives 3 to her dad she will have 7.</div>
+      <div class="wt-arrow" aria-hidden="true">&darr;</div>
+      <div class="wt-ans eq-dim" id="cotAns"><span class="wt-empty">The answer waits for the chain.</span></div>
+      <p class="wt-out" id="cotOut" aria-live="polite"></p>
+    </div>
+    <div class="eq-card eq-stepped" id="cotWalkEq">
+        <div class="eq-line" data-eqline="0">\(\displaystyle \langle \htmlClass{eqt}{\htmlData{k=x}{\htmlStyle{color:#2471a3}{x}}}, \htmlClass{eqt}{\htmlData{k=c}{\htmlStyle{color:#5d6d7e}{c}}}, \htmlClass{eqt}{\htmlData{k=y}{\htmlStyle{color:#5d6d7e}{y}}} \rangle\)</div>
+        <div class="eq-why" data-eqline="0">The question goes in. <var>\(x\)</var> is the input, the question as asked. Nothing is written yet, so the chain and the answer are still grey.</div>
+        <div class="eq-line" data-eqline="1">\(\displaystyle \langle \htmlClass{eqt}{\htmlData{k=x}{\htmlStyle{color:#5d6d7e}{x}}}, \htmlClass{eqt}{\htmlData{k=c}{\htmlStyle{color:#a04000}{c}}}, \htmlClass{eqt}{\htmlData{k=y}{\htmlStyle{color:#5d6d7e}{y}}} \rangle\)</div>
+        <div class="eq-why" data-eqline="1">The chain grows one sentence at a time. <var>\(c\)</var> is the chain of thought, and each new sentence counts from where the last one left off. The answer stays empty until the counting is done.</div>
+        <div class="eq-line" data-eqline="2">\(\displaystyle \langle \htmlClass{eqt}{\htmlData{k=x}{\htmlStyle{color:#5d6d7e}{x}}}, \htmlClass{eqt}{\htmlData{k=c}{\htmlStyle{color:#5d6d7e}{c}}}, \htmlClass{eqt}{\htmlData{k=y}{\htmlStyle{color:#0e6b59}{y}}} \rangle\)</div>
+        <div class="eq-why" data-eqline="2">The answer comes last. <var>\(y\)</var> is the output, the final answer, written after the chain. It can build on the steps because the steps are already there.</div>
+    </div>
+      <figcaption class="caption"><span class="fignum">Figure 3.</span> Step through the chain one sentence at a time. The answer box stays empty until the last step lands.</figcaption>
+    </figure>
+
+    <figure id="fig-4" class="figure tool-fig">
+    <div class="demo" id="cotTool">
+      <div class="cot-seg" role="group" aria-label="Prompt shape">
+        <button type="button" id="cotStdBtn" aria-pressed="false">Standard prompt</button>
+        <button type="button" id="cotChainBtn" class="active" aria-pressed="true">Chain of thought prompt</button>
+      </div>
+      <p class="cot-lab">Prompt</p>
+      <div class="cot-prompt" id="cotPromptStd" hidden>Q: Roger has 5 tennis balls. He buys 2 more cans of tennis balls. Each can has 3 tennis balls. How many tennis balls does he have now?
+A: The answer is 11.
+
+Q: Jane has 12 flowers. She gives 2 flowers to her mom and 3 flowers to her dad. How many flowers does Jane have now?
+A:</div>
+      <div class="cot-prompt" id="cotPromptChain">Q: Roger has 5 tennis balls. He buys 2 more cans of tennis balls. Each can has 3 tennis balls. How many tennis balls does he have now?
+A: <span class="cot-hl">Roger started with 5 balls. 2 cans of 3 tennis balls each is 6 tennis balls. 5 + 6 = 11.</span> The answer is 11.
+
+Q: Jane has 12 flowers. She gives 2 flowers to her mom and 3 flowers to her dad. How many flowers does Jane have now?
+A:</div>
+      <p class="cot-lab">Model reply</p>
+      <div class="cot-reply" id="cotReplyStd" hidden><span class="cot-ans">The answer is 7.</span></div>
+      <div class="cot-reply" id="cotReplyChain"><span class="cot-hl">After Jane gives 2 flowers to her mom she has 10. Then after she gives 3 to her dad she will have 7.</span> So <span class="cot-ans">the answer is 7.</span></div>
+      <p class="wt-out" id="cotToolOut" aria-live="polite"></p>
+    </div>
+      <figcaption class="caption"><span class="fignum">Figure 4.</span> Flip the prompt and watch the reply change shape. The question is the same; only the worked example changes.</figcaption>
+    </figure>
+
+    <p>The toggle shows the whole method in one move. The examples set the shape and the model copies it: answers only in, answers only out; steps in, steps out.</p>
+
+    <h2 id="practice"><span class="secnum">4</span> Practice</h2>
+
+    <p>Chain of thought costs nothing beyond the longer generation. The model is prompted, not retrained, so there is no training run, no new weights, and no extra data to collect. Each question costs more tokens out, because the chain is written before the answer.</p>
+
+    <p>The headline setting is few-shot prompting with chain-of-thought exemplars, from section 2 of the paper. The paper&rsquo;s arithmetic runs used eight chain-of-thought exemplars (four for the one multiple-choice benchmark) and greedy decoding, so the model always wrote the most likely next token.</p>
+
+    <p>The paper&rsquo;s own repository holds the exact prompts and predictions behind the results, at <a href="https://github.com/jasonwei20/chain-of-thought-prompting">github.com/jasonwei20/chain-of-thought-prompting</a>. It holds prompts and results, not training code, because the method needs none: to try it, put a worked example with steps in the prompt and let the model continue the shape.</p>
+
+    <h2 id="failures"><span class="secnum">5</span> Where chains fail</h2>
+
+    <p>A chain is only as good as the model writing it. Three failures cover most of what goes wrong.</p>
+
+    <h3 id="too-small"><span class="secnum">5.1</span> The model is too small</h3>
+
+    <p>Chains only help large models. Below roughly a hundred billion parameters the model writes chains that read smoothly but do not follow, and the score lands below plain direct answering. The symptom is a chain that looks fine at a glance while the logic slips between sentences. The fix is a larger model, or no chain at all: ask a small model for the answer directly.</p>
+
+    <h3 id="wrong-step"><span class="secnum">5.2</span> One wrong step early</h3>
+
+    <p>Each sentence builds on the last, so an early slip carries through to the answer. The symptom is a chain that reads carefully while the answer is wrong, with the slip sitting near the top. The fix is to read the steps, not just the answer, and to split the question into smaller steps when the chain goes wrong.</p>
+
+    <h3 id="right-answer"><span class="secnum">5.3</span> Right answer, wrong working</h3>
+
+    <p>The chain is text the model wrote, not a record of how it computed, and the paper found correct answers whose chains were wrong. The symptom is an answer that checks out with a step in the middle that does not. The fix is to verify the steps on their own: a right answer never proves the reasoning was right.</p>
+
+    <h2 id="what-next"><span class="secnum">6</span> What comes next</h2>
+
+    <p>A chain works through what the model already knows. But what happens when the thinking needs a fact the model does not have, like the date of an event or the population of a city? Guessing from memory is the wrong move, and writing more steps does not fix a missing fact. <a href="react.html">ReAct: Thinking and Acting in One Loop</a> puts the chain inside a loop with a tool, so the model can look the fact up instead of guessing it.</p>
+
+    <h2 id="references"><span class="secnum">7</span> References</h2>
+
+    <ol class="brefs">
+        <li>Wei, J., et al. Chain-of-Thought Prompting Elicits Reasoning in Large Language Models. <a href="https://arxiv.org/abs/2201.11903">arXiv:2201.11903</a>.</li>
+        <li>Chain-of-thought prompting repository, with the exact prompts and predictions from the paper. <a href="https://github.com/jasonwei20/chain-of-thought-prompting">github.com/jasonwei20/chain-of-thought-prompting</a>.</li>
+    </ol>
+
+<script>
+        (function () {
+            var nav = document.querySelector('.topnav');
+            function onNavScroll() {
+                nav.classList.toggle('scrolled', window.scrollY > 4);
+            }
+            window.addEventListener('scroll', onNavScroll, { passive: true });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            window.addEventListener('resize', function () {
+                if (window.innerWidth > 768) {
+                    document.getElementById('navPanel').classList.remove('open');
+                    document.getElementById('navToggle').setAttribute('aria-expanded', 'false');
+                }
+            });
+            onNavScroll();
+            var toggle = document.getElementById('navToggle');
+            var panel = document.getElementById('navPanel');
+            if (toggle && panel) {
+                toggle.addEventListener('click', function () {
+                    var open = panel.classList.toggle('open');
+                    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                });
+                panel.addEventListener('click', function (e) {
+                    if (e.target && e.target.classList && e.target.classList.contains('panel-link')) {
+                        panel.classList.remove('open');
+                        toggle.setAttribute('aria-expanded', 'false');
+                    }
+                });
+            }
+            var links = Array.prototype.slice.call(document.querySelectorAll('.tab-strip a.tab-link[href^="#"]'));
+            if (!links.length) return;
+            var tabEls = {};
+            links.forEach(function (a) { tabEls[a.getAttribute('href').slice(1)] = a; });
+            var current = null;
+            function centerTab(tab) {
+                var strip = tab.parentElement;
+                if (!strip || !strip.classList.contains('tab-strip')) return;
+                var sr = strip.getBoundingClientRect();
+                var pr = tab.getBoundingClientRect();
+                strip.scrollLeft += (pr.width >= sr.width) ? (pr.left - sr.left) : (pr.left - sr.left) - (sr.width - pr.width) / 2;
+            }
+            function setActive(id) {
+                if (!tabEls[id] || id === current) return;
+                current = id;
+                links.forEach(function (a) {
+                    a.classList.toggle('active', a.getAttribute('href') === '#' + id);
+                });
+                centerTab(tabEls[id]);
+            }
+            links.forEach(function (a) {
+                a.addEventListener('click', function () {
+                    setActive(a.getAttribute('href').slice(1));
+                });
+            });
+            setActive(links[0].getAttribute('href').slice(1));
+            if ('IntersectionObserver' in window) {
+                var obs = new IntersectionObserver(function (entries) {
+                    entries.forEach(function (en) {
+                        if (en.isIntersecting) setActive(en.target.id);
+                    });
+                }, { rootMargin: '-35% 0px -55% 0px' });
+                Object.keys(tabEls).forEach(function (id) {
+                    var el = document.getElementById(id);
+                    if (el) obs.observe(el);
+                });
+                window.addEventListener('scroll', function () {
+                    if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) {
+                        setActive(links[links.length - 1].getAttribute('href').slice(1));
+                    }
+                }, { passive: true });
+            }
+            window.addEventListener('load', function () {
+                var act = document.querySelector('.tab-strip a.active');
+                if (act) centerTab(act);
+            });
+        })();
+    </script>
+    <script>
+    /* Chain stepper (Figure 3): step the chain one sentence at a time. */
+    (function () {
+      var STEPS = [
+        {line: 0, key: 'x', lit: 0, ans: false, out: 'The question goes in. Nothing is written yet.'},
+        {line: 1, key: 'c', lit: 1, ans: false, out: 'First sentence lands: after the gift to her mom, Jane has 10.'},
+        {line: 1, key: 'c', lit: 2, ans: false, out: 'Second sentence lands: after the gift to her dad, she has 7.'},
+        {line: 2, key: 'y', lit: 3, ans: true, out: 'Last sentence lands, and the answer comes with it: 7.'}
+      ];
+      var cur = 0;
+      var prev = document.getElementById('cotPrev');
+      var next = document.getElementById('cotNext');
+      var count = document.getElementById('cotCount');
+      var out = document.getElementById('cotOut');
+      var sents = [document.getElementById('cotS1'), document.getElementById('cotS2')];
+      var ans = document.getElementById('cotAns');
+      var card = document.getElementById('cotWalkEq');
+      function termKey(t) {
+        var inner = t.querySelector('[data-k]');
+        if (inner) return inner.getAttribute('data-k');
+        return t.getAttribute('data-k');
+      }
+      function show(i) {
+        cur = Math.max(0, Math.min(STEPS.length - 1, i));
+        var st = STEPS[cur];
+        sents.forEach(function (s, k) {
+          var lit = k < st.lit;
+          s.classList.toggle('eq-dim', !lit);
+          s.classList.toggle('eq-hl', lit);
+        });
+        if (st.ans) {
+          ans.innerHTML = 'So <b>the answer is 7.</b>';
+          ans.classList.remove('eq-dim');
+          ans.classList.add('eq-hl');
+        } else {
+          ans.innerHTML = '<span class="wt-empty">The answer waits for the chain.</span>';
+          ans.classList.add('eq-dim');
+          ans.classList.remove('eq-hl');
+        }
+        var lines = card.querySelectorAll('.eq-line');
+        lines.forEach(function (ln) {
+          ln.classList.toggle('eq-active', +ln.getAttribute('data-eqline') === st.line);
+        });
+        var whys = card.querySelectorAll('.eq-why');
+        whys.forEach(function (w) {
+          w.classList.toggle('eq-active', +w.getAttribute('data-eqline') === st.line);
+        });
+        var terms = card.querySelectorAll('.eqt');
+        terms.forEach(function (t) {
+          var active = termKey(t) === st.key && t.closest('.eq-line').classList.contains('eq-active');
+          t.classList.toggle('eqt-active', active);
+        });
+        out.textContent = st.out;
+        count.textContent = 'Step ' + (cur + 1) + ' of ' + STEPS.length;
+        prev.disabled = cur === 0;
+        next.disabled = cur === STEPS.length - 1;
+      }
+      prev.addEventListener('click', function () { show(cur - 1); });
+      next.addEventListener('click', function () { show(cur + 1); });
+      show(0);
+      /* KaTeX renders the .eqt spans after this script runs; re-apply the
+         term highlight once the math is in the page. */
+      document.addEventListener('sitemath:ready', function () { show(cur); });
+    })();
+    </script>
+    <script>
+    /* Prompt toggle (Figure 4): standard prompt against chain of thought prompt. */
+    (function () {
+      var stdBtn = document.getElementById('cotStdBtn');
+      var chainBtn = document.getElementById('cotChainBtn');
+      var pStd = document.getElementById('cotPromptStd');
+      var pChain = document.getElementById('cotPromptChain');
+      var rStd = document.getElementById('cotReplyStd');
+      var rChain = document.getElementById('cotReplyChain');
+      var out = document.getElementById('cotToolOut');
+      function setMode(chain) {
+        pStd.hidden = chain;
+        pChain.hidden = !chain;
+        rStd.hidden = chain;
+        rChain.hidden = !chain;
+        stdBtn.classList.toggle('active', !chain);
+        chainBtn.classList.toggle('active', chain);
+        stdBtn.setAttribute('aria-pressed', String(!chain));
+        chainBtn.setAttribute('aria-pressed', String(chain));
+        out.innerHTML = chain
+          ? 'The examples show the steps, so the model writes steps first.'
+          : 'The examples show answers only, so the model answers only.';
+      }
+      stdBtn.addEventListener('click', function () { setMode(false); });
+      chainBtn.addEventListener('click', function () { setMode(true); });
+      setMode(true);
+    })();
+    </script>
+<script>
+/* P80 code sections (CODE-SECTIONS.md) */
+(function(){
+  var C=['121,184,255','255,171,112','133,232,157','210,168,255','255,161,152','118,227,234'];
+  function lay(pre){
+    var code=pre.querySelector('code'); if(!code) return;
+    var lh=parseFloat(getComputedStyle(code).lineHeight);
+    var pt=parseFloat(getComputedStyle(pre).paddingTop);
+    var old=pre.querySelectorAll('.cs-g'); for(var j=0;j<old.length;j++) pre.removeChild(old[j]);
+    var imgs=[],sizes=[],pos=[];
+    (pre.getAttribute('data-cs')||'').split(',').forEach(function(r,i){
+      var m=r.trim().match(/^(\d+)(?:-(\d+))?$/); if(!m) return;
+      var a=+m[1],b=+(m[2]||m[1]),c=C[i%C.length],top=pt+(a-1)*lh,h=(b-a+1)*lh;
+      imgs.push('linear-gradient(rgba('+c+',.55),rgba('+c+',.55))','linear-gradient(rgba('+c+',.13),rgba('+c+',.13))');
+      sizes.push('3px '+h+'px','100% '+h+'px'); pos.push('0 '+top+'px','0 '+top+'px');
+      var g=document.createElement('span'); g.className='cs-g'; g.setAttribute('aria-hidden','true');
+      g.setAttribute('data-n',String(i+1)); g.style.top=(top+(lh-11)/2)+'px'; g.style.color='rgb('+c+')';
+      pre.insertBefore(g,code);
+    });
+    pre.style.backgroundImage=imgs.join(','); pre.style.backgroundSize=sizes.join(','); pre.style.backgroundPosition=pos.join(','); pre.style.backgroundRepeat='no-repeat';
+  }
+  function all(){ var p=document.querySelectorAll('pre.cs'); for(var i=0;i<p.length;i++) lay(p[i]); }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',all); else all();
+  window.addEventListener('load',all);
+  window.addEventListener('resize',all);
+  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(all);
+})();
+</script>
+</body>
+</html>

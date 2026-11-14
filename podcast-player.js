@@ -31,8 +31,8 @@
      is reported, never swapped. */
   var NOTEBOOKLM = {
     "rl.html": "https://notebook.google.com/notebook/f9b57fa8-973f-4f63-960f-4d60af26a393",
-    "rl-methods.html": "https://notebook.google.com/notebook/10a115f5-512e-4b9e-a59b-654977207d77",
-    "q-learning.html": "https://notebook.google.com/notebook/4fb9abb2-e1fe-41b2-9c5c-02a92b2e817f",
+    "rl-methods.html": "https://notebook.google.com/notebook/3081561c-3a7e-4bce-aaf4-22c05c28ddec",
+    "q-learning.html": "https://notebook.google.com/notebook/0231f250-33c1-4429-a5e0-399fccfee7be",
     "rl-policy-gradients.html": "https://notebook.google.com/notebook/5aefa67a-b0fe-4436-871d-20a905e9162a",
     "reinforce.html": "https://notebook.google.com/notebook/3991f068-bb30-42e7-991c-aef7db4bec57",
     "actor-critic.html": "https://notebook.google.com/notebook/232fcf4a-4a8f-48de-86a6-20da961c85f2",

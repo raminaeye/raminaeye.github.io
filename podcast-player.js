@@ -30,7 +30,7 @@
      episode ingests. Do not edit the URLs here; a link that fails its check
      is reported, never swapped. */
   var NOTEBOOKLM = {
-    "rl.html": "https://notebook.google.com/notebook/0628ed91-5235-44b8-84bf-60b6d00fbc45",
+    "rl.html": "https://notebook.google.com/notebook/f9b57fa8-973f-4f63-960f-4d60af26a393",
     "rl-methods.html": "https://notebook.google.com/notebook/10a115f5-512e-4b9e-a59b-654977207d77",
     "q-learning.html": "https://notebook.google.com/notebook/4fb9abb2-e1fe-41b2-9c5c-02a92b2e817f",
     "rl-policy-gradients.html": "https://notebook.google.com/notebook/5aefa67a-b0fe-4436-871d-20a905e9162a",

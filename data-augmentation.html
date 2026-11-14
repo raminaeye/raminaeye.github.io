@@ -909,10 +909,10 @@ var:has(.katex){font-style:normal}
 <pre class="cs" data-cs="3-5,7-8,9-12"><code class="language-python">import numpy as np
 import scipy.spatial.transform
 rng = np.random.default_rng()
-shape = (200, 3)  # [t, 3]
+shape = (n_samples, 3)  # [t, 3]
 acc = rng.normal(size=shape)
 # roll, pitch, yaw in degrees
-deg = rng.uniform(-15, 15, 3)
+deg = rng.uniform(-max_turn, max_turn, 3)
 rad = np.radians(deg)
 st = scipy.spatial.transform
 euler = st.Rotation.from_euler
@@ -926,8 +926,8 @@ acc_rotated = rot.apply(acc)</code></pre>
     <p>Channel dropout and shuffling, each into a new array.</p>
 <pre class="cs" data-cs="3-4,6-7,9-12"><code class="language-python">import numpy as np
 rng = np.random.default_rng()
-x = rng.normal(size=(8, 500))
-n_ch, p = len(x), 0.1
+x = rng.normal(size=(n_channels, n_samples))
+n_ch, p = len(x), drop_rate
 # channel dropout: zero rows
 keep = rng.random(n_ch) &gt; p
 x_drop = x * keep[:, None]
@@ -944,10 +944,10 @@ x_shuf[rows] = x[rows[::-1]]</code></pre>
     <p>Random scaling and jitter; wider ranges regularize more, until they make signals no real wearer would record.</p>
 <pre class="cs" data-cs="2-4,6-7"><code class="language-python"># strap tightness per channel
 u = rng.random((n_ch, 1))
-gain = 0.8 + 0.4 * u
+gain = gain_low + gain_span * u
 x_scaled = x * gain
-# jitter: shift ≤ 20 samples
-k = rng.integers(-20, 21)
+# jitter: shift by a few samples
+k = rng.integers(-max_shift, max_shift + 1)
 x_jit = np.roll(x, k, axis=1)</code></pre>
 <ol class="cs-notes">
   <li><span class="cs-n">1</span>A per-channel gain near 1.</li>
@@ -1096,13 +1096,13 @@ spec = TA.TimeMasking(time_mask_param=T, p=rho)(spec)</code></pre>
 from scipy.signal import butter
 from scipy.signal import filtfilt
 from scipy.signal import iirnotch
-fs, hum = 1000, 60  # Hz
-x = np.random.randn(8, 2000)
+fs, hum = sample_rate, hum_freq  # Hz
+x = np.random.randn(n_channels, n_samples)
 nyq = fs / 2
-wn = (20 / nyq, 450 / nyq)
-b, a = butter(4, wn, "bandpass")
+wn = (band_low / nyq, band_high / nyq)
+b, a = butter(order, wn, "bandpass")
 x_band = filtfilt(b, a, x)
-b, a = iirnotch(hum, 30, fs)
+b, a = iirnotch(hum, notch_q, fs)
 clean = filtfilt(b, a, x_band)</code></pre>
 <ol class="cs-notes">
   <li><span class="cs-n">1</span>Sampling rate, hum frequency and channel count.</li>
@@ -1110,14 +1110,14 @@ clean = filtfilt(b, a, x_band)</code></pre>
   <li><span class="cs-n">3</span>Notch out the mains hum, line 1.</li>
 </ol>
     <p>The envelope and the per-person z-score; <var>\(z\)</var> keeps the shape [channels, time].</p>
-<pre class="cs" data-cs="2-4,6-8"><code class="language-python"># rectify, low-pass at 5 Hz
-b, a = butter(4, 5, fs=fs)
+<pre class="cs" data-cs="2-4,6-8"><code class="language-python"># rectify, low-pass
+b, a = butter(order, cutoff, fs=fs)
 rect = np.abs(clean)
 env = filtfilt(b, a, rect)
 # z-score per channel
 mu = env.mean(axis=1)[:, None]
 sd = env.std(axis=1)[:, None]
-z = (env - mu) / (sd + 1e-8)</code></pre>
+z = (env - mu) / (sd + eps)</code></pre>
 <ol class="cs-notes">
   <li><span class="cs-n">1</span>Envelope, a slow low-pass, line 2.</li>
   <li><span class="cs-n">2</span>Z-score per channel, line 3.</li>
@@ -1125,28 +1125,28 @@ z = (env - mu) / (sd + 1e-8)</code></pre>
    <p>Live use changes two things. <code>filtfilt</code> needs the whole window, including samples that have not arrived yet, so a streaming device uses a causal filter that accepts a small delay (<a href="filters.html#iir">IIR filters</a>). The z-score statistics come from a short calibration segment at the start of each session. The order stays filter, then envelope, then z-score. Features are then hand-made in time and frequency, or learned by the model.</p>
 
    <h3 id="missing-data"><span class="secnum">9.3</span> Dead channels</h3>
-   <p>Bluetooth packet loss or sweat can leave <strong>missing channels</strong>. A channel with no spread, or stuck at the top of its range more than half the time, gets the mean of the good channels, and a mask marking the bad channels goes to the model, so <em>it learns to ignore the missing channels</em>.</p>
+   <p>Bluetooth packet loss or sweat can leave <strong>missing channels</strong>. A channel with no spread, or stuck at the top of its range for more than the threshold share of the time, gets the mean of the good channels, and a mask marking the bad channels goes to the model, so <em>it learns to ignore the missing channels</em>.</p>
    <div class="eq-card" id="badEq">
      <div class="eq-what">Flag a channel that is flat or stuck at the top of the range.</div>
      <div class="eq-line eq-active" data-eqline="0">\(\displaystyle {\begin{aligned}\text{flat}_c &= \big[\htmlClass{eqt sym-sigma}{\htmlStyle{color:var(--sym-sigma)}{\sigma_c}} < \epsilon\big] \\ s_c &= \frac{1}{T}\sum_{n=1}^{T} \\ &\quad \Big[\, \big\lvert \htmlClass{eqt sym-x}{\htmlStyle{color:var(--sym-x)}{x_c}}[n] \big\rvert \ge x_{\max} \Big]\end{aligned}}\)</div>
      <div class="eq-why eq-active" data-eqline="0">Square brackets count as one when the condition inside holds and zero otherwise. A channel is flat when its spread <var>\(\htmlClass{eqt sym-sigma}{\htmlStyle{color:var(--sym-sigma)}{\sigma_c}}\)</var> is below a tiny <var>\(\epsilon\)</var>. <var>\(s_c\)</var> is the share of the window&#8217;s <var>\(T\)</var> samples stuck at <var>\(x_{\max}\)</var>, the top of the device&#8217;s <a href="adc.html#adc">converter range</a>.</div>
-     <div class="eq-line eq-active" data-eqline="1">\(\displaystyle {\text{bad}_c = \text{flat}_c \lor \big(s_c > \tfrac{1}{2}\big)}\)</div>
-     <div class="eq-why eq-active" data-eqline="1">Built on line 1: <var>\(\lor\)</var> means or, so a channel is bad when it is flat or stuck more than half the time. Bad channels get the good channels&#8217; mean, and the mask tells the model which ones were filled.</div>
+     <div class="eq-line eq-active" data-eqline="1">\(\displaystyle {\text{bad}_c = \text{flat}_c \lor \big(s_c > \theta\big)}\)</div>
+     <div class="eq-why eq-active" data-eqline="1">Built on line 1: <var>\(\lor\)</var> means or, so a channel is bad when it is flat or stuck for more than the threshold share <var>\(\theta\)</var> of the time. Bad channels get the good channels&#8217; mean, and the mask tells the model which ones were filled.</div>
      <div class="eq-why eq-active eq-sum">So a dead channel is replaced by something harmless and flagged, instead of feeding the model a flat line or a clipped one.</div>
    </div>
     <pre class="cs" data-cs="2-3,4-7,8-10"><code class="language-python">import numpy as np
-x = np.random.randn(8, 500)
-x[3] = 0.0  # a flat channel
-flat = x.std(axis=1) &lt; 1e-6
-pegged = np.abs(x) &gt;= 5.0
+x = np.random.randn(n_channels, n_samples)
+x[flat_ch] = 0.0  # a flat channel
+flat = x.std(axis=1) &lt; eps
+pegged = np.abs(x) &gt;= x_max
 share = pegged.mean(axis=1)
-bad = flat | (share &gt; 0.5)
+bad = flat | (share &gt; threshold)
 fill = x[~bad].mean(axis=0)
 x_fill = x.copy()
 x_fill[bad] = fill</code></pre>
 <ol class="cs-notes">
   <li><span class="cs-n">1</span>Several channels, one of them flat.</li>
-  <li><span class="cs-n">2</span>Bad if flat, or at its maximum over half the time, lines 1 and 2.</li>
+  <li><span class="cs-n">2</span>Bad if flat, or at its maximum over the threshold share of the time, lines 1 and 2.</li>
   <li><span class="cs-n">3</span>Bad channels get the good ones&#8217; mean.</li>
 </ol>
    <p>The check runs on every window, in training and live, with no state; the mask travels with the window.</p>
@@ -1159,12 +1159,12 @@ x_fill[bad] = fill</code></pre>
     <pre class="cs" data-cs="4-7,8-9,11"><code class="language-python">import torch
 from torch import nn
 # [time, batch, features]
-A = torch.randn(50, 2, 32)
-B = torch.randn(20, 2, 32)
-off = torch.zeros(2, 20).bool()
-off[:, 10:] = True  # B drops
+A = torch.randn(n_steps_a, batch, features)
+B = torch.randn(n_steps_b, batch, features)
+off = torch.zeros(batch, n_steps_b).bool()
+off[:, n_steps_b // 2:] = True  # B drops after the midpoint
 MHA = nn.MultiheadAttention
-attn = MHA(32, num_heads=4)
+attn = MHA(features, num_heads=n_heads)
 # 4th argument: the B mask
 fused, w = attn(A, B, B, off)</code></pre>
 <ol class="cs-notes">

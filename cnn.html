@@ -840,21 +840,21 @@ var:has(.katex){font-style:normal}
         A layer runs many kernels, and each one makes one output <strong>channel</strong>, also called a feature map. A nonlinearity follows, usually <strong>ReLU</strong>, which keeps positive values and sets negative ones to zero, so a stack of layers can fit patterns that one weighted sum cannot. A one-dimensional kernel is the same operation as an FIR (finite impulse response) filter in signal processing, a fixed weighted sum of the last few samples.<!-- link-pending: filters.html -->
     </p>
     <p>
-        In PyTorch, <code>nn.Conv2d(3, 16, 3)</code> is one layer of 16 kernels, each 3&#215;3 over the 3 color channels. Each output map is a little narrower than the image: the kernel must fit inside the image, so a pixel is lost from each edge.
+        In PyTorch, <code>nn.Conv2d(in_channels, out_channels, kernel_size)</code> is one layer of kernels, one per output channel, each spanning all the input channels. Each output map is a little narrower than the image: the kernel must fit inside the image, so a pixel is lost from each edge.
     </p>
     <pre class="cs" data-cs="4-7,8-10"><code class="language-python">import torch
 import torch.nn as nn
 
-conv = nn.Conv2d(3, 16, 3)
-x = torch.randn(1, 3, 224, 224)
+conv = nn.Conv2d(in_channels, out_channels, kernel_size)
+x = torch.randn(batch, in_channels, height, width)
 print(conv.weight.shape)
-# [16, 3, 3, 3]
+# [out_channels, in_channels, kernel_size, kernel_size]
 a = torch.relu(conv(x))
 print(a.shape)
 </code></pre>
     <ol class="cs-notes">
-        <li><span class="cs-n">1</span>Builds the layer and prints its weight: 16 kernels <var>\(K\)</var>, each 3&#215;3 over 3 channels.</li>
-        <li><span class="cs-n">2</span>Slides every kernel over the image as in <a href="#fig-kernel-slide">Figure 1</a> and applies ReLU: 16 maps, each a little narrower than the image.</li>
+        <li><span class="cs-n">1</span>Builds the layer and prints its weight: one kernel <var>\(K\)</var> per output channel, each spanning all the input channels.</li>
+        <li><span class="cs-n">2</span>Slides every kernel over the image as in <a href="#fig-kernel-slide">Figure 1</a> and applies ReLU: one map per kernel, each a little narrower than the image.</li>
     </ol>
 
     <h3 id="pattern-detector"><span class="secnum">1.1</span> Kernels as pattern detectors</h3>
@@ -896,7 +896,7 @@ def conv2d(x, K):
                 <canvas id="ksInputCv" class="ks-canvas" role="img" aria-label="Toy image: a bright vertical bar and a short diagonal stroke at the top right, in a dark room"></canvas>
             </div>
             <div class="ks-panel">
-                <div class="ks-title">Output: <span id="ksOutSize">10&#215;10</span> activation map</div>
+                <div class="ks-title">Output: activation map</div>
                 <div class="ks-key"><span><i class="ks-sw ks-sw-pos"></i>strong positive</span><span><i class="ks-sw ks-sw-neg"></i>strong negative</span></div>
                 <canvas id="ksOutputCv" class="ks-canvas" role="img" aria-label="Activation map with detection boxes"></canvas>
             </div>
@@ -1047,7 +1047,6 @@ def conv2d(x, K):
             for (var i = 0; i < n; i++)
                 for (var j = 0; j < n; j++)
                     outVals.push(fill ? response(i, j) : null);
-            $('ksOutSize').textContent = n + '\u00d7' + n;
             drawOutput();
         }
         // Activation map: visited cells shaded by strength, strong
@@ -1234,7 +1233,7 @@ def conv2d(x, K, s=1, p=0):
     <div class="eq-card" id="cnnCostEq">
             <div class="eq-what">Multiply-adds for one convolution layer on one image.</div>
             <div class="eq-line eq-active" data-eqline="0">\(\displaystyle \htmlClass{eqt}{\htmlData{k=v}{\htmlStyle{color:#0030a0}{\text{MACs}}}} = \htmlClass{eqt}{\htmlData{k=v}{\htmlStyle{color:#0030a0}{\text{out}}}}^{2} \cdot \htmlClass{eqt}{\htmlData{k=v}{\htmlStyle{color:#2c3e50}{C}}}_{in} \cdot \htmlClass{eqt}{\htmlData{k=v}{\htmlStyle{color:#a04000}{C}}}_{\text{out}} \cdot \htmlClass{eqt}{\htmlData{k=v}{\htmlStyle{color:var(--sym-kernel)}{k}}}^{2}\)</div>
-            <div class="eq-why eq-active" data-eqline="0">Every one of the <var>\(\text{out}^2\)</var> positions of every one of the <var>\(C_{\text{out}}\)</var> kernels multiplies a <var>\(k\)</var> by <var>\(k\)</var> patch through all <var>\(C_{\text{in}}\)</var> input channels and adds the products. The weights depend only on <var>\(C_{\text{in}} \cdot C_{\text{out}} \cdot k^2\)</var>; the <var>\(\text{out}^2\)</var> factor is why early, large maps dominate the run time. The first PyTorch layer of <a href="#idea">Section 1</a> multiplies every map position by every kernel weight, so its multiply-add count is large, and a stride of 2 would cut that about 4 times.</div>
+            <div class="eq-why eq-active" data-eqline="0">Every one of the <var>\(\text{out}^2\)</var> positions of every one of the <var>\(C_{\text{out}}\)</var> kernels multiplies a <var>\(k\)</var> by <var>\(k\)</var> patch through all <var>\(C_{\text{in}}\)</var> input channels and adds the products. The weights depend only on <var>\(C_{\text{in}} \cdot C_{\text{out}} \cdot k^2\)</var>; the <var>\(\text{out}^2\)</var> factor is why early, large maps dominate the run time. The first PyTorch layer of <a href="#idea">Section 1</a> multiplies every map position by every kernel weight, so its multiply-add count is large, and a stride above one cuts that count, since fewer output positions are computed.</div>
         </div>
     <p>
         Memory follows the maps, not the weights, because training keeps every layer&#8217;s output for the backward pass (<a href="#fig-conv-memory">Figure 3</a>). The full argument list and defaults are in the <a href="https://docs.pytorch.org/docs/2.6/generated/torch.nn.Conv2d.html">PyTorch Conv2d docs</a>.
@@ -1247,17 +1246,17 @@ def conv2d(x, K, s=1, p=0):
     <p>
         Pooling keeps one number per window, so the map gets smaller and each later output covers more of the image. It has no weights. Max pooling keeps only the largest value, so the other values and that value's exact place in the window are lost.
     </p>
-    <figure class="figure mtd-fig" id="fig-pool"><svg class="mtd-svg" viewBox="0 0 400 176" style="max-width:520px" role="img" aria-label="A 4 by 4 input split into four 2 by 2 windows. Darker cells hold larger values. Max pooling keeps the darkest cell in each window; average pooling keeps the window's mean shade."><text x="70" y="20" text-anchor="middle" style="font-size:15px;font-weight:600">input 4×4</text><text x="225" y="20" text-anchor="middle" style="font-size:15px;font-weight:600">max pool</text><text x="345" y="20" text-anchor="middle" style="font-size:15px;font-weight:600">average pool</text><rect x="10" y="34" width="30" height="30" style="fill:#c2dcee;stroke:#5d6d7e;stroke-width:1"/><rect x="40" y="34" width="30" height="30" style="fill:#9bc1db;stroke:#5d6d7e;stroke-width:1"/><rect x="70" y="34" width="30" height="30" style="fill:#aecfe5;stroke:#5d6d7e;stroke-width:1"/><rect x="100" y="34" width="30" height="30" style="fill:#d6eaf8;stroke:#5d6d7e;stroke-width:1"/><rect x="10" y="64" width="30" height="30" style="fill:#87b3d2;stroke:#5d6d7e;stroke-width:1"/><rect x="40" y="64" width="30" height="30" style="fill:#2471a3;stroke:#5d6d7e;stroke-width:1"/><rect x="70" y="64" width="30" height="30" style="fill:#c2dcee;stroke:#5d6d7e;stroke-width:1"/><rect x="100" y="64" width="30" height="30" style="fill:#c2dcee;stroke:#5d6d7e;stroke-width:1"/><rect x="10" y="94" width="30" height="30" style="fill:#d6eaf8;stroke:#5d6d7e;stroke-width:1"/><rect x="40" y="94" width="30" height="30" style="fill:#aecfe5;stroke:#5d6d7e;stroke-width:1"/><rect x="70" y="94" width="30" height="30" style="fill:#73a5c8;stroke:#5d6d7e;stroke-width:1"/><rect x="100" y="94" width="30" height="30" style="fill:#5f98bf;stroke:#5d6d7e;stroke-width:1"/><rect x="10" y="124" width="30" height="30" style="fill:#c2dcee;stroke:#5d6d7e;stroke-width:1"/><rect x="40" y="124" width="30" height="30" style="fill:#c2dcee;stroke:#5d6d7e;stroke-width:1"/><rect x="70" y="124" width="30" height="30" style="fill:#4c8ab6;stroke:#5d6d7e;stroke-width:1"/><rect x="100" y="124" width="30" height="30" style="fill:#9bc1db;stroke:#5d6d7e;stroke-width:1"/><rect x="10" y="34" width="60" height="60" style="fill:none;stroke:#2c3e50;stroke-width:1.5"/><rect x="70" y="34" width="60" height="60" style="fill:none;stroke:#2c3e50;stroke-width:1.5"/><rect x="10" y="94" width="60" height="60" style="fill:none;stroke:#2c3e50;stroke-width:1.5"/><rect x="70" y="94" width="60" height="60" style="fill:none;stroke:#2c3e50;stroke-width:1.5"/><rect x="40" y="64" width="30" height="30" style="fill:none;stroke:#2c3e50;stroke-width:3"/><rect x="70" y="34" width="30" height="30" style="fill:none;stroke:#2c3e50;stroke-width:3"/><rect x="40" y="94" width="30" height="30" style="fill:none;stroke:#2c3e50;stroke-width:3"/><rect x="70" y="124" width="30" height="30" style="fill:none;stroke:#2c3e50;stroke-width:3"/><rect x="195" y="64" width="30" height="30" style="fill:#2471a3;stroke:#5d6d7e;stroke-width:1"/><rect x="225" y="64" width="30" height="30" style="fill:#aecfe5;stroke:#5d6d7e;stroke-width:1"/><rect x="195" y="94" width="30" height="30" style="fill:#aecfe5;stroke:#5d6d7e;stroke-width:1"/><rect x="225" y="94" width="30" height="30" style="fill:#4c8ab6;stroke:#5d6d7e;stroke-width:1"/><rect x="305" y="64" width="40" height="30" style="fill:#82b0cf;stroke:#5d6d7e;stroke-width:1"/><rect x="345" y="64" width="40" height="30" style="fill:#c2dcee;stroke:#5d6d7e;stroke-width:1"/><rect x="305" y="94" width="40" height="30" style="fill:#c2dcee;stroke:#5d6d7e;stroke-width:1"/><rect x="345" y="94" width="40" height="30" style="fill:#6ea2c6;stroke:#5d6d7e;stroke-width:1"/><path class="mtd-s mtd-cg" d="M136,94 L188,94" style="stroke-width:2px"/><polygon class="mtd-f mtd-cg" points="194,94 186,89 186,99"/><path class="mtd-s mtd-cg" d="M152,94 L152,46 L282,46 L282,94 L298,94" style="fill:none;stroke-width:2px"/><polygon class="mtd-f mtd-cg" points="304,94 296,89 296,99"/></svg><figcaption class="caption"><span class="fignum">Figure 4.</span> Each 2×2 window keeps its largest value or its mean.</figcaption></figure>
+    <figure class="figure mtd-fig" id="fig-pool"><svg class="mtd-svg" viewBox="0 0 400 176" style="max-width:520px" role="img" aria-label="An input split into windows. Darker cells hold larger values. Max pooling keeps the darkest cell in each window; average pooling keeps the window's mean shade."><text x="70" y="20" text-anchor="middle" style="font-size:15px;font-weight:600">input</text><text x="225" y="20" text-anchor="middle" style="font-size:15px;font-weight:600">max pool</text><text x="345" y="20" text-anchor="middle" style="font-size:15px;font-weight:600">average pool</text><rect x="10" y="34" width="30" height="30" style="fill:#c2dcee;stroke:#5d6d7e;stroke-width:1"/><rect x="40" y="34" width="30" height="30" style="fill:#9bc1db;stroke:#5d6d7e;stroke-width:1"/><rect x="70" y="34" width="30" height="30" style="fill:#aecfe5;stroke:#5d6d7e;stroke-width:1"/><rect x="100" y="34" width="30" height="30" style="fill:#d6eaf8;stroke:#5d6d7e;stroke-width:1"/><rect x="10" y="64" width="30" height="30" style="fill:#87b3d2;stroke:#5d6d7e;stroke-width:1"/><rect x="40" y="64" width="30" height="30" style="fill:#2471a3;stroke:#5d6d7e;stroke-width:1"/><rect x="70" y="64" width="30" height="30" style="fill:#c2dcee;stroke:#5d6d7e;stroke-width:1"/><rect x="100" y="64" width="30" height="30" style="fill:#c2dcee;stroke:#5d6d7e;stroke-width:1"/><rect x="10" y="94" width="30" height="30" style="fill:#d6eaf8;stroke:#5d6d7e;stroke-width:1"/><rect x="40" y="94" width="30" height="30" style="fill:#aecfe5;stroke:#5d6d7e;stroke-width:1"/><rect x="70" y="94" width="30" height="30" style="fill:#73a5c8;stroke:#5d6d7e;stroke-width:1"/><rect x="100" y="94" width="30" height="30" style="fill:#5f98bf;stroke:#5d6d7e;stroke-width:1"/><rect x="10" y="124" width="30" height="30" style="fill:#c2dcee;stroke:#5d6d7e;stroke-width:1"/><rect x="40" y="124" width="30" height="30" style="fill:#c2dcee;stroke:#5d6d7e;stroke-width:1"/><rect x="70" y="124" width="30" height="30" style="fill:#4c8ab6;stroke:#5d6d7e;stroke-width:1"/><rect x="100" y="124" width="30" height="30" style="fill:#9bc1db;stroke:#5d6d7e;stroke-width:1"/><rect x="10" y="34" width="60" height="60" style="fill:none;stroke:#2c3e50;stroke-width:1.5"/><rect x="70" y="34" width="60" height="60" style="fill:none;stroke:#2c3e50;stroke-width:1.5"/><rect x="10" y="94" width="60" height="60" style="fill:none;stroke:#2c3e50;stroke-width:1.5"/><rect x="70" y="94" width="60" height="60" style="fill:none;stroke:#2c3e50;stroke-width:1.5"/><rect x="40" y="64" width="30" height="30" style="fill:none;stroke:#2c3e50;stroke-width:3"/><rect x="70" y="34" width="30" height="30" style="fill:none;stroke:#2c3e50;stroke-width:3"/><rect x="40" y="94" width="30" height="30" style="fill:none;stroke:#2c3e50;stroke-width:3"/><rect x="70" y="124" width="30" height="30" style="fill:none;stroke:#2c3e50;stroke-width:3"/><rect x="195" y="64" width="30" height="30" style="fill:#2471a3;stroke:#5d6d7e;stroke-width:1"/><rect x="225" y="64" width="30" height="30" style="fill:#aecfe5;stroke:#5d6d7e;stroke-width:1"/><rect x="195" y="94" width="30" height="30" style="fill:#aecfe5;stroke:#5d6d7e;stroke-width:1"/><rect x="225" y="94" width="30" height="30" style="fill:#4c8ab6;stroke:#5d6d7e;stroke-width:1"/><rect x="305" y="64" width="40" height="30" style="fill:#82b0cf;stroke:#5d6d7e;stroke-width:1"/><rect x="345" y="64" width="40" height="30" style="fill:#c2dcee;stroke:#5d6d7e;stroke-width:1"/><rect x="305" y="94" width="40" height="30" style="fill:#c2dcee;stroke:#5d6d7e;stroke-width:1"/><rect x="345" y="94" width="40" height="30" style="fill:#6ea2c6;stroke:#5d6d7e;stroke-width:1"/><path class="mtd-s mtd-cg" d="M136,94 L188,94" style="stroke-width:2px"/><polygon class="mtd-f mtd-cg" points="194,94 186,89 186,99"/><path class="mtd-s mtd-cg" d="M152,94 L152,46 L282,46 L282,94 L298,94" style="fill:none;stroke-width:2px"/><polygon class="mtd-f mtd-cg" points="304,94 296,89 296,99"/></svg><figcaption class="caption"><span class="fignum">Figure 4.</span> Each window keeps its largest value or its mean.</figcaption></figure>
 
     <p>
-        In PyTorch, each pooling layer below takes 16 maps of 32&#215;32. The 2 is the window, and the stride defaults to the window. A larger window shrinks the map faster and throws away more position; a window of 1 does nothing.
+        In PyTorch, each pooling layer below takes the maps the layer before it made. The pool size is the window, and the stride defaults to the window. A larger window shrinks the map faster and throws away more position; a window of one cell does nothing.
     </p>
     <pre class="cs" data-cs="5-7,8-10"><code class="language-python">import torch
 import torch.nn as nn
 
-x = torch.randn(1, 16, 32, 32)
-max_pool = nn.MaxPool2d(2)
-avg_pool = nn.AvgPool2d(2)
+x = torch.randn(batch, channels, height, width)
+max_pool = nn.MaxPool2d(window)
+avg_pool = nn.AvgPool2d(window)
 gpool = nn.AdaptiveAvgPool2d(1)
 print(max_pool(x).shape)
 print(avg_pool(x).shape)
@@ -1265,7 +1264,7 @@ print(gpool(x).shape)
 </code></pre>
     <ol class="cs-notes">
         <li><span class="cs-n">1</span>Builds the max and average pools of <a href="#fig-pool">Figure 4</a> and a global average pool.</li>
-        <li><span class="cs-n">2</span>Prints the shapes: the 2&#215;2 pools halve each side, the global pool keeps one number per map.</li>
+        <li><span class="cs-n">2</span>Prints the shapes: the pools shrink each side, the global pool keeps one number per map.</li>
     </ol>
     <p>
         Average pooling suits audio and time series, where the energy in a window matters more than one peak. Global average pooling, the last line, leaves one number per channel and can replace a large fully connected head, which removes that head's many weights, a common source of overfitting (memorizing the training images); adaptive pooling picks the window itself so any input size gives the output size you ask for.
@@ -1276,7 +1275,7 @@ print(gpool(x).shape)
     <div class="eq-card" id="cnnNyqEq">
             <div class="eq-what">Striding lowers the sampling rate, and with it the Nyquist frequency.</div>
             <div class="eq-line eq-active" data-eqline="0">\(\displaystyle \htmlClass{eqt}{\htmlData{k=v}{\htmlStyle{color:#0030a0}{f}}}_{\text{Nyquist}} = \frac{\htmlClass{eqt}{\htmlData{k=v}{\htmlStyle{color:#5d6d7e}{f}}}_{s}}{2\htmlClass{eqt}{\htmlData{k=v}{\htmlStyle{color:#a04000}{s}}}}\)</div>
-            <div class="eq-why eq-active" data-eqline="0">A signal sampled at rate <var>\(f_{s}\)</var> can only hold frequencies up to half of it, the Nyquist frequency. A stride <var>\(s\)</var> keeps one sample in <var>\(s\)</var>, so the rate falls to <var>\(f_{s}\)</var> divided by <var>\(s\)</var>, and the limit falls with it: stride 2 halves it. Content above the new limit does not vanish; it folds back as a false low frequency unless a low-pass filter removes it first, and a learned filter is not guaranteed to.</div>
+            <div class="eq-why eq-active" data-eqline="0">A signal sampled at rate <var>\(f_{s}\)</var> can only hold frequencies up to half of it, the Nyquist frequency. A stride <var>\(s\)</var> keeps one sample in <var>\(s\)</var>, so the rate falls to <var>\(f_{s}\)</var> divided by <var>\(s\)</var>, and the limit falls with it. Content above the new limit does not vanish; it folds back as a false low frequency unless a low-pass filter removes it first, and a learned filter is not guaranteed to.</div>
         </div>
     <p>
         A blur before the stride removes that fine detail first. BlurPool (Zhang 2019) does this, and its outputs change less when the input shifts by one pixel; it costs one fixed blur per downsampling layer and no weights. Its <a href="https://richzhang.github.io/antialiased-cnns/">official code</a> uses a 4-tap blur by default; a wider blur removes more aliasing but also more real detail. Zero padding adds an artificial dark border; reflect padding mirrors the edge outward instead.
@@ -1291,14 +1290,14 @@ print(gpool(x).shape)
     <pre class="cs" data-cs="4-6,7-9,10-11"><code class="language-python">import torch.nn as nn
 
 net = nn.Sequential(
-    nn.Conv2d(1, 6, 5),
+    nn.Conv2d(in_channels, c1, kernel_size),
     nn.ReLU(),
-    nn.MaxPool2d(2),     # C1 maps, H2 × W2
-    nn.Conv2d(6, 16, 5),
+    nn.MaxPool2d(pool_window),  # C1 maps, H2 × W2
+    nn.Conv2d(c1, c2, kernel_size),
     nn.ReLU(),
-    nn.MaxPool2d(2),     # C2 maps, H4 × W4
+    nn.MaxPool2d(pool_window),  # C2 maps, H4 × W4
     nn.Flatten(),        # H4 × W4 × C2 entries
-    nn.Linear(256, 10),
+    nn.Linear(flat_size, num_classes),
 )
 </code></pre>
     <ol class="cs-notes">

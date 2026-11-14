@@ -829,6 +829,8 @@ i.sw-mg { border-top-color: #148f77; border-top-width: 3px; }
         <p class="caption"><span class="fignum">Figure 1.</span> Where each kind of method acts in one training step.</p>
     </div>
 
+    <p>Stage 5 is the optimizer step. Its weight decay comes in two forms: coupled L2 adds the decay to the gradient, and decoupled decay shrinks the weights directly. Its per-coordinate scale sizes each coordinate&#8217;s step from its own gradient history.</p>
+
     <h2 id="task-gradients"><span class="secnum">3</span> Task gradients over the shared parameters</h2>
 
     <p>The 2D arrows on these pages are pictures. A real task gradient has one number per shared weight, all shared layers flattened into one vector, often millions long; lengths, dot products and projections work on it as on the arrows.</p>
@@ -844,7 +846,7 @@ i.sw-mg { border-top-color: #148f77; border-top-width: 3px; }
         <thead><tr><th>Method</th><th>Gradients taken over</th><th>How the result reaches the weights</th></tr></thead>
         <tbody>
             <tr><td><a href="pcgrad.html">PCGrad</a></td><td>all shared parameters</td><td>written into the shared .grad</td></tr>
-            <tr><td><a href="gradvac.html">GradVac</a></td><td>shared parameters, per layer in the paper</td><td>written into the shared .grad</td></tr>
+            <tr><td><a href="gradvac.html">GradVac</a></td><td>shared parameters, per layer</td><td>written into the shared .grad</td></tr>
             <tr><td><a href="cagrad.html">CAGrad</a></td><td>all shared parameters</td><td>written into the shared .grad</td></tr>
             <tr><td><a href="mgda.html">MGDA</a></td><td>all shared parameters, or only the trunk&#8217;s output (MGDA-UB)</td><td>official code re-weights the losses and backpropagates again</td></tr>
             <tr><td><a href="gradnorm.html">GradNorm</a></td><td>only the sizes, at the last shared layer</td><td>learned loss weights; the weighted loss is backpropagated</td></tr>
@@ -852,7 +854,7 @@ i.sw-mg { border-top-color: #148f77; border-top-width: 3px; }
         </tbody>
     </table>
 
-    <p>Writing into the shared .grad leaves each head its own plain gradient, the PCGrad paper&#8217;s rule and how <a href="https://github.com/median-research-group/LibMTL">LibMTL</a>, a widely used library of these methods, writes back PCGrad and GradVac. Backpropagating weighted losses scales the heads&#8217; gradients too.</p>
+    <p>Writing into the shared .grad leaves each head its own plain gradient, as PCGrad does and as <a href="https://github.com/median-research-group/LibMTL">LibMTL</a>, a widely used library of these methods, writes back PCGrad and GradVac. Backpropagating weighted losses scales the heads&#8217; gradients too.</p>
 
     <p>This step writes into .grad, with a plain sum as the combine; <code>vector_to_parameters</code> would overwrite the weights, not their gradients.</p>
 
@@ -986,7 +988,7 @@ crit_sum = nn.MSELoss(**kw)</code></pre>
         <div class="eq-line eq-active" data-eqline="0">m<sub>t</sub> = &#946;<sub>1</sub> m<sub>t&#8722;1</sub> + (1 &#8722; &#946;<sub>1</sub>) g<sub>t</sub></div>
         <div class="eq-why eq-active" data-eqline="0">The first moment <var>m</var>, Adam's momentum, is a running average of past balanced gradients <var>g</var>: each step it keeps <var>&#946;<sub>1</sub></var> of its old value and mixes in 1 &#8722; <var>&#946;<sub>1</sub></var> of the new <var>g</var>. With a high <var>&#946;<sub>1</sub></var> it spans many steps, one over one minus <var>&#946;<sub>1</sub></var>, so this step's <var>g</var> gets a small share of the weight. A larger <var>&#946;<sub>1</sub></var> smooths more noise but lags further behind when the balanced direction turns.</div>
         <div class="eq-line eq-active" data-eqline="1">v<sub>t</sub> = &#946;<sub>2</sub> v<sub>t&#8722;1</sub> + (1 &#8722; &#946;<sub>2</sub>) g<sub>t</sub><sup>2</sup></div>
-        <div class="eq-why eq-active" data-eqline="1">The second moment <var>v</var> is the same kind of average for the squared gradient, taken coordinate by coordinate, so it tracks how large each coordinate's gradient usually is. With <var>&#946;<sub>2</sub></var> near one it spans far more steps than <var>m</var>, so it changes slowly; a larger <var>&#946;<sub>2</sub></var> makes the per-coordinate scale slower still, a smaller one lets it follow each step&#8217;s gradient. 0.9 and 0.999 are the Adam paper&#8217;s suggested values and PyTorch&#8217;s defaults.</div>
+        <div class="eq-why eq-active" data-eqline="1">The second moment <var>v</var> is the same kind of average for the squared gradient, taken coordinate by coordinate, so it tracks how large each coordinate's gradient usually is. With <var>&#946;<sub>2</sub></var> near one it spans far more steps than <var>m</var>, so it changes slowly; a larger <var>&#946;<sub>2</sub></var> makes the per-coordinate scale slower still, a smaller one lets it follow each step&#8217;s gradient. 0.9 and 0.999 are PyTorch&#8217;s defaults.</div>
         <div class="eq-line eq-active" data-eqline="2">&#916;&#952; = &#8722;&#951; <span class="frac"><span class="top">m&#770;<sub>t</sub></span><span class="bot">&#8730;v&#770;<sub>t</sub> + &#949;</span></span></div>
         <div class="eq-why eq-active" data-eqline="2">The step <var>&#916;&#952;</var> is the learning rate <var>&#951;</var> times the momentum divided by the per-coordinate scale, the square root of <var>v&#770;</var>. The division is done coordinate by coordinate, so a coordinate whose past gradients were small gets a larger step than its gradient alone would give, and that is how the step can tilt off the balanced direction. The hats mark Adam's early-step correction, and <var>&#949;</var> is a tiny number that avoids dividing by zero.</div>
     </div>
@@ -1080,7 +1082,7 @@ crit_sum = nn.MSELoss(**kw)</code></pre>
         <figcaption class="caption"><span class="fignum">Figure 8.</span> PCGrad removed the conflict, yet the momentum still leans against task 2.</figcaption>
     </figure>
 
-    <p>Training still converges: for two smooth, strongly bowl-shaped losses with exact gradients and tuned step sizes, the PCGrad paper proves (Theorem 4, Appendix A.4) that PCGrad with heavy-ball momentum reaches either the optimum or a point where the two gradients point exactly opposite.</p>
+    <p>Training still converges: for two smooth, strongly bowl-shaped losses with exact gradients and tuned step sizes, PCGrad with heavy-ball momentum, the classical momentum that carries a decayed copy of the last step, reaches either the optimum or a point where the two gradients point exactly opposite.</p>
 
     <h3 id="mgda-stop"><span class="secnum">8.2</span> MGDA&#8217;s gradient norm as a stopping signal</h3>
 
@@ -1100,7 +1102,7 @@ crit_sum = nn.MSELoss(**kw)</code></pre>
 
     <h3 id="gradnorm-sum"><span class="secnum">9.1</span> Renormalizing GradNorm&#8217;s weights</h3>
 
-    <p>The GradNorm paper renormalizes after every step &#8220;to decouple gradient normalization from the global learning rate&#8221;; without it the weights&#8217; sum drifts and acts as a learning-rate change. The weights get their own optimizer <code>opt_w</code>, run much faster than the network's optimizer, so the weights keep up with training. In the fragment, <var>L</var><sub>grad</sub> trains only <var>w</var>; the last two lines rescale <var>w</var> to sum to <var>K</var> inside <code>no_grad</code>, so the rescale is not trained.</p>
+    <p>GradNorm renormalizes after every step to decouple gradient normalization from the global learning rate; without it the weights&#8217; sum drifts and acts as a learning-rate change. The weights get their own optimizer <code>opt_w</code>, run much faster than the network's optimizer, so the weights keep up with training. In the fragment, <var>L</var><sub>grad</sub> trains only <var>w</var>; the last two lines rescale <var>w</var> to sum to <var>K</var> inside <code>no_grad</code>, so the rescale is not trained.</p>
 
     <pre><code class="language-python"># GradNorm's own loss L_grad,
 # backpropagated into w only
@@ -1134,7 +1136,7 @@ opt = optim.AdamW(params, **kw)</code></pre>
         <div class="eq-why eq-active" data-eqline="0">Task <var>k</var>'s effective learning rate <var>&#951;<sub>k</sub></var>, how far one step moves the weights for that task's error, is the learning rate <var>&#951;</var> times its loss weight 1/(2<var>&#963;<sub>k</sub></var>&#178;). The noise level enters squared and in the denominator, so halving <var>&#963;<sub>k</sub></var> makes <var>&#951;<sub>k</sub></var> four times larger. As <var>&#963;<sub>k</sub></var> falls during training, <var>&#951;<sub>k</sub></var> rises, with or without momentum.</div>
     </div>
 
-    <p>The Uncertainty Weighting paper (SGD with momentum) saw all its uncertainties fall and lowered the learning rate on a schedule. Under Adam, the per-coordinate scale on a task's head largely absorbs a slow weight change.</p>
+    <p>With SGD with momentum, all uncertainties fall and the learning rate is lowered on a schedule. Under Adam, the per-coordinate scale on a task's head largely absorbs a slow weight change.</p>
 
     <h2 id="clipping"><span class="secnum">10</span> Gradient clipping</h2>
 
@@ -1229,7 +1231,7 @@ skipped = scaler.get_scale() &lt; s</code></pre>
     <p>The weighted total loss hides all of this, so this block logs its parts every step. <var>G</var>, <var>s</var>, <code>pre_clip</code> and <code>skipped</code> come from the mixed precision step; <code>writer</code> is a <code>torch.utils.tensorboard.<wbr>SummaryWriter</code>.</p>
 
     <pre class="cs" data-cs="2-9,10-13,14-15"><code class="language-python">add = writer.add_scalar
-true_G = G / s  # undo AMP scale
+true_G = G / s  # undo mixed-precision (AMP) scale
 for k in range(K):
     t = f"task{k}"
     raw = raw_losses[k].item()

@@ -1059,21 +1059,22 @@ figure.figure{margin:1.75rem 0}
 
 <p>Term by term, <var>\(\gamma / \overline{\sigma}\)</var> is the per-channel scale, and it grows when <var>\(\overline{\sigma}\)</var> is small, which can widen the range of weights to quantize: in MobileNet v1 the folded weights show larger outliers than the unfolded ones [3]. <var>\(\overline{\mu}\)</var> and <var>\(\beta\)</var> only move the bias. Folding removes the BN compute, its data movement and the quantization of its output [2]. In PyTorch, by hand and with the library call:</p>
 
-<pre class="cs" data-cs="1-6,7-11,12"><code class="language-python">import torch
+<pre class="cs" data-cs="1-5,6-11,13"><code class="language-python">import torch
 from torch import nn
 from torch.nn.utils import fusion
 
-conv = nn.Conv2d(3, 8, 3, bias=False).eval()
-bn = nn.BatchNorm2d(8).eval()
-with torch.no_grad():
-    sd = torch.sqrt(bn.running_var + bn.eps)
-    s = bn.weight / sd
-    w = conv.weight * s.view(-1, 1, 1, 1)
-    b = bn.bias - bn.running_mean * s
+def fuse_by_hand(conv, bn):
+    with torch.no_grad():
+        sd = torch.sqrt(bn.running_var + bn.eps)
+        s = bn.weight / sd
+        w = conv.weight * s.view(-1, 1, 1, 1)
+        b = bn.bias - bn.running_mean * s
+    return w, b
+
 fused = fusion.fuse_conv_bn_eval(conv, bn)</code></pre>
 <ol class="cs-notes">
-<li><span class="cs-n">1</span>The pair, both in eval mode.</li>
-<li><span class="cs-n">2</span>Lines 2 and 3 by hand: <code>s</code> is <var>\(\gamma / \overline{\sigma}\)</var>, and <code>b</code> uses <var>\(b\)</var> = 0 because <code>bias=False</code>.</li>
+<li><span class="cs-n">1</span>The pair arrives as arguments, both in eval mode.</li>
+<li><span class="cs-n">2</span>The fold by hand: <code>s</code> is <var>\(\gamma / \overline{\sigma}\)</var>, and <code>b</code> is the fused bias, with the conv contributing none because it has no bias.</li>
 <li><span class="cs-n">3</span>The library call asserts eval mode ("Fusion only for eval!"): failure row 1 [8].</li>
 </ol>
 
@@ -1158,7 +1159,7 @@ fused = fusion.fuse_conv_bn_eval(conv, bn)</code></pre>
   <text x="20" y="194" font-size="17">after dividing and multiplying, both maxima meet in the middle</text>
   <text x="20" y="218" font-size="17">XW is the same, before and after</text>
 </svg>
-<figcaption class="caption"><span class="fignum">Figure 3.</span> Outlier ①: at <var>\(\alpha\)</var> = 0.5 its activation and weight maxima meet in the middle.</figcaption>
+<figcaption class="caption"><span class="fignum">Figure 3.</span> Outlier ①: at the balance point, its activation and weight maxima meet in the middle.</figcaption>
 </figure>
 
 <p>Divide each activation channel by a factor and multiply its weight row by the same factor.</p>
@@ -1168,15 +1169,15 @@ fused = fusion.fuse_conv_bn_eval(conv, bn)</code></pre>
   <div class="eq-line eq-active" data-eqline="0">\(\displaystyle Y = (\htmlStyle{color:#2471a3}{X} \operatorname{diag}(\htmlStyle{color:#7d3c98}{s})^{-1}) (\operatorname{diag}(\htmlStyle{color:#7d3c98}{s}) W)\)</div>
   <div class="eq-why eq-active" data-eqline="0"><var>\(X\)</var> holds the tokens' activations, <var>\(W\)</var> the layer's weights and <var>\(Y\)</var> its output. \(\operatorname{diag}(s)\) is the matrix with <var>\(s\)</var> on its diagonal: divide input channel <var>\(j\)</var> by <var>\(s_{j}\)</var>, multiply weight row <var>\(j\)</var> by the same <var>\(s_{j}\)</var>, and the product does not change, as <a href="#normSmoothExample">Figure 3</a> shows: the output does not change.</div>
   <div class="eq-line eq-active" data-eqline="1">\(\displaystyle \htmlStyle{color:#7d3c98}{s_{j}} = \frac{\max \lvert \htmlStyle{color:#2471a3}{X_{j}} \rvert^{\alpha}}{\max \lvert W_{j} \rvert^{1 - \alpha}}\)</div>
-  <div class="eq-why eq-active" data-eqline="1"><var>\(\alpha\)</var> (alpha), the migration strength, sets how much of the size moves to the weights. With <var>\(\alpha\)</var> = 0.5, channel 1's activation max and its weight row max become equal: the two share the difficulty.</div>
+  <div class="eq-why eq-active" data-eqline="1"><var>\(\alpha\)</var> (alpha), the migration strength, sets how much of the size moves to the weights. When the migration strength balances them, channel 1's activation max and its weight row max become equal: the two share the difficulty.</div>
 </div>
 
 <p>Term by term, \(\operatorname{diag}(s)^{-1}\) shrinks the outlier channel, so the other channels rise from a few levels to many; \(\operatorname{diag}(s)\) grows the matching weights, so the smaller weight rows now use fewer levels. The difficulty is split, not removed. Because <var>\(X\)</var> comes out of a LayerNorm, the division by <var>\(s\)</var> folds offline into that LayerNorm's <var>\(\gamma\)</var> and <var>\(\beta\)</var>, so no extra operation runs [5], the same gain-folding move as <a href="#ln-no-fold">Section 2</a>. Slide <var>\(\alpha\)</var> to move the difficulty:</p>
 
 <figure class="figure mtd-fig" id="normAlpha">
 <div class="demo">
-  <div class="demo-controls"><label for="ncSlider">Migration strength <var>\(\alpha\)</var> = <strong class="nc-a">0.5</strong></label>
-  <input type="range" id="ncSlider" min="0" max="4" step="1" value="2" aria-valuetext="alpha 0.5"></div>
+  <div class="demo-controls"><label for="ncSlider">Migration strength <var>\(\alpha\)</var></label>
+  <input type="range" id="ncSlider" min="0" max="4" step="1" value="2"></div>
   <svg class="mtd-svg nc-svg" viewBox="0 0 400 262" style="max-width:440px;display:block;margin:0 auto" role="img" aria-label="Activation and weight maxima on a log axis, and the int8 levels left for activation channel 2 and weight row 2">
     <g class="fig-mk"><circle cx="12" cy="29" r="10"/><text x="12" y="29" text-anchor="middle" font-size="18" style="fill:#fff">1</text></g>
     <text x="28" y="34" font-size="18" class="nm-c1t">act ch 1</text>
@@ -1213,11 +1214,11 @@ fused = fusion.fuse_conv_bn_eval(conv, bn)</code></pre>
 <script>
 (function(){
   var fig=document.getElementById('normAlpha'); if(!fig) return;
-  var T={"0": {"s": [2.0, 2.0], "act": [32.0, 1.0], "w": [1.0, 1.0], "la": 8, "lw": 256}, "0.25": {"s": [4.757, 2.0], "act": [13.454, 1.0], "w": [2.378, 1.0], "la": 19, "lw": 108}, "0.5": {"s": [11.314, 2.0], "act": [5.657, 1.0], "w": [5.657, 1.0], "la": 45, "lw": 45}, "0.75": {"s": [26.909, 2.0], "act": [2.378, 1.0], "w": [13.454, 1.0], "la": 108, "lw": 19}, "1.0": {"s": [64.0, 2.0], "act": [1.0, 1.0], "w": [32.0, 1.0], "la": 256, "lw": 8}}, KEYS=['0','0.25','0.5','0.75','1.0'], LAB=['0','0.25','0.5','0.75','1'];
+  var T={"0": {"s": [2.0, 2.0], "act": [32.0, 1.0], "w": [1.0, 1.0], "la": 8, "lw": 256}, "0.25": {"s": [4.757, 2.0], "act": [13.454, 1.0], "w": [2.378, 1.0], "la": 19, "lw": 108}, "0.5": {"s": [11.314, 2.0], "act": [5.657, 1.0], "w": [5.657, 1.0], "la": 45, "lw": 45}, "0.75": {"s": [26.909, 2.0], "act": [2.378, 1.0], "w": [13.454, 1.0], "la": 108, "lw": 19}, "1.0": {"s": [64.0, 2.0], "act": [1.0, 1.0], "w": [32.0, 1.0], "la": 256, "lw": 8}}, KEYS=['0','0.25','0.5','0.75','1.0'];
   function X(v){ return 130+(Math.log(v)/Math.LN2+2)*26.25; }
   function q(c){ return fig.querySelector(c); }
   var TK={'.nc-a1':340,'.nc-a2':208.75,'.nc-w1':156.25,'.nc-w2':156.25};
-  var sl=q('#ncSlider'), lab=q('.nc-a'), read=q('.nc-read');
+  var sl=q('#ncSlider'), read=q('.nc-read');
   function bar(cls,vcls,v){ var w=X(v)-130, b=q(cls), t=q(vcls); b.setAttribute('width',Math.max(2,w).toFixed(1)); b.style.width=Math.max(2,w).toFixed(1)+'px';
     t.textContent='';
     var x0=130+Math.max(2,w)+8, k=TK[cls], G=6.5, bb; t.setAttribute('x',x0.toFixed(1));
@@ -1228,7 +1229,6 @@ fused = fusion.fuse_conv_bn_eval(conv, bn)</code></pre>
     bar('.nc-a1','.nc-va1',d.act[0]); bar('.nc-a2','.nc-va2',d.act[1]); bar('.nc-w1','.nc-vw1',d.w[0]); bar('.nc-w2','.nc-vw2',d.w[1]);
     var ga=q('.nc-ga'), gw=q('.nc-gw'), wa=(360*d.la/256).toFixed(1), ww=(360*d.lw/256).toFixed(1);
     ga.setAttribute('width',wa); ga.style.width=wa+'px'; gw.setAttribute('width',ww); gw.style.width=ww+'px';
-    lab.textContent=LAB[i]; sl.setAttribute('aria-valuetext','alpha '+LAB[i]);
     read.textContent='Activation channel 2 gets '+d.la+' of 256 levels'; }
   sl.addEventListener('input',draw);
   if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) fig.classList.add('nm-still');
@@ -1238,23 +1238,22 @@ fused = fusion.fuse_conv_bn_eval(conv, bn)</code></pre>
 
 <p>The dashed ticks ② mark the levels before smoothing. At <var>\(\alpha\)</var> = 0 the factor comes from the weights alone, so both activation channels shrink together and their levels stay at ②. In PyTorch, smoothing one LayerNorm and linear pair from recorded activations:</p>
 
-<pre class="cs" data-cs="1-5,6-9,10-13"><code class="language-python">import torch
+<pre class="cs" data-cs="4,5-7,8-11"><code class="language-python">import torch
 from torch import nn
 
-ln, lin = nn.LayerNorm(2), nn.Linear(2, 2, bias=False)
-acts = torch.tensor([[64., 1.], [-60., 2.]])
-x_max = acts.abs().amax(0)
-w_max = lin.weight.abs().amax(0)
-alpha = 0.5
-s = x_max**alpha / w_max**(1 - alpha)
-with torch.no_grad():
-    ln.weight.div_(s)
-    ln.bias.div_(s)
-    lin.weight.mul_(s)</code></pre>
+def smooth(ln, lin, acts, alpha):
+    x_max = acts.abs().amax(0)
+    w_max = lin.weight.abs().amax(0)
+    s = x_max**alpha / w_max**(1 - alpha)
+    with torch.no_grad():
+        ln.weight.div_(s)
+        ln.bias.div_(s)
+        lin.weight.mul_(s)
+    return ln, lin</code></pre>
 <ol class="cs-notes">
-<li><span class="cs-n">1</span>The pair and <code>acts</code>, the LayerNorm outputs recorded on calibration tokens (<a href="#normSmoothExample">Figure 3</a>'s <var>\(X\)</var>).</li>
-<li><span class="cs-n">2</span>Line 2. <code>nn.Linear</code> stores its weight as out × in, so <code>amax(0)</code> gives one max per input channel [7]. The weights here are random, so <code>s</code> differs from Figure 3's.</li>
-<li><span class="cs-n">3</span>Line 1, folded into LayerNorm's <var>\(\gamma\)</var> and <var>\(\beta\)</var>; <code>mul_(s)</code> broadcasts <var>\(s\)</var> along the input dimension.</li>
+<li><span class="cs-n">1</span>The pair and <code>acts</code> arrive as arguments; <code>acts</code> are the LayerNorm outputs recorded on calibration tokens (<a href="#normSmoothExample">Figure 3</a>'s <var>\(X\)</var>).</li>
+<li><span class="cs-n">2</span><code>nn.Linear</code> stores its weight as out × in, so <code>amax(0)</code> gives one max per input channel [7]. The weights here are random, so <code>s</code> differs from Figure 3's.</li>
+<li><span class="cs-n">3</span><code>s</code> folds into LayerNorm's <var>\(\gamma\)</var> and <var>\(\beta\)</var>; <code>mul_(s)</code> broadcasts <var>\(s\)</var> along the input dimension.</li>
 </ol>
 
 <hr>
@@ -1278,7 +1277,7 @@ with torch.no_grad():
 <div class="nm-tabwrap"><table class="nm-tab">
 <thead><tr><th>Knob</th><th>Default</th><th>What it does</th></tr></thead>
 <tbody>
-<tr><td><var>\(\alpha\)</var>, migration strength</td><td>0.5</td><td>larger <var>\(\alpha\)</var> moves more of the outlier's size into the weights (<a href="#normAlpha">Figure 4</a>); the rest value suits most models, and a larger <var>\(\alpha\)</var> fits models with stronger activation outliers [5]</td></tr>
+<tr><td><var>\(\alpha\)</var>, migration strength</td><td>the rest value</td><td>larger <var>\(\alpha\)</var> moves more of the outlier's size into the weights (<a href="#normAlpha">Figure 4</a>); the rest value suits most models, and a larger <var>\(\alpha\)</var> fits models with stronger activation outliers [5]</td></tr>
 </tbody></table></div>
 
 <p>When accuracy still drops after folding and smoothing, <a href="quantization-debugging.html">Debugging a Quantized Model</a> shows how to measure where the error comes from.</p>

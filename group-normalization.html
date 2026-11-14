@@ -1147,8 +1147,8 @@ window.siteWalk = function (id, opts) {
 
 <figure class="figure mtd-fig" id="gnGroupFig">
 <div class="demo">
-  <div class="demo-controls"><label for="gnG">Groups: <strong class="gn-gv">4</strong></label>
-  <input type="range" id="gnG" min="0" max="4" step="1" value="2" aria-valuetext="4 groups">
+  <div class="demo-controls"><label for="gnG">Groups: <strong class="gn-gv"></strong></label>
+  <input type="range" id="gnG" min="0" max="4" step="1" value="2" aria-valuetext="groups">
   <div class="gn-tick" aria-hidden="true"><span>1 (LayerNorm)</span><span>16 (InstanceNorm)</span></div>
   <div class="demo-buttons"><button type="button" class="gn-norm" aria-pressed="true">Normalized</button></div></div>
   <svg class="mtd-svg tool-svg gn-svg" viewBox="0 0 400 314" role="img" aria-label="Sixteen channel sheets of one image, bracketed into groups, and a second image of the batch that GroupNorm never reads">
@@ -1161,7 +1161,7 @@ window.siteWalk = function (id, opts) {
   </svg>
   <p class="tool-read gt-read" aria-live="polite"></p>
 </div>
-<figcaption class="caption"><span class="fignum">Figure 3.</span> Image 1's sixteen channels; each bracket is one group. Wider layers use the paper's 32 groups. Illustrative.</figcaption>
+<figcaption class="caption"><span class="fignum">Figure 3.</span> The image's channels; each bracket is one group. Wider layers use more groups. Illustrative.</figcaption>
 </figure>
 
 <hr>
@@ -1223,24 +1223,24 @@ window.siteWalk = function (id, opts) {
 <p><code>nn.GroupNorm(num_groups, num_channels, eps=1e-5, affine=True)</code>: more groups move it toward InstanceNorm, fewer toward LayerNorm, and 32 groups is the paper's default [3]. torchvision's FCOS detection heads use GroupNorm with 32 groups as their default norm layer [5].</p>
 
 <pre class="cs" data-cs="1-5,6-12,13-17"><code class="language-python">head = nn.Sequential(                         # one conv block of a detection head
-    nn.Conv2d(256, 256, 3, padding=1),
-    nn.GroupNorm(32, 256),                     # 32 groups of 8 channels
+    nn.Conv2d(channels, channels, kernel_size, padding=1),
+    nn.GroupNorm(n_groups, channels),                     # groups of channels
     nn.ReLU(),
 )
-x = torch.randn(2, 16, 8, 8)                   # (N, C, H, W): 2 images, 16 channels
+x = torch.randn(batch, channels, height, width)                   # (N, C, H, W)
 C = x.shape[1]
 gn1 = nn.GroupNorm(1, C, affine=False)
-ln = nn.LayerNorm([C, 8, 8], elementwise_affine=False)
-assert torch.allclose(gn1(x), ln(x), atol=1e-5)   # one group = LayerNorm
+ln = nn.LayerNorm([C, height, width], elementwise_affine=False)
+assert torch.allclose(gn1(x), ln(x), atol=tol)   # one group = LayerNorm
 gnC = nn.GroupNorm(C, C, affine=False)
-assert torch.allclose(gnC(x), nn.InstanceNorm2d(C)(x), atol=1e-5)  # one channel per group = InstanceNorm
+assert torch.allclose(gnC(x), nn.InstanceNorm2d(C)(x), atol=tol)  # one channel per group = InstanceNorm
 class ResBlock(nn.Module):                     # style-transfer residual block
     def __init__(self, c):
         super().__init__()
         self.f = nn.Sequential(nn.Conv2d(c, c, 3, padding=1), nn.InstanceNorm2d(c, affine=True), nn.ReLU(), nn.Conv2d(c, c, 3, padding=1), nn.InstanceNorm2d(c, affine=True))
     def forward(self, x): return x + self.f(x)</code></pre>
 <ol class="cs-notes">
-  <li><span class="cs-n">1</span>A detection-head conv block with GroupNorm: the same at 1 image per GPU as at 16.</li>
+  <li><span class="cs-n">1</span>A detection-head conv block with GroupNorm: the same at one image per GPU as at many.</li>
   <li><span class="cs-n">2</span>One group matches LayerNorm over <code>(C, H, W)</code> and one channel per group matches InstanceNorm, with the learned parts off. With them on, GroupNorm's <var>\(\gamma\)</var>, <var>\(\beta\)</var> are per channel while LayerNorm's are per element, so the two match only at initialization.</li>
   <li><span class="cs-n">3</span>InstanceNorm inside a style-transfer network's residual block.</li>
 </ol>
@@ -1283,7 +1283,7 @@ class ResBlock(nn.Module):                     # style-transfer residual block
   function paint(cells, vals) { cells.forEach(function (r, i) { r.style.fill = col(vals[i]); }); }
   /* Figure 2: family rows */
   (function () { var g = document.getElementById('gnFamRows'); if (!g) return;
-    var rows = [['G = 1: LayerNorm', 1], ['G = 4: GroupNorm', 4], ['G = C: InstanceNorm', 8]];
+    var rows = [['G = 1: LayerNorm', 1], ['GroupNorm', 4], ['G = C: InstanceNorm', 8]];
     rows.forEach(function (r, k) { var y = 30 + k * 62, t = el('text', { x: 8, y: y - 8, style: 'font-weight:700' }, g); t.textContent = r[0];
       for (var c = 0; c < 8; c++) { el('rect', { x: 14 + c * 47, y: y, width: 36, height: 24, rx: 3, style: 'fill:#eef1f4;stroke:#7f8c8d;stroke-width:1px' }, g); }
       var per = 8 / r[1]; for (var q = 0; q < r[1]; q++) el('rect', { x: 10 + q * per * 47, y: y - 4, width: per * 47 - 3, height: 32, rx: 6, 'class': 'gn-br', style: 'stroke:' + GC[q % 4] }, g); });
@@ -1296,8 +1296,8 @@ class ResBlock(nn.Module):                     # style-transfer residual block
     function show(v) { cells.forEach(function (cs, c) { paint(cs, v[c]); }); }
     show(raw);
     siteWalk('gnWalk', { n: 4, eq: [[], [0], [1], [2]], read: [
-      'One image\u2019s eight channels, each with its own level and contrast.',
-      'The channels split into two groups of four neighbors.',
+      'One image\u2019s channels, each with its own level and contrast.',
+      'The channels split into groups of neighbors.',
       'Each group gets one mean and one spread, from all its channels and pixels.',
       'Each group is centered and scaled with its own numbers; each channel then gets its own scale and shift.'],
       on: function (s) { show(s === 4 ? nrm : raw); } });
@@ -1315,13 +1315,13 @@ class ResBlock(nn.Module):                     # style-transfer residual block
     function boxOf(c0, c1) { var r0 = Math.floor(c0 / 4), r1 = Math.floor(c1 / 4), x0 = (r0 === r1) ? c0 % 4 : 0, x1 = (r0 === r1) ? c1 % 4 : 3;
       return { x: X0 + x0 * (W + GAP) - 5, y: Y0 + r0 * (W + GAP + 6) - 5, w: (x1 - x0 + 1) * W + (x1 - x0) * GAP + 10, h: (r1 - r0 + 1) * W + (r1 - r0) * (GAP + 6) + 10 }; }
     function draw() { var G = Gs[+sl.value], per = 16 / G, V = normed ? norm(X, G) : X;
-      gv.textContent = String(G); sl.setAttribute('aria-valuetext', G + (G === 1 ? ' group' : ' groups'));
+      gv.textContent = ''; sl.setAttribute('aria-valuetext', 'groups');
       cells.forEach(function (cs, c) { paint(cs, V[c]); });
       brs.forEach(function (b, k) { if (k >= G) { b.style.display = 'none'; return; } var o = boxOf(k * per, (k + 1) * per - 1);
         b.style.display = ''; b.setAttribute('x', o.x); b.setAttribute('y', o.y); b.setAttribute('width', o.w); b.setAttribute('height', o.h); b.style.stroke = GC[k % 4]; });
       var name = G === 1 ? ' (this is LayerNorm)' : G === 16 ? ' (this is InstanceNorm)' : '';
       rd.textContent = !normed ? 'Raw channels: each has its own level and contrast.' :
-        (G === 1 ? '1 group of 16 channels gets one mean' : G === 16 ? '16 groups of 1 channel; each channel gets its own mean' : G + ' groups of ' + per + ' channels; each group gets one mean') + name + '.';
+        (G === 1 ? 'one group gets one mean' : G === 16 ? 'each channel gets its own mean' : 'groups of channels; each group gets one mean') + name + '.';
     }
     sl.addEventListener('input', draw);
     bt.addEventListener('click', function () { normed = !normed; bt.setAttribute('aria-pressed', String(normed)); bt.textContent = normed ? 'Normalized' : 'Raw'; draw(); });

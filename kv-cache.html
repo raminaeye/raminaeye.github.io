@@ -1052,14 +1052,14 @@ li a { overflow-wrap: anywhere; }
   <div class="eq-card" id="kvK1">
       <div class="eq-what">The attention cost of decode step <var>\(t\)</var> in one layer, with and without the cache.</div>
       <div class="eq-line eq-active" data-eqline="0">\({\displaystyle \text{with cache: }\;4\,\htmlClass{eqt sym-d}{\htmlStyle{color:#1f618d}{d}}\,\htmlClass{eqt sym-t}{\htmlStyle{color:#9a6400}{t}}}\)</div>
-        <div class="eq-why eq-active" data-eqline="0">At step <var>\(t\)</var> the one new query is scored against the <var>\(t\)</var> stored keys, and one weighted sum runs over the <var>\(t\)</var> stored values, so the cost grows in a straight line with <var>\(t\)</var>. The 4 counts two products of <var>\(d\)</var> multiply-adds per stored token, the scores and the weighted sum, at two FLOPs per multiply-add.</div>
+        <div class="eq-why eq-active" data-eqline="0">At step <var>\(t\)</var> the one new query is scored against the <var>\(t\)</var> stored keys, and one weighted sum runs over the <var>\(t\)</var> stored values, so the cost grows in a straight line with <var>\(t\)</var>. Each stored token takes two products of <var>\(d\)</var> multiply-adds, the scores and the weighted sum.</div>
       <div class="eq-line eq-active" data-eqline="1">\({\displaystyle \text{without cache: }\;4\,\htmlClass{eqt sym-d}{\htmlStyle{color:#1f618d}{d}}\,\htmlClass{eqt sym-t}{\htmlStyle{color:#9a6400}{t}}^{2}}\)</div>
         <div class="eq-why eq-active" data-eqline="1">Without the cache all <var>\(t\)</var> queries are recomputed against all <var>\(t\)</var> keys, the full table, though only its last row is new; so step <var>\(t\)</var> costs <var>\(t\)</var> times the cached step. Both lines are the attention line of <a href="transformer-cost.html#attention-cost">Transformer Cost and Efficiency</a>, with one query row or with all of them.</div>
       <div class="eq-legend"><span class="eq-item"><span class="eq-sw" style="background:#9a6400"></span>tokens so far</span><span class="eq-item"><span class="eq-sw" style="background:#1f618d"></span>model width</span></div>
   </div>
 <pre class="cs" data-cs="3-6,8-9,10-11"><code class="language-python">import torch
 
-B, h, T, d_k = 1, 8, 10, 64
+B, h, T, d_k = BATCH, HEADS, SEQ_LEN, HEAD_DIM
 K = torch.randn(B, h, T, d_k)  # cache so far
 V = torch.randn(B, h, T, d_k)
 q, k, v = torch.randn(3, B, h, 1, d_k)  # the new token
@@ -1107,7 +1107,7 @@ out = S.softmax(dim=-1) @ V               # (B, h, 1, d_k)</code></pre>
 <pre class="cs" data-cs="1-2,4"><code class="language-python">def kv_cache_bytes(L, h_kv, d_k, T, b):
     return 2 * L * h_kv * d_k * T * b  # 2 = key + value
 
-mistral_7b = kv_cache_bytes(L=32, h_kv=8, d_k=128, T=4096, b=2)</code></pre>
+mistral_7b = kv_cache_bytes(L=N_LAYERS, h_kv=N_KV_HEADS, d_k=HEAD_DIM, T=SEQ_LEN, b=BYTES)</code></pre>
 <ol class="cs-notes">
   <li><span class="cs-n">1</span>The cache-size line of the card above, factor for factor.</li>
   <li><span class="cs-n">2</span>Each factor in the formula scales the cache in proportion: more layers, more stored heads, wider heads, more bytes per number and more tokens kept all grow it. A <a href="sliding-window-attention.html#rolling-buffer">rolling buffer</a> caps the cache at the window even though the context is longer.</li>
@@ -1143,7 +1143,7 @@ mistral_7b = kv_cache_bytes(L=32, h_kv=8, d_k=128, T=4096, b=2)</code></pre>
 import torch.nn.functional as F
 
 sdpa = F.scaled_dot_product_attention
-B, h, T, d_k = 1, 8, 16, 64
+B, h, T, d_k = BATCH, HEADS, SEQ_LEN, HEAD_DIM
 q, K, V = torch.randn(3, B, h, T, d_k)  # the prompt
 prompt_out = sdpa(q, K, V, is_causal=True)
 # K and V are now the cache
@@ -1160,7 +1160,7 @@ step_out = sdpa(q_new, K, V)  # no is_causal here</code></pre>
   <table class="when-table" aria-label="When it runs, its settings and code">
     <tr><th scope="row">When</th><td>Lives through one generation; grows by one key and one value per stored head per layer per token.</td></tr>
     <tr><th scope="row">Cache type</th><td>Hugging Face's default <code>DynamicCache</code> grows token by token; <code>cache_implementation="static"</code> preallocates the full length and works with <code>torch.compile</code>.</td></tr>
-    <tr><th scope="row">Cache length <var>\(T\)</var></th><td>Longer remembers more and costs more, in proportion, by the cache-size card; capped by the trained context, 2048 tokens for GPT-3.</td></tr>
+    <tr><th scope="row">Cache length <var>\(T\)</var></th><td>Longer remembers more and costs more, in proportion, by the cache-size card; capped by the trained context.</td></tr>
     <tr><th scope="row">Code</th><td><a href="https://huggingface.co/docs/transformers/en/kv_cache">Cache strategies</a> (Hugging Face), <a href="https://docs.pytorch.org/docs/2.15/generated/torch.nn.functional.scaled_dot_product_attention.html"><code>F.scaled_dot_product_attention</code></a> (PyTorch docs).</td></tr>
   </table>
   <p>

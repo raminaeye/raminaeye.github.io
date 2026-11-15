@@ -33,7 +33,7 @@
     "rl.html": "https://notebook.google.com/notebook/f9b57fa8-973f-4f63-960f-4d60af26a393",
     "rl-methods.html": "https://notebook.google.com/notebook/3081561c-3a7e-4bce-aaf4-22c05c28ddec",
     "q-learning.html": "https://notebook.google.com/notebook/0231f250-33c1-4429-a5e0-399fccfee7be",
-    "rl-policy-gradients.html": "https://notebook.google.com/notebook/5aefa67a-b0fe-4436-871d-20a905e9162a",
+    "rl-policy-gradients.html": "https://notebook.google.com/notebook/cc54fe8f-a319-43e2-bdb9-15870ccc696b",
     "reinforce.html": "https://notebook.google.com/notebook/3e2020f8-5c27-4f91-8721-3931f228b3a9",
     "actor-critic.html": "https://notebook.google.com/notebook/98190f6a-3d31-45a4-847a-b46808e01eb7",
     "ppo.html": "https://notebook.google.com/notebook/a71e9b74-00a0-4547-827c-2101f659ec3c",
@@ -41,7 +41,7 @@
     "rl-model-based.html": "https://notebook.google.com/notebook/7b1bdc43-e1d0-4ace-b9ee-77d7b48f139f",
     "dqn.html": "https://notebook.google.com/notebook/778c632e-e2da-40d1-9fc5-b66ecd6e23b3",
     "ddpg.html": "https://notebook.google.com/notebook/2125c00f-f7ec-45fb-a01b-2e41af1644bd",
-    "ddpg-training.html": "https://notebooklm.google.com/notebook/cd7fd0a9-f891-44ce-91e0-0214b26e9867",
+    "ddpg-training.html": "https://notebook.google.com/notebook/0230d3f3-5705-499d-afa3-62ac0c06e8da",
     "td3.html": "https://notebook.google.com/notebook/bebcbe5c-11cf-4177-997a-4b9dfabda5a8",
     "multi-agent-rl.html": "https://notebook.google.com/notebook/403ab1af-31ac-4ff9-9ce2-a3fb780b940a",
     "rl-alignment.html": "https://notebook.google.com/notebook/c4a39eb7-a380-4ee7-9ffc-be787553d4c7"

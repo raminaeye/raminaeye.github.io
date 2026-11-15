@@ -54,8 +54,8 @@
     "ddpg.html": "https://notebook.google.com/notebook/2125c00f-f7ec-45fb-a01b-2e41af1644bd",
     "ddpg-training.html": "https://notebook.google.com/notebook/0230d3f3-5705-499d-afa3-62ac0c06e8da",
     "td3.html": "https://notebook.google.com/notebook/bebcbe5c-11cf-4177-997a-4b9dfabda5a8",
-    "multi-agent-rl.html": "https://notebook.google.com/notebook/403ab1af-31ac-4ff9-9ce2-a3fb780b940a",
-    "rl-alignment.html": "https://notebook.google.com/notebook/c4a39eb7-a380-4ee7-9ffc-be787553d4c7"
+    "multi-agent-rl.html": "https://notebook.google.com/notebook/1ee62498-b591-4d34-9626-bb206dba9750",
+    "rl-alignment.html": "https://notebook.google.com/notebook/a7b1a198-94cf-49c6-8e80-16bce4dcebab"
   };
   /* NOTEBOOKLM-END */
 

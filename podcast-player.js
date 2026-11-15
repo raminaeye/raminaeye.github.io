@@ -49,6 +49,7 @@
     "constitutional-ai.html": "https://notebook.google.com/notebook/35f947cf-2e97-4686-a308-1d23ae503bb5",
     "rlaif.html": "https://notebook.google.com/notebook/11007455-73c1-4f65-a4af-e763f84cd150",
     "dpo.html": "https://notebook.google.com/notebook/af9a6ec5-d2c1-43c0-ab1b-5cab981e21cf",
+    "grpo.html": "https://notebook.google.com/notebook/7d4cc265-49a6-4985-bd32-f8ea5c23cd4b",
     "dqn.html": "https://notebook.google.com/notebook/778c632e-e2da-40d1-9fc5-b66ecd6e23b3",
     "ddpg.html": "https://notebook.google.com/notebook/2125c00f-f7ec-45fb-a01b-2e41af1644bd",
     "ddpg-training.html": "https://notebook.google.com/notebook/0230d3f3-5705-499d-afa3-62ac0c06e8da",

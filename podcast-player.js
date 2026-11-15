@@ -39,6 +39,8 @@
     "ppo.html": "https://notebook.google.com/notebook/a71e9b74-00a0-4547-827c-2101f659ec3c",
     "rl-continuous-actions.html": "https://notebook.google.com/notebook/1c9e0b0b-3308-44fb-a686-ea5dd5e4b5dd",
     "rl-model-based.html": "https://notebook.google.com/notebook/b44e7cd3-8a76-410b-9298-53c40cdd393b",
+    "dyna.html": "https://notebook.google.com/notebook/54c4706a-4375-4e1a-8065-16307218246b",
+    "alphazero.html": "https://notebook.google.com/notebook/e17462d2-c017-4d6a-98ce-fbe4bd6f2a8f",
     "dqn.html": "https://notebook.google.com/notebook/778c632e-e2da-40d1-9fc5-b66ecd6e23b3",
     "ddpg.html": "https://notebook.google.com/notebook/2125c00f-f7ec-45fb-a01b-2e41af1644bd",
     "ddpg-training.html": "https://notebook.google.com/notebook/0230d3f3-5705-499d-afa3-62ac0c06e8da",

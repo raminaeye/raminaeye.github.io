@@ -41,6 +41,8 @@
     "rl-model-based.html": "https://notebook.google.com/notebook/b44e7cd3-8a76-410b-9298-53c40cdd393b",
     "dyna.html": "https://notebook.google.com/notebook/54c4706a-4375-4e1a-8065-16307218246b",
     "alphazero.html": "https://notebook.google.com/notebook/e17462d2-c017-4d6a-98ce-fbe4bd6f2a8f",
+    "muzero.html": "https://notebook.google.com/notebook/6d79f7d2-2cc2-42ad-b684-46c721e0acf9",
+    "dreamer.html": "https://notebook.google.com/notebook/74b0f4d0-e231-4e83-9356-e0a20a7cef47",
     "dqn.html": "https://notebook.google.com/notebook/778c632e-e2da-40d1-9fc5-b66ecd6e23b3",
     "ddpg.html": "https://notebook.google.com/notebook/2125c00f-f7ec-45fb-a01b-2e41af1644bd",
     "ddpg-training.html": "https://notebook.google.com/notebook/0230d3f3-5705-499d-afa3-62ac0c06e8da",

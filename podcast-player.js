@@ -40,9 +40,9 @@
     "rl-continuous-actions.html": "https://notebook.google.com/notebook/61a9cecc-4161-460c-bda5-972f31d09f0d",
     "rl-model-based.html": "https://notebook.google.com/notebook/7b1bdc43-e1d0-4ace-b9ee-77d7b48f139f",
     "dqn.html": "https://notebook.google.com/notebook/778c632e-e2da-40d1-9fc5-b66ecd6e23b3",
-    "ddpg.html": "https://notebook.google.com/notebook/d06953e2-2987-4bad-b507-94f7e8b340aa",
+    "ddpg.html": "https://notebook.google.com/notebook/2125c00f-f7ec-45fb-a01b-2e41af1644bd",
     "ddpg-training.html": "https://notebooklm.google.com/notebook/cd7fd0a9-f891-44ce-91e0-0214b26e9867",
-    "td3.html": "https://notebook.google.com/notebook/e26d3ee1-e54a-4c9b-8cec-42e84e6e9950",
+    "td3.html": "https://notebook.google.com/notebook/bebcbe5c-11cf-4177-997a-4b9dfabda5a8",
     "multi-agent-rl.html": "https://notebook.google.com/notebook/403ab1af-31ac-4ff9-9ce2-a3fb780b940a",
     "rl-alignment.html": "https://notebook.google.com/notebook/c4a39eb7-a380-4ee7-9ffc-be787553d4c7"
   };

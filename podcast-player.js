@@ -56,7 +56,9 @@
     "td3.html": "https://notebook.google.com/notebook/bebcbe5c-11cf-4177-997a-4b9dfabda5a8",
     "multi-agent-rl.html": "https://notebook.google.com/notebook/1ee62498-b591-4d34-9626-bb206dba9750",
     "rl-alignment.html": "https://notebook.google.com/notebook/a7b1a198-94cf-49c6-8e80-16bce4dcebab",
-    "tokenizers.html": "https://notebook.google.com/notebook/8ea17045-fe45-45a5-8a48-f36676edeaa6"
+    "tokenizers.html": "https://notebook.google.com/notebook/8ea17045-fe45-45a5-8a48-f36676edeaa6",
+    "subword-tokenization.html": "https://notebook.google.com/notebook/e267f68f-4e48-4bbc-a839-9ad46edbf0bb",
+    "wordpiece.html": "https://notebook.google.com/notebook/2eff1cd8-8082-41a6-ba3d-88d055f40f18"
   };
   /* NOTEBOOKLM-END */
 

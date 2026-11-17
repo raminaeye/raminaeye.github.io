@@ -66,7 +66,9 @@
     "sampling.html": "https://notebook.google.com/notebook/6e6ad94c-f4e6-4b26-a7c7-152ecfb62dcf",
     "mixture-of-experts.html": "https://notebook.google.com/notebook/8ed91f15-da4d-48d3-8264-a2656aad8c0e",
     "mixture-of-experts-designs.html": "https://notebook.google.com/notebook/ab0348c4-4ae6-4848-a3ef-71a4a38a3b54",
-    "moe-bias-balancing.html": "https://notebook.google.com/notebook/f8bc9a5e-6da4-4e4c-8629-4628dee9a48b"
+    "moe-bias-balancing.html": "https://notebook.google.com/notebook/f8bc9a5e-6da4-4e4c-8629-4628dee9a48b",
+    "moe-expert-parallelism.html": "https://notebook.google.com/notebook/da7efb4f-246d-438d-b791-e1623bdcb053",
+    "moe-fine-tuning.html": "https://notebook.google.com/notebook/108eef86-2a8c-4027-b733-231d06eaa010"
   };
   /* NOTEBOOKLM-END */
 

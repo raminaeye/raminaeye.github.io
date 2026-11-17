@@ -64,7 +64,9 @@
     "decoding.html": "https://notebook.google.com/notebook/5ed7b83c-835f-429e-bb48-2a2f983bbd89",
     "beam-search.html": "https://notebook.google.com/notebook/88c06a71-686f-4bfb-aaea-45933826982e",
     "sampling.html": "https://notebook.google.com/notebook/6e6ad94c-f4e6-4b26-a7c7-152ecfb62dcf",
-    "mixture-of-experts.html": "https://notebook.google.com/notebook/8ed91f15-da4d-48d3-8264-a2656aad8c0e"
+    "mixture-of-experts.html": "https://notebook.google.com/notebook/8ed91f15-da4d-48d3-8264-a2656aad8c0e",
+    "mixture-of-experts-designs.html": "https://notebook.google.com/notebook/ab0348c4-4ae6-4848-a3ef-71a4a38a3b54",
+    "moe-bias-balancing.html": "https://notebook.google.com/notebook/f8bc9a5e-6da4-4e4c-8629-4628dee9a48b"
   };
   /* NOTEBOOKLM-END */
 

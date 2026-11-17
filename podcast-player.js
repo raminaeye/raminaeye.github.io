@@ -68,7 +68,9 @@
     "mixture-of-experts-designs.html": "https://notebook.google.com/notebook/ab0348c4-4ae6-4848-a3ef-71a4a38a3b54",
     "moe-bias-balancing.html": "https://notebook.google.com/notebook/f8bc9a5e-6da4-4e4c-8629-4628dee9a48b",
     "moe-expert-parallelism.html": "https://notebook.google.com/notebook/da7efb4f-246d-438d-b791-e1623bdcb053",
-    "moe-fine-tuning.html": "https://notebook.google.com/notebook/108eef86-2a8c-4027-b733-231d06eaa010"
+    "moe-fine-tuning.html": "https://notebook.google.com/notebook/108eef86-2a8c-4027-b733-231d06eaa010",
+    "probes.html": "https://notebook.google.com/notebook/f415147b-8606-41c0-a40b-2c0f62788a1d",
+    "blip.html": "https://notebook.google.com/notebook/9f027a66-a359-400b-9af8-5d18f025334e"
   };
   /* NOTEBOOKLM-END */
 

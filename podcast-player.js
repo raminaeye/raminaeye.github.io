@@ -70,7 +70,8 @@
     "moe-expert-parallelism.html": "https://notebook.google.com/notebook/da7efb4f-246d-438d-b791-e1623bdcb053",
     "moe-fine-tuning.html": "https://notebook.google.com/notebook/108eef86-2a8c-4027-b733-231d06eaa010",
     "probes.html": "https://notebook.google.com/notebook/f415147b-8606-41c0-a40b-2c0f62788a1d",
-    "blip.html": "https://notebook.google.com/notebook/9f027a66-a359-400b-9af8-5d18f025334e"
+    "blip.html": "https://notebook.google.com/notebook/9f027a66-a359-400b-9af8-5d18f025334e",
+    "qformer.html": "https://notebook.google.com/notebook/2384fcf0-207e-42ad-8680-4dfcae229114"
   };
   /* NOTEBOOKLM-END */
 

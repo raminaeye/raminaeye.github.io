@@ -60,7 +60,9 @@
     "subword-tokenization.html": "https://notebook.google.com/notebook/e267f68f-4e48-4bbc-a839-9ad46edbf0bb",
     "wordpiece.html": "https://notebook.google.com/notebook/2eff1cd8-8082-41a6-ba3d-88d055f40f18",
     "unigram-tokenizer.html": "https://notebook.google.com/notebook/57d6deb2-b82a-41df-b496-7450c2dc84a8",
-    "sentencepiece.html": "https://notebooklm.google.com/notebook/baea4420-3c8a-4a0f-85c1-c73eec6ae033"
+    "sentencepiece.html": "https://notebooklm.google.com/notebook/baea4420-3c8a-4a0f-85c1-c73eec6ae033",
+    "decoding.html": "https://notebook.google.com/notebook/5ed7b83c-835f-429e-bb48-2a2f983bbd89",
+    "beam-search.html": "https://notebook.google.com/notebook/88c06a71-686f-4bfb-aaea-45933826982e"
   };
   /* NOTEBOOKLM-END */
 

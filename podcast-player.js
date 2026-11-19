@@ -74,7 +74,9 @@
     "qformer.html": "https://notebook.google.com/notebook/2384fcf0-207e-42ad-8680-4dfcae229114",
     "deepseek-r1.html": "https://notebooklm.google.com/notebook/86c9470f-3239-4b20-933f-ffffcdbed848",
     "transformers.html": "https://notebooklm.google.com/notebook/928622f7-8b6d-421f-a33e-7d09e56d54f8",
-    "transformer-position-masking.html": "https://notebooklm.google.com/notebook/08b2fcb7-da81-47d5-aa35-bc530372e3d8"
+    "transformer-position-masking.html": "https://notebooklm.google.com/notebook/08b2fcb7-da81-47d5-aa35-bc530372e3d8",
+    "rope.html": "https://notebooklm.google.com/notebook/24d63ea7-178e-4ccc-b281-8cd069dc49e6",
+    "attention-masks.html": "https://notebook.google.com/notebook/dd1bbdb2-5890-46be-a7cf-3d3d9acc0ab8"
   };
   /* NOTEBOOKLM-END */
 

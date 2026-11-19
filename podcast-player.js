@@ -72,7 +72,9 @@
     "probes.html": "https://notebook.google.com/notebook/f415147b-8606-41c0-a40b-2c0f62788a1d",
     "blip.html": "https://notebook.google.com/notebook/9f027a66-a359-400b-9af8-5d18f025334e",
     "qformer.html": "https://notebook.google.com/notebook/2384fcf0-207e-42ad-8680-4dfcae229114",
-    "deepseek-r1.html": "https://notebooklm.google.com/notebook/86c9470f-3239-4b20-933f-ffffcdbed848"
+    "deepseek-r1.html": "https://notebooklm.google.com/notebook/86c9470f-3239-4b20-933f-ffffcdbed848",
+    "transformers.html": "https://notebooklm.google.com/notebook/928622f7-8b6d-421f-a33e-7d09e56d54f8",
+    "transformer-position-masking.html": "https://notebooklm.google.com/notebook/08b2fcb7-da81-47d5-aa35-bc530372e3d8"
   };
   /* NOTEBOOKLM-END */
 

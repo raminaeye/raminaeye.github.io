@@ -78,7 +78,10 @@
     "rope.html": "https://notebooklm.google.com/notebook/24d63ea7-178e-4ccc-b281-8cd069dc49e6",
     "attention-masks.html": "https://notebook.google.com/notebook/dd1bbdb2-5890-46be-a7cf-3d3d9acc0ab8",
     "transformer-block.html": "https://notebook.google.com/notebook/e4f911ec-1b15-47ed-aad9-627ff596df7f",
-    "transformer-architectures.html": "https://notebook.google.com/notebook/c2d00561-a3cb-4b28-b584-381353dc1d9a"
+    "transformer-architectures.html": "https://notebook.google.com/notebook/c2d00561-a3cb-4b28-b584-381353dc1d9a",
+    "cross-attention.html": "https://notebooklm.google.com/notebook/fb198f3b-6599-42b0-b003-f3f4d4e765fd",
+    "transformer-cost.html": "https://notebook.google.com/notebook/4d123a79-6613-4670-90e6-e78722e35ea7",
+    "flash-attention.html": "https://notebook.google.com/notebook/ef2512aa-7323-4bcf-87b8-79bb81954f52"
   };
   /* NOTEBOOKLM-END */
 

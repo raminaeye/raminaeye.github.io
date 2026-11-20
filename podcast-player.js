@@ -83,7 +83,9 @@
     "transformer-cost.html": "https://notebook.google.com/notebook/4d123a79-6613-4670-90e6-e78722e35ea7",
     "flash-attention.html": "https://notebook.google.com/notebook/ef2512aa-7323-4bcf-87b8-79bb81954f52",
     "kv-cache.html": "https://notebook.google.com/notebook/da95b37e-6582-4c46-bb02-bdb1875c4caf",
-    "grouped-query-attention.html": "https://notebook.google.com/notebook/82177b2d-f13f-4436-8ba5-6321c58878fa"
+    "grouped-query-attention.html": "https://notebook.google.com/notebook/82177b2d-f13f-4436-8ba5-6321c58878fa",
+    "sliding-window-attention.html": "https://notebook.google.com/notebook/955a3e6c-732d-46e9-a5a3-ea6a75521c5b",
+    "attention-sinks.html": "https://notebook.google.com/notebook/e2d5ec42-a372-4b31-a6c0-dd266154c77c"
   };
   /* NOTEBOOKLM-END */
 

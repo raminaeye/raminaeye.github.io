@@ -86,7 +86,9 @@
     "grouped-query-attention.html": "https://notebook.google.com/notebook/82177b2d-f13f-4436-8ba5-6321c58878fa",
     "sliding-window-attention.html": "https://notebook.google.com/notebook/955a3e6c-732d-46e9-a5a3-ea6a75521c5b",
     "attention-sinks.html": "https://notebook.google.com/notebook/e2d5ec42-a372-4b31-a6c0-dd266154c77c",
-    "adapter.html": "https://notebook.google.com/notebook/ba46a29c-c157-41b4-9c38-1afd3af6ba37"
+    "adapter.html": "https://notebook.google.com/notebook/ba46a29c-c157-41b4-9c38-1afd3af6ba37",
+    "lora.html": "https://notebook.google.com/notebook/f349173f-a9e8-4438-b265-9d433c39462c",
+    "conformer.html": "https://notebook.google.com/notebook/5aa3c0c9-187d-4ea5-ab4c-a63a0155c89c"
   };
   /* NOTEBOOKLM-END */
 

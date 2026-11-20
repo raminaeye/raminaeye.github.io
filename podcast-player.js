@@ -81,7 +81,9 @@
     "transformer-architectures.html": "https://notebook.google.com/notebook/c2d00561-a3cb-4b28-b584-381353dc1d9a",
     "cross-attention.html": "https://notebooklm.google.com/notebook/fb198f3b-6599-42b0-b003-f3f4d4e765fd",
     "transformer-cost.html": "https://notebook.google.com/notebook/4d123a79-6613-4670-90e6-e78722e35ea7",
-    "flash-attention.html": "https://notebook.google.com/notebook/ef2512aa-7323-4bcf-87b8-79bb81954f52"
+    "flash-attention.html": "https://notebook.google.com/notebook/ef2512aa-7323-4bcf-87b8-79bb81954f52",
+    "kv-cache.html": "https://notebook.google.com/notebook/da95b37e-6582-4c46-bb02-bdb1875c4caf",
+    "grouped-query-attention.html": "https://notebook.google.com/notebook/82177b2d-f13f-4436-8ba5-6321c58878fa"
   };
   /* NOTEBOOKLM-END */
 

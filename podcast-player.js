@@ -52,6 +52,8 @@
     "dpo.html": "https://notebook.google.com/notebook/af9a6ec5-d2c1-43c0-ab1b-5cab981e21cf",
     "grpo.html": "https://notebook.google.com/notebook/7d4cc265-49a6-4985-bd32-f8ea5c23cd4b",
     "dqn.html": "https://notebooklm.google.com/notebook/e43d58d4-f521-4e96-858e-5e3ce2a6ad66",
+    "double-dqn.html": "https://notebooklm.google.com/notebook/3c370629-fe12-4f5b-92d8-a4bcd5e184f5",
+    "dueling-dqn.html": "https://notebooklm.google.com/notebook/e3f56f6d-1802-4a2c-9f13-fa97bb45a486",
     "ddpg.html": "https://notebook.google.com/notebook/2125c00f-f7ec-45fb-a01b-2e41af1644bd",
     "ddpg-training.html": "https://notebook.google.com/notebook/0230d3f3-5705-499d-afa3-62ac0c06e8da",
     "td3.html": "https://notebook.google.com/notebook/bebcbe5c-11cf-4177-997a-4b9dfabda5a8",

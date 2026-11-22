@@ -496,6 +496,10 @@
 .eq-line sub,.eq-line sup{font-size:.68em}
       .eq-why{display:none;visibility:hidden;font-size:1rem;color:#475569;padding:.15rem .35rem .4rem;line-height:1.65}
       .eq-why.eq-active{display:block;visibility:visible}
+      /* Section 4.1: biasWalkEq lines and whys are clear at rest; stepping highlights the active line */
+      #biasWalkEq .eq-line{display:block;opacity:1;visibility:visible}
+      #biasWalkEq .eq-why{display:block;visibility:visible}
+      #biasWalkEq .eq-line.eq-active{background:#edf3fa}
       .eq-card.eq-stepped .eq-line{display:none;visibility:hidden}
       .eq-card.eq-stepped .eq-line.eq-active{display:block;opacity:1;visibility:visible}
       .eq-card.eq-stepped .eq-legend .eq-item{display:none;visibility:hidden}
@@ -930,6 +934,7 @@ nav.prereq-sec p { margin: 0; font-size: .9rem; line-height: 1.5; color: #495057
 .mo-table td:first-child { font-weight: 600; white-space: nowrap; }
 @media (max-width: 600px) {
   .mo-stack table, .mo-stack tbody, .mo-stack tr, .mo-stack td { display: block; width: auto; }
+  .mo-stack caption { display: block; width: 100%; }
   .mo-stack thead { display: none; }
   .mo-stack tr { border-bottom: 1px solid #e2e8f0; padding: .3rem 0; }
   .mo-stack td { border: 0; padding: .06rem .2rem; }
@@ -1123,6 +1128,7 @@ li a { overflow-wrap: anywhere; }
   </p>
   <div class="mo-tablewrap mo-stack">
   <table class="mo-table ">
+      <caption><span class="fignum">Table 1.</span> Four ways to balance loads, compared.</caption>
     <thead><tr><th>method</th><th>loads balanced</th><th>pulls on the model&rsquo;s gradient</th><th>uses future tokens</th></tr></thead>
     <tbody>
       <tr><td>strong balance loss</td><td data-h="loads balanced">yes</td><td data-h="pulls on the model&rsquo;s gradient">strongly</td><td data-h="uses future tokens">no</td></tr>
@@ -1132,6 +1138,10 @@ li a { overflow-wrap: anywhere; }
     </tbody>
   </table>
   </div>
+  <p>
+    Table 1 compares the ways to balance loads: a strong balance loss, a weak one, Expert Choice, and the loss-free bias. Each row reads left to right: the method, whether its loads balance, whether it pulls on the model's gradient, and whether it uses future tokens. Take the Expert Choice row: its loads balance with no pull on the gradient, but a token's route depends on later tokens.
+  </p>
+
   <p>
     The alternatives sum up this way. Expert Choice lets experts pick tokens, which balances perfectly but lets a token&rsquo;s routing depend on later tokens in the batch.
     DeepSeek-V3 keeps one bias per expert in every MoE layer, updates it after every step from that step&rsquo;s loads, and holds it fixed when the model generates text in <a href="decoding.html#generate-loop">the generate loop</a>.
@@ -1143,13 +1153,13 @@ li a { overflow-wrap: anywhere; }
     With a single picked expert and gates normalized over the picked set, the gate is one whatever the score, so the router would get no gradient through it; DeepSeek-V3 picks eight.
   </p>
   <div class="eq-card" id="moeBiasEq">
-    <p class="eq-what">Sigmoid scores, a bias that only picks, and gates from the original scores.</p>
+    <p class="eq-what">A router left alone sends most tokens to a few experts, and the usual balance loss pulls against the language-model loss. DeepSeek-V3 balances without a loss at all: what does it use instead of a gradient to pick evenly?</p>
     <div class="eq-line eq-active" data-eqline="0"><span class="eq-n">(1)</span>\(\displaystyle {\htmlClass{eqt sym-s}{\htmlStyle{color:#117864}{s_i}} = \sigma(\htmlClass{eqt sym-z}{\htmlStyle{color:#1f6aa5}{z_i}}) = \frac{1}{1 + e^{-\htmlClass{eqt sym-z}{\htmlStyle{color:#1f6aa5}{z_i}}}}}\)</div>
-    <div class="eq-why eq-active" data-eqline="0">Each expert gets its own score between zero and one. <var>\(z_i\)</var> is the router&rsquo;s logit, its raw score, for expert <var>\(i\)</var> and <var>\(\sigma\)</var> the sigmoid of <a href="logistic.html#idea">Logistic Regression</a>. Unlike a softmax, the scores do not compete: one expert scoring high does not push the others down.</div>
+    <div class="eq-why eq-active" data-eqline="0"><strong>Intuition.</strong> Each expert gets its own score between zero and one, so the router can compare experts that do not compete with each other.<br/><strong>The mathematics.</strong> This line says \(\htmlStyle{color:#117864}{s_i}\) equals \(\sigma\) of \(\htmlStyle{color:#1f6aa5}{z_i}\), which equals 1 over 1 plus \(e\) to the minus \(\htmlStyle{color:#1f6aa5}{z_i}\). \(\htmlStyle{color:#117864}{s_i}\) is the score of expert \(i\), \(\htmlStyle{color:#1f6aa5}{z_i}\) is the router's logit, its raw score, for that expert, and \(\sigma\) is the sigmoid. The fraction squashes any logit into the range from zero to one: a large \(\htmlStyle{color:#1f6aa5}{z_i}\) makes the bottom near one, so the score sits near one, and a very negative \(\htmlStyle{color:#1f6aa5}{z_i}\) makes the bottom large, so the score sits near zero. In the code, s is torch.sigmoid of z.<br/><strong>Example.</strong> Take one expert with a large positive logit: its score sits near one, while an expert with a large negative logit scores near zero.</div>
     <div class="eq-line eq-active" data-eqline="1"><span class="eq-n">(2)</span>\(\displaystyle {\mathcal{S} = \operatorname{TopK}_{i}\big(\htmlClass{eqt sym-s}{\htmlStyle{color:#117864}{s_i}} + \htmlClass{eqt sym-b}{\htmlStyle{color:#a85a14}{b_i}},\ k\big)}\)</div>
-    <div class="eq-why eq-active" data-eqline="1">Pick the <var>\(k\)</var> experts with the highest score after adding each expert&rsquo;s bias <var>\(b_i\)</var>. The bias is used only here, to decide who is picked; <var>\(\mathcal{S}\)</var> is the picked set.</div>
+    <div class="eq-why eq-active" data-eqline="1"><strong>Intuition.</strong> The bias is added only to decide who is picked: it lifts or lowers an expert's total without touching its score.<br/><strong>The mathematics.</strong> This line says \(\mathcal{S}\) equals TopK over \(i\) of \(\htmlStyle{color:#117864}{s_i}\) plus \(\htmlStyle{color:#a85a14}{b_i}\), with \(k\). \(\htmlStyle{color:#117864}{s_i}\) is the score of expert \(i\), \(\htmlStyle{color:#a85a14}{b_i}\) is its bias, and \(\mathcal{S}\) is the picked set. Adding the bias to each score and taking the \(k\) highest totals picks the experts, and the bias is used only here, never in the weights. In the code, topk picks the k highest totals of s plus b.<br/><strong>Example.</strong> Take one token against eight experts: the two highest totals are picked, even if the second-highest score alone would have lost.</div>
     <div class="eq-line eq-active" data-eqline="2"><span class="eq-n">(3)</span>\(\displaystyle {\htmlClass{eqt sym-g}{\htmlStyle{color:#7d3c98}{g_i}} = \frac{\htmlClass{eqt sym-s}{\htmlStyle{color:#117864}{s_i}}}{\sum_{j \in \mathcal{S}} \htmlClass{eqt sym-s}{\htmlStyle{color:#117864}{s_j}}} \quad (i \in \mathcal{S})}\)</div>
-    <div class="eq-why eq-active" data-eqline="2">A picked expert&rsquo;s weight <var>\(g_i\)</var> uses its original score, divided by the picked scores&rsquo; sum so the weights add to one. The bias never changes how much an output counts.</div>
+    <div class="eq-why eq-active" data-eqline="2"><strong>Intuition.</strong> A picked expert's weight comes from its original score, so the bias never changes how much an output counts.<br/><strong>The mathematics.</strong> This line says \(\htmlStyle{color:#7d3c98}{g_i}\) equals \(\htmlStyle{color:#117864}{s_i}\) over the sum over \(j\) in \(\mathcal{S}\) of \(\htmlStyle{color:#117864}{s_j}\), for \(i\) in \(\mathcal{S}\). \(\htmlStyle{color:#7d3c98}{g_i}\) is the weight of expert \(i\), \(\htmlStyle{color:#117864}{s_i}\) is its score, and the bottom adds the scores of the picked experts only. Dividing by the picked sum makes the weights add to one, and the bias is nowhere in this line, so it never changes how much an output counts. In the code, g is s gathered at the picked indices, divided by its sum. Together the three lines say one thing: sigmoid scores, a bias that only picks, and gates from the scores alone.<br/><strong>Example.</strong> Take the two picked experts: their gates are their scores over the two scores added, so the weights add to one.</div>
     <div class="eq-legend"><span class="eq-item"><span class="eq-sw" style="background:#117864"></span>score</span><span class="eq-item"><span class="eq-sw" style="background:#a85a14"></span>bias</span><span class="eq-item"><span class="eq-sw" style="background:#7d3c98"></span>gate weight</span><span class="eq-item"><span class="eq-sw" style="background:#c0392b"></span>load</span></div>
   </div>
 
@@ -1162,12 +1172,16 @@ li a { overflow-wrap: anywhere; }
 <svg class="bb-svg" viewBox="0 0 360 190" role="img" aria-label="Left, this step: two experts carry tall load bars above the dashed average and two carry short ones; arrows push the busy experts&apos; biases down and the idle ones&apos; up. Right, the next step: all four load bars sit near the average."><text class="bb-b" x="10" y="16">this step</text><text class="bb-b" x="196" y="16">next step</text><rect class="bb-load bb-over" x="18" y="42" width="26" height="118" rx="2"/><text class="bb-s" x="31" y="178" text-anchor="middle">E<tspan baseline-shift="sub" font-size="9">1</tspan></text><path class="bb-tri" d="M25 24 l6 10 l6 -10 z"/><rect class="bb-load bb-over" x="56" y="60" width="26" height="100" rx="2"/><text class="bb-s" x="69" y="178" text-anchor="middle">E<tspan baseline-shift="sub" font-size="9">2</tspan></text><path class="bb-tri" d="M63 36 l6 10 l6 -10 z"/><rect class="bb-load bb-under" x="94" y="130" width="26" height="30" rx="2"/><text class="bb-s" x="107" y="178" text-anchor="middle">E<tspan baseline-shift="sub" font-size="9">3</tspan></text><path class="bb-tri" d="M101 116 l6 -10 l6 10 z"/><rect class="bb-load bb-under" x="132" y="140" width="26" height="20" rx="2"/><text class="bb-s" x="145" y="178" text-anchor="middle">E<tspan baseline-shift="sub" font-size="9">4</tspan></text><path class="bb-tri" d="M139 126 l6 -10 l6 10 z"/><line class="bb-avg" x1="14" y1="88" x2="170" y2="88"/><rect class="bb-load" x="204" y="88" width="26" height="72" rx="2"/><text class="bb-s" x="217" y="178" text-anchor="middle">E<tspan baseline-shift="sub" font-size="9">1</tspan></text><rect class="bb-load" x="242" y="88" width="26" height="72" rx="2"/><text class="bb-s" x="255" y="178" text-anchor="middle">E<tspan baseline-shift="sub" font-size="9">2</tspan></text><rect class="bb-load" x="280" y="92" width="26" height="68" rx="2"/><text class="bb-s" x="293" y="178" text-anchor="middle">E<tspan baseline-shift="sub" font-size="9">3</tspan></text><rect class="bb-load" x="318" y="84" width="26" height="76" rx="2"/><text class="bb-s" x="331" y="178" text-anchor="middle">E<tspan baseline-shift="sub" font-size="9">4</tspan></text><line class="bb-avg" x1="200" y1="88" x2="356" y2="88"/><text class="bb-s" x="96" y="82">average</text></svg>
     <figcaption class="caption"><span class="fignum">Figure 1.</span> Schematic. Red: above the average load; blue: below. The arrows are the bias nudges of equation (4).</figcaption>
   </figure>
+  <p>
+    Figure 1 shows one training step's loads next to the next step's, expert by expert. The bars count how many tokens each expert got, the dashed line marks the average load, red bars sit above it and blue bars below, and the arrows are the bias nudges that push the next step toward even. Take the tallest red bar: its expert was above the average, so its bias steps down and it is picked less next time.
+  </p>
+
   <div class="eq-card" id="biasUpdateEq">
-    <p class="eq-what">The bias update after each step, and how imbalance is measured.</p>
+    <p class="eq-what">The bias is nudged by hand after each training step, from the loads of the step that just finished. How does one number per expert steer the next step's picks, and how is the imbalance measured?</p>
     <div class="eq-line eq-active" data-eqline="0"><span class="eq-n">(4)</span>\(\displaystyle {\begin{aligned}\htmlClass{eqt sym-b}{\htmlStyle{color:#a85a14}{b_i}} &\leftarrow \htmlClass{eqt sym-b}{\htmlStyle{color:#a85a14}{b_i}} \\ &\quad + \gamma\, \operatorname{sign}\!\big(\htmlClass{eqt sym-l}{\htmlStyle{color:#c0392b}{\bar{\ell}}} - \htmlClass{eqt sym-l}{\htmlStyle{color:#c0392b}{\ell_i}}\big)\end{aligned}}\)</div>
-    <div class="eq-why eq-active" data-eqline="0">After each step, an expert above the average load becomes a little less likely to be picked, and one below it a little more. <var>\(\ell_i\)</var> is the load of expert <var>\(i\)</var> in the step that just finished, <var>\(\bar{\ell}\)</var> the average load, and <var>\(\gamma\)</var> the update speed; sign gives plus one, minus one or zero. Brought back to equations (2) and (3): the bias changes who is picked, never how much they count.</div>
+    <div class="eq-why eq-active" data-eqline="0"><strong>Intuition.</strong> After each step, every expert's bias moves one notch: down when it was overloaded, up when it was idle.<br/><strong>The mathematics.</strong> This line says \(\htmlStyle{color:#a85a14}{b_i}\) becomes \(\htmlStyle{color:#a85a14}{b_i}\) plus \(\gamma\) times the sign of \(\htmlStyle{color:#c0392b}{\bar{\ell}}\) minus \(\htmlStyle{color:#c0392b}{\ell_i}\). \(\htmlStyle{color:#a85a14}{b_i}\) is the bias of expert \(i\), \(\gamma\) is the update speed, \(\htmlStyle{color:#c0392b}{\ell_i}\) is the load of expert \(i\) in the step that just finished, and \(\htmlStyle{color:#c0392b}{\bar{\ell}}\) is the average load. The arrow means the bias is replaced by the new value. Sign gives plus one, minus one or zero: an expert above the average loses \(\gamma\), one below it gains \(\gamma\), and one at the average stays put. In the code, update_bias adds \(\gamma\) times the sign of the mean load minus each load. Brought back to equations (2) and (3): the bias changes who is picked, never how much they count.<br/><strong>Example.</strong> Take the busiest expert after a step: its load sits above the average, so its bias drops by gamma and it is less likely to be picked next.</div>
     <div class="eq-line eq-active" data-eqline="1"><span class="eq-n">(5)</span>\(\displaystyle {\mathrm{MaxVio} = \frac{\max_i \htmlClass{eqt sym-l}{\htmlStyle{color:#c0392b}{\ell_i}} - \htmlClass{eqt sym-l}{\htmlStyle{color:#c0392b}{\bar{\ell}}}}{\htmlClass{eqt sym-l}{\htmlStyle{color:#c0392b}{\bar{\ell}}}}}\)</div>
-    <div class="eq-why eq-active" data-eqline="1">How far the busiest expert sits above an even share, as a fraction of that share. Zero is perfect balance. It is the curve in the tool and the metric in the evidence table.</div>
+    <div class="eq-why eq-active" data-eqline="1"><strong>Intuition.</strong> One number should say how uneven the loads are, so the balance can be watched as training runs.<br/><strong>The mathematics.</strong> This line says \(\mathrm{MaxVio}\) equals the largest \(\htmlStyle{color:#c0392b}{\ell_i}\) minus \(\htmlStyle{color:#c0392b}{\bar{\ell}}\), all over \(\htmlStyle{color:#c0392b}{\bar{\ell}}\). \(\mathrm{MaxVio}\) is the imbalance measure, \(\htmlStyle{color:#c0392b}{\ell_i}\) is the load of expert \(i\), the largest picks out the busiest expert, and \(\htmlStyle{color:#c0392b}{\bar{\ell}}\) is the average load. Subtracting the average leaves the busiest expert's excess, and dividing by the average turns that excess into a fraction of an even share. Zero is perfect balance. In the code, max_vio is this same fraction of the mean load. Together the two lines say one thing: the bias nudges each expert toward the average load, and MaxVio measures how far the busiest sits above it.<br/><strong>Example.</strong> Take one training step: the loads sit close to the average, so MaxVio sits near zero.</div>
     <div class="eq-legend"><span class="eq-item"><span class="eq-sw" style="background:#117864"></span>score</span><span class="eq-item"><span class="eq-sw" style="background:#a85a14"></span>bias</span><span class="eq-item"><span class="eq-sw" style="background:#7d3c98"></span>gate weight</span><span class="eq-item"><span class="eq-sw" style="background:#c0392b"></span>load</span></div>
   </div>
 
@@ -1177,20 +1191,24 @@ li a { overflow-wrap: anywhere; }
     <svg class="bb-svg" id="bwkSvg" viewBox="0 0 360 300" role="img" aria-label="Eight experts. Top: one token&apos;s scores, with the bias added on top and the picked experts outlined. Bottom: each expert&apos;s load in the step, with the dashed average line."></svg>
     <p class="wt-readout"></p>
   <div class="eq-card" id="biasWalkEq">
-    <p class="eq-what">The lines this walkthrough uses.</p>
+    <p class="eq-what">These lines are only lines until they run on one training step. This walkthrough runs them step by step on one token against eight experts, so the balancing can be watched as it happens.</p>
     <div class="eq-line" data-eqline="0"><span class="eq-n">(1)</span>\(\displaystyle {\htmlClass{eqt sym-s}{\htmlStyle{color:#117864}{s_i}} = \sigma(\htmlClass{eqt sym-z}{\htmlStyle{color:#1f6aa5}{z_i}}) = \frac{1}{1 + e^{-\htmlClass{eqt sym-z}{\htmlStyle{color:#1f6aa5}{z_i}}}}}\)</div>
-    <div class="eq-why" data-eqline="0">Each expert gets its own score between zero and one. <var>\(z_i\)</var> is the router&rsquo;s logit, its raw score, for expert <var>\(i\)</var> and <var>\(\sigma\)</var> the sigmoid of <a href="logistic.html#idea">Logistic Regression</a>. Unlike a softmax, the scores do not compete: one expert scoring high does not push the others down.</div>
+    <div class="eq-why" data-eqline="0"><strong>Intuition.</strong> Each expert gets its own score between zero and one, so the router can compare experts that do not compete with each other.<br/><strong>The mathematics.</strong> This line says \(\htmlStyle{color:#117864}{s_i}\) equals \(\sigma\) of \(\htmlStyle{color:#1f6aa5}{z_i}\), which equals 1 over 1 plus \(e\) to the minus \(\htmlStyle{color:#1f6aa5}{z_i}\). \(\htmlStyle{color:#117864}{s_i}\) is the score of expert \(i\), \(\htmlStyle{color:#1f6aa5}{z_i}\) is the router's logit, its raw score, for that expert, and \(\sigma\) is the sigmoid. The fraction squashes any logit into the range from zero to one: a large \(\htmlStyle{color:#1f6aa5}{z_i}\) makes the bottom near one, so the score sits near one, and a very negative \(\htmlStyle{color:#1f6aa5}{z_i}\) makes the bottom large, so the score sits near zero. In the code, s is torch.sigmoid of z.<br/><strong>Example.</strong> Take one expert with a large positive logit: its score sits near one, while an expert with a large negative logit scores near zero.</div>
     <div class="eq-line" data-eqline="1"><span class="eq-n">(2)</span>\(\displaystyle {\mathcal{S} = \operatorname{TopK}_{i}\big(\htmlClass{eqt sym-s}{\htmlStyle{color:#117864}{s_i}} + \htmlClass{eqt sym-b}{\htmlStyle{color:#a85a14}{b_i}},\ k\big)}\)</div>
-    <div class="eq-why" data-eqline="1">Pick the <var>\(k\)</var> experts with the highest score after adding each expert&rsquo;s bias <var>\(b_i\)</var>. The bias is used only here, to decide who is picked; <var>\(\mathcal{S}\)</var> is the picked set.</div>
+    <div class="eq-why" data-eqline="1"><strong>Intuition.</strong> The bias is added only to decide who is picked: it lifts or lowers an expert's total without touching its score.<br/><strong>The mathematics.</strong> This line says \(\mathcal{S}\) equals TopK over \(i\) of \(\htmlStyle{color:#117864}{s_i}\) plus \(\htmlStyle{color:#a85a14}{b_i}\), with \(k\). \(\htmlStyle{color:#117864}{s_i}\) is the score of expert \(i\), \(\htmlStyle{color:#a85a14}{b_i}\) is its bias, and \(\mathcal{S}\) is the picked set. Adding the bias to each score and taking the \(k\) highest totals picks the experts, and the bias is used only here, never in the weights. In the code, topk picks the k highest totals of s plus b.<br/><strong>Example.</strong> Take one token against eight experts: the two highest totals are picked, even if the second-highest score alone would have lost.</div>
     <div class="eq-line" data-eqline="2"><span class="eq-n">(3)</span>\(\displaystyle {\htmlClass{eqt sym-g}{\htmlStyle{color:#7d3c98}{g_i}} = \frac{\htmlClass{eqt sym-s}{\htmlStyle{color:#117864}{s_i}}}{\sum_{j \in \mathcal{S}} \htmlClass{eqt sym-s}{\htmlStyle{color:#117864}{s_j}}} \quad (i \in \mathcal{S})}\)</div>
-    <div class="eq-why" data-eqline="2">A picked expert&rsquo;s weight <var>\(g_i\)</var> uses its original score, divided by the picked scores&rsquo; sum so the weights add to one. The bias never changes how much an output counts.</div>
+    <div class="eq-why" data-eqline="2"><strong>Intuition.</strong> A picked expert's weight comes from its original score, so the bias never changes how much an output counts.<br/><strong>The mathematics.</strong> This line says \(\htmlStyle{color:#7d3c98}{g_i}\) equals \(\htmlStyle{color:#117864}{s_i}\) over the sum over \(j\) in \(\mathcal{S}\) of \(\htmlStyle{color:#117864}{s_j}\), for \(i\) in \(\mathcal{S}\). \(\htmlStyle{color:#7d3c98}{g_i}\) is the weight of expert \(i\), \(\htmlStyle{color:#117864}{s_i}\) is its score, and the bottom adds the scores of the picked experts only. Dividing by the picked sum makes the weights add to one, and the bias is nowhere in this line, so it never changes how much an output counts. In the code, g is s gathered at the picked indices, divided by its sum.<br/><strong>Example.</strong> Take the two picked experts: their gates are their scores over the two scores added, so the weights add to one.</div>
     <div class="eq-line" data-eqline="3"><span class="eq-n">(4)</span>\(\displaystyle {\begin{aligned}\htmlClass{eqt sym-b}{\htmlStyle{color:#a85a14}{b_i}} &\leftarrow \htmlClass{eqt sym-b}{\htmlStyle{color:#a85a14}{b_i}} \\ &\quad + \gamma\, \operatorname{sign}\!\big(\htmlClass{eqt sym-l}{\htmlStyle{color:#c0392b}{\bar{\ell}}} - \htmlClass{eqt sym-l}{\htmlStyle{color:#c0392b}{\ell_i}}\big)\end{aligned}}\)</div>
-    <div class="eq-why" data-eqline="3">After each step, an expert above the average load becomes a little less likely to be picked, and one below it a little more. <var>\(\ell_i\)</var> is the load of expert <var>\(i\)</var> in the step that just finished, <var>\(\bar{\ell}\)</var> the average load, and <var>\(\gamma\)</var> the update speed; sign gives plus one, minus one or zero. Brought back to equations (2) and (3): the bias changes who is picked, never how much they count.</div>
+    <div class="eq-why" data-eqline="3"><strong>Intuition.</strong> After each step, every expert's bias moves one notch: down when it was overloaded, up when it was idle.<br/><strong>The mathematics.</strong> This line says \(\htmlStyle{color:#a85a14}{b_i}\) becomes \(\htmlStyle{color:#a85a14}{b_i}\) plus \(\gamma\) times the sign of \(\htmlStyle{color:#c0392b}{\bar{\ell}}\) minus \(\htmlStyle{color:#c0392b}{\ell_i}\). \(\htmlStyle{color:#a85a14}{b_i}\) is the bias of expert \(i\), \(\gamma\) is the update speed, \(\htmlStyle{color:#c0392b}{\ell_i}\) is the load of expert \(i\) in the step that just finished, and \(\htmlStyle{color:#c0392b}{\bar{\ell}}\) is the average load. The arrow means the bias is replaced by the new value. Sign gives plus one, minus one or zero: an expert above the average loses \(\gamma\), one below it gains \(\gamma\), and one at the average stays put. In the code, update_bias adds \(\gamma\) times the sign of the mean load minus each load. Brought back to equations (2) and (3): the bias changes who is picked, never how much they count.<br/><strong>Example.</strong> Take the busiest expert after a step: its load sits above the average, so its bias drops by gamma and it is less likely to be picked next.</div>
     <div class="eq-line" data-eqline="4"><span class="eq-n">(5)</span>\(\displaystyle {\mathrm{MaxVio} = \frac{\max_i \htmlClass{eqt sym-l}{\htmlStyle{color:#c0392b}{\ell_i}} - \htmlClass{eqt sym-l}{\htmlStyle{color:#c0392b}{\bar{\ell}}}}{\htmlClass{eqt sym-l}{\htmlStyle{color:#c0392b}{\bar{\ell}}}}}\)</div>
-    <div class="eq-why" data-eqline="4">How far the busiest expert sits above an even share, as a fraction of that share. Zero is perfect balance. It is the curve in the tool and the metric in the evidence table.</div>
+    <div class="eq-why" data-eqline="4"><strong>Intuition.</strong> One number should say how uneven the loads are, so the balance can be watched as training runs.<br/><strong>The mathematics.</strong> This line says \(\mathrm{MaxVio}\) equals the largest \(\htmlStyle{color:#c0392b}{\ell_i}\) minus \(\htmlStyle{color:#c0392b}{\bar{\ell}}\), all over \(\htmlStyle{color:#c0392b}{\bar{\ell}}\). \(\mathrm{MaxVio}\) is the imbalance measure, \(\htmlStyle{color:#c0392b}{\ell_i}\) is the load of expert \(i\), the largest picks out the busiest expert, and \(\htmlStyle{color:#c0392b}{\bar{\ell}}\) is the average load. Subtracting the average leaves the busiest expert's excess, and dividing by the average turns that excess into a fraction of an even share. Zero is perfect balance. In the code, max_vio is this same fraction of the mean load. Together the two lines say one thing: the bias nudges each expert toward the average load, and MaxVio measures how far the busiest sits above it.<br/><strong>Example.</strong> Take one training step: the loads sit close to the average, so MaxVio sits near zero.</div>
   </div>
     <figcaption class="caption"><span class="fignum">Figure 2.</span> Illustrative scores and loads. Orange: bias; green outline: picked.</figcaption>
   </figure>
+  <p>
+    Figure 2 walks through one training step on one token against eight experts. The top panel scores the token against every expert, adds each bias on top and outlines the two picked, while the bottom panel counts each expert's load against the dashed average. Take the last step: the tallest bar's excess over the average has shrunk, and the loads have closed in on the average.
+  </p>
+
 
   <h2 id="bias-tool"><span class="secnum">5</span> The tool: tuning the update speed</h2>
   <figure class="demo figure mo-tool" id="moeBias">
@@ -1202,6 +1220,10 @@ li a { overflow-wrap: anywhere; }
     <p class="tool-readout" id="mbsRead" aria-live="polite"></p>
     <figcaption class="caption"><span class="fignum">Figure 3.</span> Illustrative toy: eight experts, two per token. Band: the swing; dashed grey: <var>\(\gamma\)</var> in DeepSeek-V3&rsquo;s range.</figcaption>
   </figure>
+  <p>
+    Figure 3 runs the balancing as a tool, with a slider for the update speed and a play button that runs training. The top panel shows eight experts' loads at one point in training against the dashed average, the training-step slider picks that point, and the bottom curve tracks the imbalance over training with a band for its swing. Take the speed at its fastest: the curve drops a short way and then stays level, while the load bars still swing red and blue around the average.
+  </p>
+
   <p>
     Too small a speed balances late, too large a speed keeps the loads swinging around the average, and in between the curve falls and settles.
   </p>
@@ -1223,6 +1245,7 @@ li a { overflow-wrap: anywhere; }
   <div id="knobs">
   <div class="mo-tablewrap mo-stack">
   <table class="mo-table">
+      <caption><span class="fignum">Table 2.</span> The settings, and what changing each one does.</caption>
     <thead><tr><th>knob</th><th>raise it</th><th>lower it</th><th>typical setting</th></tr></thead>
     <tbody>
       <tr><td>update speed <var>\(\gamma\)</var></td><td data-h="raise it">corrects faster but keeps swinging (Figure 3)</td><td data-h="lower it">balances slowly; zero freezes the bias</td><td data-h="typical setting">small, then zero late in training</td></tr>
@@ -1231,6 +1254,10 @@ li a { overflow-wrap: anywhere; }
   </table>
   </div>
   </div>
+  <p>
+    Table 2 lists the two knobs of this page, what raising each one does and what lowering it does, and the setting DeepSeek-V3 uses. Each row reads left to right: the knob, the effect of raising it, the effect of lowering it, and the typical setting. Take the update speed row: raising it corrects faster but keeps swinging, while lowering it balances slowly.
+  </p>
+
   <p>
     The cost is small: one vector of biases per MoE layer, one count of tokens per expert per step, and no gradient.
   </p>
@@ -1258,6 +1285,10 @@ def update_bias(b, idx, n, gamma):
 <svg class="bb-svg" viewBox="0 0 360 196" role="img" aria-label="Router entropy over training steps. With no balancing the curve falls from ln N toward ln k as the router collapses. With balancing it stays near ln N."><path class="bb-ax" d="M50 18 V160 H344"/><text class="bb-s" x="196" y="188" text-anchor="middle">training steps</text><text class="bb-s" x="14" y="92" transform="rotate(-90 14 92)" text-anchor="middle">router entropy</text><text class="bb-s" x="46" y="34" text-anchor="end">ln N</text><text class="bb-s" x="46" y="146" text-anchor="end">ln k</text><path class="bb-l2" d="M52 32 C120 34 200 33 340 34"/><text x="230" y="26" style="fill:#117864">balanced</text><path class="bb-l1" d="M52 32 C100 60 140 120 200 138 C250 144 300 142 340 142"/><text x="236" y="132" style="fill:#c0392b">no balancing</text></svg>
     <figcaption class="caption"><span class="fignum">Figure 4.</span> Illustrative toy. A collapsing router&rsquo;s entropy falls toward the value for only its favourite experts.</figcaption>
   </figure>
+  <p>
+    Figure 4 plots the router's entropy, how spread its picks are, over training, with and without balancing. The upper line is marked ln N, the entropy of an even load over all N experts, and the lower line is marked ln k, the entropy when the router has collapsed onto its k picked experts. Take the unbalanced curve: it falls toward the ln k line as the router settles on its favourites.
+  </p>
+
   <p class="code-lead">Code 2, what to log for every MoE layer.</p>
 <pre class="cs" data-cs="1-2,3,4-5,6-8"><code class="language-python">def log_router(load, keep, z):
     max_vio = (load.max() - load.mean()) / load.mean()
@@ -1277,6 +1308,7 @@ def update_bias(b, idx, n, gamma):
   <h2 id="bias-failures"><span class="secnum">10</span> What goes wrong</h2>
   <div class="mo-tablewrap mo-stack">
   <table class="mo-table fx-table">
+      <caption><span class="fignum">Table 3.</span> What goes wrong, and what helps.</caption>
     <thead><tr><th>failure</th><th>cause</th><th>symptom</th><th>fix</th></tr></thead>
     <tbody>
       <tr><td><strong>Routing collapse</strong></td><td data-h="cause">no balancing at all</td><td data-h="symptom">MaxVio climbs; router entropy falls toward <var>\(\ln k\)</var></td><td data-h="fix">turn the bias update on</td></tr>
@@ -1288,6 +1320,10 @@ def update_bias(b, idx, n, gamma):
     </tbody>
   </table>
   </div>
+  <p>
+    Table 3 lists what goes wrong with bias balancing, what causes it, what it looks like, and the fix. Each row reads left to right: the failure, its cause, its symptom, and the fix, one row per failure. Take the routing collapse row: with no balancing at all, MaxVio climbs and the router's entropy falls, so the fix is to turn the bias update on.
+  </p>
+
   <p>
     Watch MaxVio for every layer, and keep the bias out of the gate.
   </p>

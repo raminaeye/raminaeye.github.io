@@ -32,7 +32,8 @@
   var NOTEBOOKLM = {
     "rl.html": "https://notebook.google.com/notebook/7b03075f-e522-4a31-aafd-73708b40b2ac",
     "rl-methods.html": "https://notebooklm.google.com/notebook/6b1f6219-63bb-4a8f-8dd6-c74869ae65b4",
-    "q-learning.html": "https://notebook.google.com/notebook/0231f250-33c1-4429-a5e0-399fccfee7be",
+    "q-learning.html": "https://notebooklm.google.com/notebook/1ce1db23-6f84-4a0a-8b2a-95472656cadc",
+    "sarsa.html": "https://notebooklm.google.com/notebook/f42f2ace-f503-476e-a8e8-3bcbecea9ee7",
     "rl-policy-gradients.html": "https://notebook.google.com/notebook/cc54fe8f-a319-43e2-bdb9-15870ccc696b",
     "reinforce.html": "https://notebook.google.com/notebook/3e2020f8-5c27-4f91-8721-3931f228b3a9",
     "actor-critic.html": "https://notebook.google.com/notebook/98190f6a-3d31-45a4-847a-b46808e01eb7",
@@ -50,7 +51,7 @@
     "rlaif.html": "https://notebook.google.com/notebook/11007455-73c1-4f65-a4af-e763f84cd150",
     "dpo.html": "https://notebook.google.com/notebook/af9a6ec5-d2c1-43c0-ab1b-5cab981e21cf",
     "grpo.html": "https://notebook.google.com/notebook/7d4cc265-49a6-4985-bd32-f8ea5c23cd4b",
-    "dqn.html": "https://notebook.google.com/notebook/778c632e-e2da-40d1-9fc5-b66ecd6e23b3",
+    "dqn.html": "https://notebooklm.google.com/notebook/e43d58d4-f521-4e96-858e-5e3ce2a6ad66",
     "ddpg.html": "https://notebook.google.com/notebook/2125c00f-f7ec-45fb-a01b-2e41af1644bd",
     "ddpg-training.html": "https://notebook.google.com/notebook/0230d3f3-5705-499d-afa3-62ac0c06e8da",
     "td3.html": "https://notebook.google.com/notebook/bebcbe5c-11cf-4177-997a-4b9dfabda5a8",

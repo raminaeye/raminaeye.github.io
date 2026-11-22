@@ -31,7 +31,7 @@
      is reported, never swapped. */
   var NOTEBOOKLM = {
     "rl.html": "https://notebook.google.com/notebook/7b03075f-e522-4a31-aafd-73708b40b2ac",
-    "rl-methods.html": "https://notebook.google.com/notebook/3081561c-3a7e-4bce-aaf4-22c05c28ddec",
+    "rl-methods.html": "https://notebooklm.google.com/notebook/6b1f6219-63bb-4a8f-8dd6-c74869ae65b4",
     "q-learning.html": "https://notebook.google.com/notebook/0231f250-33c1-4429-a5e0-399fccfee7be",
     "rl-policy-gradients.html": "https://notebook.google.com/notebook/cc54fe8f-a319-43e2-bdb9-15870ccc696b",
     "reinforce.html": "https://notebook.google.com/notebook/3e2020f8-5c27-4f91-8721-3931f228b3a9",

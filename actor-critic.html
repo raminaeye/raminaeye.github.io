@@ -810,7 +810,7 @@ ol.fig-notes li { margin: .2rem 0; }
 
     <p>A toy A2C for Pong, to read rather than run; Pong has six buttons and we keep the three that move the paddle. The code uses gymnasium, the library that runs the games, and ale_py, the Atari game set it loads.</p>
 
-    <pre class="cs" data-cs="6-15,17-28,30-38,40-55,56-61,62-65"><code class="language-python">import gymnasium as gym, ale_py
+    <pre class="cs" data-cs="6-20,22-33,35-43,45-60,61-66,67-70"><code class="language-python">import gymnasium as gym, ale_py
 import torch
 from torch import nn
 from torch.distributions import Categorical
@@ -818,6 +818,11 @@ from torch.distributions import Categorical
 gym.register_envs(ale_py)
 MOVES = [2, 0, 3]   # Atari action numbers: 2 moves the paddle up, 0 stays, 3 moves it down
 n_envs, n_steps, gamma, lam, c_v, c_h = N_ENVS, N_STEPS, DISCOUNT, LAMBDA, C_VALUE, C_ENTROPY
+# network shapes from the A3C paper: 16 then 32 channels, 256 hidden
+FRAMES, C1, C2, HIDDEN, N_MOVES = 4, 16, 32, 256, 3
+FLAT = C2 * 9 * 9   # 32 channels on a 9 by 9 map: 2592
+EPS_FLOOR = 1e-5   # Stable-Baselines3 A2C default
+LEARNING_RATE = 7e-4   # A3C default, annealed to zero over training
 
 def make_pong():
     env = gym.make("ALE/Pong-v5", frameskip=1)   # the emulator itself skips no frames
@@ -879,7 +884,7 @@ while True:
     <ol class="cs-notes">
       <li><span class="cs-n">1</span>Copies of Pong in one batch, each played by the same network; a finished game restarts within the same step, so every step is a real move.</li>
       <li><span class="cs-n">2</span>One shared body with two outputs: the actor&#8217;s raw outputs, called <code>logits</code>, for the three moves, and the critic&#8217;s guess <var>\(V_\phi(s)\)</var>.</li>
-      <li><span class="cs-n">3</span><a href="#acGaeEq">GAE</a>, added up backward: each step&#8217;s surprise <code>delta</code>, then the blend; <code>(1 - dones[t])</code> drops the next guess when the game ended.</li>
+      <li><span class="cs-n">3</span><a href="#acGaeEq">GAE</a>, added up backward: each step&#8217;s surprise, then the blend; the mask drops the next guess when the game ended.</li>
       <li><span class="cs-n">4</span>The stretch of play: the network and its RMSProp optimizer (<a href="adaptive-optimizers.html#rmsprop">Adaptive Optimizers: AdaGrad, RMSProp and Adam</a>) are built first, then each game plays a few steps and the moves, rewards and guesses are collected for the <a href="#acLossEq">two losses</a>.</li>
       <li><span class="cs-n">5</span>The <a href="#acLossEq">two losses</a>: <code>returns</code> is <var>\(\hat R_t\)</var>, and <code>detach()</code> holds <var>\(\hat A_t\)</var> and <var>\(\hat R_t\)</var> fixed. The code averages over steps where the equations sum; only the step size changes.</li>
       <li><span class="cs-n">6</span>The <a href="#acTotalEq">whole loss</a>, then one step with the optimizer built in code section 4; <code>clip_grad_norm_</code> caps the size of the gradient (<a href="backpropagation.html#autograd">Backpropagation and Gradient Checking</a>).</li>
@@ -923,7 +928,7 @@ while True:
         <tr><td data-label="Setting">Steps per update</td><td data-label="Value">5</td><td data-label="Raising it">Longer lookaheads; less bias, more noise</td><td data-label="Lowering it">Shorter lookaheads; leans on the critic</td><td data-label="Source">A3C defaults</td></tr>
         <tr><td data-label="Setting">Discount <var>\(\gamma\)</var></td><td data-label="Value"><var>\(0.99\)</var></td><td data-label="Raising it">Far-off points count more; less bias, more noise</td><td data-label="Lowering it">Only near points count; more bias</td><td data-label="Source">A3C defaults</td></tr>
         <tr><td data-label="Setting">Entropy weight <var>\(c_H\)</var></td><td data-label="Value"><var>\(0.01\)</var></td><td data-label="Raising it">Stays undecided longer; settles slower</td><td data-label="Lowering it">Commits sooner; may lock on</td><td data-label="Source">A3C defaults (written <var>\(\beta\)</var> there)</td></tr>
-        <tr><td data-label="Setting">Learning rate <var>\(\eta\)</var></td><td data-label="Value">Shrunk to zero over training</td><td data-label="Raising it">Faster, until overshoot</td><td data-label="Lowering it">Steadier, slower</td><td data-label="Source">A3C defaults</td></tr>
+        <tr><td data-label="Setting">Learning rate <var>\(\eta\)</var></td><td data-label="Value"><var>\(7\times10^{-4}\)</var>, shrunk to zero over training</td><td data-label="Raising it">Faster, until overshoot</td><td data-label="Lowering it">Steadier, slower</td><td data-label="Source">A3C defaults</td></tr>
         <tr><td data-label="Setting"><var>\(\lambda\)</var></td><td data-label="Value"><var>\(0.9\)</var> to <var>\(0.99\)</var></td><td data-label="Raising it">Less bias, more spread</td><td data-label="Lowering it">Less spread, more bias</td><td data-label="Source">GAE settings</td></tr>
         <tr><td data-label="Setting">Critic-loss weight <var>\(c_V\)</var></td><td data-label="Value"><var>\(0.5\)</var></td><td data-label="Raising it">Critic learns faster; can crowd out the actor</td><td data-label="Lowering it">Critic lags; its bias lasts longer</td><td data-label="Source">Stable-Baselines3 A2C default</td></tr>
         <tr><td data-label="Setting">Gradient cap</td><td data-label="Value"><var>\(0.5\)</var></td><td data-label="Raising it">Bigger, riskier steps</td><td data-label="Lowering it">Safer, slower steps</td><td data-label="Source">Stable-Baselines3 A2C default</td></tr>
@@ -1007,13 +1012,13 @@ while True:
   el('text',{x:8,y:156,class:'mtd-t2',style:'font-size:14px'},gCurveLab,'critic\u2019s guess');
   // one lookahead from the circled move (step 2: one step, step 3: four steps)
   var bPath=el('path',{d:'',style:'fill:none;stroke-width:3px'},gB), bDia=el('polygon',{points:'',class:'mtd-f mtd-c2'},gB);
-  var bTxt=el('text',{x:0,y:204,'text-anchor':'middle',style:'font-size:14px'},gB,''), bGuess=el('text',{x:0,y:185,'text-anchor':'start',class:'mtd-t2',style:'font-size:14px'},gB,'critic\u2019s guess');
+  var bTxt=el('text',{x:0,y:204,'text-anchor':'middle',style:'font-size:14px'},gB,''), bGuess=el('text',{x:0,y:185,'text-anchor':'start',class:'mtd-t2',style:'font-size:14px'},gB,'');
   function bracket(p,x0,x1,y){p.setAttribute('d','M'+x0+','+(y+8)+' L'+x0+','+y+' L'+x1+','+y+' L'+x1+','+(y+8));}
   function dia(p,x,y){p.setAttribute('points',x+','+(y-7)+' '+(x+7)+','+y+' '+x+','+(y+7)+' '+(x-7)+','+y);}
   [[1,1],[2,.6],[4,.3],[6,.12]].forEach(function(b,k){var p=el('path',{style:'fill:none;stroke:#196f3d;stroke-width:3px;opacity:'+b[1]},gFade);bracket(p,X(0),X(b[0]),172+k*11);});
   el('text',{x:150,y:230,'text-anchor':'middle',class:'mtd-grn',style:'font-size:14px'},gFade,'longer lookaheads count less');
   // actor arrows: length and colour from each move's blended estimate A (target minus guess)
-  el('text',{x:8,y:240,style:'font-size:14px;font-weight:700'},gArr,'actor\u2019s push');
+  el('text',{x:8,y:252,style:'font-size:14px;font-weight:700'},gArr,'actor\u2019s push');
   el('line',{x1:16,y1:288,x2:288,y2:288,class:'rf-grey-s',style:'stroke-width:1px'},gArr);
   A.forEach(function(a,k){
     var len=Math.max(9,Math.abs(a)*100), up=a>0, c=up?'#196f3d':'#b03a2e', x=X(k), y2=up?288-len:288+len, d=up?1:-1;
@@ -1032,16 +1037,18 @@ while True:
     'Every move gets its own blended estimate the same way. The actor pushes each move by it: up and green above zero, down and red below.',
     'The critic\u2019s curve moves toward the dots, its targets: a dot above the old, dashed curve goes with a green push, below it with a red one.'];
   var LINES=[-1,-1,0,1,2,3,4], st=0, out=document.getElementById('awOut'), card=document.getElementById('acWalkEq');
-  function show(g,on){g.style.display=on?'':'none';}
+  function show(g,on){g.style.opacity=on?'1':'0.22';}
   function draw(){
     show(gCurve,st>=1); show(gCurveLab,st>=1); show(gB,st===2||st===3); show(gFade,st===4); show(gArr,st>=5); show(gTar,st>=6);
     oldC.style.opacity = st>=6 ? '.3' : '1'; oldC.style.strokeDasharray = st>=6 ? '5 4' : '';
+    bGuess.textContent=(st===2||st===3)?'critic\u2019s guess':'';
     if(st===2||st===3){
       var n=st===2?1:4, x1=X(n), est=0; for(var k=0;k<n;k++) est+=R[k]; est+=V[n]-V[0];
       var c=est>=0?'#196f3d':'#b03a2e';
       bracket(bPath,X(0),x1,180); bPath.style.stroke=c; dia(bDia,x1,180);
       bGuess.setAttribute('x',x1+11);
-      bTxt.setAttribute('x',(X(0)+x1)/2); bTxt.style.fill=c; bTxt.textContent= n===1?'a short lookahead':'a longer lookahead';
+      bTxt.style.fill=c; bTxt.textContent= n===1?'a short lookahead':'a longer lookahead';
+      bTxt.setAttribute('x',Math.max((X(0)+x1)/2, bTxt.getComputedTextLength()/2+2));
     }
     out.textContent=READ[st];
     var lines=card.querySelectorAll('.eq-line, .eq-why');

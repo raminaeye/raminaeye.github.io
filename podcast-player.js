@@ -39,7 +39,7 @@
     "actor-critic.html": "https://notebooklm.google.com/notebook/02420a7d-8113-4f13-830e-ee1e84a33440",
     "ppo.html": "https://notebooklm.google.com/notebook/238ba31d-0351-48fc-b7b3-15d726bc016e",
     "rl-continuous-actions.html": "https://notebooklm.google.com/notebook/35d2707b-2dae-4cbc-860b-29101ccaa01b",
-    "rl-model-based.html": "https://notebook.google.com/notebook/b44e7cd3-8a76-410b-9298-53c40cdd393b",
+    "rl-model-based.html": "https://notebook.google.com/notebook/4f8a8d37-f1ef-4890-bd82-7a0fc860006b",
     "dyna.html": "https://notebook.google.com/notebook/54c4706a-4375-4e1a-8065-16307218246b",
     "alphazero.html": "https://notebook.google.com/notebook/e17462d2-c017-4d6a-98ce-fbe4bd6f2a8f",
     "muzero.html": "https://notebook.google.com/notebook/6d79f7d2-2cc2-42ad-b684-46c721e0acf9",

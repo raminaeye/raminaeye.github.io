@@ -89,8 +89,8 @@
     "grouped-query-attention.html": "https://notebook.google.com/notebook/b2659845-f73a-42ca-ac9b-6b4ebe84a06d",
     "sliding-window-attention.html": "https://notebook.google.com/notebook/e025e399-5121-4d7f-ba85-1f709c20e0e7",
     "attention-sinks.html": "https://notebook.google.com/notebook/5bf61bdf-e57e-413f-8a2a-398ab81009bf",
-    "adapter.html": "https://notebook.google.com/notebook/ba46a29c-c157-41b4-9c38-1afd3af6ba37",
-    "lora.html": "https://notebook.google.com/notebook/f349173f-a9e8-4438-b265-9d433c39462c",
+    "adapter.html": "https://notebook.google.com/notebook/ed73e107-42b3-4486-9998-27c6694565bd",
+    "lora.html": "https://notebook.google.com/notebook/3f2260d3-8426-42e9-9538-48ba8d52662b",
     "conformer.html": "https://notebook.google.com/notebook/5aa3c0c9-187d-4ea5-ab4c-a63a0155c89c",
     "conformer-pytorch.html": "https://notebook.google.com/notebook/04e61aa3-67c6-474f-9da5-046ea7408234"
   };

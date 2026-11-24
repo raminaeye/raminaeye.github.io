@@ -91,8 +91,8 @@
     "attention-sinks.html": "https://notebook.google.com/notebook/5bf61bdf-e57e-413f-8a2a-398ab81009bf",
     "adapter.html": "https://notebook.google.com/notebook/ed73e107-42b3-4486-9998-27c6694565bd",
     "lora.html": "https://notebook.google.com/notebook/3f2260d3-8426-42e9-9538-48ba8d52662b",
-    "conformer.html": "https://notebook.google.com/notebook/5aa3c0c9-187d-4ea5-ab4c-a63a0155c89c",
-    "conformer-pytorch.html": "https://notebook.google.com/notebook/04e61aa3-67c6-474f-9da5-046ea7408234"
+    "conformer.html": "https://notebook.google.com/notebook/9ae83fb6-49b8-4966-b051-6f78671d2bde",
+    "conformer-pytorch.html": "https://notebook.google.com/notebook/16bb8260-a66f-4860-a3ba-27de25e972ff"
   };
   /* NOTEBOOKLM-END */
 

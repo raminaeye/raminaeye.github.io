@@ -26,6 +26,8 @@
   /* NOTEBOOKLM-BEGIN: permanent NotebookLM Audio Overview links, one per
      tutorial page. Ramin's order 2026-11-11: once a link is at the top of a
      tutorial page it stays there, never removed, replaced or changed.
+     2026-11-24: Ramin's approved episode-length plan removes 20 links
+     outside 15 to 25 minutes; in-band links stay.
      ingest.py replaces only the EPISODES block above, so this block survives
      episode ingests. Do not edit the URLs here; a link that fails its check
      is reported, never swapped. */
@@ -61,38 +63,18 @@
     "rl-alignment.html": "https://notebook.google.com/notebook/433c365f-da52-4188-b934-782cafa9d73e",
     "tokenizers.html": "https://notebook.google.com/notebook/8ea17045-fe45-45a5-8a48-f36676edeaa6",
     "subword-tokenization.html": "https://notebook.google.com/notebook/e267f68f-4e48-4bbc-a839-9ad46edbf0bb",
-    "wordpiece.html": "https://notebook.google.com/notebook/2eff1cd8-8082-41a6-ba3d-88d055f40f18",
-    "unigram-tokenizer.html": "https://notebook.google.com/notebook/57d6deb2-b82a-41df-b496-7450c2dc84a8",
     "sentencepiece.html": "https://notebooklm.google.com/notebook/baea4420-3c8a-4a0f-85c1-c73eec6ae033",
-    "decoding.html": "https://notebook.google.com/notebook/5ed7b83c-835f-429e-bb48-2a2f983bbd89",
     "beam-search.html": "https://notebook.google.com/notebook/88c06a71-686f-4bfb-aaea-45933826982e",
     "sampling.html": "https://notebook.google.com/notebook/6e6ad94c-f4e6-4b26-a7c7-152ecfb62dcf",
-    "mixture-of-experts.html": "https://notebook.google.com/notebook/8ed91f15-da4d-48d3-8264-a2656aad8c0e",
-    "mixture-of-experts-designs.html": "https://notebook.google.com/notebook/ab0348c4-4ae6-4848-a3ef-71a4a38a3b54",
     "moe-bias-balancing.html": "https://notebook.google.com/notebook/f8bc9a5e-6da4-4e4c-8629-4628dee9a48b",
     "moe-expert-parallelism.html": "https://notebook.google.com/notebook/da7efb4f-246d-438d-b791-e1623bdcb053",
-    "moe-fine-tuning.html": "https://notebook.google.com/notebook/108eef86-2a8c-4027-b733-231d06eaa010",
     "probes.html": "https://notebook.google.com/notebook/f415147b-8606-41c0-a40b-2c0f62788a1d",
-    "blip.html": "https://notebook.google.com/notebook/9f027a66-a359-400b-9af8-5d18f025334e",
     "qformer.html": "https://notebook.google.com/notebook/2384fcf0-207e-42ad-8680-4dfcae229114",
     "deepseek-r1.html": "https://notebooklm.google.com/notebook/86c9470f-3239-4b20-933f-ffffcdbed848",
-    "transformers.html": "https://notebooklm.google.com/notebook/510aa431-8ffb-4972-905d-1ed038daba48",
-    "transformer-position-masking.html": "https://notebooklm.google.com/notebook/b3e3ef99-8cc6-407b-b251-a52b7b3d4e9d",
-    "rope.html": "https://notebooklm.google.com/notebook/ab553807-c867-43e3-a074-07b6035a2890",
     "attention-masks.html": "https://notebook.google.com/notebook/926ca40a-09f2-4101-93ed-f7a79b39a7be",
-    "transformer-block.html": "https://notebook.google.com/notebook/09e3a350-d6a7-48a5-97d0-dbffa53e7e39",
     "transformer-architectures.html": "https://notebook.google.com/notebook/9f2999ae-3ef7-4324-818e-89b8ecb5e0af",
-    "cross-attention.html": "https://notebooklm.google.com/notebook/c636a1c6-1ed8-4fd2-9c71-e0987f518f9f",
-    "transformer-cost.html": "https://notebook.google.com/notebook/f5cc91ea-dcde-4905-b636-bcd99fa15009",
-    "flash-attention.html": "https://notebook.google.com/notebook/b8834aa4-0474-4bfc-98b6-6083720e5e01",
-    "kv-cache.html": "https://notebook.google.com/notebook/eb6c8013-c8e1-4d77-9d08-f237ace8f2c3",
-    "grouped-query-attention.html": "https://notebook.google.com/notebook/b2659845-f73a-42ca-ac9b-6b4ebe84a06d",
-    "sliding-window-attention.html": "https://notebook.google.com/notebook/e025e399-5121-4d7f-ba85-1f709c20e0e7",
-    "attention-sinks.html": "https://notebook.google.com/notebook/5bf61bdf-e57e-413f-8a2a-398ab81009bf",
-    "adapter.html": "https://notebook.google.com/notebook/ed73e107-42b3-4486-9998-27c6694565bd",
     "lora.html": "https://notebook.google.com/notebook/3f2260d3-8426-42e9-9538-48ba8d52662b",
-    "conformer.html": "https://notebook.google.com/notebook/9ae83fb6-49b8-4966-b051-6f78671d2bde",
-    "conformer-pytorch.html": "https://notebook.google.com/notebook/16bb8260-a66f-4860-a3ba-27de25e972ff"
+    "conformer.html": "https://notebook.google.com/notebook/9ae83fb6-49b8-4966-b051-6f78671d2bde"
   };
   /* NOTEBOOKLM-END */
 

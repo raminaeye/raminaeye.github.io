@@ -37,7 +37,7 @@
     "q-learning.html": "https://notebooklm.google.com/notebook/a646a3c9-6639-459b-b60b-afa81b0ba6b1",
     "sarsa.html": "https://notebooklm.google.com/notebook/275fdfee-4ac6-495c-b27f-da3d80607300",
     "rl-policy-gradients.html": "https://notebooklm.google.com/notebook/37d682c0-b909-4cb2-b543-2d9b9a7341bd",
-    "reinforce.html": "https://notebooklm.google.com/notebook/3844e620-10a9-4666-9726-3f5066c657ce",
+    "reinforce.html": "https://notebooklm.google.com/notebook/8c00fad2-514e-45cb-964b-475d81d7edd3",
     "actor-critic.html": "https://notebooklm.google.com/notebook/02420a7d-8113-4f13-830e-ee1e84a33440",
     "ppo.html": "https://notebooklm.google.com/notebook/238ba31d-0351-48fc-b7b3-15d726bc016e",
     "rl-continuous-actions.html": "https://notebooklm.google.com/notebook/35d2707b-2dae-4cbc-860b-29101ccaa01b",

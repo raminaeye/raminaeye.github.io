@@ -417,11 +417,11 @@
 
   /* WALKTHROUGH-HOOK: load the read-along walkthrough player beside the
      podcast hook. The version query is the first 8 hex of the ingest
-     commit that ships walkthrough-player.js (75b97d83), so a new deploy
+     commit that ships walkthrough-player.js (7bd00807), so a new deploy
      busts the cache; the registry is baked into the script. */
   try {
     var wts = document.createElement('script');
-    wts.src = href('walkthrough-player.js?v=75b97d83');
+    wts.src = href('walkthrough-player.js?v=7bd00807');
     wts.async = true;
     (document.head || document.documentElement).appendChild(wts);
   } catch (e) { /* nav keeps working */ }

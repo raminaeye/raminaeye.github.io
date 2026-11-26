@@ -25,6 +25,7 @@
   var RESUME_MIN_SECS = 5;
   var SPEEDS = [1.0, 1.1, 1.2];
   var SPEED_KEY = 'wt:speed';
+  var MIN_KEY = 'wt:minimized';
   var WORST_PODCAST = 'Resume podcast (27:55 of 28 min)';
   var WORST_WALKTHROUGH = 'Resume walkthrough (71:55 of 72 min)';
   var WORST_NOTEBOOKLM = 'Listen on NotebookLM Opens in NotebookLM.';
@@ -45,21 +46,27 @@
     '@media (max-width:640px){.pc-row{flex-direction:column;align-items:stretch}.pc-row>span{width:100%}}' +
     '@media print{.pc-row{display:none}.wt-marker{display:none!important}.wt-section-current{outline:none!important}.wt-bar{display:none!important}.wt-sheet{display:none!important}.wt-panel{display:none!important}}' +
     '.wt-section-current{outline:2px solid #d97706;outline-offset:2px}' +
-    '.wt-marker{position:absolute;width:12px;height:12px;pointer-events:none;z-index:60;color:inherit}' +
+    '.wt-marker{position:absolute;width:12px;height:12px;pointer-events:none;z-index:54;color:inherit}' +
     '.wt-marker svg{width:12px;height:12px;display:block}' +
     '.wt-bar{position:fixed;left:0;right:0;bottom:0;z-index:50;background:#fff;color:#111;' +
-    'border-top:1px solid #999;padding:.5rem .75rem;display:flex;flex-wrap:wrap;gap:.4rem .75rem;align-items:center;' +
+    'border-top:1px solid #999;padding:.5rem .75rem;display:flex;flex-direction:column;gap:.4rem;align-items:stretch;' +
     'font:inherit;font-size:1rem;line-height:1.3;box-sizing:border-box}' +
     '.wt-bar button{font:inherit;cursor:pointer;background:#fff;color:#1f618d;border:1px solid #1f618d;border-radius:8px;padding:.35rem .6rem;min-height:36px}' +
     '.wt-bar button[disabled]{opacity:.5;cursor:default}' +
     '.wt-bar button:focus-visible{outline:2px solid #1f618d;outline-offset:2px}' +
-    '.wt-bar-title{flex:1 1 8rem;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-    '.wt-bar-elem{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:8ch;max-width:40vw}' +
-    '.wt-bar-pos{white-space:nowrap;font-variant-numeric:tabular-nums}' +
-    '.wt-bar-speed{display:flex;gap:.15rem;align-items:center;border:0;padding:0;margin:0}' +
-    '.wt-bar-speed legend{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}' +
-    '.wt-bar-speed label{display:inline-flex;align-items:center;gap:.15rem;cursor:pointer;padding:.2rem .3rem;border-radius:6px}' +
-    '.wt-bar-row3{flex-basis:100%;display:flex;gap:.5rem;flex-wrap:wrap}' +
+    '.wt-bar-main{display:flex;flex-wrap:nowrap;gap:.4rem .6rem;align-items:center;min-width:0}' +
+    '.wt-bar-main button{flex:none}' +
+    '.wt-bar-title{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+    '.wt-bar-elem{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:30vw}' +
+    '.wt-bar-pos{white-space:nowrap;font-variant-numeric:tabular-nums;flex:none}' +
+    '.wt-bar-speed{font:inherit;color:#1f618d;background:#fff;border:1px solid #1f618d;border-radius:8px;padding:.35rem .3rem;min-height:36px;cursor:pointer;flex:none}' +
+    '.wt-bar-speed:focus-visible{outline:2px solid #1f618d;outline-offset:2px}' +
+    '.wt-bar-row3{display:flex;gap:.5rem;flex-wrap:wrap}' +
+    '.wt-bar.wt-min .wt-bar-main>*:not(.wt-bar-play):not(.wt-bar-minbtn){display:none}' +
+    '.wt-bar.wt-min{padding:.25rem .5rem}' +
+    '.wt-bar.wt-min .wt-bar-play,.wt-bar.wt-min .wt-bar-minbtn{min-height:28px;padding:.25rem .5rem}' +
+    '.wt-bar .wt-short{display:none}' +
+    '@media (max-width:480px){.wt-bar{font-size:.85rem;padding:.4rem .5rem}.wt-bar-main{gap:.3rem .4rem}.wt-bar-elem{display:none}.wt-bar button{padding:.3rem .45rem;min-height:32px}.wt-bar-speed{padding:.3rem .2rem;min-height:32px}.wt-bar .wt-full{display:none}.wt-bar .wt-short{display:inline}}' +
     '.wt-sheet{position:fixed;left:0;right:0;z-index:55;background:#fff;color:#111;border-top:1px solid #999;' +
     'max-height:60vh;overflow:auto;padding:1rem;box-sizing:border-box}' +
     '.wt-sheet h2{font-size:1.1rem;margin:.2rem 0 .6rem}' +
@@ -106,6 +113,11 @@
     var sp = load(SPEED_KEY);
     var r = sp && typeof sp.r === 'number' ? sp.r : 1;
     return SPEEDS.indexOf(r) >= 0 ? r : 1.0;
+  }
+
+  function loadMinimized() {
+    var m = load(MIN_KEY);
+    return !!(m && m.m === true);
   }
 
   function svgTriangle() {
@@ -310,6 +322,18 @@
         var se = sectionIndexOf(el, h2s);
         var ne = nextCount(se, 'equation');
         push({ id: 's' + se + '-e' + ne, kind: 'equation', section: se, ordinal: ne, el: el, domId: el.id || null, cardOrdinal: ne });
+        /* One unit per math line inside the card, so an equation segment
+           can point the marker at the line itself instead of the card as
+           a whole. The id is deliberately not a manifest id: the manifest
+           keys the card (s2-e1) and the eq-why divs (s2-e1-l1), so the
+           hash check skips these line units. */
+        var cardLines = el.querySelectorAll('.eq-line');
+        for (var li = 0; li < cardLines.length; li++) {
+          var lineEl = cardLines[li];
+          var ln = lineEl.querySelector('.eq-ln');
+          var lineNo = ln ? (ln.textContent || '').trim() : String(li + 1);
+          push({ id: 's' + se + '-e' + ne + '-line' + lineNo, kind: 'equation', section: se, ordinal: ne, el: lineEl, domId: lineEl.id || null, cardOrdinal: ne, cardDomId: el.id || null, eqLine: lineNo });
+        }
         continue;
       }
       if (el.classList.contains('eq-why')) {
@@ -368,6 +392,13 @@
     barElem: null,
     barPos: null,
     barPlay: null,
+    barBack: null,
+    barNext: null,
+    stepUnits: null,
+    refUnits: {},
+    barMinBtn: null,
+    barSpeed: null,
+    minimized: false,
     row3: null,
     chaptersSheet: null,
     transcriptPanel: null,
@@ -679,6 +710,102 @@
 
   /* ---------- segment resolution and the marker (plan section 3) ---------- */
 
+  /* Page section of an element: the number of h2 headings before it.
+     Section 0 is the intro before the first h2. */
+  function pageSectionOf(el) {
+    var h2s = document.querySelectorAll('h2');
+    var sec = 0;
+    for (var i = 0; i < h2s.length; i++) {
+      if (h2s[i].compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) sec = i + 1;
+      else break;
+    }
+    return sec;
+  }
+
+  /* The scanned unit for an element, or a memoized reference unit when the
+     element is not a scanned readable unit. Reference units are not added
+     to state.units: they are identified by the sidecar, not by the page
+     scan, so the hash check and the unit enumeration never see them. The
+     marker, the scroll and the bar name all work from the unit's element. */
+  function unitForElement(el, kind, section, ordinal) {
+    if (!el) return null;
+    for (var i = 0; i < state.units.length; i++) if (state.units[i].el === el) return state.units[i];
+    var key = (kind || '') + '|' + el.tagName + '|' + (el.className || '') + '|' + section + '|' + ordinal;
+    if (state.refUnits[key]) return state.refUnits[key];
+    var unit = { id: 'ref-' + (kind || 'unit') + '-' + section + '-' + ordinal, kind: kind || '', section: section, ordinal: ordinal, el: el, domId: el.id || null };
+    state.refUnits[key] = unit;
+    return unit;
+  }
+
+  /* Resolve a segment's elementRef. The transcript carries elementRef on
+     units the page gives no id to, with the field names the transcript
+     updater writes: an equation unit carries {card, line}, a figure or
+     other unit carries {class, section, ordinal}. This is the fallback
+     for units that carry no domId; the domId lookup in resolveSegment
+     still runs first. */
+  function resolveElementRef(seg) {
+    var ref = seg.elementRef;
+    if (!ref) return null;
+    if (ref.card && typeof ref.line !== 'undefined') {
+      var card = document.getElementById(ref.card);
+      if (!card) return null;
+      var lines = card.querySelectorAll('.eq-line');
+      var lineEl = lines[Number(ref.line) - 1];
+      if (!lineEl) return null;
+      return unitForElement(lineEl, 'equation', seg.sectionIndex, ref.line);
+    }
+    if (ref.class && typeof ref.section !== 'undefined' && typeof ref.ordinal !== 'undefined') {
+      var els = document.getElementsByClassName(ref.class);
+      var inSection = [];
+      for (var i = 0; i < els.length; i++) if (pageSectionOf(els[i]) === ref.section) inSection.push(els[i]);
+      var pool = inSection.length ? inSection : els;
+      var el = pool[Number(ref.ordinal) - 1];
+      if (!el) return null;
+      return unitForElement(el, seg.kind || '', ref.section, ref.ordinal);
+    }
+    return null;
+  }
+
+  /* Find the math line unit an equation segment names. The segment names
+     the line by the card id plus the line number, by a synthesized
+     card-l-N id, or, if the line itself ever carries an id, by that id.
+     Returns null when the segment does not name a line, so the caller
+     falls back to the card unit. */
+  function resolveEqLine(seg) {
+    var lines = state.units.filter(function (u) { return u.kind === 'equation' && typeof u.eqLine !== 'undefined'; });
+    if (!lines.length) return null;
+    var i, u;
+    /* The domId matches below are skipped when domId_missing is set: a
+       unit with the gate set must never resolve by domId even if a domId
+       value is present. The section, cardOrdinal and eqLine match after
+       this block uses no domId, so it still runs. */
+    if (seg.domId && !seg.domId_missing) {
+      for (i = 0; i < lines.length; i++) if (lines[i].domId === seg.domId) return lines[i];
+      if (typeof seg.eqLine !== 'undefined') {
+        for (i = 0; i < lines.length; i++) if (lines[i].cardDomId === seg.domId && String(lines[i].eqLine) === String(seg.eqLine)) return lines[i];
+      }
+      var m = /^(.+)-l(\d+)$/.exec(seg.domId);
+      if (m) {
+        for (i = 0; i < lines.length; i++) if (lines[i].cardDomId === m[1] && String(lines[i].eqLine) === m[2]) return lines[i];
+      }
+      for (i = 0; i < lines.length; i++) if (lines[i].cardDomId === seg.domId) return lines[i];
+    }
+    if (typeof seg.eqLine !== 'undefined' && typeof seg.cardOrdinal === 'number') {
+      for (i = 0; i < lines.length; i++) {
+        u = lines[i];
+        if (u.section === seg.sectionIndex && u.cardOrdinal === seg.cardOrdinal && String(u.eqLine) === String(seg.eqLine)) return u;
+      }
+    }
+    return null;
+  }
+
+  /* Resolution order, per the identification standard: a domId first,
+     where the unit carries one and domId_missing is not set; then the
+     elementRef fallback; then the ordinal fallback. A unit with
+     domId_missing set must never resolve by domId even if a domId value
+     is present; it goes straight to the elementRef fallback. The
+     paragraph_id values on transcript units are transcript-side labels,
+     not page ids, and the player never queries the DOM for them. */
   function resolveSegment(seg) {
     if (!seg) return null;
     if (seg.paragraphId && state.unitsById[seg.paragraphId]) return state.unitsById[seg.paragraphId];
@@ -692,26 +819,55 @@
     }
     if (kind === 'subhead') {
       var subs = byKind('subhead');
-      if (seg.domId) {
-        for (var i = 0; i < subs.length; i++) if (subs[i].domId === seg.domId) return subs[i];
+      if (seg.domId && !seg.domId_missing) {
+        /* A domId names one element on the page, so it is looked up across
+           all sections first; the section filter only applies to the
+           ordinal fallback below it. A segment that names a figure in one
+           narrative section while the figure sits in another page section
+           must still resolve. */
+        var allSubs = state.units.filter(function (u) { return u.kind === 'subhead'; });
+        for (var i0 = 0; i0 < allSubs.length; i0++) if (allSubs[i0].domId === seg.domId) return allSubs[i0];
       }
       if (typeof seg.ordinal === 'number') return subs[seg.ordinal - 1] || null;
       return subs[0] || null;
     }
     if (kind === 'figure' || kind === 'equation' || kind === 'tool') {
       var list = byKind(kind);
-      if (seg.domId) {
-        for (var j = 0; j < list.length; j++) if (list[j].domId === seg.domId) return list[j];
+      if (kind === 'equation') {
+        /* An equation segment names a math line, not the card as a whole.
+           The line itself carries no id on the page, so the segment names
+           it by the card id plus the line number (domId plus eqLine, the
+           same pair the eq-why segments already use), or by a synthesized
+           card-l-N id. Resolve to the line unit so the marker sits next
+           to the math line itself. */
+        var lineUnit = resolveEqLine(seg);
+        if (lineUnit) return lineUnit;
+        list = list.filter(function (u) { return typeof u.eqLine === 'undefined'; });
       }
+      if (seg.domId && !seg.domId_missing) {
+        /* A domId names one element on the page, so it is looked up across
+           all sections first; the section filter only applies to the
+           ordinal fallback below it. */
+        var allList = state.units.filter(function (u) { return u.kind === kind; });
+        for (var j0 = 0; j0 < allList.length; j0++) if (allList[j0].domId === seg.domId) return allList[j0];
+      }
+      /* A segment that carries no usable domId may carry an elementRef
+         instead: a card plus a line ordinal for an equation line, or a
+         class plus a section plus an ordinal for an element the page gives
+         no id to. The domId lookup above still runs first, unless
+         domId_missing is set, in which case the segment goes straight
+         here. */
+      var refUnit = resolveElementRef(seg);
+      if (refUnit) return refUnit;
       if (typeof seg.ordinal === 'number') return list[seg.ordinal - 1] || null;
       return list[0] || null;
     }
     if (kind === 'intuition' || kind === 'example') {
       var whys = byKind('eqwhy');
-      if (seg.domId || typeof seg.eqLine !== 'undefined') {
+      if ((seg.domId && !seg.domId_missing) || typeof seg.eqLine !== 'undefined') {
         for (var k = 0; k < whys.length; k++) {
           var w = whys[k];
-          if (seg.domId && w.domId !== seg.domId && !(w.cardOrdinal && seg.cardOrdinal === w.cardOrdinal)) continue;
+          if (seg.domId && !seg.domId_missing && w.domId !== seg.domId && !(w.cardOrdinal && seg.cardOrdinal === w.cardOrdinal)) continue;
           if (typeof seg.eqLine !== 'undefined' && String(seg.eqLine) !== String(w.eqLine)) continue;
           if (kind === 'intuition' && !w.labeled) continue;
           return w;
@@ -850,6 +1006,7 @@
     if (!seg) return;
     var changed = !state.currentSeg || state.currentSeg !== seg;
     state.currentSeg = seg;
+    if (changed) updateStepButtons();
     setSectionOutline(seg.sectionIndex);
     var unit = resolveSegment(seg);
     if (unit) {
@@ -861,7 +1018,7 @@
       clearMarker();
       if (state.barElem) state.barElem.textContent = '';
     }
-    if (state.barPos) state.barPos.textContent = fmt(t) + ' / ' + fmt(state.sidecar.totalSeconds);
+    if (state.barPos) state.barPos.textContent = posText(t);
     if (state.transcriptPanel && state.transcriptPanel.parentNode) renderTranscriptSection(seg.sectionIndex, seg);
     checkTryIt(t);
     state.lastTime = t;
@@ -880,7 +1037,7 @@
         state.tryIt = p;
         state.audio.pause();
         savePosition();
-        showRow3('tryit');
+        showRow3('both');
         announceTryIt(p);
         return;
       }
@@ -899,6 +1056,67 @@
     setTimeout(function () { if (live.parentNode) live.parentNode.removeChild(live); }, 5000);
   }
 
+  /* ---------- step buttons: previous and next thing to read ---------- */
+
+  /* The readable units, in document order, that carry at least one
+     segment. A thing to read is one of these units. Computed once; the
+     page does not change while the walkthrough runs. */
+  function stepUnits() {
+    if (state.stepUnits) return state.stepUnits;
+    var byUnit = {};
+    var segs = state.sidecar.segments || [];
+    for (var i = 0; i < segs.length; i++) {
+      var u = resolveSegment(segs[i]);
+      if (u && !byUnit[u.id]) byUnit[u.id] = u;
+    }
+    var list = state.units.filter(function (u) { return byUnit[u.id]; });
+    state.stepUnits = list;
+    return list;
+  }
+
+  function currentStepIndex() {
+    var seg = state.currentSeg;
+    if (!seg && state.audio) seg = segmentAt(state.audio.currentTime);
+    if (!seg) return -1;
+    var unit = resolveSegment(seg);
+    if (!unit) return -1;
+    var list = stepUnits();
+    for (var i = 0; i < list.length; i++) if (list[i] === unit) return i;
+    return -1;
+  }
+
+  function updateStepButtons() {
+    if (!state.barBack || !state.barNext) return;
+    var idx = currentStepIndex();
+    var list = stepUnits();
+    state.barBack.disabled = idx <= 0;
+    state.barNext.disabled = idx < 0 || idx >= list.length - 1;
+  }
+
+  function stepTo(dir) {
+    if (!state.audio) return;
+    var list = stepUnits();
+    if (!list.length) return;
+    var cur = currentStepIndex();
+    var next = dir > 0 ? (cur < 0 ? 0 : cur + 1) : (cur < 0 ? list.length - 1 : cur - 1);
+    if (next < 0 || next >= list.length) return;
+    var seg = firstSegmentForUnit(list[next]);
+    if (!seg) return;
+    state.following = true;
+    showRow3('none');
+    state.audio.currentTime = seg.startSeconds;
+    state.audio.play();
+    updateStepButtons();
+  }
+
+  /* Position readout. Below 480 pixels the bar shows the current time
+     only; the total stays in the top button and in the full bar at wider
+     widths, so the one line still fits. */
+  function posText(t) {
+    if (window.innerWidth <= 480) return fmt(t);
+    return fmt(t) + ' / ' + fmt(state.sidecar.totalSeconds);
+  }
+
   /* ---------- bottom bar ---------- */
 
   function buildBar() {
@@ -906,10 +1124,39 @@
     bar.className = 'wt-bar wt-ui';
     bar.setAttribute('role', 'region');
     bar.setAttribute('aria-label', 'Walkthrough player');
+    var main = document.createElement('div');
+    main.className = 'wt-bar-main';
+    var backBtn = document.createElement('button');
+    backBtn.type = 'button';
+    backBtn.className = 'wt-bar-step';
+    backBtn.setAttribute('aria-label', 'Previous');
+    var backFull = document.createElement('span');
+    backFull.className = 'wt-full';
+    backFull.textContent = 'Back';
+    var backShort = document.createElement('span');
+    backShort.className = 'wt-short';
+    backShort.textContent = '‹';
+    backBtn.appendChild(backFull);
+    backBtn.appendChild(backShort);
+    backBtn.addEventListener('click', function () { stepTo(-1); });
     var play = document.createElement('button');
     play.type = 'button';
+    play.className = 'wt-bar-play';
     play.textContent = 'Pause';
     play.addEventListener('click', function () { togglePlay(); });
+    var nextBtn = document.createElement('button');
+    nextBtn.type = 'button';
+    nextBtn.className = 'wt-bar-step';
+    nextBtn.setAttribute('aria-label', 'Next');
+    var nextFull = document.createElement('span');
+    nextFull.className = 'wt-full';
+    nextFull.textContent = 'Next';
+    var nextShort = document.createElement('span');
+    nextShort.className = 'wt-short';
+    nextShort.textContent = '›';
+    nextBtn.appendChild(nextFull);
+    nextBtn.appendChild(nextShort);
+    nextBtn.addEventListener('click', function () { stepTo(1); });
     var title = document.createElement('span');
     title.className = 'wt-bar-title';
     title.setAttribute('aria-live', 'polite');
@@ -917,49 +1164,66 @@
     elem.className = 'wt-bar-elem';
     var pos = document.createElement('span');
     pos.className = 'wt-bar-pos';
-    pos.textContent = '0:00 / ' + fmt(state.sidecar.totalSeconds);
-    var speedField = document.createElement('fieldset');
-    speedField.className = 'wt-bar-speed';
-    var legend = document.createElement('legend');
-    legend.textContent = 'Speed';
-    speedField.appendChild(legend);
+    pos.textContent = posText(0);
+    var speedSel = document.createElement('select');
+    speedSel.className = 'wt-bar-speed';
+    speedSel.setAttribute('aria-label', 'Speed');
     SPEEDS.forEach(function (sp) {
-      var lab = document.createElement('label');
-      var radio = document.createElement('input');
-      radio.type = 'radio';
-      radio.name = 'wt-speed';
-      radio.value = String(sp);
-      radio.checked = sp === state.speed;
-      radio.addEventListener('change', function () {
-        state.speed = sp;
-        save(SPEED_KEY, { r: sp });
-        if (state.audio) state.audio.playbackRate = sp;
-      });
-      lab.appendChild(radio);
-      lab.appendChild(document.createTextNode(sp.toFixed(1) + 'x'));
-      speedField.appendChild(lab);
+      var opt = document.createElement('option');
+      opt.value = sp.toFixed(1);
+      opt.textContent = sp.toFixed(1) + 'x';
+      speedSel.appendChild(opt);
+    });
+    speedSel.value = state.speed.toFixed(1);
+    speedSel.addEventListener('change', function () {
+      var sp = parseFloat(speedSel.value);
+      if (SPEEDS.indexOf(sp) < 0) { speedSel.value = state.speed.toFixed(1); return; }
+      state.speed = sp;
+      save(SPEED_KEY, { r: sp });
+      if (state.audio) state.audio.playbackRate = sp;
     });
     var chaptersBtn = document.createElement('button');
     chaptersBtn.type = 'button';
-    chaptersBtn.textContent = 'Chapters';
+    var chFull = document.createElement('span');
+    chFull.className = 'wt-full';
+    chFull.textContent = 'Chapters';
+    var chShort = document.createElement('span');
+    chShort.className = 'wt-short';
+    chShort.textContent = 'Ch.';
+    chaptersBtn.appendChild(chFull);
+    chaptersBtn.appendChild(chShort);
     chaptersBtn.addEventListener('click', function () { toggleChapters(chaptersBtn); });
     var trBtn = document.createElement('button');
     trBtn.type = 'button';
-    trBtn.textContent = 'Transcript';
+    var trFull = document.createElement('span');
+    trFull.className = 'wt-full';
+    trFull.textContent = 'Transcript';
+    var trShort = document.createElement('span');
+    trShort.className = 'wt-short';
+    trShort.textContent = 'Text';
+    trBtn.appendChild(trFull);
+    trBtn.appendChild(trShort);
     trBtn.addEventListener('click', function () { toggleTranscript(trBtn); });
-    var narr = document.createElement('span');
-    narr.textContent = state.sidecar.narrator || '';
+    var minBtn = document.createElement('button');
+    minBtn.type = 'button';
+    minBtn.className = 'wt-bar-minbtn';
+    minBtn.setAttribute('aria-label', 'Minimize player');
+    minBtn.textContent = '▾';
+    minBtn.addEventListener('click', function () { toggleMinimize(); });
     var row3 = document.createElement('div');
     row3.className = 'wt-bar-row3';
     row3.style.display = 'none';
-    bar.appendChild(play);
-    bar.appendChild(title);
-    bar.appendChild(elem);
-    bar.appendChild(pos);
-    bar.appendChild(speedField);
-    bar.appendChild(chaptersBtn);
-    bar.appendChild(trBtn);
-    bar.appendChild(narr);
+    main.appendChild(backBtn);
+    main.appendChild(play);
+    main.appendChild(nextBtn);
+    main.appendChild(title);
+    main.appendChild(elem);
+    main.appendChild(pos);
+    main.appendChild(speedSel);
+    main.appendChild(chaptersBtn);
+    main.appendChild(trBtn);
+    main.appendChild(minBtn);
+    bar.appendChild(main);
     bar.appendChild(row3);
     var row = document.querySelector('.pc-row');
     if (row && row.parentNode) row.parentNode.insertBefore(bar, row.nextSibling);
@@ -969,10 +1233,41 @@
     state.barElem = elem;
     state.barPos = pos;
     state.barPlay = play;
+    state.barBack = backBtn;
+    state.barNext = nextBtn;
+    state.barMinBtn = minBtn;
+    state.barSpeed = speedSel;
     state.row3 = row3;
     state.chaptersBtn = chaptersBtn;
     state.transcriptBtn = trBtn;
+    updateStepButtons();
+    if (loadMinimized()) {
+      state.minimized = true;
+      bar.classList.add('wt-min');
+      minBtn.textContent = '▴';
+      minBtn.setAttribute('aria-label', 'Expand player');
+    }
     return bar;
+  }
+
+  function toggleMinimize() {
+    if (!state.bar) return;
+    state.minimized = !state.minimized;
+    save(MIN_KEY, { m: state.minimized });
+    state.bar.classList.toggle('wt-min', state.minimized);
+    if (state.barMinBtn) {
+      state.barMinBtn.textContent = state.minimized ? '▴' : '▾';
+      state.barMinBtn.setAttribute('aria-label', state.minimized ? 'Expand player' : 'Minimize player');
+    }
+    /* The bar height is measured live wherever it is used, so minimizing
+       and expanding re-measure on their own. The sheet and panel pin their
+       bottom to the bar height at open time, so re-pin them here, and
+       re-scroll the marked element when following is on, so expanding the
+       bar never covers it. The third row is left alone: hiding Resume
+       during a try-it pause would strand the reader. */
+    if (state.chaptersSheet && state.chaptersSheet.parentNode) state.chaptersSheet.style.bottom = barHeight() + 'px';
+    if (state.transcriptPanel && state.transcriptPanel.parentNode) state.transcriptPanel.style.bottom = barHeight() + 'px';
+    if (state.following && state.markedEl) scrollToElement(state.markedEl);
   }
 
   function showRow3(kind) {
@@ -1017,7 +1312,7 @@
         if (state.markedEl) scrollToElement(state.markedEl);
       });
       if (kind === 'jump') {
-        var playHere = mkBtn('Play from here', function () {
+        var playHere = mkBtn('Play from this paragraph', function () {
           var unit = topVisibleUnit();
           if (!unit) return;
           var seg = firstSegmentForUnit(unit);
@@ -1107,6 +1402,7 @@
       b.textContent = ch.title || ('Section ' + (ch.sectionIndex + 1));
       b.addEventListener('click', function () {
         closeSheets(false);
+        clearMarker();
         state.tryIt = null;
         state.following = true;
         showRow3('none');
@@ -1125,6 +1421,7 @@
         b2.textContent = sub.mark || sub.text || '';
         b2.addEventListener('click', function () {
           closeSheets(false);
+          clearMarker();
           state.tryIt = null;
           state.following = true;
           showRow3('none');
@@ -1512,6 +1809,17 @@
       validationFailed(row, wtSpan, e && e.message ? e.message : 'validation failed');
     });
   }
+
+  /* Test hook for the live checks. Resolves a synthetic segment through
+     the real resolveSegment and places the marker, so a check can verify
+     the mechanism (for example an equation line) without a rebuilt
+     sidecar. Read only in practice: it never writes the sidecar. */
+  window.__wtTest = {
+    resolveSegment: resolveSegment,
+    placeMarker: placeMarker,
+    elementNameFor: elementNameFor,
+    state: state
+  };
 
   function safeInit() { try { init(); } catch (e) { /* nothing renders */ } }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', safeInit);

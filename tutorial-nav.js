@@ -421,7 +421,7 @@
      busts the cache; the registry is baked into the script. */
   try {
     var wts = document.createElement('script');
-    wts.src = href('walkthrough-player.js?v=d7c13f96');
+    wts.src = href('walkthrough-player.js?v=1f823722');
     wts.async = true;
     (document.head || document.documentElement).appendChild(wts);
   } catch (e) { /* nav keeps working */ }

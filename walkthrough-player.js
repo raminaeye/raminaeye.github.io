@@ -11,7 +11,8 @@
 
   /* WALKTHROUGHS-BEGIN */
   var WALKTHROUGHS = {
-    "rl-methods.html": {"audio": "podcasts/rl-methods-walkthrough.mp3?v=b7697d16", "sidecar": "podcasts/rl-methods-walkthrough-sidecar.json?v=b7697d16", "script": "podcasts/rl-methods-walkthrough-script.json?v=b7697d16", "version": "b7697d16", "fingerprint": "9639dd109f8ecbebf7f02fcde383a3b12f083123fe30e19b24c650f98e2bb2b9", "formatVersion": 1, "totalSecs": 1507}
+    "rl-methods.html": {"audio": "podcasts/rl-methods-walkthrough.mp3?v=b7697d16", "sidecar": "podcasts/rl-methods-walkthrough-sidecar.json?v=b7697d16", "script": "podcasts/rl-methods-walkthrough-script.json?v=b7697d16", "version": "b7697d16", "fingerprint": "9639dd109f8ecbebf7f02fcde383a3b12f083123fe30e19b24c650f98e2bb2b9", "formatVersion": 1, "totalSecs": 1507},
+    "rl-policy-gradients.html": {"audio": "podcasts/rl-policy-gradients-walkthrough.mp3?v=0207c126", "sidecar": "podcasts/rl-policy-gradients-walkthrough-sidecar.json?v=0207c126", "script": "podcasts/rl-policy-gradients-walkthrough-script.json?v=0207c126", "version": "0207c126", "fingerprint": "ca28c2fe39090e0be2761166e06f7322691d74ca5dbab097f359cf5ed1cf6eaf", "formatVersion": 1, "totalSecs": 2051}
   };
   /* WALKTHROUGHS-END */
 

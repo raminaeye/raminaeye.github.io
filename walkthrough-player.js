@@ -11,6 +11,7 @@
 
   /* WALKTHROUGHS-BEGIN */
   var WALKTHROUGHS = {
+    "double-dqn.html": {"audio": "podcasts/double-dqn-walkthrough.mp3?v=eb15fc08", "sidecar": "podcasts/double-dqn-walkthrough-sidecar.json?v=eb15fc08", "script": "podcasts/double-dqn-walkthrough-script.json?v=eb15fc08", "version": "eb15fc08", "fingerprint": "4ffc45b05c4b6ebe22a9cb141f78fe042f2551de8c06658617eef03238c6fa03", "formatVersion": 1, "totalSecs": 1327},
     "dqn.html": {"audio": "podcasts/dqn-walkthrough.mp3?v=8717c54c", "sidecar": "podcasts/dqn-walkthrough-sidecar.json?v=8717c54c", "script": "podcasts/dqn-walkthrough-script.json?v=8717c54c", "version": "8717c54c", "fingerprint": "ecb8a49d6987e0eed059bd1a5bd46e499bdef3f98052a39d8d03f4d2c3590923", "formatVersion": 1, "totalSecs": 1428},
     "q-learning.html": {"audio": "podcasts/q-learning-walkthrough.mp3?v=238c7099", "sidecar": "podcasts/q-learning-walkthrough-sidecar.json?v=238c7099", "script": "podcasts/q-learning-walkthrough-script.json?v=238c7099", "version": "238c7099", "fingerprint": "2d181d6fdfa0a0bdbd53bab98ba03c18e1aed010920c1f33d3e7613ee3e6ebfd", "formatVersion": 1, "totalSecs": 1776},
     "rl-methods.html": {"audio": "podcasts/rl-methods-walkthrough.mp3?v=becee38f", "sidecar": "podcasts/rl-methods-walkthrough-sidecar.json?v=becee38f", "script": "podcasts/rl-methods-walkthrough-script.json?v=becee38f", "version": "becee38f", "fingerprint": "9639dd109f8ecbebf7f02fcde383a3b12f083123fe30e19b24c650f98e2bb2b9", "formatVersion": 1, "totalSecs": 1544},

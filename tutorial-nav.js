@@ -417,7 +417,7 @@
 
   /* WALKTHROUGH-HOOK: load the read-along walkthrough player beside the
      podcast hook. The version query is the first 8 hex of the ingest
-     commit that ships walkthrough-player.js (edd22e97), so a new deploy
+     commit that ships walkthrough-player.js (d7c13f96), so a new deploy
      busts the cache; the registry is baked into the script. */
   try {
     var wts = document.createElement('script');

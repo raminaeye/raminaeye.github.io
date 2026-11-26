@@ -379,7 +379,15 @@
         var strongs = el.querySelectorAll('strong');
         var labels = [];
         for (var li = 0; li < strongs.length; li++) labels.push((strongs[li].textContent || '').trim());
-        var labeled = labels.indexOf('Intuition') >= 0 || labels.indexOf('The mathematics') >= 0 || labels.indexOf('Example') >= 0;
+        /* The site writes the labels with a trailing period (Intuition.,
+           The mathematics., Example.), so strip it before comparing, or
+           every labeled eq-why div is misread as an unlabeled worked
+           example, they all share one id, and the paragraphId hash lookup
+           can only ever match the last one. */
+        var labeled = labels.some(function (t) {
+          var n = (t || '').replace(/\.\s*$/, '');
+          return n === 'Intuition' || n === 'The mathematics' || n === 'Example';
+        });
         var wid = labeled ? ('s' + swe + '-e' + cardOrd + '-l' + line) : ('s' + swe + '-e' + cardOrd + '-worked');
         push({ id: wid, kind: 'eqwhy', section: swe, ordinal: nextCount(swe, 'eqwhy'), el: el, domId: null, cardOrdinal: cardOrd, eqLine: line, labeled: labeled, labels: labels });
         continue;

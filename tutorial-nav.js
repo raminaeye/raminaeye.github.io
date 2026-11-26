@@ -415,6 +415,17 @@
     (document.head || document.documentElement).appendChild(pcs);
   } catch (e) { /* nav keeps working */ }
 
+  /* WALKTHROUGH-HOOK: load the read-along walkthrough player beside the
+     podcast hook. The version query is the first 8 hex of the ingest
+     commit that ships walkthrough-player.js (edd22e97), so a new deploy
+     busts the cache; the registry is baked into the script. */
+  try {
+    var wts = document.createElement('script');
+    wts.src = href('walkthrough-player.js?v=edd22e97');
+    wts.async = true;
+    (document.head || document.documentElement).appendChild(wts);
+  } catch (e) { /* nav keeps working */ }
+
   function pageName(pathname) {
     var p = String(pathname || '');
     try { p = decodeURIComponent(p); } catch (e) { /* keep raw */ }

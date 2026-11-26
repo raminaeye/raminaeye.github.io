@@ -109,6 +109,8 @@
 
   var CSS =
     '.pc-row{margin:.75rem 0 1.5rem;display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .6rem;color-scheme:light}' +
+    '.pc-row>span{display:block;min-width:0}' +
+    '.pc-row>span .pc-btn{width:100%}' +
     '.pc-btn{display:inline-flex;align-items:center;gap:.35em;min-height:44px;padding:.45rem .7rem;' +
     'font:inherit;font-size:1rem;line-height:1.2;white-space:normal;max-width:100%;text-align:left;cursor:pointer;' +
     'color:#1f618d;background:#fff;border:1px solid #1f618d;border-radius:8px}' +
@@ -118,6 +120,7 @@
     '.pc-row audio{width:100%;max-width:560px;height:44px}' +
     '.pc-msg{color:#333}' +
     '.pc-nb{color:#1f618d}' +
+    '@media (max-width:640px){.pc-row{flex-direction:column;align-items:stretch}.pc-row>span{width:100%}}' +
     '@media print{.pc-row{display:none}}';
 
   function svgPlay() {
@@ -142,6 +145,128 @@
     return b;
   }
 
+  /* Worst-case labels for span sizing, shared with walkthrough-player.js so
+     whichever player creates the row sizes every span the same way. */
+  var WORST_PODCAST = 'Resume podcast (27:55 of 28 min)';
+  var WORST_WALKTHROUGH = 'Resume walkthrough (71:55 of 72 min)';
+  var WORST_NOTEBOOKLM = 'Listen on NotebookLM Opens in NotebookLM.';
+
+  var measurer = null;
+
+  function measureButton(text) {
+    if (!measurer) {
+      measurer = document.createElement('div');
+      measurer.className = 'pc-btn';
+      measurer.style.cssText = 'position:absolute;visibility:hidden;left:-9999px;top:0;pointer-events:none';
+      document.body.appendChild(measurer);
+    }
+    measurer.textContent = '';
+    measurer.appendChild(svgPlay());
+    measurer.appendChild(document.createTextNode(text));
+    return measurer;
+  }
+
+  function sizeSpan(span, text, row) {
+    var rowWidth = row.clientWidth || document.documentElement.clientWidth || 360;
+    var m = measureButton(text);
+    m.style.maxWidth = '100%';
+    m.style.width = 'auto';
+    var natural = m.offsetWidth;
+    var capped = Math.min(natural, rowWidth);
+    m.style.width = capped + 'px';
+    var h = Math.max(44, m.offsetHeight);
+    span.style.minWidth = capped + 'px';
+    span.style.minHeight = h + 'px';
+    m.style.width = 'auto';
+  }
+
+  function makeSpan(kind) {
+    var s = document.createElement('span');
+    s.setAttribute('data-wt-span', kind);
+    return s;
+  }
+
+  function findSpan(row, kind) {
+    return row.querySelector('[data-wt-span="' + kind + '"]');
+  }
+
+  function removeRowIfEmpty(row) {
+    if (row && !row.querySelector('span') && !row.children.length) {
+      if (row.parentNode) row.parentNode.removeChild(row);
+    }
+  }
+
+  function removeSpanNow(span) {
+    if (!span || !span.parentNode) return;
+    var row = span.parentNode;
+    row.removeChild(span);
+    removeRowIfEmpty(row);
+  }
+
+  /* A removal that becomes due after setup settles waits until the reader
+     scrolls the row fully out of view, with no time cap. Where the row is
+     already out of view, it fires at once. The emptiness is re-checked at
+     fire time: this player removes the other player's span, and the other
+     player may have filled it since setup. */
+  function removeSpanDeferred(span) {
+    if (!span || !span.parentNode) return;
+    var row = span.parentNode;
+    var r = row.getBoundingClientRect();
+    if (r.bottom < 0 || r.top > window.innerHeight) {
+      if (!span.hasChildNodes()) removeSpanNow(span);
+      return;
+    }
+    var onScroll = function () {
+      var r2 = row.getBoundingClientRect();
+      if (r2.bottom < 0 || r2.top > window.innerHeight) {
+        window.removeEventListener('scroll', onScroll);
+        if (span.parentNode && !span.hasChildNodes()) removeSpanNow(span);
+      }
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+  }
+
+  /* Find the row or create it, with the three owned spans in order:
+     podcast, walkthrough, NotebookLM. A row built in the old shape, with
+     its button or audio directly inside, has its children moved into the
+     podcast span. Spans are sized from worst-case content so the row never
+     shifts when a player fills its span. */
+  function ensureRow(h1) {
+    var row = document.querySelector('.pc-row');
+    if (!row) {
+      row = document.createElement('div');
+      row.className = 'pc-row';
+      var a = anchorAfter(h1);
+      a.parentNode.insertBefore(row, a.nextSibling);
+    }
+    var pcSpan = findSpan(row, 'podcast');
+    var wtSpan = findSpan(row, 'walkthrough');
+    var nbSpan = findSpan(row, 'notebooklm');
+    if (!pcSpan && !wtSpan && !nbSpan) {
+      var oldChildren = Array.prototype.slice.call(row.children);
+      pcSpan = makeSpan('podcast');
+      wtSpan = makeSpan('walkthrough');
+      nbSpan = makeSpan('notebooklm');
+      while (row.firstChild) row.removeChild(row.firstChild);
+      row.appendChild(pcSpan);
+      row.appendChild(wtSpan);
+      row.appendChild(nbSpan);
+      for (var ci = 0; ci < oldChildren.length; ci++) pcSpan.appendChild(oldChildren[ci]);
+    } else {
+      if (!pcSpan) { pcSpan = makeSpan('podcast'); row.insertBefore(pcSpan, row.firstChild); }
+      if (!wtSpan) {
+        wtSpan = makeSpan('walkthrough');
+        if (pcSpan.nextSibling) row.insertBefore(wtSpan, pcSpan.nextSibling);
+        else row.appendChild(wtSpan);
+      }
+      if (!nbSpan) { nbSpan = makeSpan('notebooklm'); row.appendChild(nbSpan); }
+    }
+    if (!pcSpan.style.minWidth) sizeSpan(pcSpan, WORST_PODCAST, row);
+    if (!wtSpan.style.minWidth) sizeSpan(wtSpan, WORST_WALKTHROUGH, row);
+    if (!nbSpan.style.minWidth) sizeSpan(nbSpan, WORST_NOTEBOOKLM, row);
+    return { row: row, pcSpan: pcSpan, wtSpan: wtSpan, nbSpan: nbSpan };
+  }
+
   /* Insert right after the H1 and its dek or subtitle, before any series map,
      so the row is on the first phone screen (DECISIONS D2 rev 3). */
   function anchorAfter(h1) {
@@ -151,11 +276,11 @@
   }
 
   function init() {
-    if (document.querySelector('.pc-row')) return;
     var page = pageName(location.pathname);
     var ep = page && EPISODES[page];
     var nb = page && NOTEBOOKLM[page];
-    if ((!ep || !ep.src) && !nb) return;
+    var foreignRow = document.querySelector('.pc-row');
+    if ((!ep || !ep.src) && !nb && !foreignRow) return;
     var h1 = document.querySelector('h1');
     if (!h1) return;
     var title = (h1.textContent || '').replace(/\s+/g, ' ').trim();
@@ -168,14 +293,39 @@
     st.textContent = CSS;
     (document.head || document.documentElement).appendChild(st);
 
-    var row = document.createElement('div');
-    row.className = 'pc-row';
-    var a = anchorAfter(h1);
-    a.parentNode.insertBefore(row, a.nextSibling);
+    /* Take over a row the walkthrough player built, or build the row with
+       the three owned spans. This player fills only its own spans and
+       never clears the whole row. */
+    var spans = ensureRow(h1);
+    var row = spans.row;
+    var pcSpan = spans.pcSpan;
+    var wtSpan = spans.wtSpan;
+    var nbSpan = spans.nbSpan;
 
     var current = null;
+    var currentAudio = null;
     document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden' && current) current(); });
     window.addEventListener('pagehide', function () { if (current) current(); });
+    /* Cross-pause: starting the walkthrough pauses the podcast. The
+       walkthrough player dispatches the same event with source
+       'walkthrough' and pauses its own audio on 'podcast'. */
+    document.addEventListener('audio-started', function (e) {
+      if (e && e.detail && e.detail.source === 'walkthrough' && currentAudio && !currentAudio.paused) {
+        try { currentAudio.pause(); } catch (err) { /* ignore */ }
+      }
+    });
+
+    /* Setup removals of this player's own spans run at once during setup:
+       no episode means no podcast span, no link means no NotebookLM span. */
+    if (!ep || !ep.src) { removeSpanNow(pcSpan); pcSpan = null; }
+    if (!nb) { removeSpanNow(nbSpan); nbSpan = null; }
+    /* A span the other player never filled is removed when this player
+       settles, deferred while the row is in view. */
+    if (wtSpan && !wtSpan.hasChildNodes()) removeSpanDeferred(wtSpan);
+    if (!row.querySelector('span') && !row.children.length) {
+      if (row.parentNode) row.parentNode.removeChild(row);
+      return;
+    }
 
     /* Permanent NotebookLM link for this page, if one exists. Ramin's order
        2026-11-11: once the link is at the top of a tutorial page it stays
@@ -198,44 +348,62 @@
     }
 
     function rest() {
-      row.textContent = '';
-      if (ep && ep.src) {
-        var saved = load(key);
-        var t = saved && saved.v === ver && typeof saved.t === 'number' && isFinite(saved.t) ? saved.t : 0;
-        var pos = t > 5 && (!ep.secs || t < ep.secs - 5) ? t : 0;
-        var label = pos ? 'Resume podcast (' + fmt(pos) + ' of ' + mins(ep.secs) + ')'
-                        : 'Listen to the podcast (' + mins(ep.secs) + ')';
-        var b = button(label, true);
-        b.addEventListener('click', function () { open(pos); });
-        row.appendChild(b);
+      if (pcSpan) {
+        pcSpan.textContent = '';
+        pcSpan.style.flex = '';
+        if (ep && ep.src) {
+          var saved = load(key);
+          var t = saved && saved.v === ver && typeof saved.t === 'number' && isFinite(saved.t) ? saved.t : 0;
+          var pos = t > 5 && (!ep.secs || t < ep.secs - 5) ? t : 0;
+          var label = pos ? 'Resume podcast (' + fmt(pos) + ' of ' + mins(ep.secs) + ')'
+                          : 'Listen to the podcast (' + mins(ep.secs) + ')';
+          var b = button(label, true);
+          b.addEventListener('click', function () { open(pos); });
+          pcSpan.appendChild(b);
+        }
       }
-      var n = nbLink();
-      if (n) row.appendChild(n);
+      if (nbSpan) {
+        nbSpan.textContent = '';
+        var n = nbLink();
+        if (n) nbSpan.appendChild(n);
+      }
     }
 
     function fail(pos) {
       current = null;
-      row.textContent = '';
-      var m = document.createElement('span');
-      m.className = 'pc-msg';
-      m.setAttribute('role', 'status');
-      m.id = 'pc-msg';
-      var again = button('Try again', false);
-      again.setAttribute('aria-describedby', 'pc-msg');
-      again.addEventListener('click', function () {
-        var sv = load(key);
-        var t = sv && sv.v === ver && typeof sv.t === 'number' && isFinite(sv.t) ? sv.t : 0;
-        open(Math.max(pos || 0, t));
-      });
-      row.appendChild(m);
-      row.appendChild(again);
-      var n = nbLink();
-      if (n) row.appendChild(n);
-      setTimeout(function () { m.textContent = 'The podcast could not load.'; again.focus(); }, 50);
+      currentAudio = null;
+      if (pcSpan) {
+        pcSpan.textContent = '';
+        pcSpan.style.flex = '';
+        var m = document.createElement('span');
+        m.className = 'pc-msg';
+        m.setAttribute('role', 'status');
+        m.id = 'pc-msg';
+        var again = button('Try again', false);
+        again.setAttribute('aria-describedby', 'pc-msg');
+        again.addEventListener('click', function () {
+          var sv = load(key);
+          var t = sv && sv.v === ver && typeof sv.t === 'number' && isFinite(sv.t) ? sv.t : 0;
+          open(Math.max(pos || 0, t));
+        });
+        pcSpan.appendChild(m);
+        pcSpan.appendChild(again);
+        setTimeout(function () { m.textContent = 'The podcast could not load.'; again.focus(); }, 50);
+      }
+      if (nbSpan) {
+        nbSpan.textContent = '';
+        var n = nbLink();
+        if (n) nbSpan.appendChild(n);
+      }
     }
 
     function open(pos) {
-      row.textContent = '';
+      /* The audio takes the full row width, as it did as a direct child of
+         the row; the span grows to its own line for the audio state only. */
+      if (pcSpan) {
+        pcSpan.textContent = '';
+        pcSpan.style.flex = '1 1 100%';
+      }
       var au = document.createElement('audio');
       au.controls = true;
       au.preload = 'none';
@@ -247,6 +415,9 @@
       var seeked = false;
       function keep() { if (au.currentTime > 0 && !au.ended) save(key, { t: au.currentTime, v: ver }); }
       au.addEventListener('error', function () { fail(pos); });
+      au.addEventListener('play', function () {
+        document.dispatchEvent(new CustomEvent('audio-started', { detail: { source: 'podcast' } }));
+      });
       au.addEventListener('loadedmetadata', function () {
         if (pos && !seeked) { seeked = true; try { au.currentTime = pos; } catch (e) { /* ignore */ } }
         au.playbackRate = r;
@@ -261,12 +432,17 @@
       });
       au.addEventListener('pause', keep);
       au.addEventListener('seeked', keep);
-      au.addEventListener('ended', function () { clear(key); });
+      au.addEventListener('ended', function () { clear(key); currentAudio = null; });
       current = keep;
+      currentAudio = au;
       au.src = src;
-      row.appendChild(au);
-      var n = nbLink();
-      if (n) row.appendChild(n);
+      if (pcSpan) pcSpan.appendChild(au);
+      else row.appendChild(au);
+      if (nbSpan) {
+        nbSpan.textContent = '';
+        var n = nbLink();
+        if (n) nbSpan.appendChild(n);
+      }
       if ('mediaSession' in navigator && window.MediaMetadata) {
         try { navigator.mediaSession.metadata = new MediaMetadata({ title: title, artist: "Ramin's tutorials" }); } catch (e) { /* ignore */ }
       }

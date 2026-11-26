@@ -427,7 +427,12 @@
   function elementNameFor(seg, unit) {
     if (!seg) return '';
     var kind = seg.kind || (unit && unit.kind) || '';
-    if (kind === 'figure') return seg.element || 'Figure';
+    // A bare fig-N id reads as jargon in the bar; show Figure N instead.
+    if (kind === 'figure') {
+      var el = seg.element || '';
+      var m = /^fig-(\d+)$/.exec(el);
+      return m ? 'Figure ' + m[1] : (el || 'Figure');
+    }
     if (kind === 'equation' || kind === 'eqwhy' || kind === 'intuition' || kind === 'example') return seg.element || 'Equation';
     if (kind === 'code') return 'Code';
     if (kind === 'table') return seg.element || 'Table';

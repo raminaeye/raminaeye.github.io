@@ -27,6 +27,8 @@
      tutorial page it stays there, never removed, replaced or changed.
      2026-11-24: Ramin's approved episode-length plan removes 20 links
      outside 15 to 25 minutes; in-band links stay.
+     2026-11-26: Ramin's order removes three links whose episodes need
+     replacing: dqn.html, grpo.html and rl-policy-gradients.html.
      ingest.py replaces only the EPISODES block above, so this block survives
      episode ingests. Do not edit the URLs here; a link that fails its check
      is reported, never swapped. */
@@ -35,7 +37,6 @@
     "rl-methods.html": "https://notebooklm.google.com/notebook/6b1f6219-63bb-4a8f-8dd6-c74869ae65b4",
     "q-learning.html": "https://notebooklm.google.com/notebook/a646a3c9-6639-459b-b60b-afa81b0ba6b1",
     "sarsa.html": "https://notebooklm.google.com/notebook/275fdfee-4ac6-495c-b27f-da3d80607300",
-    "rl-policy-gradients.html": "https://notebooklm.google.com/notebook/37d682c0-b909-4cb2-b543-2d9b9a7341bd",
     "reinforce.html": "https://notebooklm.google.com/notebook/8c00fad2-514e-45cb-964b-475d81d7edd3",
     "actor-critic.html": "https://notebooklm.google.com/notebook/25807549-a5f9-4275-ba78-e6f4e47b8ad8",
     "ppo.html": "https://notebooklm.google.com/notebook/e21fc48e-c392-4532-b30e-94e45dc66d38",
@@ -51,8 +52,6 @@
     "constitutional-ai.html": "https://notebook.google.com/notebook/b39fa636-f3e6-41ad-bdf8-53dd5d83795f",
     "rlaif.html": "https://notebook.google.com/notebook/fbb2a9c8-69e8-453a-a99f-0cda9bc50961",
     "dpo.html": "https://notebook.google.com/notebook/003c3d06-a5e3-44fc-8c12-0e8dc8358ea9",
-    "grpo.html": "https://notebook.google.com/notebook/f174bb26-ebe4-4ac9-9bff-d8b17e6f75ce",
-    "dqn.html": "https://notebooklm.google.com/notebook/e43d58d4-f521-4e96-858e-5e3ce2a6ad66",
     "double-dqn.html": "https://notebooklm.google.com/notebook/a4ddb347-2453-4ab8-8104-00de3ba69651",
     "dueling-dqn.html": "https://notebooklm.google.com/notebook/857a35f6-8a3d-4b94-bb9e-d1ac99d6e786",
     "ddpg.html": "https://notebooklm.google.com/notebook/a83e9f7d-2d35-453f-b655-1287cc9cd6a6",

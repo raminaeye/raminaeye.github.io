@@ -1130,8 +1130,14 @@
   }
 
   function currentStepIndex() {
-    var seg = state.currentSeg;
-    if (!seg && state.audio) seg = segmentAt(state.audio.currentTime);
+    /* The audio's currentTime is the source of truth: it reflects a seek
+       target at once, while state.currentSeg only catches up on the next
+       seeked/timeupdate event. Reading the step from currentTime keeps
+       rapid taps advancing instead of re-seeking to the same segment,
+       which made Next look stuck. */
+    var seg = null;
+    if (state.audio) seg = segmentAt(state.audio.currentTime);
+    if (!seg) seg = state.currentSeg;
     if (!seg) return -1;
     var unit = resolveSegment(seg);
     if (!unit) return -1;
@@ -1248,17 +1254,6 @@
     chaptersBtn.appendChild(chFull);
     chaptersBtn.appendChild(chShort);
     chaptersBtn.addEventListener('click', function () { toggleChapters(chaptersBtn); });
-    var trBtn = document.createElement('button');
-    trBtn.type = 'button';
-    var trFull = document.createElement('span');
-    trFull.className = 'wt-full';
-    trFull.textContent = 'Transcript';
-    var trShort = document.createElement('span');
-    trShort.className = 'wt-short';
-    trShort.textContent = 'Text';
-    trBtn.appendChild(trFull);
-    trBtn.appendChild(trShort);
-    trBtn.addEventListener('click', function () { toggleTranscript(trBtn); });
     var minBtn = document.createElement('button');
     minBtn.type = 'button';
     minBtn.className = 'wt-bar-minbtn';
@@ -1276,7 +1271,6 @@
     main.appendChild(pos);
     main.appendChild(speedSel);
     main.appendChild(chaptersBtn);
-    main.appendChild(trBtn);
     main.appendChild(minBtn);
     bar.appendChild(main);
     bar.appendChild(row3);
@@ -1294,7 +1288,6 @@
     state.barSpeed = speedSel;
     state.row3 = row3;
     state.chaptersBtn = chaptersBtn;
-    state.transcriptBtn = trBtn;
     updateStepButtons();
     if (loadMinimized()) {
       state.minimized = true;
@@ -1328,7 +1321,10 @@
   function showRow3(kind) {
     if (!state.row3) return;
     state.row3.textContent = '';
-    if (kind === 'none') { state.row3.style.display = 'none'; return; }
+    /* 'jump' used to offer Back to the audio and Play from this paragraph.
+       Both controls are removed, so a scrolled-away reader gets no row;
+       they scroll back or tap Play themselves. */
+    if (kind === 'none' || kind === 'jump') { state.row3.style.display = 'none'; return; }
     state.row3.style.display = 'flex';
     function mkBtn(text, fn) {
       var b = document.createElement('button');
@@ -1359,28 +1355,6 @@
         }
         if (state.audio) state.audio.play();
       });
-    }
-    if (kind === 'jump' || kind === 'both') {
-      mkBtn('Back to the audio', function () {
-        state.following = true;
-        showRow3(state.tryIt ? 'tryit' : 'none');
-        if (state.markedEl) scrollToElement(state.markedEl);
-      });
-      if (kind === 'jump') {
-        var playHere = mkBtn('Play from this paragraph', function () {
-          var unit = topVisibleUnit();
-          if (!unit) return;
-          var seg = firstSegmentForUnit(unit);
-          if (!seg) return;
-          state.following = true;
-          showRow3('none');
-          if (state.audio) {
-            state.audio.currentTime = seg.startSeconds;
-            state.audio.play();
-          }
-        });
-        if (!topVisibleUnit()) playHere.disabled = true;
-      }
     }
   }
 

@@ -11,7 +11,7 @@
 
   /* WALKTHROUGHS-BEGIN */
   var WALKTHROUGHS = {
-    "rl-methods.html": {"audio": "podcasts/rl-methods-walkthrough.mp3?v=67157ec2", "sidecar": "podcasts/rl-methods-walkthrough-sidecar.json?v=67157ec2", "script": "podcasts/rl-methods-walkthrough-script.json?v=67157ec2", "version": "67157ec2", "fingerprint": "9639dd109f8ecbebf7f02fcde383a3b12f083123fe30e19b24c650f98e2bb2b9", "formatVersion": 1, "totalSecs": 1508}
+    "rl-methods.html": {"audio": "podcasts/rl-methods-walkthrough.mp3?v=b7697d16", "sidecar": "podcasts/rl-methods-walkthrough-sidecar.json?v=b7697d16", "script": "podcasts/rl-methods-walkthrough-script.json?v=b7697d16", "version": "b7697d16", "fingerprint": "9639dd109f8ecbebf7f02fcde383a3b12f083123fe30e19b24c650f98e2bb2b9", "formatVersion": 1, "totalSecs": 1507}
   };
   /* WALKTHROUGHS-END */
 

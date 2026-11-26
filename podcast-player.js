@@ -107,7 +107,8 @@
   function clear(key) { try { localStorage.removeItem(key); } catch (e) { /* ignore */ } }
 
   var CSS =
-    '.pc-row{margin:.75rem 0 1.5rem;display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .6rem;color-scheme:light}' +
+    '.pc-row{margin:.5rem 0 .75rem;display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .6rem;color-scheme:light;' +
+    'border:1px solid #1f618d;border-radius:8px;padding:.6rem .7rem;background:#f8f9fa}' +
     '.pc-row>span{display:block;min-width:0}' +
     '.pc-row>span .pc-btn{width:100%}' +
     '.pc-btn{display:inline-flex;align-items:center;gap:.35em;min-height:44px;padding:.45rem .7rem;' +
@@ -225,11 +226,13 @@
     window.addEventListener('scroll', onScroll, { passive: true });
   }
 
-  /* Find the row or create it, with the three owned spans in order:
-     podcast, walkthrough, NotebookLM. A row built in the old shape, with
-     its button or audio directly inside, has its children moved into the
-     podcast span. Spans are sized from worst-case content so the row never
-     shifts when a player fills its span. */
+  /* Find the row or create it, with this player's owned spans in order:
+     podcast, walkthrough, NotebookLM. This player owns the podcast and
+     NotebookLM spans only; it never creates the walkthrough span, which
+     the walkthrough player creates when it runs. A row built in the old
+     shape, with its button directly inside, has its children moved into
+     the podcast span. Spans are sized from worst-case content so the row
+     never shifts when a player fills its span. */
   function ensureRow(h1) {
     var row = document.querySelector('.pc-row');
     if (!row) {
@@ -241,27 +244,18 @@
     var pcSpan = findSpan(row, 'podcast');
     var wtSpan = findSpan(row, 'walkthrough');
     var nbSpan = findSpan(row, 'notebooklm');
-    if (!pcSpan && !wtSpan && !nbSpan) {
-      var oldChildren = Array.prototype.slice.call(row.children);
+    if (!pcSpan) {
       pcSpan = makeSpan('podcast');
-      wtSpan = makeSpan('walkthrough');
-      nbSpan = makeSpan('notebooklm');
-      while (row.firstChild) row.removeChild(row.firstChild);
-      row.appendChild(pcSpan);
-      row.appendChild(wtSpan);
-      row.appendChild(nbSpan);
-      for (var ci = 0; ci < oldChildren.length; ci++) pcSpan.appendChild(oldChildren[ci]);
-    } else {
-      if (!pcSpan) { pcSpan = makeSpan('podcast'); row.insertBefore(pcSpan, row.firstChild); }
-      if (!wtSpan) {
-        wtSpan = makeSpan('walkthrough');
-        if (pcSpan.nextSibling) row.insertBefore(wtSpan, pcSpan.nextSibling);
-        else row.appendChild(wtSpan);
-      }
-      if (!nbSpan) { nbSpan = makeSpan('notebooklm'); row.appendChild(nbSpan); }
+      row.insertBefore(pcSpan, row.firstChild);
     }
+    /* Old-shape direct children (a podcast button placed directly in the
+       row) belong in the podcast span. */
+    var olds = Array.prototype.slice.call(row.children).filter(function (c) {
+      return !c.hasAttribute || !c.hasAttribute('data-wt-span');
+    });
+    for (var ci = 0; ci < olds.length; ci++) pcSpan.appendChild(olds[ci]);
+    if (!nbSpan) { nbSpan = makeSpan('notebooklm'); row.appendChild(nbSpan); }
     if (!pcSpan.style.minWidth) sizeSpan(pcSpan, WORST_PODCAST, row);
-    if (!wtSpan.style.minWidth) sizeSpan(wtSpan, WORST_WALKTHROUGH, row);
     if (!nbSpan.style.minWidth) sizeSpan(nbSpan, WORST_NOTEBOOKLM, row);
     return { row: row, pcSpan: pcSpan, wtSpan: wtSpan, nbSpan: nbSpan };
   }
@@ -300,6 +294,13 @@
     var pcSpan = spans.pcSpan;
     var wtSpan = spans.wtSpan;
     var nbSpan = spans.nbSpan;
+
+    /* A filled span hugs its real content; the worst-case sizing only
+       reserved space while it was empty. Clearing in the same step as
+       filling keeps the row from shifting after the content paints. */
+    function hug(span) {
+      if (span) { span.style.minHeight = ''; span.style.minWidth = ''; }
+    }
 
     var current = null;
     var currentAudio = null;
@@ -350,6 +351,7 @@
       if (pcSpan) {
         pcSpan.textContent = '';
         pcSpan.style.flex = '';
+        hug(pcSpan);
         if (ep && ep.src) {
           var saved = load(key);
           var t = saved && saved.v === ver && typeof saved.t === 'number' && isFinite(saved.t) ? saved.t : 0;
@@ -363,6 +365,7 @@
       }
       if (nbSpan) {
         nbSpan.textContent = '';
+        hug(nbSpan);
         var n = nbLink();
         if (n) nbSpan.appendChild(n);
       }
@@ -374,6 +377,7 @@
       if (pcSpan) {
         pcSpan.textContent = '';
         pcSpan.style.flex = '';
+        hug(pcSpan);
         var m = document.createElement('span');
         m.className = 'pc-msg';
         m.setAttribute('role', 'status');
@@ -391,6 +395,7 @@
       }
       if (nbSpan) {
         nbSpan.textContent = '';
+        hug(nbSpan);
         var n = nbLink();
         if (n) nbSpan.appendChild(n);
       }
@@ -402,6 +407,7 @@
       if (pcSpan) {
         pcSpan.textContent = '';
         pcSpan.style.flex = '1 1 100%';
+        hug(pcSpan);
       }
       var au = document.createElement('audio');
       au.controls = true;
@@ -439,6 +445,7 @@
       else row.appendChild(au);
       if (nbSpan) {
         nbSpan.textContent = '';
+        hug(nbSpan);
         var n = nbLink();
         if (n) nbSpan.appendChild(n);
       }

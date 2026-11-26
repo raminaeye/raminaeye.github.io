@@ -32,7 +32,8 @@
   var WORST_NOTEBOOKLM = 'Listen on NotebookLM Opens in NotebookLM.';
 
   var CSS =
-    '.pc-row{margin:.75rem 0 1.5rem;display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .6rem;color-scheme:light}' +
+    '.pc-row{margin:.5rem 0 .75rem;display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .6rem;color-scheme:light;' +
+    'border:1px solid #1f618d;border-radius:8px;padding:.6rem .7rem;background:#f8f9fa}' +
     '.pc-row>span{display:block;min-width:0}' +
     '.pc-row>span .pc-btn{width:100%}' +
     '.pc-btn{display:inline-flex;align-items:center;gap:.35em;min-height:44px;padding:.45rem .7rem;' +
@@ -495,9 +496,14 @@
     window.addEventListener('scroll', onScroll, { passive: true });
   }
 
+  /* This player owns only the walkthrough span. It never creates the
+     podcast or NotebookLM spans; the podcast player owns those and
+     creates them when it runs. Creating the podcast span here left an
+     empty 60px span on pages with no podcast episode. The span goes
+     after the podcast span when one is there, else before the
+     NotebookLM span, else on its own. */
   function ensureRow() {
     var row = document.querySelector('.pc-row');
-    var created = false;
     if (!row) {
       var h1 = document.querySelector('h1');
       if (!h1) return null;
@@ -505,51 +511,27 @@
       row.className = 'pc-row';
       var a = anchorAfter(h1);
       a.parentNode.insertBefore(row, a.nextSibling);
-      created = true;
     }
-    var pcSpan = findSpan(row, 'podcast');
     var wtSpan = findSpan(row, 'walkthrough');
-    var nbSpan = findSpan(row, 'notebooklm');
-    if (!pcSpan && !wtSpan && !nbSpan) {
-      /* A row the podcast player built in its old shape holds its button
-         directly. Keep that content first and add the walkthrough span
-         in the second position. */
-      var oldChildren = Array.prototype.slice.call(row.children);
-      pcSpan = makeSpan('podcast');
+    var justCreated = false;
+    if (!wtSpan) {
       wtSpan = makeSpan('walkthrough');
-      nbSpan = makeSpan('notebooklm');
-      while (row.firstChild) row.removeChild(row.firstChild);
-      row.appendChild(pcSpan);
-      row.appendChild(wtSpan);
-      row.appendChild(nbSpan);
-      for (var ci = 0; ci < oldChildren.length; ci++) pcSpan.appendChild(oldChildren[ci]);
-    } else {
-      if (!pcSpan) { pcSpan = makeSpan('podcast'); row.insertBefore(pcSpan, row.firstChild); }
-      if (!wtSpan) {
-        wtSpan = makeSpan('walkthrough');
-        if (pcSpan.nextSibling) row.insertBefore(wtSpan, pcSpan.nextSibling);
-        else row.appendChild(wtSpan);
-      }
-      if (!nbSpan) { nbSpan = makeSpan('notebooklm'); row.appendChild(nbSpan); }
+      var pcSpan = findSpan(row, 'podcast');
+      var nbSpan = findSpan(row, 'notebooklm');
+      if (pcSpan && pcSpan.nextSibling) row.insertBefore(wtSpan, pcSpan.nextSibling);
+      else if (pcSpan) row.appendChild(wtSpan);
+      else if (nbSpan) row.insertBefore(wtSpan, nbSpan);
+      else row.appendChild(wtSpan);
+      justCreated = true;
     }
-    if (created) {
-      sizeSpan(pcSpan, WORST_PODCAST, row);
-      sizeSpan(wtSpan, WORST_WALKTHROUGH, row);
-      sizeSpan(nbSpan, WORST_NOTEBOOKLM, row);
-    } else {
-      /* Size any span this player just created, so a taken-over row is
-         still sized from worst-case content. */
-      if (!pcSpan.style.minWidth) sizeSpan(pcSpan, WORST_PODCAST, row);
-      if (!wtSpan.style.minWidth) sizeSpan(wtSpan, WORST_WALKTHROUGH, row);
-      if (!nbSpan.style.minWidth) sizeSpan(nbSpan, WORST_NOTEBOOKLM, row);
-    }
-    if (created) {
+    /* Size only the span this player owns, so a taken-over row is still
+       sized from worst-case content. */
+    if (!wtSpan.style.minWidth) sizeSpan(wtSpan, WORST_WALKTHROUGH, row);
+    if (justCreated) {
       if (document.fonts && document.fonts.ready) {
         document.fonts.ready.then(function () {
           if (!state.validationDone) {
-            sizeSpan(pcSpan, WORST_PODCAST, row);
             sizeSpan(wtSpan, WORST_WALKTHROUGH, row);
-            sizeSpan(nbSpan, WORST_NOTEBOOKLM, row);
           }
         });
       }
@@ -800,6 +782,23 @@
     return null;
   }
 
+  /* A segment can name a prose paragraph by an id this player never built:
+     the sidecar counts a paragraph this player skips (inside a figure, a
+     tool or a table), so the ids after it are shifted and the named id
+     matches no unit here. The paragraph's hash still names it, so resolve
+     by hash. This keeps the marker and the step buttons on the right
+     paragraph, including the last one. */
+  function resolveByParagraphHash(seg) {
+    if (!seg.paragraphId || !state.sidecar || !state.hashes) return null;
+    var manifest = state.sidecar.paragraphs || state.sidecar.paragraphManifest || [];
+    var entry = null;
+    for (var i = 0; i < manifest.length; i++) {
+      if (manifest[i].id === seg.paragraphId) { entry = manifest[i]; break; }
+    }
+    if (!entry || !entry.hash) return null;
+    return searchByHash(seg.sectionIndex, entry.hash, entry.ordinal);
+  }
+
   /* Resolution order, per the identification standard: a domId first,
      where the unit carries one and domId_missing is not set; then the
      elementRef fallback; then the ordinal fallback. A unit with
@@ -810,6 +809,10 @@
   function resolveSegment(seg) {
     if (!seg) return null;
     if (seg.paragraphId && state.unitsById[seg.paragraphId]) return state.unitsById[seg.paragraphId];
+    if (seg.paragraphId) {
+      var byHash = resolveByParagraphHash(seg);
+      if (byHash) return byHash;
+    }
     var kind = seg.kind;
     var cands = state.units.filter(function (u) { return u.section === seg.sectionIndex; });
     function byKind(k) { return cands.filter(function (u) { return u.kind === k; }); }
@@ -1710,6 +1713,11 @@
 
   function showLiveButton(wtSpan) {
     wtSpan.textContent = '';
+    /* The span hugs its real content now; the worst-case sizing only
+       reserved space while it was empty. Clearing in the same step as
+       filling keeps the row from shifting after the button paints. */
+    wtSpan.style.minHeight = '';
+    wtSpan.style.minWidth = '';
     var b = button(buttonLabel(), true);
     b.addEventListener('click', function () {
       if (!state.audio) { startWalkthrough(); return; }

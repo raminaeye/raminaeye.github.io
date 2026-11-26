@@ -440,10 +440,25 @@
     if (!seg) return '';
     var kind = seg.kind || (unit && unit.kind) || '';
     // A bare fig-N id reads as jargon in the bar; show Figure N instead.
+    // The same holds for any short cryptic figure id (q-floor, q-big):
+    // a reader cannot tell what it names, so it shows as Figure N,
+    // numbered by the figure's position among the page's figures.
+    // Descriptive ids (q-table-figure) keep their name.
     if (kind === 'figure') {
       var el = seg.element || '';
       var m = /^fig-(\d+)$/.exec(el);
-      return m ? 'Figure ' + m[1] : (el || 'Figure');
+      if (m) return 'Figure ' + m[1];
+      if (el && el.length < 8) {
+        var n = 0;
+        if (unit && state.units) {
+          for (var i = 0; i < state.units.length; i++) {
+            if (state.units[i].kind === 'figure') n++;
+            if (state.units[i] === unit) break;
+          }
+        }
+        return n > 0 ? 'Figure ' + n : 'Figure';
+      }
+      return el || 'Figure';
     }
     if (kind === 'equation' || kind === 'eqwhy' || kind === 'intuition' || kind === 'example') return seg.element || 'Equation';
     if (kind === 'code') return 'Code';

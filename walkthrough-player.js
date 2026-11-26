@@ -282,6 +282,10 @@
       if (tag === 'P') {
         if (el.classList.contains('crumb') || el.classList.contains('tabs-label')) continue;
         if (isIn(el, 'nav') || isIn(el, 'figure') || isIn(el, 'figcaption') || isIn(el, '.demo') || isIn(el, 'table') || isIn(el, '.wt-ui')) continue;
+        /* A p.eq-what inside a card is already pushed by the card branch
+           before the math lines, so it keeps its document position; the
+           P branch must not push it a second time. */
+        if (el.classList.contains('eq-what') && isIn(el, 'div.eq-card')) continue;
         if (inReferences(el, refH2)) continue;
         var sp = sectionIndexOf(el, h2s);
         var np = nextCount(sp, 'prose');
@@ -333,12 +337,14 @@
         /* The card's lead-in is a prose paragraph the sidecar counts, so
            it is a prose unit with the next prose ordinal in this section,
            taken here before the math lines so it keeps its document
-           position. Only the div form is taken here: a p.eq-what is
-           collected by the P branch below, and taking both would count
-           it twice. This keeps the player's prose ids aligned with the
-           sidecar's wherever the lead-in is a div. */
+           position. The lead-in may be a div or a p; either form is taken
+           here, and the P branch below skips a p.eq-what inside a card,
+           so it is counted once. Before this the p form was collected by
+           the P branch after the card's lines were pushed as a group, so
+           it sat after the lines in the unit list and Previous from it
+           stepped to a math line instead of the prose before the card. */
         var what = el.querySelector('.eq-what');
-        if (what && what.tagName === 'DIV') {
+        if (what) {
           var nw = nextCount(se, 'prose');
           push({ id: 's' + se + '-p' + nw, kind: 'prose', section: se, ordinal: nw, el: what, domId: null });
         }
@@ -933,6 +939,15 @@
           return w;
         }
       }
+      /* An equation segment names its math line by elementRef (card plus
+         line). The eq-why match above only runs when the segment carries
+         a domId or eqLine, so a segment that names its line only by
+         elementRef falls through to the first eq-why in the section, the
+         wrong equation, and the marker lands on a hidden explanation
+         instead of the line. Resolve it to the line itself, so the marker
+         sits on the math and Previous steps from the right unit. */
+      var refUnit = resolveElementRef(seg);
+      if (refUnit) return refUnit;
       if (typeof seg.ordinal === 'number') return whys[seg.ordinal - 1] || null;
       return whys[0] || null;
     }

@@ -11,6 +11,7 @@
 
   /* WALKTHROUGHS-BEGIN */
   var WALKTHROUGHS = {
+    "q-learning.html": {"audio": "podcasts/q-learning-walkthrough.mp3?v=238c7099", "sidecar": "podcasts/q-learning-walkthrough-sidecar.json?v=238c7099", "script": "podcasts/q-learning-walkthrough-script.json?v=238c7099", "version": "238c7099", "fingerprint": "2d181d6fdfa0a0bdbd53bab98ba03c18e1aed010920c1f33d3e7613ee3e6ebfd", "formatVersion": 1, "totalSecs": 1776},
     "rl-methods.html": {"audio": "podcasts/rl-methods-walkthrough.mp3?v=becee38f", "sidecar": "podcasts/rl-methods-walkthrough-sidecar.json?v=becee38f", "script": "podcasts/rl-methods-walkthrough-script.json?v=becee38f", "version": "becee38f", "fingerprint": "9639dd109f8ecbebf7f02fcde383a3b12f083123fe30e19b24c650f98e2bb2b9", "formatVersion": 1, "totalSecs": 1544},
     "rl-policy-gradients.html": {"audio": "podcasts/rl-policy-gradients-walkthrough.mp3?v=0207c126", "sidecar": "podcasts/rl-policy-gradients-walkthrough-sidecar.json?v=0207c126", "script": "podcasts/rl-policy-gradients-walkthrough-script.json?v=0207c126", "version": "0207c126", "fingerprint": "ca28c2fe39090e0be2761166e06f7322691d74ca5dbab097f359cf5ed1cf6eaf", "formatVersion": 1, "totalSecs": 2051},
     "rl.html": {"audio": "podcasts/rl-walkthrough.mp3?v=14ce25fd", "sidecar": "podcasts/rl-walkthrough-sidecar.json?v=14ce25fd", "script": "podcasts/rl-walkthrough-script.json?v=14ce25fd", "version": "14ce25fd", "fingerprint": "0a0c27d9f866aceeae6f131621918d09f2b9ccbc2a6b217bed2a0e566e72bf54", "formatVersion": 1, "totalSecs": 2477}

@@ -324,6 +324,18 @@
         var se = sectionIndexOf(el, h2s);
         var ne = nextCount(se, 'equation');
         push({ id: 's' + se + '-e' + ne, kind: 'equation', section: se, ordinal: ne, el: el, domId: el.id || null, cardOrdinal: ne });
+        /* The card's lead-in is a prose paragraph the sidecar counts, so
+           it is a prose unit with the next prose ordinal in this section,
+           taken here before the math lines so it keeps its document
+           position. Only the div form is taken here: a p.eq-what is
+           collected by the P branch below, and taking both would count
+           it twice. This keeps the player's prose ids aligned with the
+           sidecar's wherever the lead-in is a div. */
+        var what = el.querySelector('.eq-what');
+        if (what && what.tagName === 'DIV') {
+          var nw = nextCount(se, 'prose');
+          push({ id: 's' + se + '-p' + nw, kind: 'prose', section: se, ordinal: nw, el: what, domId: null });
+        }
         /* One unit per math line inside the card, so an equation segment
            can point the marker at the line itself instead of the card as
            a whole. The id is deliberately not a manifest id: the manifest
@@ -629,13 +641,22 @@
       var map = {};
       for (var i = 0; i < pairs.length; i++) map[pairs[i].id] = pairs[i].hash;
       state.hashes = map;
+      /* Resolution now prefers the hash, so a step list built before the
+         hashes were ready (from id fallbacks) is stale; rebuild it on
+         next use. */
+      state.stepUnits = null;
       if (!verify) return;
       state.hashVerified = true;
       var seg = state.currentSeg;
       if (seg) {
         var unit = resolveSegment(seg);
         if (unit) {
-          var expected = byId[unit.id] && byId[unit.id].hash;
+          /* The segment names its paragraph; the resolved unit's text
+             must match that paragraph's manifest hash, not the hash of
+             whatever id the unit happens to carry, or a correctly
+             hash-resolved marker is cleared here. */
+          var entry = seg.paragraphId ? byId[seg.paragraphId] : byId[unit.id];
+          var expected = entry && entry.hash;
           if (expected && map[unit.id] !== expected) {
             var fixed = searchByHash(seg.sectionIndex, expected, unit.ordinal);
             if (fixed) placeMarker(fixed);
@@ -788,13 +809,19 @@
      matches no unit here. The paragraph's hash still names it, so resolve
      by hash. This keeps the marker and the step buttons on the right
      paragraph, including the last one. */
+  /* The sidecar's paragraph manifest entry for an id, or null. */
+  function manifestEntry(paragraphId) {
+    if (!state.sidecar) return null;
+    var manifest = state.sidecar.paragraphs || state.sidecar.paragraphManifest || [];
+    for (var i = 0; i < manifest.length; i++) {
+      if (manifest[i].id === paragraphId) return manifest[i];
+    }
+    return null;
+  }
+
   function resolveByParagraphHash(seg) {
     if (!seg.paragraphId || !state.sidecar || !state.hashes) return null;
-    var manifest = state.sidecar.paragraphs || state.sidecar.paragraphManifest || [];
-    var entry = null;
-    for (var i = 0; i < manifest.length; i++) {
-      if (manifest[i].id === seg.paragraphId) { entry = manifest[i]; break; }
-    }
+    var entry = manifestEntry(seg.paragraphId);
     if (!entry || !entry.hash) return null;
     return searchByHash(seg.sectionIndex, entry.hash, entry.ordinal);
   }
@@ -808,10 +835,28 @@
      not page ids, and the player never queries the DOM for them. */
   function resolveSegment(seg) {
     if (!seg) return null;
-    if (seg.paragraphId && state.unitsById[seg.paragraphId]) return state.unitsById[seg.paragraphId];
     if (seg.paragraphId) {
+      /* The hash names the paragraph text itself, so it is tried first
+         when it is ready: the id is a positional label that shifts when
+         the sidecar counts a paragraph this player never builds, and an
+         id match after such a shift names the wrong paragraph. Before
+         the hashes are ready the hash lookup returns null and the id
+         lookup below is the best effort, as before. */
       var byHash = resolveByParagraphHash(seg);
       if (byHash) return byHash;
+      var byId = state.unitsById[seg.paragraphId];
+      if (byId) {
+        /* The hashes are ready, no unit's text matched, and the id
+           match's text disagrees with the manifest entry for this
+           paragraph: the ids are shifted and the id match is the wrong
+           paragraph. Point at nothing rather than at the wrong
+           paragraph. */
+        if (state.hashes) {
+          var entry = manifestEntry(seg.paragraphId);
+          if (entry && entry.hash && state.hashes[byId.id] !== entry.hash) return null;
+        }
+        return byId;
+      }
     }
     var kind = seg.kind;
     var cands = state.units.filter(function (u) { return u.section === seg.sectionIndex; });

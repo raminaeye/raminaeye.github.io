@@ -54,7 +54,7 @@
     '.wt-bar{position:fixed;left:0;right:0;bottom:0;z-index:50;background:#fff;color:#111;' +
     'border-top:1px solid #999;padding:.5rem .75rem;display:flex;flex-direction:column;gap:.4rem;align-items:stretch;' +
     'font:inherit;font-size:1rem;line-height:1.3;box-sizing:border-box}' +
-    '.wt-bar button{font:inherit;cursor:pointer;background:#fff;color:#1f618d;border:1px solid #1f618d;border-radius:8px;padding:.35rem .6rem;min-height:36px}' +
+    '.wt-bar button{font:inherit;cursor:pointer;background:#fff;color:#1f618d;border:1px solid #1f618d;border-radius:8px;padding:.35rem .6rem;min-height:36px;touch-action:manipulation}' +
     '.wt-bar button[disabled]{opacity:.5;cursor:default}' +
     '.wt-bar button:focus-visible{outline:2px solid #1f618d;outline-offset:2px}' +
     '.wt-bar-main{display:flex;flex-wrap:nowrap;gap:.4rem .6rem;align-items:center;min-width:0}' +
@@ -66,6 +66,11 @@
     '.wt-bar-speed:focus-visible{outline:2px solid #1f618d;outline-offset:2px}' +
     '.wt-bar-row3{display:flex;gap:.5rem;flex-wrap:wrap}' +
     '.wt-bar.wt-min .wt-bar-main>*:not(.wt-bar-play):not(.wt-bar-minbtn){display:none}' +
+    /* When minimized only Play and the minimize button show. Without this
+       the button slides left next to Play, landing where Next sits when
+       expanded, so a tap aimed at Next can hit it. Pin it to the far
+       right so it never sits beside the transport buttons. */
+    '.wt-bar.wt-min .wt-bar-minbtn{margin-left:auto}' +
     '.wt-bar.wt-min{padding:.25rem .5rem}' +
     '.wt-bar.wt-min .wt-bar-play,.wt-bar.wt-min .wt-bar-minbtn{min-height:28px;padding:.25rem .5rem}' +
     '.wt-bar .wt-short{display:none}' +
@@ -1217,7 +1222,7 @@
     nextShort.textContent = '›';
     nextBtn.appendChild(nextFull);
     nextBtn.appendChild(nextShort);
-    nextBtn.addEventListener('click', function () { stepTo(1); });
+    nextBtn.addEventListener('click', function (e) { if (e && e.stopPropagation) e.stopPropagation(); stepTo(1); });
     var title = document.createElement('span');
     title.className = 'wt-bar-title';
     title.setAttribute('aria-live', 'polite');
@@ -1259,7 +1264,7 @@
     minBtn.className = 'wt-bar-minbtn';
     minBtn.setAttribute('aria-label', 'Minimize player');
     minBtn.textContent = '▾';
-    minBtn.addEventListener('click', function () { toggleMinimize(); });
+    minBtn.addEventListener('click', function (e) { if (e && e.stopPropagation) e.stopPropagation(); toggleMinimize(); });
     var row3 = document.createElement('div');
     row3.className = 'wt-bar-row3';
     row3.style.display = 'none';

@@ -48,6 +48,24 @@
   var SPEEDS = [1.0, 1.1, 1.2];
   var SPEED_KEY = 'wt:speed';
   var MIN_KEY = 'wt:minimized';
+  var MUSIC_KEY = 'wt:music';
+  /* Background music, Ramin 2026-11-27: user-selected, behind the
+     narration to mask voice artifacts. Fixed volume 0.3 of the
+     narration volume, always at default speed, loops, music-only
+     mute. The first option plays by default; the choice and the
+     mute persist across sessions like the speed. */
+  var MUSIC_VOLUME = 0.3;
+  var MUSIC_TRACKS = [
+    { title: 'Gravity of the Bow', file: 'gravity-of-the-bow.mp3' },
+    { title: 'Beneath the Frozen Weight', file: 'beneath-the-frozen-weight.mp3' },
+    { title: 'The Architect\'s Calm', file: 'the-architects-calm.mp3' },
+    { title: 'The Quiet Arrival', file: 'the-quiet-arrival.mp3' },
+    { title: 'Silk Thread and Wood', file: 'silk-thread-and-wood.mp3' },
+    { title: 'The Unyielding Stance', file: 'the-unyielding-stance.mp3' },
+    { title: 'Iron Mountain Ascent', file: 'iron-mountain-ascent.mp3' },
+    { title: 'Beneath the Frozen Peak', file: 'beneath-the-frozen-peak.mp3' },
+    { title: 'Before the Cold Dawn', file: 'before-the-cold-dawn.mp3' }
+  ];
   var WORST_PODCAST = 'Resume podcast (27:55 of 28 min)';
   var WORST_WALKTHROUGH = 'Resume walkthrough (71:55 of 72 min)';
   var WORST_NOTEBOOKLM = 'Listen on NotebookLM Opens in NotebookLM.';
@@ -66,7 +84,7 @@
     '.pc-btn[disabled]{opacity:.6;cursor:default}' +
     '.pc-row audio{width:100%;max-width:560px;height:44px}' +
     '.pc-msg{color:#333}' +
-    '@media (max-width:640px){.pc-row{flex-direction:column;align-items:stretch}.pc-row>span{width:100%}}' +
+    '@media (max-width:640px){.pc-row{flex-direction:column;align-items:stretch}.pc-row>span{width:100%}.wt-music select{flex:1 1 auto;min-width:0}}' +
     '@media print{.pc-row{display:none}.wt-marker{display:none!important}.wt-section-current{outline:none!important}.wt-bar{display:none!important}.wt-sheet{display:none!important}.wt-panel{display:none!important}}' +
     '.wt-section-current{outline:2px solid #d97706;outline-offset:2px}' +
     '.wt-marker{position:absolute;width:12px;height:12px;pointer-events:none;z-index:54;color:inherit}' +
@@ -76,25 +94,38 @@
     'font:inherit;font-size:1rem;line-height:1.3;box-sizing:border-box}' +
     '.wt-bar button{font:inherit;cursor:pointer;background:#fff;color:#1f618d;border:1px solid #1f618d;border-radius:8px;padding:.35rem .6rem;min-height:36px;touch-action:manipulation}' +
     '.wt-bar button[disabled]{opacity:.5;cursor:default}' +
+    '.wt-bar button.wt-music-muted{opacity:.55}' +
     '.wt-bar button:focus-visible{outline:2px solid #1f618d;outline-offset:2px}' +
     '.wt-bar-main{display:flex;flex-wrap:nowrap;gap:.4rem .6rem;align-items:center;min-width:0}' +
     '.wt-bar-main button{flex:none}' +
-    '.wt-bar-title{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+    '.wt-bar-mid{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:.2rem;justify-content:center}' +
+    '.wt-bar-chaptime{white-space:nowrap;font-variant-numeric:tabular-nums;font-size:.95rem;line-height:1.2}' +
+    '.wt-bar-track{height:6px;background:#aeb9c2;border-radius:2px;overflow:hidden}' +
+    '.wt-bar-trackfill{display:block;height:100%;width:0%;background:#1f618d}' +
+    '.wt-bar-msg{padding:.2rem 0}' +
+    '.wt-bar-save{font-size:.8rem;color:#1f618d;padding:.1rem 0 0}' +
+    '.wt-bar.wt-min .wt-bar-save{display:none}' +
+    '.wt-saved{font-size:.85rem;color:#1f618d}' +
+    '.wt-music{display:flex;align-items:center;gap:.5rem;min-width:0}' +
+    '.wt-music label{color:#1f618d;white-space:nowrap}' +
+    '.wt-music select{font:inherit;color:#1f618d;background:#fff;border:1px solid #1f618d;border-radius:8px;padding:.45rem .5rem;min-height:44px;cursor:pointer;max-width:100%}' +
+    '.wt-music select:focus-visible{outline:2px solid #1f618d;outline-offset:2px}' +
     '.wt-bar-elem{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:30vw}' +
     '.wt-bar-pos{white-space:nowrap;font-variant-numeric:tabular-nums;flex:none}' +
     '.wt-bar-speed{font:inherit;color:#1f618d;background:#fff;border:1px solid #1f618d;border-radius:8px;padding:.35rem .3rem;min-height:36px;cursor:pointer;flex:none}' +
     '.wt-bar-speed:focus-visible{outline:2px solid #1f618d;outline-offset:2px}' +
     '.wt-bar-row3{display:flex;gap:.5rem;flex-wrap:wrap}' +
-    '.wt-bar.wt-min .wt-bar-main>*:not(.wt-bar-play):not(.wt-bar-minbtn){display:none}' +
-    /* When minimized only Play and the minimize button show. Without this
-       the button slides left next to Play, landing where Next sits when
-       expanded, so a tap aimed at Next can hit it. Pin it to the far
-       right so it never sits beside the transport buttons. */
+    '.wt-bar.wt-min .wt-bar-main>*:not(.wt-bar-minbtn){display:none}' +
+    /* When minimized only the triangle shows. Play, Resume and Skip go
+       too, so a tap aimed at Next can never hit a shrunken control, and
+       the bar is just the triangle to expand it back. Pin it to the far
+       right so it never sits where a transport button sat. */
     '.wt-bar.wt-min .wt-bar-minbtn{margin-left:auto}' +
+    '.wt-bar.wt-min .wt-bar-row3{display:none!important}' +
     '.wt-bar.wt-min{padding:.25rem .5rem}' +
-    '.wt-bar.wt-min .wt-bar-play,.wt-bar.wt-min .wt-bar-minbtn{min-height:28px;padding:.25rem .5rem}' +
+    '.wt-bar.wt-min .wt-bar-minbtn{min-height:28px;padding:.25rem .5rem}' +
     '.wt-bar .wt-short{display:none}' +
-    '@media (max-width:480px){.wt-bar{font-size:.85rem;padding:.4rem .5rem}.wt-bar-main{gap:.3rem .4rem}.wt-bar-elem{display:none}.wt-bar button{padding:.3rem .45rem;min-height:32px}.wt-bar-speed{padding:.3rem .2rem;min-height:32px}.wt-bar .wt-full{display:none}.wt-bar .wt-short{display:inline}}' +
+    '@media (max-width:480px){.wt-bar{font-size:.85rem;padding:.4rem .5rem}.wt-bar-main{gap:.3rem .4rem;flex-wrap:wrap}.wt-bar-mid{flex:1 1 100%;order:10}.wt-bar-elem{display:none}.wt-bar button{padding:.3rem .45rem;min-height:32px}.wt-bar-speed{padding:.3rem .2rem;min-height:32px}.wt-bar .wt-full{display:none}.wt-bar .wt-short{display:inline}}' +
     '.wt-sheet{position:fixed;left:0;right:0;z-index:55;background:#fff;color:#111;border-top:1px solid #999;' +
     'max-height:60vh;overflow:auto;padding:1rem;box-sizing:border-box}' +
     '.wt-sheet h2{font-size:1.1rem;margin:.2rem 0 .6rem}' +
@@ -103,6 +134,9 @@
     '.wt-sheet button{font:inherit;cursor:pointer;background:none;border:0;color:#1f618d;text-align:left;padding:.3rem 0}' +
     '.wt-sheet button:focus-visible{outline:2px solid #1f618d;outline-offset:2px}' +
     '.wt-sheet .wt-sub{padding-left:1.2rem;font-size:.95rem}' +
+    '.wt-sheet li.wt-chapter-current{background:#eef4f9;border-left:3px solid #1f618d;padding-left:.4rem}' +
+    '.wt-sheet li.wt-chapter-current>button{font-weight:700;color:#111}' +
+    '.wt-sheet .wt-now{font-weight:700;color:#1f618d}' +
     '.wt-panel{position:fixed;right:0;z-index:55;background:#fff;color:#111;border-left:1px solid #999;' +
     'width:360px;max-width:100vw;overflow:auto;padding:1rem;box-sizing:border-box}' +
     '.wt-panel h2{font-size:1.1rem;margin:.2rem 0 .6rem}' +
@@ -146,6 +180,127 @@
   function loadMinimized() {
     var m = load(MIN_KEY);
     return !!(m && m.m === true);
+  }
+
+  /* ---------- background music (Ramin, 2026-11-27) ---------- */
+
+  function loadMusic() {
+    var m = load(MUSIC_KEY);
+    var track = (m && typeof m.t === 'number') ? m.t : 0;
+    if (track < 0 || track >= MUSIC_TRACKS.length) track = 0;
+    return { track: track, muted: !!(m && m.m === true) };
+  }
+
+  function saveMusic() {
+    save(MUSIC_KEY, { t: state.musicTrack, m: state.musicMuted });
+  }
+
+  function musicUrl(i) {
+    try { return new URL('podcasts/music/' + MUSIC_TRACKS[i].file, BASE).href; } catch (e) { return ''; }
+  }
+
+  /* The music element is detached, loops, and plays at a fixed 0.3
+     volume. Its speed is never touched: the walkthrough speed control
+     only ever sets state.audio.playbackRate, never this element. */
+  function createMusicAudio() {
+    var m = document.createElement('audio');
+    m.preload = 'none';
+    m.loop = true;
+    m.volume = MUSIC_VOLUME;
+    m.setAttribute('aria-label', 'Background music');
+    var src = musicUrl(state.musicTrack);
+    if (!src) return null;
+    m.src = src;
+    /* Music failure is silent and never touches the narration: a
+       missing or uncached track offline just means no music. */
+    m.addEventListener('error', function () { /* silent */ });
+    state.musicAudio = m;
+    return m;
+  }
+
+  /* Music follows the narration: it plays only while the narration
+     plays and is unmuted, and pauses the moment the narration pauses
+     or ends. Called from the narration play, pause and ended
+     handlers, so every play path (bar, top button, resume) syncs it. */
+  function syncMusic() {
+    var m = state.musicAudio;
+    if (!m) {
+      if (state.musicMuted || !state.audio || state.audio.paused) return;
+      m = createMusicAudio();
+      if (!m) return;
+    }
+    if (state.musicMuted || !state.audio || state.audio.paused || state.audio.ended) {
+      m.pause();
+      return;
+    }
+    var p = m.play();
+    if (p && p.catch) p.catch(function () { /* autoplay block: the next play gesture retries */ });
+  }
+
+  function selectMusic(i) {
+    if (i < 0 || i >= MUSIC_TRACKS.length) return;
+    state.musicTrack = i;
+    saveMusic();
+    if (state.musicSel) state.musicSel.value = String(i);
+    var m = state.musicAudio;
+    if (!m) return;
+    var src = musicUrl(i);
+    if (!src || m.src === src) return;
+    var wasPlaying = state.audio && !state.audio.paused && !state.musicMuted;
+    m.src = src;
+    if (wasPlaying) {
+      var p = m.play();
+      if (p && p.catch) p.catch(function () { /* silent */ });
+    }
+  }
+
+  function updateMusicMuteBtn() {
+    var b = state.musicMuteBtn;
+    if (!b) return;
+    var full = b.querySelector('.wt-full');
+    var short = b.querySelector('.wt-short');
+    if (full) full.textContent = state.musicMuted ? 'Muted' : 'Music';
+    if (short) short.textContent = '♪';
+    b.classList.toggle('wt-music-muted', state.musicMuted);
+    b.setAttribute('aria-pressed', state.musicMuted ? 'true' : 'false');
+    b.setAttribute('aria-label', state.musicMuted ? 'Unmute background music' : 'Mute background music');
+  }
+
+  function toggleMusicMute() {
+    state.musicMuted = !state.musicMuted;
+    saveMusic();
+    updateMusicMuteBtn();
+    syncMusic();
+  }
+
+  /* The picker sits in the top audio row, after the walkthrough
+     button: a label and a select with all nine tracks by name. */
+  function showMusicRow(wtSpan) {
+    var row = wtSpan && wtSpan.parentNode;
+    if (!row || state.musicSel) return;
+    var span = makeSpan('music');
+    var wrap = document.createElement('div');
+    wrap.className = 'wt-music';
+    var lab = document.createElement('label');
+    lab.textContent = 'Music';
+    var sel = document.createElement('select');
+    sel.setAttribute('aria-label', 'Background music');
+    MUSIC_TRACKS.forEach(function (t, i) {
+      var opt = document.createElement('option');
+      opt.value = String(i);
+      opt.textContent = t.title;
+      sel.appendChild(opt);
+    });
+    sel.value = String(state.musicTrack);
+    sel.addEventListener('change', function () {
+      selectMusic(parseInt(sel.value, 10));
+    });
+    wrap.appendChild(lab);
+    wrap.appendChild(sel);
+    span.appendChild(wrap);
+    if (wtSpan.nextSibling) row.insertBefore(span, wtSpan.nextSibling);
+    else row.appendChild(span);
+    state.musicSel = sel;
   }
 
   function svgTriangle() {
@@ -427,6 +582,11 @@
     playing: false,
     loading: false,
     speed: 1.0,
+    musicAudio: null,
+    musicTrack: 0,
+    musicMuted: false,
+    musicSel: null,
+    musicMuteBtn: null,
     currentSeg: null,
     currentSection: -1,
     following: true,
@@ -442,13 +602,19 @@
     tryIt: null,
     tryItFiredAt: -1,
     bar: null,
-    barTitle: null,
+    barMid: null,
+    barMidTime: null,
+    barMidFill: null,
+    chapterStart: 0,
+    chapterEnd: 0,
     barElem: null,
     barPos: null,
     barPlay: null,
     barBack: null,
     barNext: null,
-    stepUnits: null,
+    stepStops: null,
+    liCache: null,
+    scrollGen: 0,
     refUnits: {},
     barMinBtn: null,
     barSpeed: null,
@@ -459,6 +625,18 @@
     transcriptData: null,
     transcriptLoaded: false,
     validationDone: false,
+    savedShown: false,
+    savedEl: null,
+    barSave: null,
+    barMidTotal: null,
+    saveState: 'none',
+    saveListenersAdded: false,
+    chapterItems: null,
+    currentChapterIdx: -1,
+    swReg: null,
+    firstPlayPending: false,
+    persistRequested: false,
+    offlineMsgShown: false,
   };
 
   function slugKey() { return 'wt:pos:' + (state.slug || ''); }
@@ -492,8 +670,187 @@
     if (kind === 'table') return seg.element || 'Table';
     if (kind === 'tool') return 'Demo';
     if (kind === 'step_list') return 'Steps';
-    if (kind === 'section_title' || kind === 'subhead') return seg.element || (unit && unit.el ? (unit.el.textContent || '').replace(/\s+/g, ' ').trim() : '');
+    /* A section title is the chapter title, and the bar carries no
+       chapter title text, so a title segment names nothing here. */
+    if (kind === 'section_title' || kind === 'subhead') return '';
     return '';
+  }
+
+  /* ---------- service worker: offline playback ---------- */
+
+  var OFFLINE_MSG = 'This walkthrough is not saved on this device yet. Play it once while online and it will be saved for offline listening.';
+
+  function audioUrl() {
+    try { return new URL(state.entry.audio, BASE).href; } catch (e) { return ''; }
+  }
+
+  /* Register wt-sw.js at the site root. Silent failure: a browser
+     without service worker support, or a failed registration, plays
+     from the network exactly as today. */
+  function registerWorker() {
+    try {
+      if (!('serviceWorker' in navigator)) return;
+      state.swReg = navigator.serviceWorker.register(new URL('wt-sw.js', BASE).href, { scope: '/', updateViaCache: 'none' });
+      state.swReg.catch(function () { /* silent */ });
+      navigator.serviceWorker.addEventListener('message', onWorkerMessage);
+      navigator.serviceWorker.addEventListener('controllerchange', function () { askCachedOnInit(); });
+    } catch (e) { /* silent */ }
+  }
+
+  /* Wait briefly for the worker to control this page before a first
+     play, so the first play caches. At most 3 seconds; on timeout, or
+     with no registration, play proceeds from the network exactly as
+     today. Never blocks the button: the caller waits async. */
+  function waitForWorkerReady() {
+    if (!state.swReg) return Promise.resolve(false);
+    var deadline = Date.now() + 3000;
+    return new Promise(function (resolve) {
+      var settled = false;
+      function done(v) { if (!settled) { settled = true; resolve(v); } }
+      function controllerPresent() {
+        try { return !!(navigator.serviceWorker && navigator.serviceWorker.controller); } catch (e) { return false; }
+      }
+      (function poll() {
+        if (controllerPresent()) { done(true); return; }
+        if (Date.now() >= deadline) { done(false); return; }
+        setTimeout(poll, 100);
+      })();
+      state.swReg.then(function (reg) {
+        if (reg && reg.active) return;
+        if (navigator.serviceWorker) {
+          navigator.serviceWorker.ready.then(function () { /* poll keeps checking */ }, function () { done(false); });
+        } else done(false);
+      }, function () { done(false); });
+    });
+  }
+
+  /* Ask the worker whether the current walkthrough is cached. Resolves
+     true, false, or null (no worker, or no answer within the timeout).
+     No ask ever blocks playback. */
+  function askWorkerCached(url, timeoutMs) {
+    return new Promise(function (resolve) {
+      var done = false;
+      function finish(v) { if (!done) { done = true; resolve(v); } }
+      var timer = setTimeout(function () { finish(null); }, timeoutMs);
+      try {
+        if (!('serviceWorker' in navigator) || !navigator.serviceWorker) { clearTimeout(timer); finish(null); return; }
+        var target = navigator.serviceWorker.controller;
+        if (target) { sendAsk(target); return; }
+        navigator.serviceWorker.ready.then(function (reg) {
+          if (reg && reg.active) sendAsk(reg.active); else finish(null);
+        }, function () { finish(null); });
+        function sendAsk(t) {
+          try {
+            var ch = new MessageChannel();
+            ch.port1.onmessage = function (e) {
+              clearTimeout(timer);
+              finish(e.data && e.data.cached === true);
+            };
+            t.postMessage({ type: 'wt-cached?', url: url }, [ch.port2]);
+          } catch (e) { finish(null); }
+        }
+      } catch (e) { finish(null); }
+    });
+  }
+
+  /* Tell the worker this walkthrough is playing, so eviction is
+     least-recently-played. Fire and forget. */
+  function tellWorkerPlaying() {
+    try {
+      var url = audioUrl();
+      if (!url || !('serviceWorker' in navigator) || !navigator.serviceWorker) return;
+      var t = navigator.serviceWorker.controller;
+      if (t) t.postMessage({ type: 'wt-playing', url: url });
+    } catch (e) { /* silent */ }
+  }
+
+  function requestPersistOnce() {
+    if (state.persistRequested) return;
+    state.persistRequested = true;
+    try {
+      if (navigator.storage && navigator.storage.persist) {
+        var p = navigator.storage.persist();
+        if (p && p.catch) p.catch(function () { /* ignored */ });
+      }
+    } catch (e) { /* ignored */ }
+  }
+
+  /* The save line, in the row and in the bar the listener watches
+     while listening. 'Saving...' while the worker caches the audio
+     on first play, 'Saved on this device' once it reports cached.
+     Offline, the saved line also says so, since offline looks
+     identical to online otherwise. */
+  function saveLineText(base) {
+    if (base === 'Saved on this device' && typeof navigator.onLine === 'boolean' && !navigator.onLine) {
+      return 'Saved on this device · Offline';
+    }
+    return base;
+  }
+
+  function setSaveLine(text) {
+    if (state.savedEl) state.savedEl.textContent = saveLineText(text);
+    if (state.barSave) state.barSave.textContent = saveLineText(text);
+  }
+
+  function refreshSaveLine() {
+    if (state.saveState === 'saved') setSaveLine('Saved on this device');
+    else if (state.saveState === 'saving') setSaveLine('Saving...');
+  }
+
+  function showSavingIndicator() {
+    if (!state.entry || state.saveState === 'saved') return;
+    state.saveState = 'saving';
+    var span = document.querySelector('[data-wt-span="walkthrough"]');
+    if (!span) return;
+    if (!state.savedEl) {
+      var d = document.createElement('div');
+      d.className = 'wt-saved';
+      state.savedEl = d;
+    }
+    if (!state.savedEl.parentNode) span.appendChild(state.savedEl);
+    setSaveLine('Saving...');
+  }
+
+  function showSavedIndicator() {
+    if (!state.entry) return;
+    state.savedShown = true;
+    state.saveState = 'saved';
+    var span = document.querySelector('[data-wt-span="walkthrough"]');
+    if (!span) return;
+    if (!state.savedEl) {
+      var d = document.createElement('div');
+      d.className = 'wt-saved';
+      state.savedEl = d;
+    }
+    if (!state.savedEl.parentNode) span.appendChild(state.savedEl);
+    setSaveLine('Saved on this device');
+    requestPersistOnce();
+  }
+
+  function onWorkerMessage(e) {
+    var data = e.data || {};
+    if (data.type === 'wt-cached' && data.url === audioUrl()) showSavedIndicator();
+  }
+
+  function askCachedOnInit() {
+    if (!state.entry) return;
+    askWorkerCached(audioUrl(), 3000).then(function (cached) {
+      if (cached === true) showSavedIndicator();
+    });
+  }
+
+  function showOfflineNotSaved() {
+    var span = document.querySelector('[data-wt-span="walkthrough"]');
+    if (!span) return;
+    /* Nothing plays in this state, so the bar reads Play at 0:00,
+       never Pause. */
+    if (state.barPlay && !state.audio) state.barPlay.textContent = 'Play';
+    if (state.offlineMsgShown) return;
+    var m = document.createElement('div');
+    m.className = 'pc-msg';
+    m.textContent = OFFLINE_MSG;
+    span.appendChild(m);
+    state.offlineMsgShown = true;
   }
 
   /* ---------- row and spans (plan section 1) ---------- */
@@ -714,12 +1071,15 @@
       /* Resolution now prefers the hash, so a step list built before the
          hashes were ready (from id fallbacks) is stale; rebuild it on
          next use. */
-      state.stepUnits = null;
+      state.stepStops = null;
+      state.liCache = null;
       if (!verify) return;
       state.hashVerified = true;
       var seg = state.currentSeg;
       if (seg) {
-        var unit = resolveSegment(seg);
+        /* The hash check names the paragraph's own unit, the list
+           itself, not the one item the marker points at. */
+        var unit = resolveSegmentBase(seg);
         if (unit) {
           /* The segment names its paragraph; the resolved unit's text
              must match that paragraph's manifest hash, not the hash of
@@ -903,7 +1263,7 @@
      is present; it goes straight to the elementRef fallback. The
      paragraph_id values on transcript units are transcript-side labels,
      not page ids, and the player never queries the DOM for them. */
-  function resolveSegment(seg) {
+  function resolveSegmentBase(seg) {
     if (!seg) return null;
     if (seg.paragraphId) {
       /* The hash names the paragraph text itself, so it is tried first
@@ -1012,6 +1372,51 @@
     return null;
   }
 
+  /* The list items of a list element: its direct LI children, or any
+     descendant LI when the list is wrapped. */
+  function listItems(el) {
+    if (!el) return [];
+    var kids = el.children || [];
+    var out = [];
+    for (var i = 0; i < kids.length; i++) if (kids[i].tagName === 'LI') out.push(kids[i]);
+    if (out.length) return out;
+    return Array.prototype.slice.call(el.querySelectorAll('li'));
+  }
+
+  /* Which item of a list a segment reads: the segments that name the
+     same list read its items in order, so the segment's position among
+     them is the item index. The first segment reads the first item, the
+     second the second, and so on. Clamped to the last item. Cached per
+     segment index; the sidecar does not change while the page runs. */
+  function listItemUnit(seg, unit) {
+    var segs = state.sidecar.segments || [];
+    var segIdx = segs.indexOf(seg);
+    if (segIdx < 0) return unit;
+    if (!state.liCache) state.liCache = {};
+    if (state.liCache[segIdx]) return state.liCache[segIdx];
+    var items = listItems(unit.el);
+    if (!items.length) { state.liCache[segIdx] = unit; return unit; }
+    var idx = 0;
+    for (var i = 0; i < segIdx; i++) {
+      var u = resolveSegmentBase(segs[i]);
+      if (u && u.id === unit.id) idx++;
+    }
+    var li = items[Math.min(idx, items.length - 1)];
+    var liUnit = unitForElement(li, 'step_list', unit.section, unit.ordinal * 1000 + idx);
+    state.liCache[segIdx] = liUnit;
+    return liUnit;
+  }
+
+  /* Resolution with the list fix: a segment that names a list points
+     the marker at the list item it reads, not at the list as a whole,
+     so the marker moves to the next bullet point as the narration
+     advances. Every other segment resolves exactly as before. */
+  function resolveSegment(seg) {
+    var unit = resolveSegmentBase(seg);
+    if (!unit || unit.kind !== 'step_list') return unit;
+    return listItemUnit(seg, unit);
+  }
+
   function segmentAt(t) {
     var segs = state.sidecar.segments;
     var found = null;
@@ -1044,8 +1449,19 @@
       left = r.left + window.scrollX - 18;
       top = r.top + window.scrollY;
     }
-    state.markerEl.style.left = Math.max(0, left) + 'px';
-    state.markerEl.style.top = Math.max(0, top) + 'px';
+    /* Keep the marker inside the viewport, not just inside the
+       document: an element at the very top of the screen puts its
+       marker above the screen otherwise. The clamp only applies
+       while the element itself is on screen: an element scrolled
+       far off screen keeps its marker at its own position, and
+       the scroll brings both into view. */
+    /* The marker never hides under the fixed nav either: an element
+       at the top of the readable area keeps its marker below the
+       nav, on the element itself, instead of 26 px above it. */
+    if (r.top >= 0) top = Math.max(window.scrollY + navTop(), top);
+    if (r.left >= 0) left = Math.max(window.scrollX, left);
+    state.markerEl.style.left = left + 'px';
+    state.markerEl.style.top = top + 'px';
   }
 
   function placeMarker(unit) {
@@ -1082,15 +1498,55 @@
       target.classList.add('wt-section-current');
       state.outlinedEl = target;
     }
-    if (state.barTitle) {
-      var chapters = state.sidecar.chapters || [];
-      var ch = null;
-      for (var i = 0; i < chapters.length; i++) if (chapters[i].sectionIndex === sectionIndex) ch = chapters[i];
-      state.barTitle.textContent = ch ? (ch.title || '') : (target ? (target.textContent || '').replace(/\s+/g, ' ').trim() : '');
-    }
   }
 
   function barHeight() { return state.bar ? state.bar.offsetHeight : 0; }
+
+  /* The top of the readable area: below the fixed site nav, with a
+     small gap. Measured from the nav itself, so it holds on every
+     page at every width; 73 is the fallback when no nav is found
+     (65 px nav plus 8 px gap). Every scroll in the player lands the
+     marked element here, never at viewport top 0, where the nav
+     would cover it. */
+  function navTop() {
+    var nav = document.querySelector('.topnav');
+    if (nav) {
+      var h = nav.offsetHeight;
+      if (h > 0) return h + 8;
+    }
+    return 73;
+  }
+
+  /* Scroll an element so its top sits at navTop, used when the
+     element must be the thing on screen, for example an equation
+     line whose explanation block sits below it. */
+  function scrollToNavTop(el) {
+    var r = el.getBoundingClientRect();
+    var delta = r.top - navTop();
+    if (Math.abs(delta) < 2) return;
+    var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    state.progScroll = true;
+    state.scrollGen = (state.scrollGen || 0) + 1;
+    var gen = state.scrollGen;
+    window.scrollBy({ top: delta, behavior: reduced ? 'auto' : 'smooth' });
+    scheduleProgScrollClear(gen);
+  }
+
+  /* The eq-why div that explains one equation line: same card, same
+     data-eqline. Null when the line has no explanation block. */
+  function eqWhyForLine(unit) {
+    if (!unit || !unit.el || !unit.el.getAttribute) return null;
+    var lineNo = unit.el.getAttribute('data-eqline');
+    if (lineNo === null || lineNo === '') return null;
+    var card = unit.el;
+    while (card && !(card.classList && card.classList.contains('eq-card'))) card = card.parentNode;
+    if (!card) return null;
+    var whys = card.querySelectorAll('.eq-why[data-eqline]');
+    for (var i = 0; i < whys.length; i++) {
+      if (whys[i].getAttribute('data-eqline') === lineNo) return whys[i];
+    }
+    return null;
+  }
 
   function sheetHeight() {
     if (state.chaptersSheet && state.chaptersSheet.parentNode) return state.chaptersSheet.offsetHeight;
@@ -1102,31 +1558,91 @@
     return window.innerHeight - barHeight() - sheetHeight();
   }
 
+  /* Scroll an element into view, keeping its top, where the marker
+     sits, on screen. An element taller than the visible area never
+     scrolls to its bottom, or the top and the marker go off screen
+     above it; it stays where its top is visible. A short element
+     scrolls just enough to show its bottom too. */
   function scrollToElement(el) {
     var r = el.getBoundingClientRect();
     var bottom = visibleBottom();
-    if (r.top >= 0 && r.bottom <= bottom) return;
+    var top = navTop();
     var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     var delta;
-    if (r.height <= bottom) delta = r.top - 8;
-    else if (r.top < 0) delta = r.top - 8;
-    else delta = r.bottom - bottom + 8;
+    if (r.top < top) delta = r.top - top;
+    else if (r.top > bottom) delta = r.top - top;
+    else if (r.height <= bottom && r.bottom > bottom) {
+      delta = r.bottom - bottom + 8;
+      /* Never scroll the element's own top above the nav: an
+         element taller than the visible area keeps its top below
+         the nav and its bottom below the fold, rather than hiding
+         its top under the nav to show its bottom. */
+      if (r.top - delta < top) delta = r.top - top;
+      if (delta <= 0) return;
+    }
+    else return;
     state.progScroll = true;
+    state.scrollGen = (state.scrollGen || 0) + 1;
+    var gen = state.scrollGen;
     window.scrollBy({ top: delta, behavior: reduced ? 'auto' : 'smooth' });
-    scheduleProgScrollClear();
+    scheduleProgScrollClear(gen);
   }
 
-  function scheduleProgScrollClear() {
+  /* Clear the programmatic-scroll flag when the scroll ends. The
+     generation keeps an old scroll's end from clearing the flag during
+     a newer scroll: a new scroll cancels the old one, the old one's
+     scrollend fires at once, and without the guard it would clear the
+     flag while the new scroll is still running, so the scroll listener
+     would read the new scroll as the reader scrolling away and stop
+     following. A safety timer covers a scrollend that never fires. */
+  function scheduleProgScrollClear(gen) {
     clearTimeout(state.scrollTimer);
+    function clearIfCurrent() {
+      if (state.scrollGen === gen) state.progScroll = false;
+    }
     if ('onscrollend' in window) {
       var onEnd = function () {
-        state.progScroll = false;
         window.removeEventListener('scrollend', onEnd);
+        clearIfCurrent();
       };
       window.addEventListener('scrollend', onEnd);
-    } else {
-      state.scrollTimer = setTimeout(function () { state.progScroll = false; }, 500);
     }
+    state.scrollTimer = setTimeout(clearIfCurrent, 2000);
+  }
+
+  /* A stepped equation card hides every line except the active one
+     (the page CSS hides a line without eq-active, and the tool steps
+     the card by moving eq-active between lines). When the narration
+     names a line of such a card, activate that line first, setting
+     eq-active on it and clearing it from the others, so the audio,
+     the marker and the visible line always agree and the player never
+     narrates a hidden line. A plain card shows all its lines, so the
+     player leaves it alone: the card is only stepped when a line
+     without eq-active is display none, read from the page's own CSS.
+     The named line's eq-why div carries the same data-eqline, so it
+     is activated with the line. */
+  function activateEqLine(unit) {
+    if (!unit || !unit.el || !unit.el.getAttribute) return;
+    var lineNo = unit.el.getAttribute('data-eqline');
+    if (lineNo === null || lineNo === '') return;
+    var card = unit.el;
+    while (card && !(card.classList && card.classList.contains('eq-card'))) card = card.parentNode;
+    if (!card) return;
+    var lines = card.querySelectorAll('.eq-line');
+    var stepped = false;
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i].classList.contains('eq-active')) continue;
+      var cs = null;
+      try { cs = window.getComputedStyle(lines[i]); } catch (e) { cs = null; }
+      if (cs && cs.display === 'none') { stepped = true; break; }
+    }
+    if (!stepped) return;
+    var items = card.querySelectorAll('[data-eqline]');
+    for (var j = 0; j < items.length; j++) {
+      if (items[j].getAttribute('data-eqline') === lineNo) items[j].classList.add('eq-active');
+      else items[j].classList.remove('eq-active');
+    }
+    card.classList.remove('rw-empty');
   }
 
   function updateForTime(t, fromSeek) {
@@ -1139,14 +1655,43 @@
     var unit = resolveSegment(seg);
     if (unit) {
       var samePara = state.markedEl === unit.el;
+      activateEqLine(unit);
       placeMarker(unit);
       if (state.following && changed && !samePara) scrollToElement(unit.el);
+      /* An equation line being expanded term by term stays on screen
+         even when following is off: the reader cannot follow an
+         expansion of an equation they cannot see. A new line segment
+         always brings its line into view; while its terms continue,
+         the line is only pulled back when it has gone fully off
+         screen, so a reader who scrolled it partly away is not
+         fought on every frame. */
+      if (unit.kind === 'equation' && typeof unit.eqLine !== 'undefined') {
+        if (changed) {
+          /* A line with an explanation block of its own is scrolled
+             to the top of the readable area, so the block below it
+             is on screen during the term walk. Leaving the line
+             where it already sits, at the bottom of the screen,
+             would show the previous line's block above it instead. */
+          var why = eqWhyForLine(unit);
+          if (why) {
+            var wr = why.getBoundingClientRect();
+            var lr0 = unit.el.getBoundingClientRect();
+            if (wr.bottom > visibleBottom() || lr0.top > navTop() + 8) scrollToNavTop(unit.el);
+            else scrollToElement(unit.el);
+          } else scrollToElement(unit.el);
+        }
+        else {
+          var lr = unit.el.getBoundingClientRect();
+          if (lr.bottom < 0 || lr.top > visibleBottom()) scrollToElement(unit.el);
+        }
+      }
       if (state.barElem) state.barElem.textContent = elementNameFor(seg, unit);
     } else {
       clearMarker();
       if (state.barElem) state.barElem.textContent = '';
     }
     if (state.barPos) state.barPos.textContent = posText(t);
+    updateChapterDisplay(t);
     if (state.transcriptPanel && state.transcriptPanel.parentNode) renderTranscriptSection(seg.sectionIndex, seg);
     checkTryIt(t);
     state.lastTime = t;
@@ -1173,33 +1718,52 @@
   }
 
   function announceTryIt(p) {
-    if (!state.barTitle) return;
+    if (!state.bar) return;
     var el = p.element || {};
     var name = (el.kind || 'element') + (el.id ? ' ' + el.id : '');
     var live = document.createElement('div');
     live.setAttribute('aria-live', 'polite');
     live.style.cssText = 'position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)';
     live.textContent = 'Audio paused for a try-it on ' + name + '.';
-    state.bar.appendChild(live);
+    /* The announcement is for screen readers, not bar content: it
+       lives on the body, so the bar's own text stays just its
+       controls (a minimized bar reads as only the triangle). */
+    (document.body || document.documentElement).appendChild(live);
     setTimeout(function () { if (live.parentNode) live.parentNode.removeChild(live); }, 5000);
   }
 
   /* ---------- step buttons: previous and next thing to read ---------- */
 
-  /* The readable units, in document order, that carry at least one
-     segment. A thing to read is one of these units. Computed once; the
-     page does not change while the walkthrough runs. */
-  function stepUnits() {
-    if (state.stepUnits) return state.stepUnits;
-    var byUnit = {};
+  /* The step stops, in narration order: one stop per thing to read.
+     Most units are one stop, at their first segment. An eq-why unit is
+     one stop per segment, so Intuition, Mathematics and Example are
+     each a stop with the marker staying on the div, and Back from the
+     Example goes to the Mathematics, Back from the Mathematics to the
+     Intuition, Back from the Intuition to the equation line. A list
+     unit is one stop per segment too, one per bullet, so Back steps
+     through the bullets. Narration order, not document order: the
+     equation lines are enumerated as a group before the eq-why divs,
+     so document order would put both lines before both divs and Back
+     from an eq-why block would land on the wrong line. Computed once;
+     the page does not change while the walkthrough runs. */
+  function stepStops() {
+    if (state.stepStops) return state.stepStops;
     var segs = state.sidecar.segments || [];
+    var seen = {};
+    var stops = [];
     for (var i = 0; i < segs.length; i++) {
-      var u = resolveSegment(segs[i]);
-      if (u && !byUnit[u.id]) byUnit[u.id] = u;
+      var seg = segs[i];
+      var base = resolveSegmentBase(seg);
+      if (!base) continue;
+      if (base.kind === 'eqwhy' || base.kind === 'step_list') {
+        stops.push({ seg: seg, unit: resolveSegment(seg) });
+      } else if (!seen[base.id]) {
+        seen[base.id] = true;
+        stops.push({ seg: seg, unit: base });
+      }
     }
-    var list = state.units.filter(function (u) { return byUnit[u.id]; });
-    state.stepUnits = list;
-    return list;
+    state.stepStops = stops;
+    return stops;
   }
 
   function currentStepIndex() {
@@ -1212,29 +1776,30 @@
     if (state.audio) seg = segmentAt(state.audio.currentTime);
     if (!seg) seg = state.currentSeg;
     if (!seg) return -1;
-    var unit = resolveSegment(seg);
+    var stops = stepStops();
+    for (var i = 0; i < stops.length; i++) if (stops[i].seg === seg) return i;
+    var unit = resolveSegmentBase(seg);
     if (!unit) return -1;
-    var list = stepUnits();
-    for (var i = 0; i < list.length; i++) if (list[i] === unit) return i;
+    for (var j = 0; j < stops.length; j++) if (stops[j].unit === unit) return j;
     return -1;
   }
 
   function updateStepButtons() {
     if (!state.barBack || !state.barNext) return;
     var idx = currentStepIndex();
-    var list = stepUnits();
+    var list = stepStops();
     state.barBack.disabled = idx <= 0;
     state.barNext.disabled = idx < 0 || idx >= list.length - 1;
   }
 
   function stepTo(dir) {
     if (!state.audio) return;
-    var list = stepUnits();
+    var list = stepStops();
     if (!list.length) return;
     var cur = currentStepIndex();
     var next = dir > 0 ? (cur < 0 ? 0 : cur + 1) : (cur < 0 ? list.length - 1 : cur - 1);
     if (next < 0 || next >= list.length) return;
-    var seg = firstSegmentForUnit(list[next]);
+    var seg = list[next].seg;
     if (!seg) return;
     state.following = true;
     showRow3('none');
@@ -1243,12 +1808,77 @@
     updateStepButtons();
   }
 
-  /* Position readout. Below 480 pixels the bar shows the current time
-     only; the total stays in the top button and in the full bar at wider
-     widths, so the one line still fits. */
+  /* Whole-walkthrough time, always labeled and always with its
+     total, at every width. At phone width it lives in the bar
+     middle on its own line and the separate readout is hidden, so
+     the two times can never collide. */
   function posText(t) {
-    if (window.innerWidth <= 480) return fmt(t);
-    return fmt(t) + ' / ' + fmt(state.sidecar.totalSeconds);
+    return 'Total ' + fmt(t) + ' / ' + fmt(state.sidecar.totalSeconds);
+  }
+
+  /* Which chapter the audio is in: the last chapter whose start is
+     at or before t. -1 when there are no chapters. */
+  function chapterIndexForTime(t) {
+    var chapters = (state.sidecar && state.sidecar.chapters) || [];
+    var idx = -1;
+    for (var i = 0; i < chapters.length; i++) {
+      if ((chapters[i].startSeconds || 0) <= t) idx = i;
+      else break;
+    }
+    return idx;
+  }
+
+  /* Mark the playing chapter in the open chapters sheet, if any:
+     bold, a blue edge, and the words Now playing. Called on every
+     time update, but it only touches the DOM when the chapter
+     changes. */
+  function markCurrentChapter(t) {
+    if (!state.chaptersSheet || !state.chapterItems) return;
+    var idx = chapterIndexForTime(t);
+    if (idx === state.currentChapterIdx) return;
+    state.currentChapterIdx = idx;
+    for (var i = 0; i < state.chapterItems.length; i++) {
+      var item = state.chapterItems[i];
+      var cur = i === idx;
+      if (item.li) {
+        if (cur) item.li.classList.add('wt-chapter-current');
+        else item.li.classList.remove('wt-chapter-current');
+      }
+      if (item.btn) {
+        if (cur) item.btn.setAttribute('aria-current', 'true');
+        else item.btn.removeAttribute('aria-current');
+      }
+      if (item.now) item.now.textContent = cur ? ' · Now playing' : '';
+    }
+  }
+
+  /* Chapter time for the bar middle: current over chapter total, plus
+     the thin track showing position within the current chapter. The
+     chapter is the last one whose start is at or before t; its end is
+     the next chapter start, or the walkthrough end. */
+  function chapterBounds(t) {
+    var chapters = (state.sidecar && state.sidecar.chapters) || [];
+    var total = state.sidecar ? state.sidecar.totalSeconds : 0;
+    var start = 0, end = total;
+    for (var i = 0; i < chapters.length; i++) {
+      var cs = chapters[i].startSeconds || 0;
+      if (cs <= t) start = cs;
+      else { end = cs; break; }
+    }
+    return { start: start, end: end };
+  }
+
+  function updateChapterDisplay(t) {
+    if (!state.barMidTime || !state.barMidFill || !state.sidecar) return;
+    var b = chapterBounds(t);
+    state.chapterStart = b.start;
+    state.chapterEnd = b.end;
+    var span = Math.max(1, b.end - b.start);
+    var elapsed = Math.max(0, Math.min(span, t - b.start));
+    state.barMidTime.textContent = 'Chapter ' + fmt(elapsed) + ' / ' + fmt(span);
+    if (state.barMidTotal) state.barMidTotal.textContent = posText(t);
+    state.barMidFill.style.width = (elapsed / span * 100).toFixed(1) + '%';
+    markCurrentChapter(t);
   }
 
   /* ---------- bottom bar ---------- */
@@ -1276,7 +1906,7 @@
     var play = document.createElement('button');
     play.type = 'button';
     play.className = 'wt-bar-play';
-    play.textContent = 'Pause';
+    play.textContent = 'Play';
     play.addEventListener('click', function () { togglePlay(); });
     var nextBtn = document.createElement('button');
     nextBtn.type = 'button';
@@ -1291,13 +1921,34 @@
     nextBtn.appendChild(nextFull);
     nextBtn.appendChild(nextShort);
     nextBtn.addEventListener('click', function (e) { if (e && e.stopPropagation) e.stopPropagation(); stepTo(1); });
-    var title = document.createElement('span');
-    title.className = 'wt-bar-title';
-    title.setAttribute('aria-live', 'polite');
+    /* The middle of the bar carries the chapter time, labeled,
+       current over chapter total, plus a track showing position
+       within the current chapter. The whole-walkthrough time is
+       labeled too: on its own line in the middle at phone width,
+       where the bar wraps, and as the separate readout at wider
+       widths. No chapter title text lives anywhere in the bar;
+       titles live in the chapters list. */
+    var mid = document.createElement('div');
+    mid.className = 'wt-bar-mid';
+    var chapTime = document.createElement('span');
+    chapTime.className = 'wt-bar-chaptime';
+    chapTime.textContent = 'Chapter 0:00 / 0:00';
+    var totalTime = document.createElement('span');
+    totalTime.className = 'wt-bar-chaptime wt-short';
+    totalTime.textContent = posText(0);
+    var track = document.createElement('div');
+    track.className = 'wt-bar-track';
+    track.setAttribute('aria-hidden', 'true');
+    var fill = document.createElement('div');
+    fill.className = 'wt-bar-trackfill';
+    track.appendChild(fill);
+    mid.appendChild(chapTime);
+    mid.appendChild(totalTime);
+    mid.appendChild(track);
     var elem = document.createElement('span');
     elem.className = 'wt-bar-elem';
     var pos = document.createElement('span');
-    pos.className = 'wt-bar-pos';
+    pos.className = 'wt-bar-pos wt-full';
     pos.textContent = posText(0);
     var speedSel = document.createElement('select');
     speedSel.className = 'wt-bar-speed';
@@ -1327,6 +1978,20 @@
     chaptersBtn.appendChild(chFull);
     chaptersBtn.appendChild(chShort);
     chaptersBtn.addEventListener('click', function () { toggleChapters(chaptersBtn); });
+    /* Music-only mute: silences the background music, never the
+       narration. It sits in the bar so it is reachable while
+       listening, and hides with everything else when minimized. */
+    var musicBtn = document.createElement('button');
+    musicBtn.type = 'button';
+    var muFull = document.createElement('span');
+    muFull.className = 'wt-full';
+    muFull.textContent = 'Music';
+    var muShort = document.createElement('span');
+    muShort.className = 'wt-short';
+    muShort.textContent = '♪';
+    musicBtn.appendChild(muFull);
+    musicBtn.appendChild(muShort);
+    musicBtn.addEventListener('click', function () { toggleMusicMute(); });
     var minBtn = document.createElement('button');
     minBtn.type = 'button';
     minBtn.className = 'wt-bar-minbtn';
@@ -1339,19 +2004,36 @@
     main.appendChild(backBtn);
     main.appendChild(play);
     main.appendChild(nextBtn);
-    main.appendChild(title);
+    main.appendChild(mid);
     main.appendChild(elem);
     main.appendChild(pos);
     main.appendChild(speedSel);
     main.appendChild(chaptersBtn);
+    main.appendChild(musicBtn);
     main.appendChild(minBtn);
+    /* The save line in the bar itself, so the listener sees it while
+       listening, not only in the row above. Hidden until the save
+       starts, and hidden again when the bar is minimized. */
+    var barSave = document.createElement('div');
+    barSave.className = 'wt-bar-save';
     bar.appendChild(main);
+    bar.appendChild(barSave);
     bar.appendChild(row3);
     var row = document.querySelector('.pc-row');
     if (row && row.parentNode) row.parentNode.insertBefore(bar, row.nextSibling);
     else document.body.insertBefore(bar, document.body.firstChild);
     state.bar = bar;
-    state.barTitle = title;
+    state.barSave = barSave;
+    state.barMid = mid;
+    state.barMidTime = chapTime;
+    state.barMidTotal = totalTime;
+    state.barMidFill = fill;
+    if (!state.saveListenersAdded) {
+      state.saveListenersAdded = true;
+      window.addEventListener('online', refreshSaveLine);
+      window.addEventListener('offline', refreshSaveLine);
+    }
+    refreshSaveLine();
     state.barElem = elem;
     state.barPos = pos;
     state.barPlay = play;
@@ -1359,9 +2041,12 @@
     state.barNext = nextBtn;
     state.barMinBtn = minBtn;
     state.barSpeed = speedSel;
+    state.musicMuteBtn = musicBtn;
+    updateMusicMuteBtn();
     state.row3 = row3;
     state.chaptersBtn = chaptersBtn;
     updateStepButtons();
+    updateChapterDisplay(0);
     if (loadMinimized()) {
       state.minimized = true;
       bar.classList.add('wt-min');
@@ -1443,11 +2128,12 @@
      with no segment are skipped. */
   function topVisibleUnit() {
     var bottom = visibleBottom();
+    var top = navTop();
     for (var i = 0; i < state.units.length; i++) {
       var u = state.units[i];
       if (u.kind === 'section_title' || u.kind === 'subhead') continue;
       var r = u.el.getBoundingClientRect();
-      var visTop = Math.max(0, r.top);
+      var visTop = Math.max(top, r.top);
       var visBottom = Math.min(bottom, r.bottom);
       var vis = visBottom - visTop;
       var need = Math.min(24, r.height);
@@ -1464,7 +2150,9 @@
     for (var i = 0; i < segs.length; i++) {
       var s = segs[i];
       if (s.paragraphId === unit.id) return s;
-      var resolved = resolveSegment(s);
+      /* The base resolution names the list itself; the list-item
+         mapping names one item, so it never matches the list unit. */
+      var resolved = resolveSegmentBase(s);
       if (resolved === unit) return s;
     }
     return null;
@@ -1497,11 +2185,17 @@
     sheet.appendChild(h);
     var ul = document.createElement('ul');
     var chapters = state.sidecar.chapters || [];
-    chapters.forEach(function (ch) {
+    state.chapterItems = [];
+    state.currentChapterIdx = -1;
+    chapters.forEach(function (ch, chIdx) {
       var li = document.createElement('li');
       var b = document.createElement('button');
       b.type = 'button';
       b.textContent = ch.title || ('Section ' + (ch.sectionIndex + 1));
+      var now = document.createElement('span');
+      now.className = 'wt-now';
+      b.appendChild(now);
+      state.chapterItems.push({ li: li, btn: b, now: now, start: ch.startSeconds || 0 });
       b.addEventListener('click', function () {
         closeSheets(false);
         clearMarker();
@@ -1540,6 +2234,7 @@
     sheet.style.bottom = barHeight() + 'px';
     document.body.appendChild(sheet);
     state.chaptersSheet = sheet;
+    markCurrentChapter(state.audio ? state.audio.currentTime : 0);
     var firstBtn = sheet.querySelector('button');
     if (firstBtn) firstBtn.focus();
   }
@@ -1687,6 +2382,30 @@
     return 'Walk through with audio (' + mins(state.sidecar.totalSeconds) + ')';
   }
 
+  /* A plain message in the bar, replacing any earlier one. With a
+     retry it also adds a Try again button, as the old load error did. */
+  function showBarMessage(text, withRetry) {
+    if (!state.bar) return;
+    var old = state.bar.querySelector('.wt-bar-msg');
+    if (old) old.parentNode.removeChild(old);
+    var m = document.createElement('div');
+    m.className = 'wt-bar-msg';
+    m.textContent = text;
+    state.bar.appendChild(m);
+    if (withRetry) {
+      var again = document.createElement('button');
+      again.type = 'button';
+      again.textContent = 'Try again';
+      again.addEventListener('click', function () {
+        if (state.audio) {
+          state.audio.load();
+          state.audio.play();
+        }
+      });
+      state.bar.appendChild(again);
+    }
+  }
+
   function createAudio() {
     var au = document.createElement('audio');
     au.preload = 'none';
@@ -1701,6 +2420,8 @@
       state.playing = true;
       state.loading = false;
       if (state.barPlay) state.barPlay.textContent = 'Pause';
+      tellWorkerPlaying();
+      syncMusic();
       document.dispatchEvent(new CustomEvent('audio-started', { detail: { source: 'walkthrough' } }));
     });
     au.addEventListener('playing', function () {
@@ -1715,6 +2436,7 @@
       state.playing = false;
       if (state.barPlay) state.barPlay.textContent = 'Play';
       savePosition();
+      syncMusic();
     });
     au.addEventListener('seeked', function () {
       clearMarker();
@@ -1729,6 +2451,7 @@
     });
     au.addEventListener('ended', function () {
       state.playing = false;
+      if (state.musicAudio) { state.musicAudio.pause(); try { state.musicAudio.currentTime = 0; } catch (e) { /* ignore */ } }
       clear(slugKey());
       clearMarker();
       if (state.outlinedEl) state.outlinedEl.classList.remove('wt-section-current');
@@ -1737,23 +2460,19 @@
       if (state.bar && state.bar.parentNode) state.bar.parentNode.removeChild(state.bar);
       state.bar = null;
       state.audio = null;
+      askCachedOnInit();
       refreshTopButton();
     });
     au.addEventListener('error', function () {
       state.playing = false;
-      if (state.bar) {
-        state.barTitle.textContent = 'The walkthrough could not load.';
-        var again = document.createElement('button');
-        again.type = 'button';
-        again.textContent = 'Try again';
-        again.addEventListener('click', function () {
-          if (state.audio) {
-            state.audio.load();
-            state.audio.play();
-          }
-        });
-        state.bar.appendChild(again);
+      syncMusic();
+      if (!state.bar) return;
+      if (state.barPlay) state.barPlay.textContent = 'Play';
+      if (typeof navigator.onLine === 'boolean' && !navigator.onLine) {
+        showBarMessage(OFFLINE_MSG, false);
+        return;
       }
+      showBarMessage('The walkthrough could not load.', true);
     });
     state.audio = au;
     return au;
@@ -1780,24 +2499,48 @@
 
   function startWalkthrough(fromTop) {
     if (!state.bar) buildBar();
-    if (!state.audio) {
-      var au = createAudio();
-      if (!au) return;
-      var pos = savedStart();
-      if (pos) {
-        au.addEventListener('loadedmetadata', function onMeta() {
-          au.removeEventListener('loadedmetadata', onMeta);
-          try { au.currentTime = pos; } catch (e) { /* ignore */ }
-        });
-      }
-      if (state.barPlay) state.barPlay.textContent = 'Loading';
-      state.loading = true;
-      au.play();
-      if (!state.rafId) state.rafId = requestAnimationFrame(rafLoop);
-      state.following = true;
+    if (state.audio) { togglePlay(); return; }
+    if (state.firstPlayPending) return;
+    /* Offline, the player asks the worker first whether this
+       walkthrough is saved. Cached plays from the cache; not cached
+       shows the plain not-saved message instead of starting playback,
+       with no stuck loading box and no retries. */
+    if (typeof navigator.onLine === 'boolean' && !navigator.onLine) {
+      state.firstPlayPending = true;
+      askWorkerCached(audioUrl(), 1000).then(function (cached) {
+        state.firstPlayPending = false;
+        if (cached === true) { beginFirstPlay(); return; }
+        showOfflineNotSaved();
+      });
       return;
     }
-    togglePlay();
+    state.firstPlayPending = true;
+    waitForWorkerReady().then(function () {
+      state.firstPlayPending = false;
+      beginFirstPlay();
+    });
+  }
+
+  function beginFirstPlay() {
+    if (state.audio) { togglePlay(); return; }
+    var au = createAudio();
+    if (!au) return;
+    var pos = savedStart();
+    if (pos) {
+      au.addEventListener('loadedmetadata', function onMeta() {
+        au.removeEventListener('loadedmetadata', onMeta);
+        try { au.currentTime = pos; } catch (e) { /* ignore */ }
+      });
+    }
+    if (state.barPlay) state.barPlay.textContent = 'Loading';
+    state.loading = true;
+    /* First play starts the save: the worker caches the audio in
+       the background, so the row and the bar read Saving... until
+       the worker reports it cached. */
+    if (!state.savedShown) showSavingIndicator();
+    au.play();
+    if (!state.rafId) state.rafId = requestAnimationFrame(rafLoop);
+    state.following = true;
   }
 
   var topButton = null;
@@ -1828,6 +2571,8 @@
     });
     topButton = b;
     wtSpan.appendChild(b);
+    showMusicRow(wtSpan);
+    if (state.savedShown) showSavedIndicator();
   }
 
   /* ---------- scroll and keyboard ---------- */
@@ -1875,6 +2620,9 @@
     if (!slug) return;
     state.slug = slug;
     state.speed = loadSpeed();
+    var mp = loadMusic();
+    state.musicTrack = mp.track;
+    state.musicMuted = mp.muted;
     /* Enumerate before any UI is injected, so injected UI never enters
        the enumeration. */
     state.units = enumerateUnits();
@@ -1894,6 +2642,7 @@
       return;
     }
     state.entry = entry;
+    askCachedOnInit();
     var ph = button('Loading walkthrough…', false);
     ph.disabled = true;
     wtSpan.appendChild(ph);
@@ -1928,7 +2677,7 @@
     state: state
   };
 
-  function safeInit() { try { init(); } catch (e) { /* nothing renders */ } }
+  function safeInit() { try { registerWorker(); init(); } catch (e) { /* nothing renders */ } }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', safeInit);
   else safeInit();
 })();

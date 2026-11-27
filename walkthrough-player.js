@@ -50,11 +50,11 @@
   var MIN_KEY = 'wt:minimized';
   var MUSIC_KEY = 'wt:music';
   /* Background music, Ramin 2026-11-27: user-selected, behind the
-     narration to mask voice artifacts. Fixed volume 0.3 of the
+     narration to mask voice artifacts. Fixed volume 0.27 of the
      narration volume, always at default speed, loops, music-only
      mute. The first option plays by default; the choice and the
      mute persist across sessions like the speed. */
-  var MUSIC_VOLUME = 0.3;
+  var MUSIC_VOLUME = 0.27;
   var MUSIC_TRACKS = [
     { title: 'Gravity of the Bow', file: 'gravity-of-the-bow.mp3' },
     { title: 'Beneath the Frozen Weight', file: 'beneath-the-frozen-weight.mp3' },
@@ -187,7 +187,8 @@
   function loadMusic() {
     var m = load(MUSIC_KEY);
     var track = (m && typeof m.t === 'number') ? m.t : 0;
-    if (track < 0 || track >= MUSIC_TRACKS.length) track = 0;
+    /* -1 is No music: a real choice, not a bad value. */
+    if (track < -1 || track >= MUSIC_TRACKS.length) track = 0;
     return { track: track, muted: !!(m && m.m === true) };
   }
 
@@ -199,7 +200,7 @@
     try { return new URL('podcasts/music/' + MUSIC_TRACKS[i].file, BASE).href; } catch (e) { return ''; }
   }
 
-  /* The music element is detached, loops, and plays at a fixed 0.3
+  /* The music element is detached, loops, and plays at a fixed 0.27
      volume. Its speed is never touched: the walkthrough speed control
      only ever sets state.audio.playbackRate, never this element. */
   function createMusicAudio() {
@@ -238,14 +239,23 @@
   }
 
   function selectMusic(i) {
-    if (i < 0 || i >= MUSIC_TRACKS.length) return;
+    if (i < -1 || i >= MUSIC_TRACKS.length) return;
     state.musicTrack = i;
     saveMusic();
     if (state.musicSel) state.musicSel.value = String(i);
+    refreshDownloadState();
     var m = state.musicAudio;
-    if (!m) return;
+    if (!m) {
+      /* No element yet (the page loaded on No music, or nothing has
+         played): selecting a real track starts it at once when the
+         narration is already playing. */
+      if (i >= 0) syncMusic();
+      return;
+    }
     var src = musicUrl(i);
-    if (!src || m.src === src) return;
+    /* No music: stop whatever is playing and play nothing. */
+    if (!src) { m.pause(); return; }
+    if (m.src === src) return;
     var wasPlaying = state.audio && !state.audio.paused && !state.musicMuted;
     m.src = src;
     if (wasPlaying) {
@@ -274,7 +284,9 @@
   }
 
   /* The picker sits in the top audio row, after the walkthrough
-     button: a label and a select with all nine tracks by name. */
+     button: a label and a select with No music first, then all nine
+     tracks by name. No music is a real choice (value -1); the
+     default stays the first track, Gravity of the Bow. */
   function showMusicRow(wtSpan) {
     var row = wtSpan && wtSpan.parentNode;
     if (!row || state.musicSel) return;
@@ -285,6 +297,10 @@
     lab.textContent = 'Music';
     var sel = document.createElement('select');
     sel.setAttribute('aria-label', 'Background music');
+    var no = document.createElement('option');
+    no.value = '-1';
+    no.textContent = 'No music';
+    sel.appendChild(no);
     MUSIC_TRACKS.forEach(function (t, i) {
       var opt = document.createElement('option');
       opt.value = String(i);
@@ -301,6 +317,219 @@
     if (wtSpan.nextSibling) row.insertBefore(span, wtSpan.nextSibling);
     else row.appendChild(span);
     state.musicSel = sel;
+  }
+
+  /* ---------- offline download on demand (Ramin, 2026-11-27) ---------- */
+
+  /* Cache names the worker serves offline from. They are spelled out
+     here too so the download stores into the same caches; they only
+     ever change when the stored format changes. */
+  var DL_AUDIO_CACHE = 'wt-audio-v1';
+  var DL_STATIC_CACHE = 'wt-static-v1';
+  var DL_MUSIC_CACHE = 'wt-music-v1';
+
+  /* What the download saves: the walkthrough trio (audio, sidecar,
+     script) plus every music track in the list, so track switching
+     works offline too. No music selected means the trio alone, and
+     no music download is needed. The files go into the same caches
+     the worker serves offline from, so a downloaded walkthrough
+     plays fully offline without playing first. */
+  function downloadItems() {
+    if (!state.entry) return [];
+    var items = [];
+    var a = audioUrl();
+    if (a) items.push({ url: a, cache: DL_AUDIO_CACHE });
+    try {
+      var sc = new URL(state.entry.sidecar, BASE).href;
+      if (sc) items.push({ url: sc, cache: DL_STATIC_CACHE });
+    } catch (e) { /* no sidecar */ }
+    try {
+      var sr = new URL(state.entry.script, BASE).href;
+      if (sr) items.push({ url: sr, cache: DL_STATIC_CACHE });
+    } catch (e) { /* no script */ }
+    /* Every track in the list, not just the selected one. Written
+       against the list itself, so a new track added to it is
+       included automatically. */
+    if (state.musicTrack >= 0) {
+      MUSIC_TRACKS.forEach(function (t, i) {
+        var mu = musicUrl(i);
+        if (mu) items.push({ url: mu, cache: DL_MUSIC_CACHE });
+      });
+    }
+    return items;
+  }
+
+  function downloadCached(items) {
+    var checks = items.map(function (it) {
+      return caches.open(it.cache).then(function (cache) {
+        return cache.match(it.url);
+      }).then(function (hit) { return !!hit; }).catch(function () { return false; });
+    });
+    return Promise.all(checks).then(function (flags) {
+      for (var i = 0; i < flags.length; i++) if (!flags[i]) return false;
+      return true;
+    }).catch(function () { return false; });
+  }
+
+  function setDownloadBtn(text, disabled) {
+    var b = state.dlBtn;
+    if (!b) return;
+    b.textContent = text;
+    b.disabled = !!disabled;
+  }
+
+  function refreshDownloadState() {
+    if (!state.dlBtn || state.dlBusy) return;
+    var items = downloadItems();
+    if (!items.length) return;
+    downloadCached(items).then(function (all) {
+      if (state.dlBusy || !state.dlBtn) return;
+      if (all === true) setDownloadBtn('Ready offline', true);
+      else setDownloadBtn('Download for offline', false);
+    });
+  }
+
+  function showDownloadProgress(have, total, doneFiles, totalFiles) {
+    if (total > 0) {
+      var pct = Math.min(99, Math.floor(have / total * 100));
+      setDownloadBtn('Downloading… ' + pct + '%', true);
+    } else {
+      setDownloadBtn('Downloading… ' + (doneFiles + 1) + ' of ' + totalFiles, true);
+    }
+  }
+
+  function finishDownload(ok) {
+    state.dlBusy = false;
+    if (ok) {
+      setDownloadBtn('Ready offline', true);
+      showSavedIndicator();
+      requestPersistOnce();
+    } else {
+      setDownloadBtn('Download for offline', false);
+    }
+    refreshDownloadState();
+  }
+
+  /* HEAD each file so the progress percent has a stable total. A
+     HEAD failure just means that file counts by completion instead. */
+  function fetchLengths(list) {
+    return Promise.all(list.map(function (it) {
+      return fetch(it.url, { method: 'HEAD' }).then(function (res) {
+        var len = parseInt(res.headers.get('Content-Length') || '0', 10);
+        return (isFinite(len) && len > 0) ? len : 0;
+      }).catch(function () { return 0; });
+    }));
+  }
+
+  function startDownload() {
+    if (state.dlBusy || !state.entry) return;
+    if (!('caches' in window)) return;
+    var items = downloadItems();
+    if (!items.length) return;
+    state.dlBusy = true;
+    setDownloadBtn('Downloading… 0%', true);
+    /* Files already cached are skipped, so a retry after a failure
+       only fetches what is missing. A failure leaves the button
+       offering the download again; nothing half-saved is ever
+       called ready. */
+    var missing = [];
+    var seq = Promise.resolve();
+    items.forEach(function (it) {
+      seq = seq.then(function () {
+        return caches.open(it.cache).then(function (cache) {
+          return cache.match(it.url);
+        }).then(function (hit) {
+          if (!hit) missing.push(it);
+        }).catch(function () { missing.push(it); });
+      });
+    });
+    seq.then(function () {
+      if (!missing.length) { finishDownload(true); return; }
+      return fetchLengths(missing).then(function (lengths) {
+        var totalBytes = 0;
+        var knownTotal = true;
+        lengths.forEach(function (n) {
+          if (!n) knownTotal = false;
+          totalBytes += n;
+        });
+        if (!knownTotal || totalBytes <= 0) totalBytes = 0;
+        var doneBytes = 0;
+        var doneFiles = 0;
+        var chain = Promise.resolve();
+        missing.forEach(function (it, idx) {
+          chain = chain.then(function () {
+            return fetch(it.url).then(function (res) {
+              if (!res || !res.ok) throw new Error('fetch failed');
+              /* Clone before touching the body: getReader() locks the
+                 stream and a locked body cannot be cloned, so a
+                 clone after the reader throws and the download dies
+                 on its first file. The clone keeps the response
+                 exactly as served (headers and encoding included), so
+                 the worker's range slicing sees the same bytes it
+                 would have cached on first play. A clone that fails
+                 is a real failure, not a silent skip. */
+              var copy;
+              try { copy = res.clone(); } catch (e) { copy = null; }
+              if (!copy) throw new Error('clone failed');
+              var putP = caches.open(it.cache).then(function (cache) {
+                return cache.put(it.url, copy);
+              });
+              var reader = res.body ? res.body.getReader() : null;
+              if (!reader) {
+                /* No stream: the clone put above stores the whole
+                   response; just wait for it. */
+                return putP.then(function () {
+                  doneBytes += lengths[idx];
+                  doneFiles++;
+                  showDownloadProgress(doneBytes, totalBytes, doneFiles, missing.length);
+                });
+              }
+              var got = 0;
+              function pump() {
+                return reader.read().then(function (r) {
+                  if (r.done) return;
+                  got += r.value.byteLength;
+                  showDownloadProgress(doneBytes + got, totalBytes, doneFiles, missing.length);
+                  return pump();
+                });
+              }
+              return pump().then(function () {
+                doneBytes += got;
+                doneFiles++;
+                showDownloadProgress(doneBytes, totalBytes, doneFiles, missing.length);
+                return putP;
+              });
+            });
+          });
+        });
+        return chain.then(function () { finishDownload(true); });
+      });
+    }).catch(function () { finishDownload(false); });
+  }
+
+  function showDownloadBtn(wtSpan) {
+    if (!state.entry) return;
+    /* No Cache Storage, no control that cannot work. */
+    if (!('caches' in window)) return;
+    var row = wtSpan && wtSpan.parentNode;
+    if (!row || state.dlBtn) return;
+    var span = makeSpan('download');
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'pc-btn';
+    b.setAttribute('aria-live', 'polite');
+    b.addEventListener('click', function () {
+      if (!state.dlBusy) startDownload();
+    });
+    span.appendChild(b);
+    var anchor = findSpan(row, 'music');
+    if (anchor && anchor.nextSibling) row.insertBefore(span, anchor.nextSibling);
+    else if (anchor) row.appendChild(span);
+    else if (wtSpan.nextSibling) row.insertBefore(span, wtSpan.nextSibling);
+    else row.appendChild(span);
+    state.dlBtn = b;
+    setDownloadBtn('Download for offline', false);
+    refreshDownloadState();
   }
 
   function svgTriangle() {
@@ -587,6 +816,8 @@
     musicMuted: false,
     musicSel: null,
     musicMuteBtn: null,
+    dlBtn: null,
+    dlBusy: false,
     currentSeg: null,
     currentSection: -1,
     following: true,
@@ -829,7 +1060,10 @@
 
   function onWorkerMessage(e) {
     var data = e.data || {};
-    if (data.type === 'wt-cached' && data.url === audioUrl()) showSavedIndicator();
+    if (data.type === 'wt-cached' && data.url === audioUrl()) {
+      showSavedIndicator();
+      refreshDownloadState();
+    }
   }
 
   function askCachedOnInit() {
@@ -2572,6 +2806,7 @@
     topButton = b;
     wtSpan.appendChild(b);
     showMusicRow(wtSpan);
+    showDownloadBtn(wtSpan);
     if (state.savedShown) showSavedIndicator();
   }
 

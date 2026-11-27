@@ -572,4 +572,77 @@
   }
 
   start();
+
+  /* Page chrome dropdowns, Ramin 2026-11-27 (website session, separate from
+     the prev-next lane above; ORDER and TITLES above are untouched):
+     "Before you start" is a dropdown that defaults to minimized, and the
+     sub-section navigation is a dropdown that defaults to showing the
+     sub-sections. The series map row is hidden by site.css. The toggle
+     buttons are built here. Without JS the pills and tabs stay visible, so
+     nothing is lost. The html.js class is added at parse time, before the
+     prereq and tab-strip render, so the collapsed pills never flash. */
+  document.documentElement.classList.add('js');
+
+  function chromeToggle(labelText, expanded, onToggle) {
+    var b = document.createElement('button');
+    b.setAttribute('type', 'button');
+    b.setAttribute('class', 'chrome-toggle');
+    b.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    b.appendChild(document.createTextNode(labelText + ' '));
+    var caret = document.createElement('span');
+    caret.setAttribute('class', 'caret');
+    caret.setAttribute('aria-hidden', 'true');
+    caret.appendChild(document.createTextNode('\u25BE'));
+    b.appendChild(caret);
+    b.addEventListener('click', function () {
+      var open = b.getAttribute('aria-expanded') !== 'true';
+      b.setAttribute('aria-expanded', open ? 'true' : 'false');
+      onToggle(open);
+    });
+    return b;
+  }
+
+  function setupChromeDropdowns() {
+    var i, nav, label, btn, strip, tabLabel, prev;
+    /* "Before you start" pills: dropdown, defaults to minimized. */
+    var prereqs = document.querySelectorAll('nav.prereq');
+    for (i = 0; i < prereqs.length; i++) {
+      nav = prereqs[i];
+      if (nav.getAttribute('data-chrome') === 'done') continue;
+      nav.setAttribute('data-chrome', 'done');
+      label = nav.querySelector('.prereq-label');
+      if (!label) continue;
+      btn = chromeToggle(label.textContent.replace(/\s+/g, ' ').trim(), false, (function (n) {
+        return function (open) { if (open) { n.classList.add('open'); } else { n.classList.remove('open'); } };
+      })(nav));
+      label.parentNode.replaceChild(btn, label);
+    }
+    /* Sub-section navigation: dropdown, defaults to showing the sections. */
+    var strips = document.querySelectorAll('.tab-strip');
+    for (i = 0; i < strips.length; i++) {
+      strip = strips[i];
+      if (strip.getAttribute('data-chrome') === 'done') continue;
+      strip.setAttribute('data-chrome', 'done');
+      tabLabel = null;
+      if (strip.getAttribute('aria-labelledby')) {
+        tabLabel = document.getElementById(strip.getAttribute('aria-labelledby'));
+      }
+      if (!tabLabel) {
+        prev = strip.previousElementSibling;
+        if (prev && (' ' + (prev.getAttribute('class') || '') + ' ').indexOf(' tabs-label ') >= 0) tabLabel = prev;
+      }
+      if (!tabLabel) tabLabel = document.querySelector('.tabs-label');
+      if (!tabLabel) continue;
+      btn = chromeToggle(tabLabel.textContent.replace(/\s+/g, ' ').trim() || 'On this page', true, (function (s) {
+        return function (open) { if (open) { s.classList.remove('collapsed'); } else { s.classList.add('collapsed'); } };
+      })(strip));
+      tabLabel.parentNode.replaceChild(btn, tabLabel);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupChromeDropdowns);
+  } else {
+    setupChromeDropdowns();
+  }
 })();

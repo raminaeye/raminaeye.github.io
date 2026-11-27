@@ -672,7 +672,17 @@
   function validationFailed(row, wtSpan, reason) {
     console.warn('Walkthrough hidden: ' + reason);
     if (row) row.setAttribute('data-wt-failed', reason);
-    removeSpanDeferred(wtSpan);
+    /* A fingerprint mismatch is permanent: the page moved, or the sidecar
+       no longer matches the registry, so this walkthrough will never load.
+       Remove the span at once instead of leaving a "Loading walkthrough…"
+       placeholder that waits for scroll-out. Any other failure (a fetch
+       that failed, a timeout) stays deferred, so a transient failure
+       never causes a layout shift while the reader is looking at the row. */
+    if (reason === 'page fingerprint mismatch' || reason === 'sidecar fingerprint does not match the registry') {
+      removeSpanNow(wtSpan);
+    } else {
+      removeSpanDeferred(wtSpan);
+    }
   }
 
   /* ---------- fingerprint precompute (plan section 4) ---------- */
